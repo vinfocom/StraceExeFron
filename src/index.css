@@ -1,0 +1,61 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@tailwind utilities;
+
+
+
+body {
+  @apply bg-white text-gray-800;
+}
+
+.dark body {
+  @apply bg-gray-900 text-gray-200;
+}
+.no-scrollbar::-webkit-scrollbar { display: none; }  
+
+
+/* Add to your global CSS or as a style tag */
+.overflow-y-auto::-webkit-scrollbar {
+  width: 6px;
+}
+
+.overflow-y-auto::-webkit-scrollbar-track {
+  background: #f1f1f1;
+  border-radius: 3px;
+}
+
+.overflow-y-auto::-webkit-scrollbar-thumb {
+  background: #cbd5e0;
+  border-radius: 3px;
+}
+
+.overflow-y-auto::-webkit-scrollbar-thumb:hover {
+  background: #a0aec0;
+}
+/* Hide scrollbar for Chrome, Safari, Edge */
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}
+
+/* Hide scrollbar for Firefox */
+.scrollbar-hide {
+  scrollbar-width: none;
+}
+
+
+
+@keyframes float-glow {
+  0%, 100% {
+    transform: translateY(0) scale(1);
+    filter: brightness(1);
+  }
+  50% {
+    transform: translateY(-12px) scale(1.05);
+    filter: brightness(1.3);
+  }
+}
+
+.animate-float {
+  animation: float-glow 2.5s ease-in-out infinite;
+}

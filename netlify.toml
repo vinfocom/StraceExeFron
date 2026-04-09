@@ -1,0 +1,15 @@
+# netlify.toml
+
+[build]
+  command = "npm run build"
+  publish = "dist"
+
+[build.environment]
+  # Tell Netlify secret scanner to ignore these frontend env vars
+  SECRETS_SCAN_OMIT_KEYS = "VITE_API_BASE_URL,VITE_GOOGLE_MAPS_API_KEY,VITE_GOOGLE_MAPS_MAP_ID"
+
+[[redirects]]
+  from = "/api/*"
+  to = "http://65.2.162.237/:splat"
+  status = 200
+  force = true
