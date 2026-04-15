@@ -6,6 +6,9 @@ import { cancelAllRequests } from "@/api/apiService"; // Import the cancel funct
 import { PanelLeftClose, PanelLeftOpen } from "lucide-react";
 
 const AppLayout = ({ children }) => {
+  const isElectronRuntime =
+    typeof navigator !== "undefined" &&
+    /electron/i.test(navigator.userAgent || "");
   const [collapsed, setCollapsed] = useState(false);
   const location = useLocation();
 
@@ -41,7 +44,7 @@ const AppLayout = ({ children }) => {
       {/* Sidebar — always visible, just changes width */}
       {shouldShowSidebar && (
         <div
-          className={`fixed left-0 top-0 h-full z-40 bg-slate-900 shadow-xl flex flex-col
+          className={`fixed left-0 ${isElectronRuntime ? "top-8 h-[calc(100%-2rem)]" : "top-0 h-full"} z-40 bg-slate-900 shadow-xl flex flex-col
             transition-all duration-300 ease-in-out
             ${collapsed ? "w-16" : "w-[250px]"}`}
         >

@@ -7,6 +7,11 @@ import Spinner from "../components/common/Spinner";
 import { Button } from "@/components/ui/button";
 import { ChevronLeft } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
+import {
+  FEATURE_OPTIONS,
+  buildFeaturePayload,
+  getEnabledFeaturesFromSource,
+} from "@/utils/featureAccess";
 
 const CompanyLicensesPage = () => {
   const [searchParams] = useSearchParams();
@@ -15,6 +20,7 @@ const CompanyLicensesPage = () => {
 
   const [users, setUsers] = useState([]);
   const [licenseEdits, setLicenseEdits] = useState({});
+  const [featureEdits, setFeatureEdits] = useState({});
   const [updatingLicenseId, setUpdatingLicenseId] = useState(null);
   const [loading, setLoading] = useState(true);
 
@@ -39,18 +45,22 @@ const CompanyLicensesPage = () => {
       setUsers(userData);
 
       const nextEdits = {};
+      const nextFeatureEdits = {};
       userData.forEach((row) => {
         if (row?.license_id == null) return;
         nextEdits[row.license_id] = {
           valid_till: toDateInputValue(row.valid_till),
           status: String(row.license_status ?? 0),
         };
+        nextFeatureEdits[row.license_id] = getEnabledFeaturesFromSource(row);
       });
       setLicenseEdits(nextEdits);
+      setFeatureEdits(nextFeatureEdits);
     } catch (error) {
       toast.error(error?.message || "Failed to fetch users.");
       setUsers([]);
       setLicenseEdits({});
+      setFeatureEdits({});
     } finally {
       setLoading(false);
     }
@@ -132,6 +142,7 @@ const CompanyLicensesPage = () => {
     if (!licenseId) return;
 
     const edit = licenseEdits[licenseId] || {};
+    const selectedFeatures = featureEdits[licenseId] || [];
     const status = Number(edit.status);
 
     if (!edit.valid_till) {
@@ -149,6 +160,7 @@ const CompanyLicensesPage = () => {
       await companyApi.updateIssuedLicense(licenseId, {
         valid_till: edit.valid_till,
         status,
+        ...buildFeaturePayload(selectedFeatures),
       });
       toast.success("License updated successfully.");
       await fetchUsers();
@@ -157,6 +169,40 @@ const CompanyLicensesPage = () => {
     } finally {
       setUpdatingLicenseId(null);
     }
+  };
+
+  const handleRevokeLicense = async (row) => {
+    const licenseId = row?.license_id;
+    if (!licenseId) return;
+
+    const confirmed = window.confirm(
+      "Are you sure you want to revoke this license?",
+    );
+    if (!confirmed) return;
+
+    try {
+      setUpdatingLicenseId(licenseId);
+      await companyApi.revokeLicense(licenseId);
+      toast.success("License revoked successfully.");
+      await fetchUsers();
+    } catch (error) {
+      toast.error(error?.message || "Failed to revoke license.");
+    } finally {
+      setUpdatingLicenseId(null);
+    }
+  };
+
+  const toggleFeature = (licenseId, featureKey) => {
+    setFeatureEdits((prev) => {
+      const current = Array.isArray(prev[licenseId]) ? prev[licenseId] : [];
+      const exists = current.includes(featureKey);
+      return {
+        ...prev,
+        [licenseId]: exists
+          ? current.filter((item) => item !== featureKey)
+          : [...current, featureKey],
+      };
+    });
   };
 
   const columns = [
@@ -241,6 +287,34 @@ const CompanyLicensesPage = () => {
       },
     },
     {
+      header: "Feature Access",
+      accessor: "features",
+      render: (row) => {
+        const licenseId = row?.license_id;
+        const selected = Array.isArray(featureEdits[licenseId])
+          ? featureEdits[licenseId]
+          : [];
+        return (
+          <div className="space-y-1.5 min-w-[220px]">
+            {FEATURE_OPTIONS.map((feature) => (
+              <label
+                key={feature.key}
+                className="flex items-center gap-2 text-xs text-gray-700 cursor-pointer"
+              >
+                <input
+                  type="checkbox"
+                  checked={selected.includes(feature.key)}
+                  onChange={() => toggleFeature(licenseId, feature.key)}
+                  className="h-3.5 w-3.5"
+                />
+                <span>{feature.label}</span>
+              </label>
+            ))}
+          </div>
+        );
+      },
+    },
+    {
       header: "User Status",
       accessor: "user_isactive",
       render: (row) => <div>{getUserStatusBadge(row.user_isactive)}</div>,
@@ -250,13 +324,23 @@ const CompanyLicensesPage = () => {
       render: (row) => {
         const isUpdating = updatingLicenseId === row.license_id;
         return (
-          <Button
-            size="sm"
-            onClick={() => handleUpdateLicense(row)}
-            disabled={isUpdating}
-          >
-            {isUpdating ? "Updating..." : "Update"}
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button
+              size="sm"
+              onClick={() => handleUpdateLicense(row)}
+              disabled={isUpdating}
+            >
+              {isUpdating ? "Updating..." : "Update"}
+            </Button>
+            <Button
+              size="sm"
+              variant="destructive"
+              onClick={() => handleRevokeLicense(row)}
+              disabled={isUpdating}
+            >
+              Revoke
+            </Button>
+          </div>
         );
       },
     },

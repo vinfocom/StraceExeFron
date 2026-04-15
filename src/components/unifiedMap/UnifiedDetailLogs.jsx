@@ -41,6 +41,7 @@ import { LoadingSpinner } from "./common/LoadingSpinner";
 import { calculateStats, calculateIOSummary } from "@/utils/analyticsHelpers";
 import { exportAnalytics } from "@/utils/exportService";
 import { TABS } from "@/utils/constants";
+import { FEATURE_KEYS, hasFeatureAccess } from "@/utils/featureAccess";
 import { adminApi, homeApi, reportApi } from "@/api/apiEndpoints";
 import { useAuth } from "@/hooks/useAuth";
 
@@ -744,7 +745,18 @@ function UnifiedDetailLogs({
   const [isGeneratingReport, setIsGeneratingReport] = useState(false);
   const isGeneratingReportRef = useRef(false);
 
-  const { user } = useAuth();
+  const { user, refreshUser } = useAuth();
+  useEffect(() => {
+    refreshUser?.();
+  }, [refreshUser]);
+  const canGenerateReport = useMemo(
+    () => hasFeatureAccess(user, FEATURE_KEYS.REPORT_GENERATION, false),
+    [user],
+  );
+  const canUseBenchmarkTab = useMemo(
+    () => hasFeatureAccess(user, FEATURE_KEYS.BENCHMARK_TAB, false),
+    [user],
+  );
 
   
   const rndRef = useRef(null);
@@ -882,6 +894,9 @@ function UnifiedDetailLogs({
     if (!techHandOver) {
       tabs = tabs.filter(tab => tab.id !== 'handover');
     }
+    if (!canUseBenchmarkTab) {
+      tabs = tabs.filter((tab) => tab.id !== "operatorComparison");
+    }
     if (showN78Neighbors && n78NeighborData?.length > 0) {
       tabs.push({ id: "n78", label: "Anchor" });
     }
@@ -894,6 +909,7 @@ function UnifiedDetailLogs({
     showSiteMarkers,
     showSiteSectors,
     techHandOver,
+    canUseBenchmarkTab,
     showN78Neighbors,
     n78NeighborData,
     showSubSession,
@@ -905,7 +921,7 @@ function UnifiedDetailLogs({
   }, [activeTabExternal]);
 
   useEffect(() => {
-    if (activeTab === "operatorComparison") {
+    if (activeTab === "operatorComparison" && canUseBenchmarkTab) {
       return;
     }
     if (!availableTabs.some((tab) => tab.id === activeTab)) {
@@ -913,7 +929,7 @@ function UnifiedDetailLogs({
       setActiveTab(fallbackTab);
       onActiveTabExternalChange?.(fallbackTab);
     }
-  }, [availableTabs, activeTab, onActiveTabExternalChange]);
+  }, [availableTabs, activeTab, canUseBenchmarkTab, onActiveTabExternalChange]);
 
   useEffect(() => {
     onFilteredDataChange?.(filteredLocations);
@@ -973,6 +989,11 @@ function UnifiedDetailLogs({
   };
 
   const handleGenerateReport = async () => {
+    if (!canGenerateReport) {
+      toast.error("Report generation is disabled for your license.");
+      return;
+    }
+
     if (!projectId || !user?.id) {
       toast.error(`Missing ${!projectId ? 'Project ID' : 'User ID'}. Please ensure you are logged in and have a project selected.`);
       return;
@@ -1123,30 +1144,33 @@ function UnifiedDetailLogs({
         </div>
 
         <div className="flex items-center gap-2" onMouseDown={(e) => e.stopPropagation()}>
-          <button
-            onClick={handleGenerateReport}
-            disabled={isGeneratingReport || !locations?.length}
-            className={`
-              flex items-center gap-2 px-3 py-1.5 rounded-lg font-medium text-sm
-              transition-all duration-200 
-              ${!isGeneratingReport && locations?.length
-                ? "bg-gradient-to-r from-blue-600 to-cyan-600 hover:from-blue-500 hover:to-cyan-500 text-white shadow-lg hover:shadow-blue-500/25"
-                : "bg-slate-700 text-slate-400 cursor-not-allowed"
-              }
-            `}
-          >
-            {isGeneratingReport ? (
-              <>
-                <Loader2 className="h-4 w-4 animate-spin" />
-                <span>Generating...</span>
-              </>
-            ) : (
-              <>
-                <FileText className="h-4 w-4" />
-                <span className="hidden sm:inline">Generate PDF</span>
-              </>
-            )}
-          </button>
+          {canGenerateReport && (
+            <button
+              onClick={handleGenerateReport}
+              disabled={isGeneratingReport || !locations?.length}
+              className={`
+                flex items-center gap-2 px-3 py-1.5 rounded-lg font-medium text-sm
+                transition-all duration-200 
+                ${!isGeneratingReport && locations?.length
+                  ? "bg-gradient-to-r from-blue-600 to-cyan-600 hover:from-blue-500 hover:to-cyan-500 text-white shadow-lg hover:shadow-blue-500/25"
+                  : "bg-slate-700 text-slate-400 cursor-not-allowed"
+                }
+              `}
+              title="Generate PDF report"
+            >
+              {isGeneratingReport ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  <span>Generating...</span>
+                </>
+              ) : (
+                <>
+                  <FileText className="h-4 w-4" />
+                  <span className="hidden sm:inline">Generate PDF</span>
+                </>
+              )}
+            </button>
+          )}
 
           <ExportDropdown
             locations={exportLocations}

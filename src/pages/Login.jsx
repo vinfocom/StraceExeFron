@@ -75,7 +75,9 @@ const LoginPage = () => {
   };
 
   return (
-    <div className="flex items-center justify-center min-h-screen bg-gradient-to-br  from-grey-900 via-white to-blue-900  px-4">
+    <div
+      className="flex items-center justify-center bg-gradient-to-br from-grey-900 via-white to-blue-900 px-4 overflow-hidden min-h-screen"
+    >
       <div className="relative w-full max-w-md p-8 bg-white/80  backdrop-blur-md rounded-2xl shadow-lg space-y-6">
         {loading && (
           <div className="absolute inset-0 flex items-center justify-center bg-white/70  rounded-2xl z-10">

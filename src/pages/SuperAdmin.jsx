@@ -127,6 +127,12 @@ const SuperAdminCompanies = () => {
                             Edit
                         </DropdownMenuItem>
                         <DropdownMenuItem
+                            onClick={() => navigate(`/company-licenses?companyId=${user.id}`)}
+                            className="text-gray-700 hover:bg-gray-100 cursor-pointer"
+                        >
+                            Manage Licenses
+                        </DropdownMenuItem>
+                        <DropdownMenuItem
                             onClick={() => handleInactiveCompany(user)}
                             className="text-red-600 hover:bg-red-50 cursor-pointer"
                         >

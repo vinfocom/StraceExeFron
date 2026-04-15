@@ -188,6 +188,19 @@ const CompanyForm = () => {
           <p className="text-black text-sm mt-1">
             {isEditMode ? "Update company details." : "Enter company details."}
           </p>
+          {isEditMode && (
+            <div className="mt-3">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() =>
+                  navigate(`/company-licenses?companyId=${editCompany.id}`)
+                }
+              >
+                Manage Licenses & Features
+              </Button>
+            </div>
+          )}
         </div>
 
         <form onSubmit={handleSubmit} className="py-2 px-8">

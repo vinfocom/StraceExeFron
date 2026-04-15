@@ -26,6 +26,8 @@ import {
 import { Button } from "@/components/ui/button";
 import { predictionApi } from "@/api/apiEndpoints";
 import { Label } from "@/components/ui/label";
+import { useAuth } from "@/hooks/useAuth";
+import { FEATURE_KEYS, hasFeatureAccess } from "@/utils/featureAccess";
 import {
   Select,
   SelectContent,
@@ -396,6 +398,19 @@ const UnifiedMapSidebar = ({
   setCoverageViolationThreshold,
   onAddSiteClick,
 }) => {
+  const { user, refreshUser } = useAuth();
+  useEffect(() => {
+    refreshUser?.();
+  }, [refreshUser]);
+  const canRunPrediction = useMemo(
+    () => hasFeatureAccess(user, FEATURE_KEYS.RUN_PREDICTION, false),
+    [user],
+  );
+  const canUseGridApi = useMemo(
+    () => hasFeatureAccess(user, FEATURE_KEYS.GRID_FETCH, false),
+    [user],
+  );
+
   const sideClasses = useMemo(() => {
     const base =
       "fixed top-14 left-0 h-[calc(100vh-3.5rem)] z-50 w-[340px] bg-slate-950 text-white  transition-transform duration-200 ease-out flex flex-col";
@@ -550,8 +565,12 @@ const UnifiedMapSidebar = ({
 
   const deltaGridButtonsDisabled = useMemo(() => {
     const numericProjectId = Number(projectId);
-    return !Number.isFinite(numericProjectId) || numericProjectId <= 0;
-  }, [projectId]);
+    return (
+      !canUseGridApi ||
+      !Number.isFinite(numericProjectId) ||
+      numericProjectId <= 0
+    );
+  }, [projectId, canUseGridApi]);
   const ltePredictionButtonDisabled = useMemo(() => {
     const numericProjectId = Number(projectId);
     const validSessionIds = (Array.isArray(sessionIds) ? sessionIds : [])
@@ -559,20 +578,22 @@ const UnifiedMapSidebar = ({
       .filter((value) => Number.isFinite(value) && value > 0);
 
     return (
+      !canRunPrediction ||
       isRunningLtePrediction ||
       !Number.isFinite(numericProjectId) ||
       numericProjectId <= 0 ||
       validSessionIds.length === 0
     );
-  }, [isRunningLtePrediction, projectId, sessionIds]);
+  }, [canRunPrediction, isRunningLtePrediction, projectId, sessionIds]);
   const lteOptimisedPredictionButtonDisabled = useMemo(() => {
     const numericProjectId = Number(projectId);
     return (
+      !canRunPrediction ||
       isRunningLteOptimisedPrediction ||
       !Number.isFinite(numericProjectId) ||
       numericProjectId <= 0
     );
-  }, [isRunningLteOptimisedPrediction, projectId]);
+  }, [canRunPrediction, isRunningLteOptimisedPrediction, projectId]);
   const showDeltaGridAdvancedControls = useMemo(
     () =>
       Boolean(deltaGridApiState?.gridVisible) ||
@@ -754,6 +775,11 @@ const UnifiedMapSidebar = ({
   }, [stopLteOptimisedPredictionMonitoring]);
 
   const handleRunLtePrediction = useCallback(async () => {
+    if (!canRunPrediction) {
+      toast.error("Prediction is disabled for your license.");
+      return;
+    }
+
     const numericProjectId = Number(projectId);
     const validSessionIds = (Array.isArray(sessionIds) ? sessionIds : [])
       .map((value) => Number(value))
@@ -780,6 +806,7 @@ const UnifiedMapSidebar = ({
 
     try {
       const response = await predictionApi.runLtePrediction({
+        user_id: Number(user?.id) || 0,
         project_id: numericProjectId,
         session_ids: validSessionIds,
         grid_value: Number(lteGridSizeMeters) || 25,
@@ -834,6 +861,7 @@ const UnifiedMapSidebar = ({
       ltePredictionToastIdRef.current = null;
     }
   }, [
+    canRunPrediction,
     projectId,
     sessionIds,
     lteGridSizeMeters,
@@ -843,6 +871,11 @@ const UnifiedMapSidebar = ({
   ]);
 
   const handleRunLteOptimisedPrediction = useCallback(async () => {
+    if (!canRunPrediction) {
+      toast.error("Prediction is disabled for your license.");
+      return;
+    }
+
     const numericProjectId = Number(projectId);
 
     if (!Number.isFinite(numericProjectId) || numericProjectId <= 0) {
@@ -861,6 +894,7 @@ const UnifiedMapSidebar = ({
 
     try {
       const response = await predictionApi.runLteOptimisedPrediction({
+        user_id: Number(user?.id) || 0,
         project_id: numericProjectId,
         grid_resolution: Number(lteGridSizeMeters) || 25,
         radius: Number(ltePredictionRadiusMeters) || 5000,
@@ -913,6 +947,7 @@ const UnifiedMapSidebar = ({
       lteOptimisedPredictionToastIdRef.current = null;
     }
   }, [
+    canRunPrediction,
     projectId,
     lteGridSizeMeters,
     ltePredictionRadiusMeters,
@@ -1194,7 +1229,7 @@ const UnifiedMapSidebar = ({
 
                   {isCellMode && (
                     <div className="pt-1 bg-slate-800/50 rounded-lg p-2 space-y-2">
-                      {isBaselineCellMode && (
+                      {isBaselineCellMode && canRunPrediction && (
                         <div className="pt-1 bg-slate-900/40 rounded-lg p-2 space-y-2">
                           <Label className="text-xs font-semibold text-blue-400 flex items-center gap-1">
                             <Radio className="w-3 h-3" /> Baseline LTE Prediction
@@ -1237,6 +1272,7 @@ const UnifiedMapSidebar = ({
                             onClick={handleRunLtePrediction}
                             disabled={ltePredictionButtonDisabled}
                             className="w-full h-8 text-xs font-semibold"
+                            title={!canRunPrediction ? "Disabled by license" : "Run LTE Prediction"}
                           >
                             {isRunningLtePrediction ? (
                               <span className="inline-flex items-center gap-2">
@@ -1250,7 +1286,7 @@ const UnifiedMapSidebar = ({
                         </div>
                       )}
 
-                      {isOptimizedCellMode && (
+                      {isOptimizedCellMode && canRunPrediction && (
                         <div className="pt-1 bg-slate-900/40 rounded-lg p-2 space-y-2">
                           <Label className="text-xs font-semibold text-emerald-400 flex items-center gap-1">
                             <Radio className="w-3 h-3" /> Optimized LTE Prediction
@@ -1293,6 +1329,7 @@ const UnifiedMapSidebar = ({
                             onClick={handleRunLteOptimisedPrediction}
                             disabled={lteOptimisedPredictionButtonDisabled}
                             className="w-full h-8 text-xs font-semibold bg-emerald-600 hover:bg-emerald-500"
+                            title={!canRunPrediction ? "Disabled by license" : "Run optimized prediction"}
                           >
                             {isRunningLteOptimisedPrediction ? (
                               <span className="inline-flex items-center gap-2">
@@ -1306,7 +1343,7 @@ const UnifiedMapSidebar = ({
                         </div>
                       )}
 
-                      {isDeltaCellMode && (
+                      {isDeltaCellMode && canUseGridApi && (
                         <>
                           <Label className="text-xs font-semibold text-blue-400 flex items-center gap-1">
                             <Grid3X3 className="w-3 h-3" /> Delta Grid Scope
@@ -1325,7 +1362,7 @@ const UnifiedMapSidebar = ({
                         </>
                       )}
 
-                      {showDeltaGridAdvancedControls && (
+                      {canUseGridApi && showDeltaGridAdvancedControls && (
                         <>
                           <div className="pt-1 bg-slate-900/40 rounded-lg p-2">
                             <div className="flex items-center justify-between text-xs mb-2">
@@ -1339,7 +1376,7 @@ const UnifiedMapSidebar = ({
                                   Boolean(deltaGridApiState?.fetching)
                                 }
                                 className="px-2 py-1 rounded text-[10px] font-semibold bg-blue-600 hover:bg-blue-500 text-white disabled:opacity-50 disabled:cursor-not-allowed"
-                                title="Compute and store with current manual grid size"
+                                title={!canUseGridApi ? "Disabled by license" : "Compute and store with current manual grid size"}
                               >
                                 {deltaGridApiState?.computing ? "Computing..." : "Compute"}
                               </button>
@@ -1370,7 +1407,8 @@ const UnifiedMapSidebar = ({
                         </>
                       )}
 
-                      <div className="pt-2 border-t border-slate-700/50 space-y-2">
+                      {canUseGridApi && (
+                        <div className="pt-2 border-t border-slate-700/50 space-y-2">
                         <Label className="text-xs font-semibold text-blue-400 flex items-center gap-1">
                           <Database className="w-3 h-3" /> Grid API
                         </Label>
@@ -1392,6 +1430,7 @@ const UnifiedMapSidebar = ({
                               ? "bg-rose-600 hover:bg-rose-500"
                               : "bg-emerald-600 hover:bg-emerald-500"
                           }`}
+                          title={!canUseGridApi ? "Disabled by license" : "Fetch and show grid"}
                         >
                           {deltaGridApiState?.computing
                             ? "Computing..."
@@ -1408,7 +1447,8 @@ const UnifiedMapSidebar = ({
                               : "Fetching stored grid..."}
                           </p>
                         )}
-                      </div>
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>

@@ -386,11 +386,13 @@ export const predictionApi = {
   runLtePrediction: async (params) => {
     try {
       if (!params.project_id) throw new Error("project_id is required");
+      if (!params.user_id) throw new Error("user_id is required");
       if (!params.session_ids || !Array.isArray(params.session_ids) || params.session_ids.length === 0) {
         throw new Error("session_ids array is required and must not be empty");
       }
 
       const payload = {
+        user_id: params.user_id,
         project_id: params.project_id,
         session_ids: params.session_ids,
         grid_value: params.grid_value ?? 25.0,
@@ -421,8 +423,10 @@ export const predictionApi = {
   runLteOptimisedPrediction: async (params) => {
     try {
       if (!params.project_id) throw new Error("project_id is required");
+      if (!params.user_id) throw new Error("user_id is required");
 
       const payload = {
+        user_id: params.user_id,
         project_id: params.project_id,
         radius: params.radius ?? 5000.0,
         grid_resolution: params.grid_resolution ?? 25.0,

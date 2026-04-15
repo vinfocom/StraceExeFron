@@ -465,6 +465,7 @@ function UnifiedHeader({
     setIsPredicting(true);
     try {
       const payload = {
+        user_id: Number(user?.id) || 0,
         project_id: effectiveProjectId,
         session_ids: effectiveSessionIds,
         grid_value: parseFloat(gridValue) || 25.0,

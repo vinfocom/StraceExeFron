@@ -59,3 +59,24 @@ body {
 .animate-float {
   animation: float-glow 2.5s ease-in-out infinite;
 }
+
+/* Electron custom title-bar layout compensation */
+.electron-runtime .electron-content .h-screen {
+  height: calc(100vh - 2rem) !important;
+}
+
+.electron-runtime .electron-content .min-h-screen {
+  min-height: calc(100vh - 2rem) !important;
+}
+
+.electron-runtime .electron-content [style*="height: 100vh"] {
+  height: calc(100vh - 2rem) !important;
+}
+
+.electron-runtime .electron-content [style*="height: calc(100vh - 64px)"] {
+  height: calc(100vh - 96px) !important;
+}
+
+.electron-runtime .electron-content [style*="height:calc(100vh-64px)"] {
+  height: calc(100vh - 96px) !important;
+}

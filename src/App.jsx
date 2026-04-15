@@ -1,7 +1,8 @@
 // src/App.jsx
-import React, { Suspense, lazy } from "react";
+import React, { Suspense, lazy, useEffect } from "react";
 import {
   BrowserRouter as Router,
+  HashRouter,
   Routes,
   Route,
   Navigate,
@@ -15,6 +16,7 @@ import AuthProvider, { useAuth } from "./context/AuthContext";
 import { indexedDBProvider } from "./utils/indexedDBProvider";
 import Spinner from "./components/common/Spinner";
 import { MapProvider } from './context/MapContext';
+import ElectronWindowBar from "./components/layout/ElectronWindowBar";
 
 // --- Lazy Load Pages for Optimization ---
 const LoginPage = lazy(() => import("./pages/Login"));
@@ -88,46 +90,69 @@ const swrConfig = {
 };
 
 function App() {
+  const isElectronRuntime =
+    typeof navigator !== "undefined" &&
+    /electron/i.test(navigator.userAgent || "");
+  const RouterComponent = isElectronRuntime ? HashRouter : Router;
+
+  useEffect(() => {
+    const cls = "electron-runtime";
+    if (isElectronRuntime) {
+      document.documentElement.classList.add(cls);
+      document.body.classList.add(cls);
+    } else {
+      document.documentElement.classList.remove(cls);
+      document.body.classList.remove(cls);
+    }
+    return () => {
+      document.documentElement.classList.remove(cls);
+      document.body.classList.remove(cls);
+    };
+  }, [isElectronRuntime]);
+
   return (
-    <Router>
+    <RouterComponent>
       <AuthProvider>
         <MapProvider>
           <SWRConfig value={swrConfig}>
+            <ElectronWindowBar />
             <ToastContainer position="top-right" autoClose={3000} theme="colored" />
             
             {/* Suspense handles the loading state while lazy components are being fetched */}
-            <Suspense fallback={<PageLoader />}>
-              <Routes>
-                <Route path="/" element={<PublicRoute><LoginPage /></PublicRoute>} />
-                <Route path="/company-form" element={<PrivateRoute><CompanyForm /></PrivateRoute>} />
-                
-                {/* Wrap related routes in a fragment if needed, but keeping your structure */}
-                <Route path="/debug-map" element={<PrivateRoute><SessionMapDebug /></PrivateRoute>} />
-                <Route path="/dashboard" element={<PrivateRoute><DashboardPage /></PrivateRoute>} />
-                <Route path="/drive-test-sessions" element={<PrivateRoute><DriveTestSessionsPage /></PrivateRoute>} />
-                <Route path="/mapview" element={<PrivateRoute><HighPerfMap /></PrivateRoute>} />
-                <Route path="/map" element={<PrivateRoute><SimpleMapView /></PrivateRoute>} />
-                <Route path="/multi-map" element={<MultiViewPage />} />
-                <Route path="/manage-users" element={<PrivateRoute><ManageUsersPage /></PrivateRoute>} />
-                <Route path="/upload-data" element={<PrivateRoute><UploadDataPage /></PrivateRoute>} />
-                <Route path="/settings" element={<PrivateRoute><SettingsPage /></PrivateRoute>} />
-                <Route path="/logscircles" element={<PrivateRoute><LogsCirclesPage /></PrivateRoute>} />
-                <Route path="/create-project" element={<PrivateRoute><ProjectsPage /></PrivateRoute>} />
-                <Route path="/prediction-map" element={<PrivateRoute><PredictionMapPage /></PrivateRoute>} />
-                <Route path="/getreport" element={<PrivateRoute><GetReportPage /></PrivateRoute>} />
-                <Route path="/unified-map" element={<PrivateRoute><UnifiedMapView /></PrivateRoute>} />
-                <Route path="/viewProject" element={<PrivateRoute><ViewProjectsPage /></PrivateRoute>} />
-                
-                <Route path="/companies" element={<SuperAdminRoute><SuperAdminCompanies /></SuperAdminRoute>} />
-                <Route path="/company-licenses" element={<SuperAdminRoute><CompanyLicensesPage /></SuperAdminRoute>} />
-                
-                <Route path="*" element={<NotFoundPage />} />
-              </Routes>
-            </Suspense>
+            <div className={isElectronRuntime ? "electron-content pt-8" : ""}>
+              <Suspense fallback={<PageLoader />}>
+                <Routes>
+                  <Route path="/" element={<PublicRoute><LoginPage /></PublicRoute>} />
+                  <Route path="/company-form" element={<PrivateRoute><CompanyForm /></PrivateRoute>} />
+                  
+                  {/* Wrap related routes in a fragment if needed, but keeping your structure */}
+                  <Route path="/debug-map" element={<PrivateRoute><SessionMapDebug /></PrivateRoute>} />
+                  <Route path="/dashboard" element={<PrivateRoute><DashboardPage /></PrivateRoute>} />
+                  <Route path="/drive-test-sessions" element={<PrivateRoute><DriveTestSessionsPage /></PrivateRoute>} />
+                  <Route path="/mapview" element={<PrivateRoute><HighPerfMap /></PrivateRoute>} />
+                  <Route path="/map" element={<PrivateRoute><SimpleMapView /></PrivateRoute>} />
+                  <Route path="/multi-map" element={<MultiViewPage />} />
+                  <Route path="/manage-users" element={<PrivateRoute><ManageUsersPage /></PrivateRoute>} />
+                  <Route path="/upload-data" element={<PrivateRoute><UploadDataPage /></PrivateRoute>} />
+                  <Route path="/settings" element={<PrivateRoute><SettingsPage /></PrivateRoute>} />
+                  <Route path="/logscircles" element={<PrivateRoute><LogsCirclesPage /></PrivateRoute>} />
+                  <Route path="/create-project" element={<PrivateRoute><ProjectsPage /></PrivateRoute>} />
+                  <Route path="/prediction-map" element={<PrivateRoute><PredictionMapPage /></PrivateRoute>} />
+                  <Route path="/getreport" element={<PrivateRoute><GetReportPage /></PrivateRoute>} />
+                  <Route path="/unified-map" element={<PrivateRoute><UnifiedMapView /></PrivateRoute>} />
+                  <Route path="/viewProject" element={<PrivateRoute><ViewProjectsPage /></PrivateRoute>} />
+                  
+                  <Route path="/companies" element={<SuperAdminRoute><SuperAdminCompanies /></SuperAdminRoute>} />
+                  <Route path="/company-licenses" element={<SuperAdminRoute><CompanyLicensesPage /></SuperAdminRoute>} />
+                  
+                  <Route path="*" element={<NotFoundPage />} />
+                </Routes>
+              </Suspense>
+            </div>
           </SWRConfig>
         </MapProvider>
       </AuthProvider>
-    </Router>
+    </RouterComponent>
   );
 }
 
