@@ -532,11 +532,21 @@ const UnifiedMapSidebar = ({
       String(sitePredictionVersion || "").trim().toLowerCase() === "original",
     [siteToggle, sitePredictionVersion],
   );
+  const isOptimizedCellMode = useMemo(
+    () =>
+      String(siteToggle || "").toLowerCase() === "cell" &&
+      String(sitePredictionVersion || "").trim().toLowerCase() === "updated",
+    [siteToggle, sitePredictionVersion],
+  );
   const [isRunningLtePrediction, setIsRunningLtePrediction] = useState(false);
   const [ltePredictionRadiusMeters, setLtePredictionRadiusMeters] = useState(5000);
   const ltePredictionPollingRef = useRef(null);
   const ltePredictionToastIdRef = useRef(null);
   const ltePredictionJobIdRef = useRef(null);
+  const [isRunningLteOptimisedPrediction, setIsRunningLteOptimisedPrediction] = useState(false);
+  const lteOptimisedPredictionPollingRef = useRef(null);
+  const lteOptimisedPredictionToastIdRef = useRef(null);
+  const lteOptimisedPredictionJobIdRef = useRef(null);
 
   const deltaGridButtonsDisabled = useMemo(() => {
     const numericProjectId = Number(projectId);
@@ -555,6 +565,14 @@ const UnifiedMapSidebar = ({
       validSessionIds.length === 0
     );
   }, [isRunningLtePrediction, projectId, sessionIds]);
+  const lteOptimisedPredictionButtonDisabled = useMemo(() => {
+    const numericProjectId = Number(projectId);
+    return (
+      isRunningLteOptimisedPrediction ||
+      !Number.isFinite(numericProjectId) ||
+      numericProjectId <= 0
+    );
+  }, [isRunningLteOptimisedPrediction, projectId]);
   const showDeltaGridAdvancedControls = useMemo(
     () =>
       Boolean(deltaGridApiState?.gridVisible) ||
@@ -582,11 +600,28 @@ const UnifiedMapSidebar = ({
     }
   }, []);
 
+  const stopLteOptimisedPredictionMonitoring = useCallback((dismissToast = false) => {
+    if (lteOptimisedPredictionPollingRef.current) {
+      clearInterval(lteOptimisedPredictionPollingRef.current);
+      lteOptimisedPredictionPollingRef.current = null;
+    }
+
+    if (dismissToast && lteOptimisedPredictionToastIdRef.current) {
+      toast.dismiss(lteOptimisedPredictionToastIdRef.current);
+    }
+
+    lteOptimisedPredictionJobIdRef.current = null;
+    if (dismissToast) {
+      lteOptimisedPredictionToastIdRef.current = null;
+    }
+  }, []);
+
   useEffect(() => {
     return () => {
       stopLtePredictionMonitoring(true);
+      stopLteOptimisedPredictionMonitoring(true);
     };
-  }, [stopLtePredictionMonitoring]);
+  }, [stopLteOptimisedPredictionMonitoring, stopLtePredictionMonitoring]);
 
   const pollLtePredictionStatus = useCallback(async () => {
     const jobId = ltePredictionJobIdRef.current;
@@ -652,6 +687,71 @@ const UnifiedMapSidebar = ({
       console.error("LTE status polling failed:", msg);
     }
   }, [stopLtePredictionMonitoring]);
+
+  const pollLteOptimisedPredictionStatus = useCallback(async () => {
+    const jobId = lteOptimisedPredictionJobIdRef.current;
+    const toastId = lteOptimisedPredictionToastIdRef.current;
+
+    if (!jobId || !toastId) return;
+
+    try {
+      const statusResponse = await predictionApi.getLteOptimisedPredictionStatus(jobId);
+      const status = String(statusResponse?.status || "").trim().toLowerCase();
+      const progressText = statusResponse?.progress
+        ? String(statusResponse.progress).trim()
+        : "";
+
+      if (status === "done") {
+        stopLteOptimisedPredictionMonitoring(false);
+        setIsRunningLteOptimisedPrediction(false);
+        const insertedRows = Number(statusResponse?.inserted);
+        const suffix = Number.isFinite(insertedRows) ? ` (${insertedRows} rows)` : "";
+        toast.update(toastId, {
+          render: `LTE optimized prediction completed${suffix}.`,
+          type: "success",
+          isLoading: false,
+          autoClose: 5000,
+          closeOnClick: true,
+          draggable: true,
+        });
+        lteOptimisedPredictionToastIdRef.current = null;
+        return;
+      }
+
+      if (status === "failed") {
+        stopLteOptimisedPredictionMonitoring(false);
+        setIsRunningLteOptimisedPrediction(false);
+        const errorMessage =
+          statusResponse?.error || "Optimized prediction failed in Python service.";
+        toast.update(toastId, {
+          render: `LTE optimized prediction failed: ${errorMessage}`,
+          type: "error",
+          isLoading: false,
+          autoClose: 7000,
+          closeOnClick: true,
+          draggable: true,
+        });
+        lteOptimisedPredictionToastIdRef.current = null;
+        return;
+      }
+
+      const statusLabel = status ? status.toUpperCase() : "RUNNING";
+      const liveMessage = progressText
+        ? `LTE optimized ${statusLabel}: ${progressText}`
+        : `LTE optimized ${statusLabel}...`;
+
+      toast.update(toastId, {
+        render: liveMessage,
+        isLoading: true,
+        autoClose: false,
+        closeOnClick: false,
+        draggable: false,
+      });
+    } catch (statusError) {
+      const msg = statusError?.message || "Unable to fetch LTE optimized status.";
+      console.error("LTE optimized status polling failed:", msg);
+    }
+  }, [stopLteOptimisedPredictionMonitoring]);
 
   const handleRunLtePrediction = useCallback(async () => {
     const numericProjectId = Number(projectId);
@@ -740,6 +840,84 @@ const UnifiedMapSidebar = ({
     ltePredictionRadiusMeters,
     stopLtePredictionMonitoring,
     pollLtePredictionStatus,
+  ]);
+
+  const handleRunLteOptimisedPrediction = useCallback(async () => {
+    const numericProjectId = Number(projectId);
+
+    if (!Number.isFinite(numericProjectId) || numericProjectId <= 0) {
+      toast.error("Please select a valid project before running LTE optimized prediction.");
+      return;
+    }
+
+    setIsRunningLteOptimisedPrediction(true);
+    stopLteOptimisedPredictionMonitoring(true);
+    const loadingToastId = toast.loading("Starting LTE optimized prediction...", {
+      autoClose: false,
+      closeOnClick: false,
+      draggable: false,
+    });
+    lteOptimisedPredictionToastIdRef.current = loadingToastId;
+
+    try {
+      const response = await predictionApi.runLteOptimisedPrediction({
+        project_id: numericProjectId,
+        grid_resolution: Number(lteGridSizeMeters) || 25,
+        radius: Number(ltePredictionRadiusMeters) || 5000,
+      });
+
+      const jobId = response?.job_id || response?.jobId;
+      if (!jobId) {
+        setIsRunningLteOptimisedPrediction(false);
+        toast.update(loadingToastId, {
+          render: "LTE optimized prediction started, but no job id was returned.",
+          type: "warning",
+          isLoading: false,
+          autoClose: 6000,
+          closeOnClick: true,
+          draggable: true,
+        });
+        lteOptimisedPredictionToastIdRef.current = null;
+        return;
+      }
+
+      lteOptimisedPredictionJobIdRef.current = jobId;
+      toast.update(loadingToastId, {
+        render: `LTE optimized prediction queued. Job: ${jobId}. Monitoring progress...`,
+        isLoading: true,
+        autoClose: false,
+        closeOnClick: false,
+        draggable: false,
+      });
+
+      await pollLteOptimisedPredictionStatus();
+      lteOptimisedPredictionPollingRef.current = setInterval(() => {
+        pollLteOptimisedPredictionStatus();
+      }, 3000);
+    } catch (error) {
+      setIsRunningLteOptimisedPrediction(false);
+      const failureMessage = error?.message || "Failed to start LTE optimized prediction.";
+      if (lteOptimisedPredictionToastIdRef.current) {
+        toast.update(lteOptimisedPredictionToastIdRef.current, {
+          render: failureMessage,
+          type: "error",
+          isLoading: false,
+          autoClose: 7000,
+          closeOnClick: true,
+          draggable: true,
+        });
+      } else {
+        toast.error(failureMessage);
+      }
+      stopLteOptimisedPredictionMonitoring(false);
+      lteOptimisedPredictionToastIdRef.current = null;
+    }
+  }, [
+    projectId,
+    lteGridSizeMeters,
+    ltePredictionRadiusMeters,
+    stopLteOptimisedPredictionMonitoring,
+    pollLteOptimisedPredictionStatus,
   ]);
 
   const toggleEnvironment = useCallback(
@@ -1067,6 +1245,62 @@ const UnifiedMapSidebar = ({
                               </span>
                             ) : (
                               "Run LTE Prediction"
+                            )}
+                          </Button>
+                        </div>
+                      )}
+
+                      {isOptimizedCellMode && (
+                        <div className="pt-1 bg-slate-900/40 rounded-lg p-2 space-y-2">
+                          <Label className="text-xs font-semibold text-emerald-400 flex items-center gap-1">
+                            <Radio className="w-3 h-3" /> Optimized LTE Prediction
+                          </Label>
+                          <p className="text-[10px] text-slate-400">
+                            Run the LTE optimisation pipeline for this project and store the optimized output in DB.
+                          </p>
+                          <div className="pt-1 bg-slate-800/60 rounded-lg p-2">
+                            <div className="flex items-center justify-between text-xs mb-2">
+                              <span className="text-slate-400">Grid Size</span>
+                            </div>
+                            <ThresholdInput
+                              value={Number(lteGridSizeMeters) || 25}
+                              onChange={(next) =>
+                                setLteGridSizeMeters?.(Math.round(next))
+                              }
+                              min={5}
+                              max={500}
+                              step={5}
+                              unit="m"
+                            />
+                          </div>
+                          <div className="pt-1 bg-slate-800/60 rounded-lg p-2">
+                            <div className="flex items-center justify-between text-xs mb-2">
+                              <span className="text-slate-400">Radius</span>
+                            </div>
+                            <ThresholdInput
+                              value={Number(ltePredictionRadiusMeters) || 5000}
+                              onChange={(next) =>
+                                setLtePredictionRadiusMeters(Math.round(next))
+                              }
+                              min={100}
+                              max={20000}
+                              step={100}
+                              unit="m"
+                            />
+                          </div>
+                          <Button
+                            type="button"
+                            onClick={handleRunLteOptimisedPrediction}
+                            disabled={lteOptimisedPredictionButtonDisabled}
+                            className="w-full h-8 text-xs font-semibold bg-emerald-600 hover:bg-emerald-500"
+                          >
+                            {isRunningLteOptimisedPrediction ? (
+                              <span className="inline-flex items-center gap-2">
+                                <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+                                Running...
+                              </span>
+                            ) : (
+                              "Run Optimized Prediction"
                             )}
                           </Button>
                         </div>

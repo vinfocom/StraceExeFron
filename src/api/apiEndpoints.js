@@ -418,12 +418,51 @@ export const predictionApi = {
     }
   },
 
+  runLteOptimisedPrediction: async (params) => {
+    try {
+      if (!params.project_id) throw new Error("project_id is required");
+
+      const payload = {
+        project_id: params.project_id,
+        radius: params.radius ?? 5000.0,
+        grid_resolution: params.grid_resolution ?? 25.0,
+      };
+
+      const response = await pythonApi.post("/api/lte-prediction-optimised/run", payload, {
+        timeout: 600000,
+      });
+      return response;
+    } catch (error) {
+      console.error("LTE Optimised Prediction run error:", error);
+      if (error.code === "ECONNABORTED") {
+        throw new Error("LTE Optimised Prediction timed out.");
+      }
+      if (error.response?.data?.detail) {
+        throw new Error(`LTE Optimised Prediction failed: ${error.response.data.detail}`);
+      }
+      if (error.response?.data?.error) {
+        throw new Error(`LTE Optimised Prediction failed: ${error.response.data.error}`);
+      }
+      throw error;
+    }
+  },
+
   getLtePredictionStatus: async (jobId) => {
     try {
       if (!jobId) throw new Error("jobId is required");
       return await pythonApi.get(`/api/lte-prediction/status/${jobId}`);
     } catch (error) {
       console.error("LTE Prediction status error:", error);
+      throw error;
+    }
+  },
+
+  getLteOptimisedPredictionStatus: async (jobId) => {
+    try {
+      if (!jobId) throw new Error("jobId is required");
+      return await pythonApi.get(`/api/lte-prediction-optimised/status/${jobId}`);
+    } catch (error) {
+      console.error("LTE Optimised Prediction status error:", error);
       throw error;
     }
   },
@@ -1072,7 +1111,7 @@ export const mapViewApi = {
 };
 
 export const gridAnalyticsApi = {
-  computeAndStoreGridAnalytics: (params, config = {}) =>
+      computeAndStoreGridAnalytics: (params, config = {}) =>
     api.post("/api/GridAnalytics/ComputeAndStoreGridAnalytics", null, {
       params,
       ...config,

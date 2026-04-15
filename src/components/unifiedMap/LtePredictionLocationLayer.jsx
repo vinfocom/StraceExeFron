@@ -574,7 +574,12 @@ const LtePredictionLocationLayer = ({
           lng: Number(cell?.lng),
           color: Array.isArray(cell?.color) ? cell.color : [107, 114, 128, 190],
         }))
-        .filter((cell) => Array.isArray(cell.polygon) && cell.polygon.length >= 3);
+        .filter((cell) => Array.isArray(cell.polygon) && cell.polygon.length >= 3)
+        .filter((cell) => {
+          if (!filterInsidePolygons || polygonPaths.length === 0) return true;
+          if (!Number.isFinite(cell.lat) || !Number.isFinite(cell.lng)) return false;
+          return polygonPaths.some((path) => isPointInPolygon(cell, path));
+        });
     }
 
     if (!enabled || !enableGrid || !Array.isArray(filteredPoints) || filteredPoints.length === 0) {
@@ -722,6 +727,7 @@ const LtePredictionLocationLayer = ({
     enabled,
     enableGrid,
     filteredPoints,
+    filterInsidePolygons,
     gridSizeMeters,
     gridAggregationMethod,
     polygonPaths,

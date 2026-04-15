@@ -18,6 +18,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Label } from '@/components/ui/label';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 const ManageUsersPage = () => {
     const { user } = useAuth();
@@ -30,7 +31,7 @@ const ManageUsersPage = () => {
     const [loading, setLoading] = useState(true);
     const [isDialogOpen, setIsDialogOpen] = useState(false);
     const [currentUser, setCurrentUser] = useState(null);
-    const [filters, setFilters] = useState({ UserName: '', MobileNo: '', EmailId: '', CompanyId: '' });
+    const [filters, setFilters] = useState({ UserName: '', MobileNo: '', EmailId: '', CompanyName: '', Status: 'all' });
     const [isFetchingDetails, setIsFetchingDetails] = useState(false);
     const [currentPage, setCurrentPage] = useState(1);
     const [usersPerPage] = useState(10);
@@ -40,7 +41,7 @@ const ManageUsersPage = () => {
         try {
             const superAdminCompanyId = companyIdQuery
                 ? Number(companyIdQuery)
-                : Number(filters.CompanyId?.trim() || 0);
+                : 0;
 
             const scopedCompanyId = isSuperAdmin
                 ? superAdminCompanyId
@@ -50,6 +51,8 @@ const ManageUsersPage = () => {
                 ...(filters.UserName?.trim() ? { UserName: filters.UserName.trim() } : {}),
                 ...(filters.MobileNo?.trim() ? { Mobile: filters.MobileNo.trim() } : {}),
                 ...(filters.EmailId?.trim() ? { Email: filters.EmailId.trim() } : {}),
+                ...(filters.Status !== 'all' ? { Status: Number(filters.Status) } : {}),
+                ...(isSuperAdmin && filters.CompanyName?.trim() ? { CompanyName: filters.CompanyName.trim() } : {}),
                 ...(Number.isFinite(scopedCompanyId) && scopedCompanyId > 0 ? { company_id: scopedCompanyId } : {})
             };
             const response = await adminApi.getUsers(apiFilters);
@@ -76,7 +79,7 @@ const ManageUsersPage = () => {
                     m_user_type_id: userTypeId,
                     license_id: item?.license_id ?? userTypeId,
                     company_id: companyId,
-                    company_name: item?.company_name ?? (companyId ? `ID: ${companyId}` : '-'),
+                    company_name: item?.company_name ?? '-',
                     created_on: obUser.date_created ?? item?.created_on ?? null,
                 };
             });
@@ -255,8 +258,12 @@ const ManageUsersPage = () => {
         setFilters(prev => ({ ...prev, [name]: value }));
     };
 
+    const handleStatusChange = (value) => {
+        setFilters(prev => ({ ...prev, Status: value }));
+    };
+
     const handleReset = () => {
-        setFilters({ UserName: '', MobileNo: '', EmailId: '', CompanyId: '' });
+        setFilters({ UserName: '', MobileNo: '', EmailId: '', CompanyName: '', Status: 'all' });
     };
 
     useEffect(() => {
@@ -412,7 +419,7 @@ const ManageUsersPage = () => {
 
             <Card className="bg-white border border-gray-200 shadow-sm">
                 <CardContent className="pt-6">
-                    <div className={`grid grid-cols-1 gap-4 items-end ${isSuperAdmin ? 'md:grid-cols-5' : 'md:grid-cols-4'}`}>
+                    <div className={`grid grid-cols-1 gap-4 items-end ${isSuperAdmin ? 'md:grid-cols-6' : 'md:grid-cols-5'}`}>
                         <div className="space-y-1.5">
                             <Label htmlFor="UserName" className="text-gray-700 font-medium">User Name</Label>
                             <Input
@@ -448,18 +455,31 @@ const ManageUsersPage = () => {
                         </div>
                         {isSuperAdmin && (
                             <div className="space-y-1.5">
-                                <Label htmlFor="CompanyId" className="text-gray-700 font-medium">Company ID</Label>
+                                <Label htmlFor="CompanyName" className="text-gray-700 font-medium">Company Name</Label>
                                 <Input
-                                    id="CompanyId"
-                                    name="CompanyId"
-                                    type="number"
-                                    placeholder="Search by company ID..."
-                                    value={filters.CompanyId}
+                                    id="CompanyName"
+                                    name="CompanyName"
+                                    placeholder="Search by company name..."
+                                    value={filters.CompanyName}
                                     onChange={handleFilterChange}
                                     className="bg-white border-gray-300 text-gray-800 placeholder-gray-400 focus:border-blue-500 focus:ring-blue-500"
                                 />
                             </div>
                         )}
+                        <div className="space-y-1.5">
+                            <Label htmlFor="Status" className="text-gray-700 font-medium">Status</Label>
+                            <Select value={filters.Status} onValueChange={handleStatusChange}>
+                                <SelectTrigger id="Status" className="bg-white border-gray-300 text-gray-800">
+                                    <SelectValue placeholder="All statuses" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    <SelectItem value="all">All</SelectItem>
+                                    <SelectItem value="1">Active</SelectItem>
+                                    <SelectItem value="0">Inactive</SelectItem>
+                                    <SelectItem value="2">Deleted</SelectItem>
+                                </SelectContent>
+                            </Select>
+                        </div>
                         <div className="flex gap-2">
                             <Button 
                                 onClick={fetchUsers} 

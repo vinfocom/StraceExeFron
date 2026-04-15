@@ -1804,26 +1804,26 @@ const UnifiedMapView = () => {
     const pickDiffValue = (row = {}) => {
       const diff = row?.difference || {};
       if (metricKey === "rsrq") {
-        return Number(diff?.[`diff_${metricMode}_rsrq`]);
+        return toFiniteNumber(diff?.[`diff_${metricMode}_rsrq`]);
       }
       if (metricKey === "sinr" || metricKey === "snr") {
-        return Number(diff?.[`diff_${metricMode}_sinr`]);
+        return toFiniteNumber(diff?.[`diff_${metricMode}_sinr`]);
       }
-      return Number(diff?.[`diff_${metricMode}_rsrp`]);
+      return toFiniteNumber(diff?.[`diff_${metricMode}_rsrp`]);
     };
 
     const pickBaselineAvg = (row = {}) => {
       const base = row?.baseline || {};
-      if (metricKey === "rsrq") return Number(base?.[`${metricMode}_rsrq`]);
-      if (metricKey === "sinr" || metricKey === "snr") return Number(base?.[`${metricMode}_sinr`]);
-      return Number(base?.[`${metricMode}_rsrp`]);
+      if (metricKey === "rsrq") return toFiniteNumber(base?.[`${metricMode}_rsrq`]);
+      if (metricKey === "sinr" || metricKey === "snr") return toFiniteNumber(base?.[`${metricMode}_sinr`]);
+      return toFiniteNumber(base?.[`${metricMode}_rsrp`]);
     };
 
     const pickOptimizedAvg = (row = {}) => {
       const opt = row?.optimized || {};
-      if (metricKey === "rsrq") return Number(opt?.[`${metricMode}_rsrq`]);
-      if (metricKey === "sinr" || metricKey === "snr") return Number(opt?.[`${metricMode}_sinr`]);
-      return Number(opt?.[`${metricMode}_rsrp`]);
+      if (metricKey === "rsrq") return toFiniteNumber(opt?.[`${metricMode}_rsrq`]);
+      if (metricKey === "sinr" || metricKey === "snr") return toFiniteNumber(opt?.[`${metricMode}_sinr`]);
+      return toFiniteNumber(opt?.[`${metricMode}_rsrp`]);
     };
 
     const resolveGridColor = (value, metricName, isDeltaMetric) => {
@@ -3311,7 +3311,7 @@ const UnifiedMapView = () => {
 
   const reloadData = useCallback(() => {
     refetchColors();
-    if (enableSiteToggle) refetchSites();
+    if (enableSiteToggle && typeof refetchSites === "function") refetchSites();
     if (enableDataToggle && dataToggle === "sample") refetchSample();
     if (
       (enableDataToggle && dataToggle === "prediction") ||

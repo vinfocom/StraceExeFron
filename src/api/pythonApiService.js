@@ -5,9 +5,26 @@ const isElectronRuntime =
   typeof navigator !== "undefined" &&
   /electron/i.test(navigator.userAgent || "");
 
+const getRuntimePythonBaseUrl = () => {
+  if (typeof window === "undefined") return "";
+
+  try {
+    const queryValue = new URLSearchParams(window.location.search).get(
+      "pythonApiBaseUrl",
+    );
+    return String(queryValue || "").trim();
+  } catch {
+    return "";
+  }
+};
+
 const PYTHON_BASE_URL = String(
   isElectronRuntime
-    ? (import.meta.env.VITE_ELECTRON_PYTHON_API_URL || "http://127.0.0.1:8080")
+    ? (
+        getRuntimePythonBaseUrl() ||
+        import.meta.env.VITE_ELECTRON_PYTHON_API_URL ||
+        "http://127.0.0.1:8080"
+      )
     : (import.meta.env.VITE_PYTHON_API_URL || "http://127.0.0.1:8080")
 )
   .trim()

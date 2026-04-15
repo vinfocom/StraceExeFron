@@ -637,8 +637,10 @@ function mergeSectorWithFetchedRow(sector, fetchedRow) {
     ...(sector?.rawSite && typeof sector.rawSite === "object" ? sector.rawSite : {}),
     ...row,
   };
-  const mergedSiteId = getDisplaySiteId(row) || getDisplaySiteId(sector);
-  const mergedSiteName = getSiteName(row) || sector?.siteName || "Unknown";
+  // Keep clicked sector/site identity stable; fetched rows may include nearby
+  // points from other sites when lookup keys are broad.
+  const mergedSiteId = getDisplaySiteId(sector) || getDisplaySiteId(row);
+  const mergedSiteName = sector?.siteName || getSiteName(row) || "Unknown";
 
   const mergedSectorValue =
     row.sector ?? row.sector_id ?? row.sectorId ?? sector?.sector ?? null;
@@ -1270,7 +1272,9 @@ const NetworkPlannerMap = ({
 
       let rows = [];
       let siteFetchFailed = false;
-      if (normalizedVersion !== "delta") {
+      const shouldUseLegacySitePredictionApi = normalizedVersion === "original";
+
+      if (shouldUseLegacySitePredictionApi) {
         for (const params of candidateParams) {
           try {
             const res = await mapViewApi.getSitePrediction(params);
@@ -1887,9 +1891,28 @@ const NetworkPlannerMap = ({
           nextSector.rawSite?.cellId ??
           "",
       ).trim();
+      const optimizedNodeBId = String(
+        nextSector.siteId ??
+          nextSector.rawSite?.site_id ??
+          nextSector.rawSite?.siteId ??
+          nextSector.nodebId ??
+          nextSector.rawSite?.node_b_id ??
+          nextSector.rawSite?.nodeb_id ??
+          extractNodebId(nextSector.rawSite) ??
+          "",
+      ).trim();
+      const optimizedCellId = String(sectorValueForLookup || fallbackCellId || "").trim();
+      const combinedCellId = (() => {
+        const fallback = String(fallbackCellId || "").trim();
+        if (fallback.includes("_")) return fallback;
+        if (optimizedNodeBId && fallback) return `${optimizedNodeBId}_${fallback}`;
+        if (optimizedNodeBId && sectorValueForLookup) return `${optimizedNodeBId}_${sectorValueForLookup}`;
+        return "";
+      })();
       const lookupCandidates = Array.from(
         new Set(
           [
+            combinedCellId,
             // Prefer concrete cell id first when available; sector-only values like 1/2/3
             // are often non-unique and can return empty or wrong rows.
             fallbackCellId,
@@ -1899,7 +1922,10 @@ const NetworkPlannerMap = ({
             .filter(Boolean),
         ),
       );
-      if (lookupCandidates.length === 0) return false;
+      if (lookupCandidates.length === 0) {
+        if (!silent) toast.info("No data");
+        return false;
+      }
 
       const rawVersion = String(sitePredictionVersion || "original").trim().toLowerCase();
       const normalizedVersion =
@@ -1922,11 +1948,18 @@ const NetworkPlannerMap = ({
       try {
         let rows = [];
         let resolvedLookupValue = "";
+        if (!combinedCellId && !optimizedCellId && !fallbackCellId && !sectorValueForLookup) {
+          if (!silent) toast.info("No data");
+          return false;
+        }
+
+        // Primary path: query by project_id + combined cell_id (node_b_cell_id format),
+        // using optimised endpoint that reads from two tables.
         for (const candidate of lookupCandidates) {
-          const response =
-            shouldUseOptimizedApi
-              ? await mapViewApi.getSitePredictionOptimised({ cell_id: candidate })
-              : await mapViewApi.getSitePredictionBase({ cell_id: candidate });
+          const response = await mapViewApi.getSitePredictionOptimised({
+            project_id: projectId,
+            cell_id: candidate || undefined,
+          });
           const extractedRows = extractRowsFromApiResponse(response);
           if (Array.isArray(extractedRows) && extractedRows.length > 0) {
             rows = extractedRows;
@@ -1935,7 +1968,26 @@ const NetworkPlannerMap = ({
           }
         }
 
-        if (rows.length === 0) return false;
+        // Compatibility fallback for original mode: baseline table endpoint by cell id only.
+        if (rows.length === 0 && !shouldUseOptimizedApi) {
+          for (const candidate of lookupCandidates) {
+            const response = await mapViewApi.getSitePredictionBase({
+              project_id: projectId,
+              cell_id: candidate || undefined,
+            });
+            const extractedRows = extractRowsFromApiResponse(response);
+            if (Array.isArray(extractedRows) && extractedRows.length > 0) {
+              rows = extractedRows;
+              resolvedLookupValue = candidate;
+              break;
+            }
+          }
+        }
+
+        if (rows.length === 0) {
+          if (!silent) toast.info("No data");
+          return false;
+        }
         const normalizedPredictionRowsWithVariant = normalizeSectorPredictionRows(
           rows,
           selectedMetric,
@@ -1948,12 +2000,33 @@ const NetworkPlannerMap = ({
           }));
         }
 
+        const targetSiteId = normalizeComparableSiteId(nextSector.siteId);
+        const targetNodeB = normalizeMatchValue(
+          optimizedNodeBId || nextSector.nodebId || extractNodebId(nextSector.rawSite),
+        );
+        const targetCellId = normalizeMatchValue(fallbackCellId || optimizedCellId);
+        const targetSector = normalizeMatchValue(sectorValueForLookup);
+
         const matchedRow =
+          rows.find((row) => {
+            const rowSiteId = normalizeComparableSiteId(
+              row?.site_id ?? row?.siteId ?? row?.site ?? row?.node_b_id ?? row?.nodeb_id ?? "",
+            );
+            const rowNodeB = extractNodebId(row);
+            const rowCellId = normalizeMatchValue(row?.cell_id ?? row?.cellId ?? "");
+            const rowSector = normalizeMatchValue(row?.sector ?? row?.sector_id ?? row?.sectorId ?? "");
+
+            if (targetSiteId && rowSiteId && rowSiteId === targetSiteId) return true;
+            if (targetNodeB && rowNodeB && rowNodeB === targetNodeB && targetCellId && rowCellId && rowCellId === targetCellId) return true;
+            if (targetNodeB && rowNodeB && rowNodeB === targetNodeB && targetSector && rowSector && rowSector === targetSector) return true;
+            return false;
+          }) ||
           rows.find((row) => {
             const rowSector = String(row?.sector ?? row?.sector_id ?? row?.sectorId ?? "").trim();
             const rowCellId = String(row?.cell_id ?? row?.cellId ?? "").trim();
             return rowSector === resolvedLookupValue || rowCellId === resolvedLookupValue;
-          }) || rows[0];
+          }) ||
+          rows[0];
         const mergedSector = mergeSectorWithFetchedRow(nextSector, matchedRow);
         if (nextSector.renderKey) {
           setSectorOverridesByRenderKey((prev) => ({
@@ -1985,7 +2058,7 @@ const NetworkPlannerMap = ({
         );
       }
     },
-    [openSectorInfo, selectedMetric, sitePredictionVersion],
+    [openSectorInfo, projectId, selectedMetric, sitePredictionVersion],
   );
 
   const handleSelectAllSectors = useCallback(async () => {

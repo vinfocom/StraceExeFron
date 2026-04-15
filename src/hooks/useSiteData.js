@@ -275,5 +275,5 @@ export const useSiteData = ({
     }
   }, [fetchSiteData, autoFetch]);
 
-  return { siteData, loading, error, fetchSiteData };
+  return { siteData, loading, error, fetchSiteData, refetch: fetchSiteData };
 };
