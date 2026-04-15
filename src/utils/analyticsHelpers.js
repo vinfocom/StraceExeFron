@@ -31,6 +31,27 @@ export const calculateStats = (locations, metric) => {
 export const calculateIOSummary = (logArea) => {
   if (!logArea || typeof logArea !== "object") return null;
 
+  const normalizeIOLabel = (value) => {
+    const raw = String(value ?? "").trim().toLowerCase();
+    if (!raw) return null;
+
+    const beforeBracket = raw.split("(")[0].trim();
+    if (!beforeBracket) return null;
+
+    if (["ouotdot", "outdot", "oudoor", "outdor"].includes(beforeBracket)) {
+      return "outdoor";
+    }
+    if (["indor", "indoorr", "inodor"].includes(beforeBracket)) {
+      return "indoor";
+    }
+
+    if (beforeBracket.includes("indoor")) return "indoor";
+    if (beforeBracket.includes("outdoor")) return "outdoor";
+    if (beforeBracket === "in") return "indoor";
+    if (beforeBracket === "out") return "outdoor";
+    return null;
+  };
+
   const toCount = (value) => {
     const parsed = Number(
       value?.inputCount ??
@@ -57,10 +78,10 @@ export const calculateIOSummary = (logArea) => {
       return;
     }
 
-    const label = String(key ?? "").toLowerCase();
+    const label = normalizeIOLabel(key);
     const count = toCount(session);
-    if (label.includes("indoor")) totalIndoor += count;
-    if (label.includes("outdoor")) totalOutdoor += count;
+    if (label === "indoor") totalIndoor += count;
+    if (label === "outdoor") totalOutdoor += count;
   });
 
   return {

@@ -676,16 +676,58 @@ export const useIndOut =() =>{
       console.error("data is not array")
       return []
     }
+
+    const getFirstValue = (item, keys, fallback = undefined) => {
+      for (const key of keys) {
+        const value = item?.[key];
+        if (value !== undefined && value !== null && value !== "") {
+          return value;
+        }
+      }
+      return fallback;
+    };
+
+    const normalizeLocation = (value) => {
+      const raw = String(value ?? "").trim().toLowerCase();
+      if (!raw) return "Unknown";
+
+      // Read the environment label before metrics in brackets:
+      // "Outdoor (1.13)" / "Ouotdot (1.13)" -> "outdoor"
+      const label = raw.split("(")[0].trim();
+      if (!label) return "Unknown";
+
+      const corrected =
+        ["ouotdot", "outdot", "oudoor", "outdor"].includes(label)
+          ? "outdoor"
+          : ["indor", "indoorr", "inodor"].includes(label)
+            ? "indoor"
+            : label;
+
+      if (["indoor", "in", "inside", "1"].includes(corrected)) return "Indoor";
+      if (["outdoor", "out", "outside", "0", "2"].includes(corrected)) return "Outdoor";
+      if (corrected.includes("indoor")) return "Indoor";
+      if (corrected.includes("outdoor")) return "Outdoor";
+      return raw;
+    };
+
     return rawData.map((item) => ({
-      provider: normalizeProviderName(item.OperatorName) || "Unknown",
-      location: item.LocationType || "Unknown",
-      avgRsrp: Number(item.AvgRsrp) || 0,
-      avgRsrq: Number(item.AvgRsrq) || 0,
-      avgSinr: Number(item.AvgSinr) || 0,
-      avgMos: Number(item.AvgMos) || 0,
-      avgDlTpt: Number(item.AvgDlTpt) || 0,
-      avgUlTpt: Number(item.AvgUlTpt) || 0,
-      sampleCount: Number(item.SampleCount) || 0,
+      provider: normalizeProviderName(
+        getFirstValue(item, [
+          "OperatorName", "operatorName", "Operator", "operator", "Provider", "provider", "Name", "name"
+        ], "Unknown")
+      ) || "Unknown",
+      location: normalizeLocation(
+        getFirstValue(item, [
+          "LocationType", "locationType", "Location", "location", "IndoorOutdoor", "indoorOutdoor", "indoor_outdoor"
+        ], "Unknown")
+      ),
+      avgRsrp: Number(getFirstValue(item, ["AvgRsrp", "avgRsrp", "RSRP", "rsrp"], 0)) || 0,
+      avgRsrq: Number(getFirstValue(item, ["AvgRsrq", "avgRsrq", "RSRQ", "rsrq"], 0)) || 0,
+      avgSinr: Number(getFirstValue(item, ["AvgSinr", "avgSinr", "SINR", "sinr"], 0)) || 0,
+      avgMos: Number(getFirstValue(item, ["AvgMos", "avgMos", "MOS", "mos"], 0)) || 0,
+      avgDlTpt: Number(getFirstValue(item, ["AvgDlTpt", "avgDlTpt", "DlTpt", "dlTpt"], 0)) || 0,
+      avgUlTpt: Number(getFirstValue(item, ["AvgUlTpt", "avgUlTpt", "UlTpt", "ulTpt"], 0)) || 0,
+      sampleCount: Number(getFirstValue(item, ["SampleCount", "sampleCount", "Count", "count", "Samples", "samples"], 0)) || 0,
     }));
   },[rawData])
   return { data: processedData, ...rest };

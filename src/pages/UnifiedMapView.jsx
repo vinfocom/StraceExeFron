@@ -243,12 +243,32 @@ const toFiniteNumber = (value) => {
   return Number.isFinite(parsed) ? parsed : null;
 };
 
-const getIndoorOutdoorBucket = (value) => {
-  const normalized = String(value ?? "").trim().toLowerCase();
-  if (!normalized) return null;
-  if (normalized.includes("indoor")) return "indoor";
-  if (normalized.includes("outdoor")) return "outdoor";
+const formatIndoorOutdoorValue = (value) => {
+  const raw = String(value ?? "").trim();
+  if (!raw) return null;
+
+  // Keep only the label part before "(...)" e.g. "Ouotdot (1.13)" -> "Ouotdot"
+  const labelBeforeBracket = raw.split("(")[0].trim().toLowerCase();
+  if (!labelBeforeBracket) return null;
+
+  // Common misspellings seen in source data
+  if (["ouotdot", "outdot", "oudoor", "outdor"].includes(labelBeforeBracket)) {
+    return "outdoor";
+  }
+  if (["indor", "indoorr", "inodor"].includes(labelBeforeBracket)) {
+    return "indoor";
+  }
+
+  if (labelBeforeBracket.includes("indoor")) return "indoor";
+  if (labelBeforeBracket.includes("outdoor")) return "outdoor";
+  if (labelBeforeBracket === "in") return "indoor";
+  if (labelBeforeBracket === "out") return "outdoor";
+
   return null;
+};
+
+const getIndoorOutdoorBucket = (value) => {
+  return formatIndoorOutdoorValue(value);
 };
 
 const buildIndoorOutdoorFromLogs = (logs = []) => {
@@ -2530,9 +2550,7 @@ const UnifiedMapView = () => {
     if (indoorOutdoor?.length > 0) {
       const lowerFilters = indoorOutdoor.map((v) => v.toLowerCase());
       result = result.filter(
-        (l) =>
-          l.indoor_outdoor &&
-          lowerFilters.includes(l.indoor_outdoor.toLowerCase()),
+        (l) => lowerFilters.includes(formatIndoorOutdoorValue(l?.indoor_outdoor)),
       );
     }
     if (isSampleMode && pciThreshold > 0) {
