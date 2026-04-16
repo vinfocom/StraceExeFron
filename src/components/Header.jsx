@@ -6,6 +6,7 @@ import { LogOut } from 'lucide-react';
 import { useLocation } from 'react-router-dom';
 import DrawingControlsPanel from './map/layout/DrawingControlsPanel';
 import AdvancedFilters from './map/HeaderFilters';
+import UptimeStatus from './common/UptimeStatus';
 
 export default function Header() {
   const { user, logout } = useAuth();
@@ -25,6 +26,7 @@ export default function Header() {
       </div>
 
       <div className="flex items-center space-x-4 min-w-[200px] justify-end">
+        <UptimeStatus />
         <p className="text-gray-300 text-sm">
           Welcome, <span className="font-semibold text-white">{user?.name || 'User'}</span>
         </p>
