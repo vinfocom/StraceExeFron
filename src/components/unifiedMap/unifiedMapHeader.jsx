@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import { useAuth } from "@/context/AuthContext";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -6,31 +6,20 @@ import {
   LogOut,
   Filter,
   ChartBar,
+  LayoutGrid,
   Plus,
   Minus,
   UploadCloud,
-  Settings as SettingsIcon,
-  Droplets,
-  CircleDot,
-  Radio,
-  Globe,
-  ChevronDown,
   ArrowLeft,
 } from "lucide-react";
-import { useLocation, Link, useSearchParams } from "react-router-dom";
+import { useLocation, useSearchParams } from "react-router-dom";
 import { mapViewApi, predictionApi } from "@/api/apiEndpoints";
 import { toast } from "react-toastify";
 import { useMapContext } from "@/context/MapContext";
 import Spinner from "@/components/common/Spinner";
 import ProjectsDropdown from "../project/ProjectsDropdown";
 import DrawingControlsPanel from "../map/layout/DrawingControlsPanel";
-import { Dialog, DialogContent, DialogTrigger } from "@/components/ui/dialog";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
+import { Dialog, DialogContent } from "@/components/ui/dialog";
 import SettingsPage from "@/pages/Setting";
 import {
   findProjectInProjectsCache,
@@ -328,8 +317,8 @@ function UnifiedHeader({
   setNeighborSquareSize,
   onUIChange,
   ui,
-
   onSettingsSaved,
+  onOpenMultiView,
 }) {
   const { user, logout } = useAuth();
   const location = useLocation();
@@ -351,6 +340,8 @@ function UnifiedHeader({
   const [isUploading, setIsUploading] = useState(false);
   const [selectedFile, setSelectedFile] = useState(null);
   const [activeQuickControl, setActiveQuickControl] = useState(null);
+  const [openSettingsDialog, setOpenSettingsDialog] = useState(false);
+  const [openImportDialog, setOpenImportDialog] = useState(false);
 
   // Prediction Prompt State
   const [showPredictionPrompt, setShowPredictionPrompt] = useState(false);
@@ -578,9 +569,9 @@ function UnifiedHeader({
     setNeighborSquareSize(Math.max(3, Math.min(80, Math.round(nextSize))));
   };
 
-  const toggleQuickControl = (controlKey) => {
+  const toggleQuickControl = useCallback((controlKey) => {
     setActiveQuickControl((prev) => (prev === controlKey ? null : controlKey));
-  };
+  }, []);
 
   useEffect(() => {
     if (!neighborLogsAvailable && activeQuickControl === "neighbors") {
@@ -588,10 +579,38 @@ function UnifiedHeader({
     }
   }, [neighborLogsAvailable, activeQuickControl]);
 
-  const openInNewTab = (path) => {
-    if (typeof window === "undefined") return;
-    window.open(path, "_blank", "noopener,noreferrer");
-  };
+  useEffect(() => {
+    const handleUtilityAction = (event) => {
+      const action = event?.detail?.action;
+      if (!isMapPage || !action) return;
+
+      if (action === "opacity") {
+        toggleQuickControl("opacity");
+        return;
+      }
+      if (action === "log-radius") {
+        toggleQuickControl("radius");
+        return;
+      }
+      if (action === "neighbor-radius") {
+        if (neighborLogsAvailable) {
+          toggleQuickControl("neighbors");
+        }
+        return;
+      }
+      if (action === "settings") {
+        setOpenSettingsDialog(true);
+        return;
+      }
+      if (action === "import") {
+        setOpenImportDialog(true);
+      }
+    };
+
+    window.addEventListener("stracer:utility-action", handleUtilityAction);
+    return () =>
+      window.removeEventListener("stracer:utility-action", handleUtilityAction);
+  }, [isMapPage, neighborLogsAvailable, toggleQuickControl]);
 
   return (
     <header className="h-14 bg-gray-800 text-white shadow-sm flex items-center justify-between px-6 flex-shrink-0 relative z-10">
@@ -642,49 +661,14 @@ function UnifiedHeader({
               {showAnalytics ? "Hide" : "Analytics"}
             </Button>
 
-            <div className="flex items-center gap-2">
-              <Button
-                size="sm"
-                onClick={() => toggleQuickControl("opacity")}
-                className={`${activeQuickControl === "opacity" ? "bg-blue-600 hover:bg-blue-500" : "bg-slate-700 hover:bg-slate-600"} text-white border-slate-600`}
-                title="Opacity"
-              >
-                <Droplets className="h-4 w-4" />
-              </Button>
-              <Button
-                size="sm"
-                onClick={() => toggleQuickControl("radius")}
-                className={`${activeQuickControl === "radius" ? "bg-blue-600 hover:bg-blue-500" : "bg-slate-700 hover:bg-slate-600"} text-white border-slate-600`}
-                title="Log Radius"
-              >
-                <CircleDot className="h-4 w-4" />
-              </Button>
-              {neighborLogsAvailable && (
-                <Button
-                  size="sm"
-                  onClick={() => toggleQuickControl("neighbors")}
-                  className={`${activeQuickControl === "neighbors" ? "bg-blue-600 hover:bg-blue-500" : "bg-slate-700 hover:bg-slate-600"} text-white border-slate-600`}
-                  title="Secondary Logs"
-                >
-                  <Radio className="h-4 w-4" />
-                </Button>
-              )}
-
-              <Dialog>
-          <DialogTrigger asChild>
             <Button
+              onClick={() => onOpenMultiView?.()}
               size="sm"
-              className="bg-slate-700 hover:bg-slate-600 text-white border-slate-600"
-              title="Settings"
+              className="flex gap-1 items-center bg-blue-600 hover:bg-blue-500 text-white"
             >
-              <SettingsIcon className="h-4 w-4" />
+              <LayoutGrid className="h-4 w-4" />
+              Multi Map
             </Button>
-          </DialogTrigger>
-          <DialogContent className="max-w-5xl max-h-[90vh] overflow-hidden p-0">
-            <SettingsPage onSaveSuccess={onSettingsSaved} />
-          </DialogContent>
-        </Dialog>
-            </div>
 
             {activeQuickControl === "opacity" && (
               <div className="flex items-center gap-2 bg-gray-700/80 rounded-lg px-3 py-1.5 border border-gray-600">
@@ -799,56 +783,7 @@ function UnifiedHeader({
       </div>
 
       <div className="flex items-center space-x-4">
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button
-              size="sm"
-              className="bg-slate-700 hover:bg-slate-600 text-white border-slate-600 flex items-center gap-1"
-            >
-              Views
-              <ChevronDown className="h-4 w-4" />
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent
-            align="end"
-            className="bg-white border border-gray-200 shadow-lg"
-          >
-            <DropdownMenuItem
-              onClick={() => openInNewTab("/dashboard")}
-              className="cursor-pointer"
-            >
-              Dashboard
-            </DropdownMenuItem>
-            <DropdownMenuItem
-              onClick={() => openInNewTab("/mapview")}
-              className="cursor-pointer"
-            >
-              Map View
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
-
-
-<DropdownMenu>
-  <DropdownMenuTrigger asChild>
-    <Button
-      size="sm"
-      className="bg-slate-700 hover:bg-slate-600 text-white border-slate-600 flex items-center gap-1"
-    >
-      Import
-      <UploadCloud className="h-4 w-4" />
-    </Button>
-  </DropdownMenuTrigger>
-  <DropdownMenuContent
-    align="end"
-    className="bg-white border border-gray-200 shadow-lg"
-  >
-    <Dialog>
-          <DialogTrigger asChild>
-            <Button size="sm" >
-            Site
-            </Button>
-          </DialogTrigger>
+        <Dialog open={openImportDialog} onOpenChange={setOpenImportDialog}>
           <DialogContent className="sm:max-w-md bg-gray-800 text-white border-gray-700">
             <div className="p-6 text-center">
               <h2 className="text-lg font-semibold mb-4">
@@ -858,9 +793,7 @@ function UnifiedHeader({
                 <label className="w-full flex flex-col items-center px-4 py-6 bg-gray-700 rounded-lg border-2 border-dashed border-gray-500 cursor-pointer hover:border-blue-500 transition-colors">
                   <UploadCloud className="h-10 w-10 text-gray-400 mb-2" />
                   <span className="text-sm">
-                    {selectedFile
-                      ? selectedFile.name
-                      : "Select .csv or .xlsx file"}
+                    {selectedFile ? selectedFile.name : "Select .csv or .xlsx file"}
                   </span>
                   <input
                     type="file"
@@ -881,9 +814,12 @@ function UnifiedHeader({
             </div>
           </DialogContent>
         </Dialog>
-    
-  </DropdownMenuContent>
-</DropdownMenu>
+
+        <Dialog open={openSettingsDialog} onOpenChange={setOpenSettingsDialog}>
+          <DialogContent className="max-w-5xl max-h-[90vh] overflow-hidden p-0">
+            <SettingsPage onSaveSuccess={onSettingsSaved} />
+          </DialogContent>
+        </Dialog>
         
 
         

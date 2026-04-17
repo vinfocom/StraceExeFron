@@ -131,6 +131,15 @@ export const buildFeaturePayload = (features = []) => {
 };
 
 export const hasFeatureAccess = (user, featureKey, defaultAllow = true) => {
+  const roleId = Number(
+    user?.m_user_type_id ??
+      user?.user_type_id ??
+      user?.role_id ??
+      user?.m_user_type ??
+      0,
+  );
+  if (roleId === 3) return true; // Super Admin: full feature access
+
   const enabled = getEnabledFeaturesFromSource(user);
   if (!enabled.length) return defaultAllow;
   return enabled.includes(featureKey);

@@ -579,13 +579,16 @@ export const useOutdoorCount = (filters = {}) => {
   );
 };
 
-export const useCoverageRanking = (rsrpMin = -95, rsrpMax = 0) => {
+export const useCoverageRanking = (rsrpMin = -95, rsrpMax = 0, filters = {}) => {
+  const timeQuery = useMemo(() => buildQueryString(filters), [filters]);
   const query = useMemo(
     () => ({
       min: rsrpMin,
       max: rsrpMax,
+      from: timeQuery.from,
+      to: timeQuery.to,
     }),
-    [rsrpMin, rsrpMax]
+    [rsrpMin, rsrpMax, timeQuery.from, timeQuery.to]
   );
 
   const cacheKey = useMemo(
@@ -615,13 +618,16 @@ export const useCoverageRanking = (rsrpMin = -95, rsrpMax = 0) => {
   return { data: ranking, ...rest };
 };
 
-export const useQualityRanking = (rsrqMin = -10, rsrqMax = 0) => {
+export const useQualityRanking = (rsrqMin = -10, rsrqMax = 0, filters = {}) => {
+  const timeQuery = useMemo(() => buildQueryString(filters), [filters]);
   const query = useMemo(
     () => ({
       min: rsrqMin,
       max: rsrqMax,
+      from: timeQuery.from,
+      to: timeQuery.to,
     }),
-    [rsrqMin, rsrqMax]
+    [rsrqMin, rsrqMax, timeQuery.from, timeQuery.to]
   );
 
   const cacheKey = useMemo(
@@ -651,12 +657,13 @@ export const useQualityRanking = (rsrqMin = -10, rsrqMax = 0) => {
   return { data: ranking, ...rest };
 };
 
-export const useIndOut =() =>{
+export const useIndOut =(filters = {}) =>{
+  const query = useMemo(() => buildQueryString(filters), [filters]);
   const {data:rawData, ...rest} =useSWR(
-    "IndoorOutdoor",
+    createCacheKey("IndoorOutdoor", query),
     async() => {
       try {
-        const response  = await adminApi.getIndoorOutdoor();
+        const response  = await adminApi.getIndoorOutdoor(query);
         return extractData(response, []);
       } catch (error) {
         throw error;

@@ -262,6 +262,15 @@ const normalizeThresholdRanges = (thresholds = []) =>
     .filter(Boolean)
     .sort((a, b) => a.min - b.min);
 
+const formatThresholdRangeLabel = (min, max) => {
+  const safeMin = toFiniteNumber(min);
+  const safeMax = toFiniteNumber(max);
+  if (!Number.isFinite(safeMin) || !Number.isFinite(safeMax)) return "";
+  if (safeMin <= -1e8) return `< ${safeMax}`;
+  if (safeMax >= 1e8) return `>= ${safeMin}`;
+  return `${safeMin} to ${safeMax}`;
+};
+
 const matchThresholdRange = (value, ranges = []) => {
   if (!Number.isFinite(value) || !Array.isArray(ranges) || ranges.length === 0) return null;
   for (let i = 0; i < ranges.length; i += 1) {
@@ -1647,6 +1656,7 @@ export const ConditionLogsTab = ({
         return {
           key: `${range.index}-${range.label}`,
           label: range.label,
+          rangeLabel: formatThresholdRangeLabel(range.min, range.max),
           thresholdColor: range.color,
           baselineCount: counts.baselineCount,
           optimizedCount: counts.optimizedCount,
@@ -1891,7 +1901,7 @@ export const ConditionLogsTab = ({
                 <BarChart data={poorGridRsrpHistogram.rows} margin={CHART_CONFIG.margin}>
                   <CartesianGrid {...CHART_CONFIG.grid} />
                   <XAxis
-                    dataKey="label"
+                    dataKey="rangeLabel"
                     tick={{ fill: "#9CA3AF", fontSize: 12 }}
                     angle={-40}
                     textAnchor="end"

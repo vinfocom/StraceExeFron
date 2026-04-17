@@ -3,14 +3,66 @@
 
 @tailwind utilities;
 
+@theme inline {
+  --color-background: hsl(var(--background));
+  --color-foreground: hsl(var(--foreground));
+  --color-card: hsl(var(--card));
+  --color-card-foreground: hsl(var(--card-foreground));
+  --color-popover: hsl(var(--popover));
+  --color-popover-foreground: hsl(var(--popover-foreground));
+  --color-primary: hsl(var(--primary));
+  --color-primary-foreground: hsl(var(--primary-foreground));
+  --color-secondary: hsl(var(--secondary));
+  --color-secondary-foreground: hsl(var(--secondary-foreground));
+  --color-muted: hsl(var(--muted));
+  --color-muted-foreground: hsl(var(--muted-foreground));
+  --color-accent: hsl(var(--accent));
+  --color-accent-foreground: hsl(var(--accent-foreground));
+  --color-destructive: hsl(var(--destructive));
+  --color-border: hsl(var(--border));
+  --color-input: hsl(var(--input));
+  --color-ring: hsl(var(--ring));
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+}
 
+:root {
+  --radius: 0.7rem;
+  --background: 216 33% 97%;
+  --foreground: 222 47% 12%;
+  --card: 0 0% 100%;
+  --card-foreground: 222 47% 12%;
+  --popover: 0 0% 100%;
+  --popover-foreground: 222 47% 12%;
+  --primary: 213 89% 43%;
+  --primary-foreground: 210 40% 98%;
+  --secondary: 215 28% 92%;
+  --secondary-foreground: 222 47% 14%;
+  --muted: 214 22% 93%;
+  --muted-foreground: 215 17% 36%;
+  --accent: 196 72% 47%;
+  --accent-foreground: 0 0% 100%;
+  --destructive: 0 72% 51%;
+  --border: 214 27% 86%;
+  --input: 214 27% 86%;
+  --ring: 213 89% 43%;
+}
 
 body {
-  @apply bg-white text-gray-800;
+  @apply bg-background text-foreground antialiased;
+  background-image: radial-gradient(circle at top right, rgba(14, 165, 233, 0.08), transparent 35%),
+    radial-gradient(circle at bottom left, rgba(37, 99, 235, 0.09), transparent 40%);
 }
 
 .dark body {
-  @apply bg-gray-900 text-gray-200;
+  /* Dark mode is supported globally via the `.dark` class on root/body */
+  @apply bg-slate-950 text-slate-100;
+}
+
+#root {
+  min-height: 100vh;
 }
 .no-scrollbar::-webkit-scrollbar { display: none; }  
 
@@ -21,17 +73,17 @@ body {
 }
 
 .overflow-y-auto::-webkit-scrollbar-track {
-  background: #f1f1f1;
+  background: rgba(148, 163, 184, 0.2);
   border-radius: 3px;
 }
 
 .overflow-y-auto::-webkit-scrollbar-thumb {
-  background: #cbd5e0;
+  background: rgba(71, 85, 105, 0.5);
   border-radius: 3px;
 }
 
 .overflow-y-auto::-webkit-scrollbar-thumb:hover {
-  background: #a0aec0;
+  background: rgba(51, 65, 85, 0.8);
 }
 /* Hide scrollbar for Chrome, Safari, Edge */
 .scrollbar-hide::-webkit-scrollbar {

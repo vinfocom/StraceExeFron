@@ -3,7 +3,7 @@ import { useAuth } from "../context/AuthContext";
 import { useNavigate } from "react-router-dom";
 import { toast } from "react-toastify";
 import Spinner from "../components/common/Spinner";
-import vinfocom from "/favicon.png";
+import appLogo from "/favicon.svg";
 import axios from "axios";
 import { Eye, EyeOff } from "lucide-react";
 
@@ -50,9 +50,32 @@ const LoginPage = () => {
         toast.success("Login successful!");
         navigate("/dashboard");
       } else {
-        toast.error(
-          response.message || "Login failed. Please check your credentials.",
-        );
+        const alreadyLoggedIn =
+          typeof response?.message === "string" &&
+          response.message.toLowerCase().includes("already logged in");
+
+        if (alreadyLoggedIn) {
+          const shouldForceLogin = window.confirm(
+            "This account is reported active on another device. Do you want to continue and force login here?"
+          );
+
+          if (shouldForceLogin) {
+            const forceResponse = await login({
+              Email: email,
+              Password: password,
+              IP: ipAddress,
+              ForceLogin: true,
+            });
+
+            if (forceResponse.success) {
+              toast.success("Login successful!");
+              navigate("/dashboard");
+              return;
+            }
+          }
+        }
+
+        toast.error(response.message || "Login failed. Please check your credentials.");
       }
     } catch (error) {
       let displayMessage = "An unexpected error occurred.";
@@ -89,8 +112,8 @@ const LoginPage = () => {
           <div className="flex justify-center mb-4">
             <div className="flex justify-center mb-4">
               <img
-                src={vinfocom}
-                alt="vinfocom"
+                src={appLogo}
+                alt="S-Tracer"
                 className="w-20 h-20 object-contain border-2 border-slate-400 shadow-2xl rounded-xl p-2"
               />
             </div>

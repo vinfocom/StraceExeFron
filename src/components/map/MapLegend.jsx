@@ -1,6 +1,6 @@
 // src/components/map/MapLegend.jsx
 import React, { useMemo, useState } from "react";
-import { ChevronDown, Layers, X } from "lucide-react";
+import { ChevronDown, Layers, Settings2, X } from "lucide-react";
 import {
   PCI_COLOR_PALETTE,
   getMetricConfig,
@@ -532,6 +532,16 @@ export default function MapLegend({
     onFilterChange(null);
   };
 
+  const openSettings = (e) => {
+    e.stopPropagation();
+    if (typeof window === "undefined") return;
+    window.dispatchEvent(
+      new CustomEvent("stracer:utility-action", {
+        detail: { action: "settings" },
+      }),
+    );
+  };
+
   const { content, title } = useMemo(() => {
     if (colorBy) {
       return {
@@ -619,6 +629,13 @@ export default function MapLegend({
             </div>
 
             <div className="flex items-center gap-1">
+              <div
+                onClick={openSettings}
+                className="p-1 hover:bg-white/10 rounded text-gray-400 hover:text-white"
+                title="Settings"
+              >
+                <Settings2 className="w-3.5 h-3.5" />
+              </div>
               {activeFilter && (
                 <div
                   onClick={clearFilter}

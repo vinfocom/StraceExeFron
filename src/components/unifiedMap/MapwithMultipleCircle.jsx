@@ -10,7 +10,9 @@ import { getMetricValueFromLog, COLOR_SCHEMES } from "@/utils/metrics";
 import { normalizeProviderName, normalizeTechName, getLogColor, generateColorFromHash } from "@/utils/colorUtils";
 
 const DEFAULT_CENTER = { lat: 28.64453086, lng: 77.37324242 };
-const CSHARP_API_BASE_URL = (import.meta.env.VITE_CSHARP_API_URL || "").replace(/\/+$/, "");
+const CSHARP_API_BASE_URL = (
+  import.meta.env.DEV ? "" : (import.meta.env.VITE_CSHARP_API_URL || "")
+).replace(/\/+$/, "");
 const EMPTY_ARRAY = [];
 const MAX_IMAGE_LOG_SCAN_POINTS = 12000;
 const METRIC_RANGE_EPSILON = 1e-9;
@@ -358,7 +360,8 @@ const generateGridCellsOptimized = (
   metric, 
   getMetricColor,
   aggregationMethod = 'median',
-  spatialIndex
+  spatialIndex,
+  colorBy = null
 ) => {
   if (!polygonData?.length || !locations?.length) return [];
 
@@ -384,6 +387,44 @@ const generateGridCellsOptimized = (
 
   const checker = new PolygonChecker(polygonData);
   const aggregateFn = AGGREGATION_METHODS[aggregationMethod] || AGGREGATION_METHODS.median;
+  const lowerIsBetterMetrics = new Set([
+    "latency",
+    "jitter",
+    "packet_loss",
+    "num_cells",
+  ]);
+  const normalizedMetric = String(metric || "rsrp").trim().toLowerCase();
+  const isLowerBetterMetric = lowerIsBetterMetrics.has(normalizedMetric);
+  const normalizedColorBy = String(colorBy || "").trim().toLowerCase();
+  const getCategoryLabel = (key) => {
+    if (key === "provider" || key === "operator") return "Provider";
+    if (key === "technology") return "Technology";
+    if (key === "band") return "Band";
+    return "Category";
+  };
+  const resolveProviderName = (log) => {
+    const raw = log?.provider ?? log?.Provider ?? log?.operator ?? log?.network ?? "";
+    const normalized = normalizeProviderName(raw);
+    return String(normalized || raw || "").trim() || "Unknown";
+  };
+  const resolveBandName = (log) => {
+    const raw = log?.band ?? log?.primaryBand ?? log?.Band ?? log?.band_name ?? "";
+    const band = String(raw || "").trim();
+    return band && band !== "-1" ? band : "Unknown";
+  };
+  const resolveTechnologyName = (log) =>
+    normalizeTechName(
+      log?.technology ?? log?.networkType ?? log?.network ?? "",
+      log?.band ?? log?.primaryBand,
+    ) || "Unknown";
+  const resolveCategoryValue = (log) => {
+    if (normalizedColorBy === "provider" || normalizedColorBy === "operator") {
+      return resolveProviderName(log);
+    }
+    if (normalizedColorBy === "technology") return resolveTechnologyName(log);
+    if (normalizedColorBy === "band") return resolveBandName(log);
+    return null;
+  };
 
   const cells = [];
   let cellId = 0;
@@ -420,14 +461,46 @@ const generateGridCellsOptimized = (
       const count = cellLocationIndices.length;
       let aggregatedValue = null;
       let fillColor = "#E5E7EB";
+      let bestOperator = null;
+      let bestByColor = null;
 
       if (count > 0) {
+        const operatorMetricBuckets = new Map();
+        const categoryMetricBuckets = new Map();
         let validCount = 0;
         for (const idx of cellLocationIndices) {
-          const v = locations[idx][metric];
-          if (v != null && !isNaN(v)) {
+          const log = locations[idx];
+          const v = getMetricValueFromLog(log, metric);
+          if (v != null && !isNaN(v) && Number.isFinite(v)) {
             if (validCount < valuesBuffer.length) {
               valuesBuffer[validCount++] = v;
+            }
+
+            const provider = resolveProviderName(log);
+            if (provider && provider !== "Unknown") {
+              const current = operatorMetricBuckets.get(provider) || {
+                sum: 0,
+                count: 0,
+              };
+              current.sum += v;
+              current.count += 1;
+              operatorMetricBuckets.set(provider, current);
+            }
+
+            const categoryValue = resolveCategoryValue(log);
+            if (
+              categoryValue &&
+              categoryValue !== "Unknown" &&
+              normalizedColorBy &&
+              normalizedColorBy !== "metric"
+            ) {
+              const current = categoryMetricBuckets.get(categoryValue) || {
+                sum: 0,
+                count: 0,
+              };
+              current.sum += v;
+              current.count += 1;
+              categoryMetricBuckets.set(categoryValue, current);
             }
           }
         }
@@ -439,6 +512,37 @@ const generateGridCellsOptimized = (
           if (getMetricColor && aggregatedValue !== null) {
             fillColor = getMetricColor(aggregatedValue, metric);
           }
+
+          const rankedOperators = Array.from(operatorMetricBuckets.entries())
+            .map(([name, stat]) => ({
+              name,
+              count: stat.count,
+              average: stat.count > 0 ? stat.sum / stat.count : null,
+            }))
+            .filter((entry) => Number.isFinite(entry.average))
+            .sort((a, b) =>
+              isLowerBetterMetric ? a.average - b.average : b.average - a.average,
+            );
+          if (rankedOperators.length > 0) {
+            bestOperator = rankedOperators[0];
+          }
+
+          const rankedCategories = Array.from(categoryMetricBuckets.entries())
+            .map(([name, stat]) => ({
+              name,
+              count: stat.count,
+              average: stat.count > 0 ? stat.sum / stat.count : null,
+            }))
+            .filter((entry) => Number.isFinite(entry.average))
+            .sort((a, b) =>
+              isLowerBetterMetric ? a.average - b.average : b.average - a.average,
+            );
+          if (rankedCategories.length > 0) {
+            bestByColor = {
+              label: getCategoryLabel(normalizedColorBy),
+              ...rankedCategories[0],
+            };
+          }
         }
       }
 
@@ -448,6 +552,8 @@ const generateGridCellsOptimized = (
         count,
         aggregatedValue,
         fillColor,
+        bestOperator,
+        bestByColor,
       });
     }
   }
@@ -584,7 +690,7 @@ const MapWithMultipleCircles = ({
   defaultZoom = 14,
   fitToLocations = true,
   onLoad: onLoadProp,
-  pointRadius = 14,
+  pointRadius = 10,
   children,
   projectId = null,
   polygonSource = "map",
@@ -607,15 +713,17 @@ const MapWithMultipleCircles = ({
   thresholds = {},
   neighborData = [],
   showNeighbors = false,
-  neighborSquareSize = 5,
+  neighborSquareSize = 4,
   neighborMinSquareSize = 3,
-  neighborOpacity = 0.7,
+  neighborOpacity = 0.45,
   disableDeckInteractions = false,
   onNeighborClick,
   onFilteredNeighborsChange,
   onGridCellsStatsChange,
   debugMode = false,
   legendFilter = null,
+  drawingEnabled = false,
+  drawingShapeMode = null,
 }) => {
   const { 
     getMetricColor: getMetricColorFromHook, 
@@ -627,6 +735,7 @@ const MapWithMultipleCircles = ({
 
   const [map, setMap] = useState(null);
   const [hoveredCell, setHoveredCell] = useState(null);
+  const [hoveredCellTooltipPos, setHoveredCellTooltipPos] = useState(null);
   const [polygonData, setPolygonData] = useState([]);
   const [polygonsFetched, setPolygonsFetched] = useState(false);
   const [fetchError, setFetchError] = useState(null);
@@ -638,6 +747,7 @@ const MapWithMultipleCircles = ({
   const onFilteredLocationsChangeRef = useRef(onFilteredLocationsChange);
   const onFilteredNeighborsChangeRef = useRef(onFilteredNeighborsChange);
   const spatialIndexRef = useRef(null);
+  const mapContainerRef = useRef(null);
   const onMarkerClickRef = useRef(onMarkerClick);
   const onNeighborClickRef = useRef(onNeighborClick);
 
@@ -975,9 +1085,10 @@ const MapWithMultipleCircles = ({
       selectedMetric, 
       resolveColor, 
       gridAggregationMethod,
-      spatialIndexRef.current
+      spatialIndexRef.current,
+      colorBy
     );
-  }, [enableGrid, gridSizeMeters, activePolygonData, locationsToRender, selectedMetric, gridAggregationMethod, resolveColor]);
+  }, [enableGrid, gridSizeMeters, activePolygonData, locationsToRender, selectedMetric, gridAggregationMethod, resolveColor, colorBy]);
 
   useEffect(() => {
     if (typeof onGridCellsStatsChange !== "function") return;
@@ -1085,7 +1196,11 @@ const MapWithMultipleCircles = ({
     onNeighborClickRef.current?.(neighbor);
   }, []);
 
-  const showPoints = showPointsProp && !enableGrid && !areaEnabled;
+  const isMeasurementMode =
+    Boolean(drawingEnabled) &&
+    String(drawingShapeMode || "").toLowerCase() === "polyline";
+  const showPoints =
+    showPointsProp && ((!enableGrid && !areaEnabled) || isMeasurementMode);
   const showImageIcons = showPointsProp && locationsToRender.length > 0;
 
   const imageLogs = useMemo(() => {
@@ -1123,6 +1238,39 @@ const MapWithMultipleCircles = ({
     setSelectedNeighbor(null);
   }, []);
 
+  const getGridTooltipPosition = useCallback((event) => {
+    const domEvent = event?.domEvent;
+    const container = mapContainerRef.current;
+    if (!domEvent || !container) return null;
+
+    const rect = container.getBoundingClientRect();
+    const rawX = domEvent.clientX - rect.left + 14;
+    const rawY = domEvent.clientY - rect.top + 14;
+
+    const maxX = Math.max(12, rect.width - 250);
+    const maxY = Math.max(12, rect.height - 170);
+
+    return {
+      x: Math.min(Math.max(12, rawX), maxX),
+      y: Math.min(Math.max(12, rawY), maxY),
+    };
+  }, []);
+
+  const handleGridCellMouseOver = useCallback((cell, event) => {
+    setHoveredCell(cell);
+    setHoveredCellTooltipPos(getGridTooltipPosition(event));
+  }, [getGridTooltipPosition]);
+
+  const handleGridCellMouseMove = useCallback((cell, event) => {
+    setHoveredCell(cell);
+    setHoveredCellTooltipPos(getGridTooltipPosition(event));
+  }, [getGridTooltipPosition]);
+
+  const handleGridCellMouseOut = useCallback(() => {
+    setHoveredCell(null);
+    setHoveredCellTooltipPos(null);
+  }, []);
+
   if (loadError) return <div className="flex items-center justify-center w-full h-full text-red-500">Failed to load Google Maps</div>;
   if (!isLoaded) return null;
 
@@ -1130,7 +1278,7 @@ const MapWithMultipleCircles = ({
     (hasExternalPolygonControl ? externalPolygonsLoading : !polygonsFetched);
 
   return (
-    <div className="relative w-full h-full">
+    <div ref={mapContainerRef} className="relative w-full h-full">
       <GoogleMap
         mapContainerStyle={containerStyle}
         onLoad={handleMapLoad}
@@ -1163,9 +1311,10 @@ const MapWithMultipleCircles = ({
           <RectangleF
             key={`grid-${cell.id}`}
             bounds={cell.bounds}
-            options={{ fillColor: cell.fillColor, fillOpacity: cell.count > 0 ? 0.7 : 0.2, strokeColor: "transparent", strokeWeight: 0, zIndex: 2, clickable: false }}
-            onMouseOver={() => setHoveredCell(cell)}
-            onMouseOut={() => setHoveredCell(null)}
+            options={{ fillColor: cell.fillColor, fillOpacity: cell.count > 0 ? 0.7 : 0.2, strokeColor: "transparent", strokeWeight: 0, zIndex: 2, clickable: true }}
+            onMouseOver={(event) => handleGridCellMouseOver(cell, event)}
+            onMouseMove={(event) => handleGridCellMouseMove(cell, event)}
+            onMouseOut={handleGridCellMouseOut}
           />
         ))}
 
@@ -1281,11 +1430,33 @@ const MapWithMultipleCircles = ({
       )}
 
       {enableGrid && hoveredCell && (
-        <div className="absolute top-4 right-4 bg-white/95 backdrop-blur-sm rounded-lg shadow-lg p-3 z-20 min-w-[160px] text-xs">
+        <div
+          className="absolute bg-white/95 backdrop-blur-sm rounded-lg shadow-lg p-3 z-20 min-w-[190px] text-xs pointer-events-none"
+          style={{
+            left: `${hoveredCellTooltipPos?.x ?? 16}px`,
+            top: `${hoveredCellTooltipPos?.y ?? 16}px`,
+          }}
+        >
           <div className="font-semibold text-gray-800 mb-2">Grid Cell</div>
           <div className="space-y-1">
             <div className="flex justify-between text-blue-600"><span>Logs:</span><span className="font-bold">{hoveredCell.count}</span></div>
             {hoveredCell.aggregatedValue !== null && (<div className="flex justify-between text-gray-600"><span>{gridAggregationMethod.charAt(0).toUpperCase() + gridAggregationMethod.slice(1)} {selectedMetric.toUpperCase()}:</span><span className="font-medium">{hoveredCell.aggregatedValue.toFixed(1)}</span></div>)}
+            {hoveredCell.bestByColor && (
+              <div className="flex justify-between text-gray-700 gap-2">
+                <span>Best {hoveredCell.bestByColor.label}:</span>
+                <span className="font-medium text-right">
+                  {hoveredCell.bestByColor.name} ({hoveredCell.bestByColor.average?.toFixed?.(1)})
+                </span>
+              </div>
+            )}
+            {!hoveredCell.bestByColor && hoveredCell.bestOperator && (
+              <div className="flex justify-between text-gray-700 gap-2">
+                <span>Best Operator:</span>
+                <span className="font-medium text-right">
+                  {hoveredCell.bestOperator.name} ({hoveredCell.bestOperator.average?.toFixed?.(1)})
+                </span>
+              </div>
+            )}
           </div>
         </div>
       )}

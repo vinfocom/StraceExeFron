@@ -470,11 +470,7 @@ const DriveTestSessionsPage = () => {
   return (
     <div className="p-6 h-full flex flex-col bg-white">
       <div className="flex items-center justify-between mb-4 gap-4">
-        <h1 className="text-2xl font-bold whitespace-nowrap">
-          Manage Drive Test Sessions
-        </h1>
-
-        <div className="flex items-center gap-3 flex-grow justify-end flex-wrap">
+        <div className="flex items-center gap-3 w-full justify-end flex-wrap">
           {/* Column Selector */}
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
@@ -1070,8 +1066,9 @@ const DriveTestSessionsPage = () => {
                           <Map className="h-4 w-4" />
                         </Button>
                         <Button
-                          variant="destructive"
+                          variant="outline"
                           size="sm"
+                          className="!bg-white hover:!bg-white focus:!bg-white active:!bg-white border-red-200 text-red-500 hover:text-red-600"
                           onClick={() => handleDelete(session.id)}
                         >
                           <Trash2 className="h-4 w-4 text-red-500" />

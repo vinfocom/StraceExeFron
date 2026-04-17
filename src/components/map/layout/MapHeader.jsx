@@ -1,17 +1,12 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useState } from "react";
 import { useAuth } from "@/context/AuthContext";
 import { Button } from "@/components/ui/button";
 import {
   LogOut,
-  ChevronDown,
-  ChevronUp,
-  PenTool,
   XCircle,
-  Download,
   SlidersHorizontal,
   Search,
 } from "lucide-react";
-import { Label } from "@/components/ui/label";
 import MapSidebarFloating from "./MapSidebarFloating";
 import DrawingControlsPanel from "./DrawingControlsPanel";
 
@@ -35,32 +30,7 @@ export default function MapHeader({
   isLoading = false,
 }) {
   const { user, logout } = useAuth();
-  const [dropOpen, setDropOpen] = useState(false);
-  const dropdownRef = useRef(null);
   const [filtersOpen, setFiltersOpen] = useState(false);
-
-  const safeUi = {
-    drawEnabled: false,
-    shapeMode: "polygon",
-    drawPixelateRect: false,
-    drawCellSizeMeters: 100,
-    drawClearSignal: 0,
-    ...ui,
-  };
-
-  useEffect(() => {
-    const onOutside = (e) => {
-      if (dropdownRef.current && !dropdownRef.current.contains(e.target)) {
-        setDropOpen(false);
-      }
-    };
-    document.addEventListener("mousedown", onOutside);
-    return () => document.removeEventListener("mousedown", onOutside);
-  }, []);
-
-  const clearDrawings = () => {
-    onUIChange?.({ drawClearSignal: (safeUi.drawClearSignal || 0) + 1 });
-  };
 
   return (
     <header className="h-16 bg-slate-900 text-white shadow-lg flex items-center justify-between px-4 sm:px-6 relative z-50">
@@ -80,9 +50,6 @@ export default function MapHeader({
           )}
         </Button>
       </div>
-
-     
-
       <div className="relative">
         <DrawingControlsPanel
           ui={ui}

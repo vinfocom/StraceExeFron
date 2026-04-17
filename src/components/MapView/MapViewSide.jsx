@@ -1,5 +1,5 @@
 // src/components/MapView/MapViewSide.jsx
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useMemo, useState } from "react";
 import { Filter, X, SlidersHorizontal, ArrowRightLeft } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -89,8 +89,7 @@ export default function MapViewSide({
     <>
       {isOpen && (
         <div
-          className="fixed inset-0 z-40 bg-black/40 backdrop-blur-[1px]"
-          onClick={() => setOpen(false)}
+          className="fixed inset-0 z-40 pointer-events-none"
         />
       )}
 

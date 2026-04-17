@@ -91,15 +91,22 @@ const ChartCard = ({
     return keys;
   }, [dataset]);
 
-  const activeChartFiltersCount = useMemo(() => {
-    if (!chartFilters) return 0;
-    let count = 0;
-    if (chartFilters.operators?.length > 0) count++;
-    if (chartFilters.networks?.length > 0) count++;
-    if (chartFilters.dateFrom) count++;
-    if (chartFilters.dateTo) count++;
-    return count;
+  const activeChartFilterLabels = useMemo(() => {
+    if (!chartFilters) return [];
+    const labels = [];
+
+    if (chartFilters.operators?.length > 0) {
+      labels.push(`Operators: ${chartFilters.operators.length}`);
+    }
+
+    if (chartFilters.networks?.length > 0) {
+      labels.push(`Networks: ${chartFilters.networks.length}`);
+    }
+
+    return labels;
   }, [chartFilters]);
+
+  const activeChartFiltersCount = activeChartFilterLabels.length;
 
   if (isLoading) {
     return <ChartCardSkeleton title={title} />;
@@ -115,10 +122,15 @@ const ChartCard = ({
               <span className="truncate">{title}</span>
             </CardTitle>
             {activeChartFiltersCount > 0 && (
-              <div className="flex items-center gap-2 mt-2">
+              <div className="flex items-center flex-wrap gap-2 mt-2">
                 <Badge variant="secondary" className="text-xs">
                   {activeChartFiltersCount} filter{activeChartFiltersCount > 1 ? 's' : ''} active
                 </Badge>
+                {activeChartFilterLabels.map((label) => (
+                  <Badge key={label} variant="outline" className="text-[10px] font-medium">
+                    {label}
+                  </Badge>
+                ))}
               </div>
             )}
           </div>

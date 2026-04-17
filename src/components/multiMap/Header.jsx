@@ -3,7 +3,7 @@ import React, { useState, useEffect } from "react";
 import { useAuth } from "@/context/AuthContext";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogTrigger, DialogContent } from "@/components/ui/dialog";
-import { LogOut, Plus, BarChart3 } from "lucide-react";
+import { LogOut, Plus, BarChart3, ArrowLeft } from "lucide-react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { mapViewApi } from "@/api/apiEndpoints";
 import MultiAnalytics from "./MultiAnalytics";
@@ -95,9 +95,25 @@ export default function Header({
     });
   };
 
+  const handleBack = () => {
+    if (typeof window !== "undefined" && window.history.length > 1) {
+      navigate(-1);
+      return;
+    }
+    navigate("/dashboard");
+  };
+
   return (
     <header className="h-14 bg-slate-800 border-b flex items-center justify-between px-4 shadow-sm z-10 flex-shrink-0">
       <div className="flex items-center gap-4">
+        <Button
+          size="sm"
+          className="bg-slate-700 text-white hover:bg-slate-600"
+          onClick={handleBack}
+        >
+          <ArrowLeft className="h-4 w-4 mr-1" />
+          Back
+        </Button>
         <h1 className="font-bold text-lg text-white">
           {displayProject
             ? `${displayProject.project_name || displayProject.name}`
@@ -132,7 +148,6 @@ export default function Header({
           </button>
         </div>
 
-        {/* Navigation Buttons */}
         <Button
           size="sm"
           className="bg-blue-600 text-white"

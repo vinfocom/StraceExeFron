@@ -5,6 +5,8 @@ import { checkAllServices } from '@/api/apiEndpoints';
 import { useAuth } from '../../context/AuthContext';
 
 const POLL_INTERVAL_MS = 30000;
+const INCLUDE_PYTHON_UPTIME =
+  String(import.meta.env.VITE_UPTIME_CHECK_PYTHON || 'false').toLowerCase() === 'true';
 
 const createMailtoLink = (recipient, subject, body) => {
   const params = new URLSearchParams({ subject, body }).toString();
@@ -14,11 +16,11 @@ const createMailtoLink = (recipient, subject, body) => {
 const formatServiceErrors = (details) => {
   const errors = [];
 
-  if (details?.python && !details.python.healthy) {
+  if (details?.python?.enabled && !details.python.healthy) {
     errors.push(`Python backend: ${details.python.error || 'unreachable'}`);
   }
 
-  if (details?.csharp && !details.csharp.healthy) {
+  if (details?.csharp?.enabled && !details.csharp.healthy) {
     errors.push(`C# auth service: ${details.csharp.error || 'unreachable'}`);
   }
 
@@ -33,6 +35,7 @@ function UptimeStatus() {
   const [copied, setCopied] = useState(false);
   const emailSentRef = useRef(false);
   const mountedRef = useRef(true);
+  const previousStatusRef = useRef('checking');
 
   const userEmail = useMemo(() => {
     return user?.email || user?.Email || user?.EmailId || null;
@@ -51,14 +54,18 @@ function UptimeStatus() {
 
   const runHealthCheck = useCallback(async () => {
     try {
-      const result = await checkAllServices();
+      const result = await checkAllServices({ includePython: INCLUDE_PYTHON_UPTIME });
       if (!mountedRef.current) return;
 
-      const healthy = result.python.healthy && result.csharp.healthy;
+      const healthy = result.csharp.healthy && (!result.python.enabled || result.python.healthy);
       setStatus(healthy ? 'healthy' : 'degraded');
       setDetails(result);
 
-      if (!healthy) {
+      const nextStatus = healthy ? 'healthy' : 'degraded';
+      const wasStatus = previousStatusRef.current;
+      previousStatusRef.current = nextStatus;
+
+      if (!healthy && wasStatus !== 'degraded') {
         const errorText = formatServiceErrors(result);
         toast.error(`Uptime issue: ${errorText}`, { autoClose: 6000 });
 
@@ -75,7 +82,10 @@ function UptimeStatus() {
       const errorText = error?.message || 'Unknown uptime error';
       setStatus('error');
       setDetails({ error: errorText });
-      toast.error(`Uptime monitor failed: ${errorText}`, { autoClose: 6000 });
+      if (previousStatusRef.current !== 'error') {
+        toast.error(`Uptime monitor failed: ${errorText}`, { autoClose: 6000 });
+      }
+      previousStatusRef.current = 'error';
 
       if (userEmail && !emailSentRef.current) {
         emailSentRef.current = true;
@@ -99,8 +109,8 @@ function UptimeStatus() {
       'Uptime Kuma Dashboard: http://localhost:3001',
       'Frontend app URL: http://localhost:5173',
       'Frontend monitor type: HTTP(s) (checks site availability)',
-      'Optional backend monitor: http://127.0.0.1:8080/health',
-      'Optional auth monitor: https://s-traccceer.vinfocom.co.in/api/auth/status',
+      `Optional backend monitor: http://127.0.0.1:8080/health (${INCLUDE_PYTHON_UPTIME ? 'enabled in app' : 'disabled in app'})`,
+      'Optional auth monitor: http://localhost:5224/api/auth/status',
       'Note: Uptime Kuma only checks reachability. JavaScript errors need browser error logging.'
     ].join('\n');
   }, []);
@@ -110,7 +120,7 @@ function UptimeStatus() {
       await navigator.clipboard.writeText(setupText);
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
-    } catch (error) {
+    } catch {
       toast.error('Copy failed. Please select and copy manually.');
     }
   }, [setupText]);
@@ -183,7 +193,7 @@ function UptimeStatus() {
             <p className="text-slate-400">If you want backend monitors:</p>
             <ul className="list-disc pl-4 text-slate-300">
               <li>http://127.0.0.1:8080/health</li>
-              <li>https://s-traccceer.vinfocom.co.in/api/auth/status</li>
+              <li>http://localhost:5224/api/auth/status</li>
             </ul>
           </div>
           <button

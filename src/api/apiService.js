@@ -2,7 +2,14 @@
 import axios from 'axios';
 import { clearProjectSessionCache } from '../utils/projectSessionCache';
 
-const API_BASE_URL = import.meta.env.VITE_CSHARP_API_URL;
+const API_BASE_URL = import.meta.env.DEV ? "" : (import.meta.env.VITE_CSHARP_API_URL || "");
+
+if (!import.meta.env.DEV && !API_BASE_URL) {
+  console.warn(
+    "VITE_CSHARP_API_URL is not defined. API requests will use relative paths, which can cause 404 errors in dev mode. " +
+      "Create a .env, .env.development, or .env.development.local file with VITE_CSHARP_API_URL set to your backend URL."
+  );
+}
 
 
 let authErrorHandler = null;
@@ -150,7 +157,7 @@ csharpAxios.interceptors.response.use(
 
     const { status, data, config } = error.response;
 
-    if (status === 401 || status === 403) {
+    if ((status === 401 || status === 403) && !isAuthorizationScopeError(status, data)) {
       handleAuthError(config);
       return Promise.reject(
         createError('Session expired. Please login again.', {
@@ -182,6 +189,16 @@ const extractErrorMessage = (data) => {
   if (!data) return 'Unknown error';
   if (typeof data === 'string') return data;
   return data.message || data.Message || data.error || data.detail || data.title || 'Request failed';
+};
+
+const isAuthorizationScopeError = (status, data) => {
+  if (status !== 401 && status !== 403) return false;
+  const msg = extractErrorMessage(data).toLowerCase();
+  return (
+    msg.includes('invalid company') ||
+    msg.includes('unable to resolve company context') ||
+    msg.includes('forbidden')
+  );
 };
 
 const handleAuthError = (config) => {
@@ -228,7 +245,7 @@ const apiService = async (endpoint, options = {}) => {
   };
 
   if (priority === 0) {
-    // ✅ FIX: Create a unique key that includes parameters/data
+    // FIX: Create a unique key that includes parameters/data
     // This prevents "Network Logs" from sharing a promise with "Neighbors"
     const cacheKey = JSON.stringify({
       method: axiosOptions.method || 'GET',

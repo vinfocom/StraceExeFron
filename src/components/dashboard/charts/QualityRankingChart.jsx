@@ -75,7 +75,7 @@ const isValidOperatorName = (name) => {
   );
 };
 
-const OperatorRankingChart = () => {
+const OperatorRankingChart = ({ chartFilters, onChartFiltersChange }) => {
   const theme = useTheme();
   const isSmallScreen = useMediaQuery(theme.breakpoints.down('sm'));
   const isMediumDown = useMediaQuery(theme.breakpoints.down('md'));
@@ -93,12 +93,14 @@ const OperatorRankingChart = () => {
 
   const { data: coverageData, isLoading: coverageLoading } = useCoverageRanking(
     coverageSettings.rsrpMin,
-    coverageSettings.rsrpMax
+    coverageSettings.rsrpMax,
+    chartFilters || {}
   );
 
   const { data: qualityData, isLoading: qualityLoading } = useQualityRanking(
     qualitySettings.rsrqMin,
-    qualitySettings.rsrqMax
+    qualitySettings.rsrqMax,
+    chartFilters || {}
   );
 
   const currentData = chartType === 'coverage' ? coverageData : qualityData;
@@ -508,7 +510,11 @@ const OperatorRankingChart = () => {
       dataset={chartData}
       exportFileName={chartType === 'coverage' ? 'coverage_rank' : 'quality_rank'}
       isLoading={isLoading}
-      showChartFilters={false}
+      showChartFilters={true}
+      chartFilters={chartFilters}
+      onChartFiltersChange={onChartFiltersChange}
+      operators={[]}
+      networks={[]}
       headerActions={<HeaderToggleButtons />}
       settings={{
         title: `${chartType === 'coverage' ? 'RSRP' : 'RSRQ'} Settings`,

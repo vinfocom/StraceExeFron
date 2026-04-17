@@ -5,9 +5,7 @@ import {
   X,
   RefreshCw,
   AlertTriangle,
-  ShieldAlert,
   Layers,
-  Filter,
   Minus,
   Plus,
   ChevronDown,
@@ -17,7 +15,6 @@ import {
   Hexagon,
   Palette,
   Grid3X3,
-  Thermometer,
   ArrowLeftRight,
   PlusCircle,
   Check,
@@ -413,8 +410,8 @@ const UnifiedMapSidebar = ({
 
   const sideClasses = useMemo(() => {
     const base =
-      "fixed top-14 left-0 h-[calc(100vh-3.5rem)] z-50 w-[340px] bg-slate-950 text-white  transition-transform duration-200 ease-out flex flex-col";
-    return open ? `${base} translate-x-0` : `${base} -translate-x-full`;
+      "relative h-full z-20 bg-slate-950 text-white transition-[width] duration-200 ease-out flex flex-col shrink-0 overflow-hidden";
+    return open ? `${base} w-[340px]` : `${base} w-0`;
   }, [open]);
 
   // Metric options
@@ -433,6 +430,8 @@ const UnifiedMapSidebar = ({
       { value: "latency", label: "Latency" },
       { value: "packet_loss", label: "Packet Loss" },
       { value: "tac", label: "TAC" },
+      { value: "dominance", label: "Dominance Analysis" },
+      { value: "coverage_violation", label: "Coverage Violation" },
     ],
     [],
   );
@@ -530,6 +529,42 @@ const UnifiedMapSidebar = ({
       onlyInsidePolygons,
     [enableDataToggle, enableSiteToggle, siteToggle, showPolygons, onlyInsidePolygons],
   );
+
+  useEffect(() => {
+    const normalizedMetric = String(metric || "").trim().toLowerCase();
+    if (normalizedMetric === "dominance") {
+      if (dominanceThreshold === null) {
+        setDominanceThreshold?.(6);
+      }
+      if (coverageViolationThreshold !== null) {
+        setCoverageViolationThreshold?.(null);
+      }
+      return;
+    }
+
+    if (normalizedMetric === "coverage_violation") {
+      if (coverageViolationThreshold === null) {
+        setCoverageViolationThreshold?.(-10);
+      }
+      if (dominanceThreshold !== null) {
+        setDominanceThreshold?.(null);
+      }
+      return;
+    }
+
+    if (dominanceThreshold !== null) {
+      setDominanceThreshold?.(null);
+    }
+    if (coverageViolationThreshold !== null) {
+      setCoverageViolationThreshold?.(null);
+    }
+  }, [
+    metric,
+    dominanceThreshold,
+    coverageViolationThreshold,
+    setDominanceThreshold,
+    setCoverageViolationThreshold,
+  ]);
 
   const isDeltaCellMode = useMemo(
     () =>
@@ -1003,30 +1038,330 @@ const UnifiedMapSidebar = ({
             </div>
           )}
 
-          <CollapsibleSection title="Map View" icon={Layers}>
-            <ToggleRow
-              label="Lock Zoom"
-              description="Keep current zoom level fixed"
-              checked={Boolean(isZoomLocked)}
-              onChange={setIsZoomLocked}
+          <CollapsibleSection
+            title="Raster"
+            icon={Grid3X3}
+            defaultOpen={true}
+            badge={activeDataFiltersCount > 0 ? activeDataFiltersCount : null}
+          >
+            {shouldShowMetricSelector ? (
+              <div className="space-y-3">
+
+
+                <SelectRow
+                  label="KPI"
+                  value={metric}
+                  onChange={setMetric}
+                  options={metricOptions}
+                  placeholder="Select metric"
+                />
+
+                {String(metric || "").toLowerCase() === "dominance" && (
+                  <div className="border border-slate-700/50 rounded-lg p-2.5 bg-slate-900/40 space-y-3">
+                    <div className="text-xs font-semibold text-amber-300">
+                      Dominance Analysis
+                    </div>
+                    {loading ? (
+                      <div className="flex items-center gap-2 text-xs text-slate-300">
+                        <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+                        Loading dominance analysis...
+                      </div>
+                    ) : (
+                      <>
+                        <div className="space-y-2">
+                          <Label className="text-xs text-slate-400">
+                            Range Mask (±dB)
+                          </Label>
+                          <Input
+                            type="number"
+                            value={dominanceThreshold ?? 6}
+                            min={0}
+                            disabled={!supportsSessionFilters}
+                            onChange={(e) => {
+                              const parsed = Number(e.target.value);
+                              if (Number.isFinite(parsed)) {
+                                setDominanceThreshold(Math.max(0, parsed));
+                              }
+                            }}
+                            className="bg-slate-800 border-slate-600 text-white h-8 text-sm"
+                          />
+                          <p className="text-[10px] text-slate-500 italic">
+                            Showing logs with anchor within{" "}
+                            {-Math.abs(Number(dominanceThreshold ?? 6))} to{" "}
+                            {Math.abs(Number(dominanceThreshold ?? 6))} dB. Colors reflect the count
+                            of overlapping signals.
+                          </p>
+                          {!supportsSessionFilters && (
+                            <p className="text-[10px] text-amber-400">
+                              Available only in Data Layer sample mode.
+                            </p>
+                          )}
+                        </div>
+                      </>
+                    )}
+                  </div>
+                )}
+
+                {String(metric || "").toLowerCase() === "coverage_violation" && (
+                  <div className="border border-slate-700/50 rounded-lg p-2.5 bg-slate-900/40 space-y-3">
+                    <div className="text-xs font-semibold text-amber-300">
+                      Coverage Violation
+                    </div>
+                    {loading ? (
+                      <div className="flex items-center gap-2 text-xs text-slate-300">
+                        <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+                        Loading coverage violation...
+                      </div>
+                    ) : (
+                      <>
+                        <div className="space-y-2">
+                          <Label className="text-xs text-slate-400">
+                            Range Start (Negative dB)
+                          </Label>
+                          <Input
+                            type="number"
+                            value={coverageViolationThreshold ?? -10}
+                            max={0}
+                            disabled={!supportsSessionFilters}
+                            onChange={(e) => {
+                              const parsed = Number(e.target.value);
+                              if (Number.isFinite(parsed)) {
+                                setCoverageViolationThreshold?.(Math.min(0, parsed));
+                              }
+                            }}
+                            className="bg-slate-800 border-slate-600 text-white h-8 text-sm"
+                          />
+                          <p className="text-[10px] text-slate-500 italic">
+                            Showing logs with neighbors between{" "}
+                            {Number(coverageViolationThreshold ?? -10)} dB and 0 dB relative to
+                            primary. Colors reflect count of signals.
+                          </p>
+                          {!supportsSessionFilters && (
+                            <p className="text-[10px] text-amber-400">
+                              Available only in Data Layer sample mode.
+                            </p>
+                          )}
+                        </div>
+                      </>
+                    )}
+                  </div>
+                )}
+
+                <SelectRow
+                  label="Color By"
+                  value={colorBy || "metric"}
+                  onChange={(v) => setColorBy?.(v === "metric" ? null : v)}
+                  options={colorOptions}
+                  placeholder="Select color scheme"
+                  disabled={!enableDataToggle}
+                />
+
+                <div className="border-t border-slate-700/50 pt-3">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-xs text-slate-400">KPI Filters</span>
+                    {activeDataFiltersCount > 0 && (
+                      <button
+                        onClick={clearAllDataFilters}
+                        className="text-[10px] text-blue-400 hover:underline"
+                      >
+                        Clear All
+                      </button>
+                    )}
+                  </div>
+
+                  <div className="space-y-2">
+                    <SelectRow
+                      label="Provider"
+                      value={dataFilters?.providers?.[0] || "all"}
+                      onChange={(v) => updateDataFilter("providers", v)}
+                      options={[
+                        { value: "all", label: "All Providers" },
+                        ...(availableFilterOptions?.providers?.map((p) => ({
+                          value: p,
+                          label: p,
+                        })) || []),
+                      ]}
+                      disabled={!enableDataToggle}
+                    />
+
+                    <SelectRow
+                      label="Band"
+                      value={dataFilters?.bands?.[0] || "all"}
+                      onChange={(v) => updateDataFilter("bands", v)}
+                      options={[
+                        { value: "all", label: "All Bands" },
+                        ...(availableFilterOptions?.bands?.map((b) => ({
+                          value: b,
+                          label: b,
+                        })) || []),
+                      ]}
+                      disabled={!enableDataToggle}
+                    />
+
+                    <SelectRow
+                      label="Technology"
+                      value={dataFilters?.technologies?.[0] || "all"}
+                      onChange={(v) => updateDataFilter("technologies", v)}
+                      options={[
+                        { value: "all", label: "All Technologies" },
+                        ...(availableFilterOptions?.technologies
+                          ?.filter((t) => t && t.toLowerCase() !== "unknown")
+                          ?.map((t) => ({ value: t, label: t })) || []),
+                      ]}
+                      disabled={!enableDataToggle}
+                    />
+                  </div>
+                </div>
+                <ToggleRow
+              label="Enable Sub Sessions"
+              description="Load sub-session analytics and map markers"
+              checked={Boolean(showSubSession)}
+              onChange={setShowSubSession}
               useSwitch={true}
             />
 
-            <div className="bg-slate-800/50 rounded p-2">
-              <InfoBadge
-                label="Current Zoom"
-                value={Number.isFinite(currentZoom) ? currentZoom.toFixed(1) : "N/A"}
-                color="blue"
-              />
-            </div>
+            {showSubSession && (
+              <div className="bg-slate-800/50 rounded p-2 text-xs">
+                <InfoBadge
+                  label="Start Markers"
+                  value={subSessionLoading ? "Loading..." : subSessionMarkerCount}
+                  color="orange"
+                />
+                <p className="text-[10px] text-slate-400 mt-1">
+                  Click any marker to view sub-session details. A new analytics tab
+                  is available in the detail logs panel.
+                </p>
+              </div>
+            )}
+                 <div className="space-y-1.5 pt-1">
+                  <Label className="text-xs text-slate-400">Environment</Label>
+                  <div className="flex gap-4">
+                    <label className="flex items-center gap-2 cursor-pointer p-1 rounded hover:bg-slate-800/50">
+                      <Checkbox
+                        checked={dataFilters?.indoorOutdoor?.includes("Indoor")}
+                        onChange={() => toggleEnvironment("Indoor")}
+                        disabled={!enableDataToggle}
+                      />
+                      <span className="text-sm text-slate-300">Indoor</span>
+                    </label>
+                    <label className="flex items-center gap-2 cursor-pointer p-1 rounded hover:bg-slate-800/50">
+                      <Checkbox
+                        checked={dataFilters?.indoorOutdoor?.includes(
+                          "Outdoor",
+                        )}
+                        onChange={() => toggleEnvironment("Outdoor")}
+                        disabled={!enableDataToggle}
+                      />
+                      <span className="text-sm text-slate-300">Outdoor</span>
+                    </label>
+                  </div>
+                </div>
 
-            <Button
-              className="w-full bg-slate-700 hover:bg-slate-600 h-8 text-xs"
-              onClick={() => onResetZoom?.()}
-            >
-              Reset Zoom
-            </Button>
+                <div className="border-t border-slate-700/50 pt-3">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-xs text-slate-400">
+                      PCI Appearance Filter
+                    </span>
+                  </div>
+
+                  <div className="px-1 flex items-center justify-between gap-2">
+                    <ThresholdInput
+                      value={clampedPciThreshold}
+                      onChange={(next) => setPciThreshold(parseFloat(next))}
+                      min={normalizedPciRange.min}
+                      max={normalizedPciRange.max}
+                      step={1}
+                      unit="%"
+                      disabled={!supportsSessionFilters}
+                    />
+                    <span className="text-[10px] text-slate-500 whitespace-nowrap">
+                      {normalizedPciRange.min}% - {normalizedPciRange.max}%
+                    </span>
+                  </div>
+                  <p className="text-[10px] text-slate-500 mt-2 italic">
+                    Hides PCIs that appear less than {clampedPciThreshold}% of
+                    the time in this session.
+                  </p>
+                  {!supportsSessionFilters && (
+                    <p className="text-[10px] text-amber-400 mt-1">
+                      Available only in Data Layer sample mode.
+                    </p>
+                  )}
+                </div>
+
+                {activeDataFiltersCount > 0 && (
+                  <div className="mt-1 p-2 bg-blue-900/20 border border-blue-700/50 rounded text-xs text-blue-300">
+                    Filters active: {activeDataFiltersCount}
+                  </div>
+                )}
+
+                
+              </div>
+            ) : (
+              <p className="text-[11px] text-slate-400 pt-1">
+                Enable Data, Sites prediction, or Polygons to configure Raster KPI.
+              </p>
+            )}
           </CollapsibleSection>
+          <CollapsibleSection
+            title="Geography"
+            icon={Hexagon}
+            badge={showPolygons && polygonCount > 0 ? polygonCount : null}
+          >
+            <>
+              <ToggleRow
+                label="Buildings"
+                checked={Boolean(showPolygons && polygonSource === "save")}
+                onChange={(checked) => {
+                  if (checked) {
+                    setShowPolygons?.(true);
+                    setPolygonSource?.("save");
+                    return;
+                  }
+                  // Back to normal mode: keep base boundary only (avoid duplicate polygon layer)
+                  setShowPolygons?.(false);
+                  setPolygonSource?.("map");
+                }}
+                useSwitch={true}
+              />
+
+              <ToggleRow
+                label="Area Zone"
+                checked={Boolean(areaEnabled)}
+                onChange={setAreaEnabled}
+                useSwitch={true}
+              />
+
+              <ToggleRow
+                label="Grid"
+                checked={Boolean(enableGrid)}
+                onChange={setEnableGrid}
+                useSwitch={true}
+              />
+
+              {enableGrid && (
+                <div className="pt-1 bg-slate-800/50 rounded-lg p-2">
+                  <div className="flex items-center justify-between text-xs mb-2">
+                    <span className="text-slate-400">Grid Size</span>
+                  </div>
+                  <ThresholdInput
+                    value={Number(gridSizeMeters) || 50}
+                    onChange={(next) => setGridSizeMeters?.(Math.round(next))}
+                    min={5}
+                    max={200}
+                    step={10}
+                    unit="m"
+                  />
+                </div>
+              )}
+
+
+
+
+
+            </>
+          </CollapsibleSection>
+
 
           {/* Data Layer */}
           <CollapsibleSection
@@ -1054,56 +1389,15 @@ const UnifiedMapSidebar = ({
 
                 <div className="space-y-2 pt-1">
                   <ToggleRow
-                    label="Area Zones"
-                    checked={areaEnabled}
-                    onChange={setAreaEnabled}
-                  />
-                  <ToggleRow
                     label="Secondary Logs"
-                    description="Show secondary signal markers on map"
                     checked={Boolean(showSessionNeighbors)}
                     onChange={setShowSessionNeighbors}
                     useSwitch={true}
                   />
-                  <ToggleRow
-                    label="Grid View"
-                    description="Show data as grid cells"
-                    checked={enableGrid}
-                    onChange={setEnableGrid}
-                  />
                 </div>
-
-                {enableGrid && (
-                  <div className="pt-1 bg-slate-800/50 rounded-lg p-2">
-                    <div className="flex items-center justify-between text-xs mb-2">
-                      <span className="text-slate-400">Cell Size</span>
-                    </div>
-                    <ThresholdInput
-                      value={Number(gridSizeMeters) || 50}
-                      onChange={(next) => setGridSizeMeters?.(Math.round(next))}
-                      min={5}
-                      max={200}
-                      step={10}
-                      unit="m"
-                    />
-                    <div className="mt-2 space-y-1 border-t border-slate-700/50 pt-2">
-                      <InfoBadge
-                        label="Grid Formed"
-                        value={Number(gridCellStats?.total) || 0}
-                        color="blue"
-                      />
-                      <InfoBadge
-                        label="With Logs"
-                        value={Number(gridCellStats?.populated) || 0}
-                        color="green"
-                      />
-                    </div>
-                  </div>
-                )}
 
                 <ToggleRow
                   label="Show Num cell "
-                  description="Display cell count on logs"
                   checked={showNumCells}
                   onChange={setShowNumCells}
                 />
@@ -1111,34 +1405,7 @@ const UnifiedMapSidebar = ({
             )}
           </CollapsibleSection>
 
-          <CollapsibleSection
-            title="Sub Sessions"
-            icon={MapPin}
-            badge={showSubSession ? subSessionMarkerCount : null}
-          >
-            <ToggleRow
-              label="Enable Sub Sessions"
-              description="Load sub-session analytics and map markers"
-              checked={Boolean(showSubSession)}
-              onChange={setShowSubSession}
-              useSwitch={true}
-            />
-
-            {showSubSession && (
-              <div className="bg-slate-800/50 rounded p-2 text-xs">
-                <InfoBadge
-                  label="Start Markers"
-                  value={subSessionLoading ? "Loading..." : subSessionMarkerCount}
-                  color="orange"
-                />
-                <p className="text-[10px] text-slate-400 mt-1">
-                  Click any marker to view sub-session details. A new analytics tab
-                  is available in the detail logs panel.
-                </p>
-              </div>
-            )}
-          </CollapsibleSection>
-
+         
 
           <CollapsibleSection title="Sites Layer" icon={Radio}>
             <ToggleRow
@@ -1409,44 +1676,43 @@ const UnifiedMapSidebar = ({
 
                       {canUseGridApi && (
                         <div className="pt-2 border-t border-slate-700/50 space-y-2">
-                        <Label className="text-xs font-semibold text-blue-400 flex items-center gap-1">
-                          <Database className="w-3 h-3" /> Grid API
-                        </Label>
-                        <p className="text-[10px] text-slate-400">
-                          {showDeltaGridAdvancedControls
-                            ? "Grid is manual. Use Compute to update DB, then Fetch to read/show."
-                            : "Click Fetch once to show Manual Grid Size and Stored Grid Metric."}
-                        </p>
-                        <button
-                          type="button"
-                          onClick={() => onDeltaGridFetchStored?.()}
-                          disabled={
-                            deltaGridButtonsDisabled ||
-                            Boolean(deltaGridApiState?.computing) ||
-                            Boolean(deltaGridApiState?.fetching)
-                          }
-                          className={`w-full px-2 py-1.5 rounded-md text-[11px] font-medium disabled:opacity-50 disabled:cursor-not-allowed text-white ${
-                            deltaGridApiState?.gridVisible
-                              ? "bg-rose-600 hover:bg-rose-500"
-                              : "bg-emerald-600 hover:bg-emerald-500"
-                          }`}
-                          title={!canUseGridApi ? "Disabled by license" : "Fetch and show grid"}
-                        >
-                          {deltaGridApiState?.computing
-                            ? "Computing..."
-                            : deltaGridApiState?.fetching
-                              ? "Fetching..."
-                              : deltaGridApiState?.gridVisible
-                                ? "Hide Grid"
-                                : "Fetch & Show Grid"}
-                        </button>
-                        {(deltaGridApiState?.computing || deltaGridApiState?.fetching) && (
-                          <p className="text-[10px] text-blue-300">
-                            {deltaGridApiState?.computing
-                              ? "Computing grid..."
-                              : "Fetching stored grid..."}
+                          <Label className="text-xs font-semibold text-blue-400 flex items-center gap-1">
+                            <Database className="w-3 h-3" /> Grid API
+                          </Label>
+                          <p className="text-[10px] text-slate-400">
+                            {showDeltaGridAdvancedControls
+                              ? "Grid is manual. Use Compute to update DB, then Fetch to read/show."
+                              : "Click Fetch once to show Manual Grid Size and Stored Grid Metric."}
                           </p>
-                        )}
+                          <button
+                            type="button"
+                            onClick={() => onDeltaGridFetchStored?.()}
+                            disabled={
+                              deltaGridButtonsDisabled ||
+                              Boolean(deltaGridApiState?.computing) ||
+                              Boolean(deltaGridApiState?.fetching)
+                            }
+                            className={`w-full px-2 py-1.5 rounded-md text-[11px] font-medium disabled:opacity-50 disabled:cursor-not-allowed text-white ${deltaGridApiState?.gridVisible
+                                ? "bg-rose-600 hover:bg-rose-500"
+                                : "bg-emerald-600 hover:bg-emerald-500"
+                              }`}
+                            title={!canUseGridApi ? "Disabled by license" : "Fetch and show grid"}
+                          >
+                            {deltaGridApiState?.computing
+                              ? "Computing..."
+                              : deltaGridApiState?.fetching
+                                ? "Fetching..."
+                                : deltaGridApiState?.gridVisible
+                                  ? "Hide Grid"
+                                  : "Fetch & Show Grid"}
+                          </button>
+                          {(deltaGridApiState?.computing || deltaGridApiState?.fetching) && (
+                            <p className="text-[10px] text-blue-300">
+                              {deltaGridApiState?.computing
+                                ? "Computing grid..."
+                                : "Fetching stored grid..."}
+                            </p>
+                          )}
                         </div>
                       )}
                     </div>
@@ -1478,327 +1744,21 @@ const UnifiedMapSidebar = ({
                     Add Site
                   </button>
 
-                 
+
 
                 </div>
               </>
             )}
           </CollapsibleSection>
 
-          {/* Polygon Layer */}
-          <CollapsibleSection
-            title="Polygons"
-            icon={Hexagon}
-            badge={showPolygons && polygonCount > 0 ? polygonCount : null}
-          >
-            <ToggleRow
-              label="Show Polygons"
-              checked={showPolygons}
-              onChange={setShowPolygons}
-              useSwitch={true}
-            />
 
-            {showPolygons && (
-              <>
-                <SegmentedControl
-                  value={polygonSource}
-                  onChange={setPolygonSource}
-                  options={[
-                    { value: "map", label: "Map Regions" },
-                    { value: "save", label: "Buildings" },
-                  ]}
-                />
+            
 
-                <div className="flex items-center justify-between pt-1">
-                  <span className="text-sm text-slate-300">
-                    Filter Inside Only
-                  </span>
-                  <span className="rounded border border-emerald-500/40 bg-emerald-600/20 px-2 py-0.5 text-[10px] font-semibold text-emerald-300">
-                    Always On
-                  </span>
-                </div>
-                <p className="text-[10px] text-slate-500">
-                  Logs and calculations are restricted to polygon boundaries.
-                </p>
 
-                {polygonCount > 0 && (
-                  <div className="bg-slate-800/50 rounded p-2 text-xs">
-                    <InfoBadge
-                      label="Loaded"
-                      value={`${polygonCount} polygon(s)`}
-                      color="green"
-                    />
-                  </div>
-                )}
-              </>
-            )}
-          </CollapsibleSection>
 
-          {
-            shouldShowMetricSelector && (
-              <CollapsibleSection
-                title="Metric & Filters"
-                icon={Filter}
-                defaultOpen={true}
-                badge={activeDataFiltersCount > 0 ? activeDataFiltersCount : null}
-              >
-                <SelectRow
-                  label="Metric"
-                  value={metric}
-                  onChange={setMetric}
-                  options={metricOptions}
-                  placeholder="Select metric"
-                />
+          {/* Metric & Filters moved to Raster section */}
 
-                <SelectRow
-                  label="Color By"
-                  value={colorBy || "metric"}
-                  onChange={(v) => setColorBy?.(v === "metric" ? null : v)}
-                  options={colorOptions}
-                  placeholder="Select color scheme"
-                  disabled={!enableDataToggle}
-                />
-
-                <div className="border-t border-slate-700/50 pt-3 mt-2">
-                  <div className="flex items-center justify-between mb-2">
-                    <span className="text-xs text-slate-400">Data Filters</span>
-                    {activeDataFiltersCount > 0 && (
-                      <button
-                        onClick={clearAllDataFilters}
-                        className="text-[10px] text-blue-400 hover:underline"
-                      >
-                        Clear All
-                      </button>
-                    )}
-                  </div>
-
-                  <div className="space-y-2">
-                    <SelectRow
-                      label="Provider"
-                      value={dataFilters?.providers?.[0] || "all"}
-                      onChange={(v) => updateDataFilter("providers", v)}
-                      options={[
-                        { value: "all", label: "All Providers" },
-                        ...(availableFilterOptions?.providers?.map((p) => ({
-                          value: p,
-                          label: p,
-                        })) || []),
-                      ]}
-                      disabled={!enableDataToggle}
-                    />
-
-                    <SelectRow
-                      label="Band"
-                      value={dataFilters?.bands?.[0] || "all"}
-                      onChange={(v) => updateDataFilter("bands", v)}
-                      options={[
-                        { value: "all", label: "All Bands" },
-                        ...(availableFilterOptions?.bands?.map((b) => ({
-                          value: b,
-                          label: b,
-                        })) || []),
-                      ]}
-                      disabled={!enableDataToggle}
-                    />
-
-                    <SelectRow
-                      label="Technology"
-                      value={dataFilters?.technologies?.[0] || "all"}
-                      onChange={(v) => updateDataFilter("technologies", v)}
-                      options={[
-                        { value: "all", label: "All Technologies" },
-                        ...(availableFilterOptions?.technologies
-                          ?.filter((t) => t && t.toLowerCase() !== "unknown")
-                          ?.map((t) => ({ value: t, label: t })) || []),
-                      ]}
-                      disabled={!enableDataToggle}
-                    />
-                  </div>
-
-                  <div className="space-y-1.5 pt-1">
-                    <Label className="text-xs text-slate-400">Environment</Label>
-                    <div className="flex gap-4">
-                      <label className="flex items-center gap-2 cursor-pointer p-1 rounded hover:bg-slate-800/50">
-                        <Checkbox
-                          checked={dataFilters?.indoorOutdoor?.includes("Indoor")}
-                          onChange={() => toggleEnvironment("Indoor")}
-                          disabled={!enableDataToggle}
-                        />
-                        <span className="text-sm text-slate-300">Indoor</span>
-                      </label>
-                      <label className="flex items-center gap-2 cursor-pointer p-1 rounded hover:bg-slate-800/50">
-                        <Checkbox
-                          checked={dataFilters?.indoorOutdoor?.includes(
-                            "Outdoor",
-                          )}
-                          onChange={() => toggleEnvironment("Outdoor")}
-                          disabled={!enableDataToggle}
-                        />
-                        <span className="text-sm text-slate-300">Outdoor</span>
-                      </label>
-                    </div>
-                  </div>
-
-                  <div className="border-t border-slate-700/50 pt-3 mt-2">
-                    <div className="flex items-center justify-between mb-2">
-                      <span className="text-xs text-slate-400">
-                        PCI Appearance Filter
-                      </span>
-                    </div>
-
-                    <div className="px-1 flex items-center justify-between gap-2">
-                      <ThresholdInput
-                        value={clampedPciThreshold}
-                        onChange={(next) => setPciThreshold(parseFloat(next))}
-                        min={normalizedPciRange.min}
-                        max={normalizedPciRange.max}
-                        step={1}
-                        unit="%"
-                        disabled={!supportsSessionFilters}
-                      />
-                      <span className="text-[10px] text-slate-500 whitespace-nowrap">
-                        {normalizedPciRange.min}% - {normalizedPciRange.max}%
-                      </span>
-                    </div>
-                    <p className="text-[10px] text-slate-500 mt-2 italic">
-                      Hides PCIs that appear less than {clampedPciThreshold}% of
-                      the time in this session.
-                    </p>
-                    {!supportsSessionFilters && (
-                      <p className="text-[10px] text-amber-400 mt-1">
-                        Available only in Data Layer sample mode.
-                      </p>
-                    )}
-                  </div>
-
-                  {activeDataFiltersCount > 0 && (
-                    <div className="mt-2 p-2 bg-blue-900/20 border border-blue-700/50 rounded text-xs text-blue-300">
-                      🔍 {activeDataFiltersCount} filter
-                      {activeDataFiltersCount > 1 ? "s" : ""} active
-                    </div>
-                  )}
-                </div>
-              </CollapsibleSection>
-            )
-          }
-
-        
-
-          {/* Metric & Filters */}
-
-          <CollapsibleSection title="Dominance Analysis" icon={AlertTriangle}>
-            <div className="space-y-3">
-              <div className="flex items-center justify-between">
-                <span className="text-sm text-slate-300">Dominance Filter</span>
-                <ToggleSwitch
-                  checked={dominanceThreshold !== null}
-                  disabled={!supportsSessionFilters}
-                  onChange={(checked) => {
-                    const newVal = checked ? 6 : null;
-                    setDominanceThreshold(newVal);
-                    if (checked) {
-                      setCoverageViolationThreshold?.(null);
-                    }
-
-                    // if (checked) 
-                    //   setMetric("dominance") 
-                    //   else 
-                    //     setMetric("rsrp");
-                  }}
-                />
-              </div>
-
-              {dominanceThreshold !== null && (
-                <div className="space-y-2">
-                  <Label className="text-xs text-slate-400">
-                    Range Mask (±dB)
-                  </Label>
-                  <Input
-                    type="number"
-                    value={dominanceThreshold}
-                    min={0}
-                    disabled={!supportsSessionFilters}
-                    onChange={(e) => {
-                      const parsed = Number(e.target.value);
-                      if (Number.isFinite(parsed)) {
-                        setDominanceThreshold(Math.max(0, parsed));
-                      }
-                    }}
-                    className="bg-slate-800 border-slate-600 text-white h-8 text-sm"
-                  />
-                  <p className="text-[10px] text-slate-500 italic">
-                    Showing logs with anchor within{" "}
-                    {-Math.abs(dominanceThreshold)} to{" "}
-                    {Math.abs(dominanceThreshold)} dB. Colors reflect the count
-                    of overlapping signals.
-                  </p>
-                  {!supportsSessionFilters && (
-                    <p className="text-[10px] text-amber-400">
-                      Available only in Data Layer sample mode.
-                    </p>
-                  )}
-                </div>
-              )}
-            </div>
-          </CollapsibleSection>
-          <CollapsibleSection title="Coverage Violation" icon={ShieldAlert}>
-            <div className="space-y-3">
-              <div className="flex items-center justify-between">
-                <span className="text-sm text-slate-300">Enable Violation</span>
-                <ToggleSwitch
-                  checked={coverageViolationThreshold !== null}
-                  disabled={!supportsSessionFilters}
-                  onChange={(checked) => {
-                    // FIX: Ensure it defaults to a negative number and updates the metric
-                    const newVal = checked ? -10 : null;
-                    setCoverageViolationThreshold?.(newVal);
-
-                    if (checked) {
-                      setDominanceThreshold?.(null); // Mutually exclusive
-                      // setMetric("coverage_violation"); // This triggers the layer update
-                    }
-                    // else {
-                    //   // If disabling, reset metric to default
-                    //   setMetric("rsrp");
-                    // }
-
-                  }}
-                />
-              </div>
-
-              {coverageViolationThreshold !== null && (
-                <div className="space-y-2">
-                  <Label className="text-xs text-slate-400">
-                    Range Start (Negative dB)
-                  </Label>
-                  <Input
-                    type="number"
-                    value={coverageViolationThreshold}
-                    max={0} // Ensure user doesn't go positive
-                    disabled={!supportsSessionFilters}
-                    onChange={(e) => {
-                      const parsed = Number(e.target.value);
-                      if (Number.isFinite(parsed)) {
-                        setCoverageViolationThreshold?.(Math.min(0, parsed));
-                      }
-                    }}
-                    className="bg-slate-800 border-slate-600 text-white h-8 text-sm"
-                  />
-                  <p className="text-[10px] text-slate-500 italic">
-                    Showing logs with neighbors between{" "}
-                    {coverageViolationThreshold} dB and 0 dB relative to
-                    primary. Colors reflect count of signals.
-                  </p>
-                  {!supportsSessionFilters && (
-                    <p className="text-[10px] text-amber-400">
-                      Available only in Data Layer sample mode.
-                    </p>
-                  )}
-                </div>
-              )}
-            </div>
-          </CollapsibleSection>
-
+          {/* Dominance/Coverage controls moved under Raster KPI */}
           <CollapsibleSection
             title="Handovers"
             icon={ArrowLeftRight}

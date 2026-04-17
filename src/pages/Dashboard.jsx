@@ -1,8 +1,8 @@
 // src/pages/Dashboard.jsx
 import React, { useMemo, useCallback, useState, useEffect, memo } from 'react';
-import { 
-  BarChart2, RefreshCw, Users, Car, Waypoints, FileText, 
-  Wifi, Layers, Home, MapPin 
+import {
+  RefreshCw, Users, Car, Waypoints, FileText,
+  Wifi, Layers, Home, MapPin
 } from 'lucide-react';
 
 import MonthlySamplesChart from '@/components/dashboard/charts/MonthlySamplesChart';
@@ -16,9 +16,9 @@ import { StatCard } from '@/components/dashboard';
 import AppChart from '@/components/dashboard/charts/AppChart';
 import HolesScatterChart from '@/components/dashboard/charts/IndoorOutdoorBarChart';
 
-import { 
-  useTotals, 
-  useOperatorsAndNetworks, 
+import {
+  useTotals,
+  useOperatorsAndNetworks,
   useBandCount,
   useIndoorCount,
   useOutdoorCount,
@@ -27,7 +27,6 @@ import {
 
 import { usePersistedFilters } from '@/hooks/usePersistedFilters';
 
-// ✅ Memoized components to prevent unnecessary re-renders
 const MemoizedStatCard = memo(StatCard);
 const MemoizedMonthlySamplesChart = memo(MonthlySamplesChart);
 const MemoizedOperatorNetworkChart = memo(OperatorNetworkChart);
@@ -42,19 +41,19 @@ const DashboardPage = () => {
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [chartStage, setChartStage] = useState(1);
 
-  // Persisted filters for each chart
   const [monthlySamplesFilters, setMonthlySamplesFilters] = usePersistedFilters('monthlySamples');
   const [operatorSamplesFilters, setOperatorSamplesFilters] = usePersistedFilters('operatorSamples');
   const [metricFilters, setMetricFilters] = usePersistedFilters('metric');
   const [bandDistFilters] = usePersistedFilters('bandDist');
+  const [indoorOutdoorFilters, setIndoorOutdoorFilters] = usePersistedFilters('indoorOutdoor');
+  const [coverageRankingFilters, setCoverageRankingFilters] = usePersistedFilters('coverageRanking');
 
-  // ✅ Fetch ONLY KPI data on initial load - no chart data yet
   const { data: totalsData, isLoading: isTotalsLoading } = useTotals();
   const { operators, networks, operatorCount, isLoading: isOperatorsLoading } = useOperatorsAndNetworks();
   const { data: bandCount, isLoading: isBandCountLoading } = useBandCount();
   const { data: indoorCount, isLoading: isIndoorLoading } = useIndoorCount();
   const { data: outdoorCount, isLoading: isOutdoorLoading } = useOutdoorCount();
-  
+
   const refreshDashboard = useRefreshDashboard();
 
   useEffect(() => {
@@ -66,17 +65,15 @@ const DashboardPage = () => {
     };
   }, []);
 
-  // Calculate total samples
   const totalLocationSamples = useMemo(() => {
     return (Number(indoorCount) || 0) + (Number(outdoorCount) || 0);
   }, [indoorCount, outdoorCount]);
 
-  // Check if any KPI data is loading
   const isKPILoading = isTotalsLoading || isOperatorsLoading || isBandCountLoading || isIndoorLoading || isOutdoorLoading;
 
   const stats = useMemo(() => {
     const totals = totalsData || {};
-    
+
     return [
       {
         title: "Total Users",
@@ -137,12 +134,10 @@ const DashboardPage = () => {
     ];
   }, [totalsData, operatorCount, bandCount, indoorCount, outdoorCount, totalLocationSamples]);
 
-  // ✅ Optimized refresh without page reload
   const handleRefreshAll = useCallback(async () => {
     setIsRefreshing(true);
-    
+
     try {
-      // Trigger SWR revalidation
       await refreshDashboard();
     } catch (error) {
       console.error('Refresh failed:', error);
@@ -151,7 +146,6 @@ const DashboardPage = () => {
     }
   }, [refreshDashboard]);
 
-  // ✅ Stable filter handlers
   const handleMonthlySamplesFilterChange = useCallback((filters) => {
     setMonthlySamplesFilters(filters);
   }, [setMonthlySamplesFilters]);
@@ -164,28 +158,26 @@ const DashboardPage = () => {
     setMetricFilters(filters);
   }, [setMetricFilters]);
 
+  const handleIndoorOutdoorFilterChange = useCallback((filters) => {
+    setIndoorOutdoorFilters(filters);
+  }, [setIndoorOutdoorFilters]);
+
+  const handleCoverageRankingFilterChange = useCallback((filters) => {
+    setCoverageRankingFilters(filters);
+  }, [setCoverageRankingFilters]);
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-50 via-blue-50 to-indigo-50">
       <div className="max-w-[1920px] mx-auto p-3 sm:p-4 lg:p-6 space-y-4 sm:space-y-6">
-       
-        {/* Header */}
-        <div className="flex flex-wrap items-center justify-between gap-4 mb-6">
-          <div>
-            <h1 className="text-3xl font-bold text-gray-900 flex items-center gap-3">
-              <div className="h-10 w-10 bg-blue-600 rounded-lg flex items-center justify-center shadow-lg">
-                <BarChart2 className="h-6 w-6 text-white" />
-              </div>
-              Dashboard Analytics
-            </h1>
-          </div>
+        <div className="flex flex-wrap items-center justify-end gap-4 mb-6">
           <button
             onClick={handleRefreshAll}
             disabled={isRefreshing}
             className={`
-              px-5 py-2.5 rounded-lg border-2 flex items-center gap-2 
+              px-5 py-2.5 rounded-lg border-2 flex items-center gap-2
               transition-all font-medium shadow-sm
-              ${isRefreshing 
-                ? 'border-gray-200 bg-gray-100 text-gray-400 cursor-not-allowed' 
+              ${isRefreshing
+                ? 'border-gray-200 bg-gray-100 text-gray-400 cursor-not-allowed'
                 : 'border-gray-300 hover:border-blue-500 hover:bg-blue-50 hover:shadow-md'
               }
             `}
@@ -195,7 +187,6 @@ const DashboardPage = () => {
           </button>
         </div>
 
-        {/* KPI Cards */}
         <div className="flex flex-wrap gap-4 sm:gap-6">
           {isKPILoading ? (
             Array.from({ length: 8 }).map((_, i) => (
@@ -212,9 +203,7 @@ const DashboardPage = () => {
           )}
         </div>
 
-        {/* Charts Grid */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6">
-
           {chartStage >= 1 && (
             <MemoizedMonthlySamplesChart
               chartFilters={monthlySamplesFilters}
@@ -251,10 +240,18 @@ const DashboardPage = () => {
           )}
 
           {chartStage >= 3 && <MemoizedHandsetPerformanceChart />}
-
-          {chartStage >= 3 && <MemoizedHolesScatterChart />}
-
-          {chartStage >= 3 && <MemoizedQualityRankingChart />}
+          {chartStage >= 3 && (
+            <MemoizedHolesScatterChart
+              chartFilters={indoorOutdoorFilters}
+              onChartFiltersChange={handleIndoorOutdoorFilterChange}
+            />
+          )}
+          {chartStage >= 3 && (
+            <MemoizedQualityRankingChart
+              chartFilters={coverageRankingFilters}
+              onChartFiltersChange={handleCoverageRankingFilterChange}
+            />
+          )}
         </div>
       </div>
     </div>

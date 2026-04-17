@@ -3,7 +3,7 @@ import React, { useState, useEffect, useMemo, useCallback } from "react";
 import { useSearchParams, Link } from "react-router-dom";
 import { useJsApiLoader } from "@react-google-maps/api";
 import { toast } from "react-toastify";
-import { Filter } from "lucide-react";
+import { Filter, ArrowLeft } from "lucide-react";
 
 import { mapViewApi, settingApi } from "../api/apiEndpoints";
 import Spinner from "../components/common/Spinner";
@@ -230,26 +230,27 @@ const SimpleMapView = () => {
   return (
     <div className="p-4 md:p-6 h-screen flex flex-col bg-gray-50 dark:bg-gray-800">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-4 gap-2">
-        <h1 className="text-xl md:text-2xl font-semibold dark:text-white">
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-4 gap-3 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-4 py-3 shadow-sm">
+        <h1 className="text-xl md:text-2xl font-bold text-gray-900 dark:text-white">
           Drive Session Map View
-          <span className="text-base font-normal text-gray-600 dark:text-gray-400 block sm:inline sm:ml-2">
+          <span className="text-sm md:text-base font-normal text-gray-600 dark:text-gray-400 block sm:inline sm:ml-2">
             (Session: {sessionIds.join(", ")} | Project: {projectId || "-"})
           </span>
         </h1>
-        <div className="flex gap-5 justify-center items-center">
+        <div className="flex gap-3 justify-center items-center">
           <button
             onClick={() => setIsSideOpen(!isSideOpen)}
-            className="flex gap-1 items-center bg-blue-600 hover:bg-blue-500 text-white text-sm sm:text-base rounded-md px-3 py-1"
+            className="flex gap-1.5 items-center bg-blue-600 hover:bg-blue-500 text-white text-sm sm:text-base rounded-md px-3 py-2"
           >
             <Filter className="h-4" />
             {isSideOpen ? "Close Filters" : "Open Filters"}
           </button>
           <Link
             to="/drive-test-sessions"
-            className="text-blue-600 dark:text-blue-400 hover:underline text-sm sm:text-base"
+            className="inline-flex items-center gap-1.5 text-blue-600 dark:text-blue-400 hover:underline text-sm sm:text-base font-medium"
           >
-            ← Back to All Sessions
+            <ArrowLeft className="h-4 w-4" />
+            Back to All Sessions
           </Link>
         </div>
       </div>

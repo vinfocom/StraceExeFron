@@ -469,9 +469,7 @@ const SessionMultiDropdown = ({ sessions, selectedSessions, setSelectedSessions 
             {loading ? <Spinner /> : "Upload & Process"}
           </Button>
           <Button
-            onClick={() =>
-              excelApi.downloadTemplate(activeTab === "session" ? 1 : 2)
-            }
+            onClick={() => excelApi.downloadTemplate(1)}
             variant="outline"
             size="lg"
             className="bg-white text-gray-700 hover:bg-blue-200"

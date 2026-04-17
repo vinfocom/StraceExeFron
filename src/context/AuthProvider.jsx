@@ -52,10 +52,10 @@ const AuthProvider = ({ children }) => {
         const cachedUser = sessionStorage.getItem('user');
         const isAuth = error.status === 401 || error.status === 403 || error.isAuthError;
         
-        if (isAuth && (!cachedUser || cachedUser === 'undefined')) {
-          clearSession(); // Truly not logged in
+        if (isAuth) {
+          clearSession();
         } else if (cachedUser && cachedUser !== 'undefined') {
-          // Keep the cached session alive
+          // Keep cached user only for non-auth/network failures.
           try {
             setUser(JSON.parse(cachedUser));
           } catch {
@@ -89,13 +89,13 @@ const AuthProvider = ({ children }) => {
     return () => window.removeEventListener('storage', handleStorageChange);
   }, [clearSession, navigate]);
 
-  const login = async ({ Email, Password, IP = '' }) => {
+  const login = async ({ Email, Password, IP = '', ForceLogin = false }) => {
     try {
       setAuthError(null);
       setLoading(true);
       
       const hashed = sha256(Password || '');
-      const response = await homeApi.login({ Email, Password: hashed, IP });
+      const response = await homeApi.login({ Email, Password: hashed, IP, ForceLogin });
 
       if (response.success) {
         const userData = response.user;

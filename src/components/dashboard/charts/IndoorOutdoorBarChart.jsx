@@ -131,8 +131,8 @@ const CustomLegend = React.memo(() => (
 
 CustomLegend.displayName = 'CustomLegend';
 
-const IndoorOutdoorProviderChart = () => {
-  const { data, isLoading, error } = useIndOut();
+const IndoorOutdoorProviderChart = ({ chartFilters, onChartFiltersChange }) => {
+  const { data, isLoading, error } = useIndOut(chartFilters || {});
   const [selectedMetric, setSelectedMetric] = useState('rsrp');
 
   const metricConfig = METRIC_CONFIG[selectedMetric];
@@ -238,7 +238,11 @@ const IndoorOutdoorProviderChart = () => {
       isLoading={isLoading}
       dataset={exportData}
       exportFileName={`indoor_outdoor_comparison_${selectedMetric}`}
-      showChartFilters={false}
+      showChartFilters={true}
+      chartFilters={chartFilters}
+      onChartFiltersChange={onChartFiltersChange}
+      operators={[]}
+      networks={[]}
       headerActions={
         <div className="flex items-center gap-3 mr-2">
           <MetricToggle selected={selectedMetric} onChange={handleMetricChange} />

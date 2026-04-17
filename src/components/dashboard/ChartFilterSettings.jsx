@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { Calendar } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
+import { Input } from '@/components/ui/input';
 
 const ChartFilterSettings = ({ 
   operators = [], 
@@ -9,12 +9,20 @@ const ChartFilterSettings = ({
   onChange,
   showOperators = true,
   showNetworks = true,
-  
+  showDateRange = false,
 }) => {
-  const [localFilters, setLocalFilters] = useState(value);
+  const [localFilters, setLocalFilters] = useState({
+    ...value,
+    dateFrom: value?.dateFrom || '',
+    dateTo: value?.dateTo || '',
+  });
 
   useEffect(() => {
-    setLocalFilters(value);
+    setLocalFilters({
+      ...value,
+      dateFrom: value?.dateFrom || '',
+      dateTo: value?.dateTo || '',
+    });
   }, [value]);
 
   const toggleOperator = (op) => {
@@ -31,8 +39,16 @@ const ChartFilterSettings = ({
     setLocalFilters(prev => ({ ...prev, networks: newNets }));
   };
 
+  const handleDateChange = (key, nextValue) => {
+    setLocalFilters(prev => ({ ...prev, [key]: nextValue || '' }));
+  };
+
   const handleApply = () => {
-    onChange(localFilters);
+    onChange({
+      ...localFilters,
+      dateFrom: localFilters.dateFrom || undefined,
+      dateTo: localFilters.dateTo || undefined,
+    });
   };
 
   return (
@@ -94,11 +110,40 @@ const ChartFilterSettings = ({
         </div>
       )}
 
-      
+      {showDateRange && (
+        <div className="space-y-3">
+          <div className="flex items-center justify-between">
+            <label className="font-semibold text-gray-800">Date Range</label>
+            <Badge variant="secondary" className="text-xs">
+              {localFilters.dateFrom || localFilters.dateTo ? 'Active' : 'All time'}
+            </Badge>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 p-3 border border-gray-200 rounded-lg bg-gray-50">
+            <div>
+              <label className="text-xs text-gray-500 block mb-1">From</label>
+              <Input
+                type="date"
+                value={localFilters.dateFrom || ''}
+                onChange={(e) => handleDateChange('dateFrom', e.target.value)}
+                className="bg-white border-gray-300"
+              />
+            </div>
+            <div>
+              <label className="text-xs text-gray-500 block mb-1">To</label>
+              <Input
+                type="date"
+                value={localFilters.dateTo || ''}
+                onChange={(e) => handleDateChange('dateTo', e.target.value)}
+                className="bg-white border-gray-300"
+              />
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="flex gap-2 pt-4 border-t">
         <button
-          onClick={() => setLocalFilters({})}
+          onClick={() => setLocalFilters({ operators: [], networks: [], dateFrom: '', dateTo: '' })}
           className="flex-1 px-4 py-2 rounded-lg border border-gray-300 hover:bg-gray-50 transition-colors"
         >
           Clear

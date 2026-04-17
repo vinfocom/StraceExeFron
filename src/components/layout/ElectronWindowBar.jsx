@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Minus, Square, X } from "lucide-react";
-import appLogo from "/favicon.png";
+import appLogo from "/favicon.svg";
 
 const menuButtonClass =
   "px-2 py-0.5 text-xs text-slate-700 hover:bg-slate-200 rounded transition-colors";
@@ -51,6 +51,35 @@ const callWindowApi = async (fnName) => {
   const api = window?.electronWindow;
   if (!api || typeof api[fnName] !== "function") return;
   await api[fnName]();
+};
+
+const emitUtilityAction = (action) => {
+  if (typeof window === "undefined" || !action) return;
+  window.dispatchEvent(
+    new CustomEvent("stracer:utility-action", {
+      detail: { action },
+    }),
+  );
+};
+
+const navigateRoute = (path) => {
+  if (typeof window === "undefined" || !path) return;
+
+  const normalizedPath = path.startsWith("/") ? path : `/${path}`;
+  const isHashMode =
+    typeof navigator !== "undefined" &&
+    /electron/i.test(navigator.userAgent || "");
+
+  if (isHashMode) {
+    const currentHashPath = window.location.hash?.replace(/^#/, "") || "/";
+    if (currentHashPath === normalizedPath) return;
+    window.location.hash = normalizedPath;
+    return;
+  }
+
+  if (window.location.pathname === normalizedPath) return;
+  window.history.pushState({}, "", normalizedPath);
+  window.dispatchEvent(new PopStateEvent("popstate"));
 };
 
 const ElectronWindowBar = () => {
@@ -117,6 +146,7 @@ const ElectronWindowBar = () => {
           onHoverOpen={() => activeMenu && setActiveMenu("File")}
           onActionClick={() => setActiveMenu(null)}
           actions={[
+            { label: "Import From", onClick: () => emitUtilityAction("import") },
             { label: "Reload", onClick: () => callWindowApi("reload") },
             { label: "Quit", onClick: () => callWindowApi("quit") },
           ]}
@@ -143,8 +173,36 @@ const ElectronWindowBar = () => {
           onHoverOpen={() => activeMenu && setActiveMenu("View")}
           onActionClick={() => setActiveMenu(null)}
           actions={[
+            { label: "Dashboard", onClick: () => navigateRoute("/dashboard") },
+            { label: "Map View", onClick: () => navigateRoute("/mapview") },
             { label: "Reload", onClick: () => callWindowApi("reload") },
             { label: "Toggle DevTools", onClick: () => callWindowApi("toggleDevTools") },
+          ]}
+        />
+        <MenuGroup
+          label="Project"
+          isOpen={activeMenu === "Project"}
+          onToggle={() => setActiveMenu((prev) => (prev === "Project" ? null : "Project"))}
+          onHoverOpen={() => activeMenu && setActiveMenu("Project")}
+          onActionClick={() => setActiveMenu(null)}
+          actions={[
+            { label: "Unified Map", onClick: () => navigateRoute("/unified-map") },
+            { label: "View Projects", onClick: () => navigateRoute("/viewProject") },
+            { label: "Create Project", onClick: () => navigateRoute("/create-project") },
+            { label: "Multi Map", onClick: () => navigateRoute("/multi-map") },
+          ]}
+        />
+        <MenuGroup
+          label="Utility"
+          isOpen={activeMenu === "Utility"}
+          onToggle={() => setActiveMenu((prev) => (prev === "Utility" ? null : "Utility"))}
+          onHoverOpen={() => activeMenu && setActiveMenu("Utility")}
+          onActionClick={() => setActiveMenu(null)}
+          actions={[
+            { label: "Opacity", onClick: () => emitUtilityAction("opacity") },
+            { label: "Log Radius", onClick: () => emitUtilityAction("log-radius") },
+            { label: "Neighbour Radius", onClick: () => emitUtilityAction("neighbor-radius") },
+            { label: "Settings", onClick: () => emitUtilityAction("settings") },
           ]}
         />
         <MenuGroup
@@ -172,7 +230,7 @@ const ElectronWindowBar = () => {
         <img
           src={appLogo}
           alt="S-Tracer"
-          className="h-4 w-4 rounded-sm object-contain"
+          className="h-5 w-5 rounded-sm object-contain"
           onError={(e) => {
             e.currentTarget.style.display = "none";
           }}

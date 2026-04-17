@@ -120,11 +120,11 @@ const MapSidebar = ({
   };
 
   return (
-    <div className="absolute top-4 left-10 h-auto max-h-[90vh] w-80 bg-white rounded-lg border z-10 flex flex-col shadow-lg">
+    <div className="absolute top-4 left-10 h-auto max-h-[90vh] w-80 bg-white text-slate-900 rounded-lg border border-slate-200 z-10 flex flex-col shadow-lg">
       {/* Header */}
-      <div className="flex border-b">
+      <div className="flex border-b border-slate-200 bg-white">
         <button
-          className="flex-1 p-3 text-sm font-medium flex items-center justify-center gap-2 border-b-2 border-blue-600 text-blue-600 bg-blue-50 dark:bg-slate-900"
+          className="flex-1 p-3 text-sm font-medium flex items-center justify-center gap-2 border-b-2 border-blue-600 text-blue-600 bg-blue-50"
           disabled
         >
           <Layers size={16} />

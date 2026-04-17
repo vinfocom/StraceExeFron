@@ -338,7 +338,8 @@ function DrawingToolsLayerComponent({
       createdAt: new Date().toISOString(),
     };
     shapesRef.current.push(shapeObj);
-    const entry = reAnalyzeShapeRef.current?.(shapeObj);
+    const isMeasurementTool = type === "polyline";
+    const entry = isMeasurementTool ? null : reAnalyzeShapeRef.current?.(shapeObj);
     const listeners = [];
     const update = () => reAnalyzeShapeRef.current?.(shapeObj);
 
@@ -350,16 +351,25 @@ function DrawingToolsLayerComponent({
           shapeObj.labelMarker = new window.google.maps.Marker({
             map,
             position: center,
-            icon: { path: window.google.maps.SymbolPath.CIRCLE, scale: 0 },
-            label: { text, color: "#000000", fontWeight: "bold", fontSize: "12px" },
-            zIndex: 100,
+            icon: {
+              url: "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==",
+              scaledSize: new window.google.maps.Size(1, 1),
+              anchor: new window.google.maps.Point(0, 0),
+              labelOrigin: new window.google.maps.Point(0, -14),
+            },
+            label: {
+              text,
+              color: "#111827",
+              fontWeight: "700",
+              fontSize: "12px",
+            },
+            zIndex: 1000,
           });
         } else {
           shapeObj.labelMarker.setPosition(center);
           const lbl = shapeObj.labelMarker.getLabel();
           shapeObj.labelMarker.setLabel({ ...lbl, text });
         }
-        update();
       };
       const path = overlay.getPath();
       ["set_at", "insert_at", "remove_at"].forEach((ev) =>
@@ -381,10 +391,14 @@ function DrawingToolsLayerComponent({
 
     shapeObj.listeners = listeners;
 
-    // reAnalyzeShape (called above at line 341) already fires onDrawingsChange with
-    // the full data including logs, geometry, and stats. No additional snapshot needed.
+    // For non-measurement tools, reAnalyzeShape already fires onDrawingsChange with
+    // full data including logs, geometry, and stats.
     drawingManager?.setDrawingMode(null);
     callbacksRef.current.onUIChange?.({ drawEnabled: false, shapeMode: null });
+    if (isMeasurementTool) {
+      callbacksRef.current.onSummary?.(null);
+      callbacksRef.current.onDrawingsChange?.([...collectedDrawingRef.current]);
+    }
 
     if (type !== "polyline") {
       const sessionMsg =

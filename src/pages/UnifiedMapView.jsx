@@ -13,7 +13,6 @@ import React, {
 import { useSearchParams, useNavigate, useLocation } from "react-router-dom";
 import { useJsApiLoader, Polygon } from "@react-google-maps/api";
 import { toast } from "react-toastify";
-import { LayoutGrid } from "lucide-react";
 
 import { mapViewApi, gridAnalyticsApi } from "../api/apiEndpoints";
 
@@ -1104,8 +1103,8 @@ const UnifiedMapView = () => {
   const [drawnShapeAnalytics, setDrawnShapeAnalytics] = useState([]);
   const [legendFilter, setLegendFilter] = useState(null);
   const [opacity, setOpacity] = useState(0.8);
-  const [logRadius, setLogRadius] = useState(12);
-  const [neighborSquareSize, setNeighborSquareSize] = useState(5);
+  const [logRadius, setLogRadius] = useState(10);
+  const [neighborSquareSize, setNeighborSquareSize] = useState(4);
   const [showSessionNeighbors, setShowSessionNeighbors] = useState(true);
 
   const [bestNetworkEnabled, setBestNetworkEnabled] = useState(false);
@@ -1943,6 +1942,10 @@ const UnifiedMapView = () => {
       storedDeltaGridCells.length > 0,
     [isCellSiteGridMode, deltaGridApiState?.gridVisible, storedDeltaGridCells.length],
   );
+  const isStoredGridOverlayVisible = useMemo(
+    () => Boolean(isFetchedStoredGridVisible) && !enableGrid,
+    [isFetchedStoredGridVisible, enableGrid],
+  );
 
   // ✅ 2. Use Prediction Data Hook
   const {
@@ -2723,11 +2726,11 @@ const UnifiedMapView = () => {
     const shouldRenderLtePredictionLayer =
       isDataPredictionMode ||
       lteGridEnabled ||
-      isFetchedStoredGridVisible ||
+      isStoredGridOverlayVisible ||
       (enableSiteToggle && selectedSites.length > 0) ||
       sectorPredictionGridPoints.length > 0;
 
-    if (isFetchedStoredGridVisible) {
+    if (isStoredGridOverlayVisible) {
       const selectedMetricKey = String(selectedMetric || "rsrp").trim().toLowerCase();
       const normalizedVersion = String(sitePredictionVersion || "").trim().toLowerCase();
       const isDeltaView = normalizedVersion === "delta";
@@ -2786,20 +2789,20 @@ const UnifiedMapView = () => {
     sectorPredictionGridPoints.length,
     lteLayerLocations,
     finalDisplayLocations,
-    isFetchedStoredGridVisible,
+    isStoredGridOverlayVisible,
     storedDeltaGridCells,
     sitePredictionVersion,
     selectedMetric,
   ]);
 
   const analyticsPanelLocations = useMemo(
-    () => (isFetchedStoredGridVisible ? legendLogs : finalDisplayLocations),
-    [isFetchedStoredGridVisible, legendLogs, finalDisplayLocations],
+    () => (isStoredGridOverlayVisible ? legendLogs : finalDisplayLocations),
+    [isStoredGridOverlayVisible, legendLogs, finalDisplayLocations],
   );
 
   const analyticsPanelFilteredLocations = useMemo(
-    () => (isFetchedStoredGridVisible ? legendLogs : filteredLocations),
-    [isFetchedStoredGridVisible, legendLogs, filteredLocations],
+    () => (isStoredGridOverlayVisible ? legendLogs : filteredLocations),
+    [isStoredGridOverlayVisible, legendLogs, filteredLocations],
   );
   const deferredAnalyticsPanelLocations = useDeferredValue(analyticsPanelLocations);
   const deferredAnalyticsPanelFilteredLocations = useDeferredValue(
@@ -2808,11 +2811,11 @@ const UnifiedMapView = () => {
 
   const legendSelectedMetric = useMemo(
     () => {
-      if (!isFetchedStoredGridVisible) return selectedMetric;
+      if (!isStoredGridOverlayVisible) return selectedMetric;
       const normalizedVersion = String(sitePredictionVersion || "").trim().toLowerCase();
       return normalizedVersion === "delta" ? "delta" : selectedMetric;
     },
-    [isFetchedStoredGridVisible, selectedMetric, sitePredictionVersion],
+    [isStoredGridOverlayVisible, selectedMetric, sitePredictionVersion],
   );
 
   
@@ -3063,20 +3066,20 @@ const UnifiedMapView = () => {
     () =>
       isDataPredictionMode ||
       lteGridEnabled ||
-      isFetchedStoredGridVisible ||
+      isStoredGridOverlayVisible ||
       (enableSiteToggle && selectedSites.length > 0) ||
       sectorPredictionGridPoints.length > 0,
     [
       isDataPredictionMode,
       lteGridEnabled,
-      isFetchedStoredGridVisible,
+      isStoredGridOverlayVisible,
       enableSiteToggle,
       selectedSites.length,
       sectorPredictionGridPoints.length,
     ],
   );
   const shouldRenderSiteLayer =
-    Boolean(showSiteMarkers || showSiteSectors) && !isFetchedStoredGridVisible;
+    Boolean(showSiteMarkers || showSiteSectors) && !isStoredGridOverlayVisible;
   const shouldShowLegend = useMemo(() => {
     if (!Array.isArray(legendLogs) || legendLogs.length === 0) return false;
     return Boolean(showDataCircles || shouldRenderLtePredictionLayer);
@@ -3091,6 +3094,7 @@ const UnifiedMapView = () => {
     () => ({
       mapTypeId: ui.basemapStyle,
       disableDefaultUI: false,
+      streetViewControl: false,
       zoomControl: !isZoomLocked,
       scrollwheel: !isZoomLocked,
       disableDoubleClickZoom: isZoomLocked,
@@ -3110,10 +3114,71 @@ const UnifiedMapView = () => {
   );
 
   const mapListenerHandlesRef = useRef([]);
+  const [isZoomMemoryArmed, setIsZoomMemoryArmed] = useState(false);
+  const zoomMemoryArmedRef = useRef(false);
+  const storedZoomMemoryRef = useRef(null);
+  const storedCenterMemoryRef = useRef(null);
+  const zoomLockControlRef = useRef({
+    map: null,
+    button: null,
+    container: null,
+    clickHandler: null,
+  });
+
+  const applyZoomLockControlStyle = useCallback(() => {
+    const btn = zoomLockControlRef.current.button;
+    if (!btn) return;
+    if (isZoomMemoryArmed) {
+      btn.style.background = "#2563eb";
+      btn.style.color = "#ffffff";
+      btn.style.borderColor = "#1d4ed8";
+    } else {
+      btn.style.background = "#ffffff";
+      btn.style.color = "#1f2937";
+      btn.style.borderColor = "#cbd5e1";
+    }
+  }, [isZoomMemoryArmed]);
+
+  const teardownZoomLockControl = useCallback(() => {
+    const current = zoomLockControlRef.current;
+    if (current.button && current.clickHandler) {
+      current.button.removeEventListener("click", current.clickHandler);
+    }
+
+    const map = current.map;
+    const container = current.container;
+    if (map && container && window.google?.maps?.ControlPosition) {
+      const controls = map.controls[window.google.maps.ControlPosition.RIGHT_TOP];
+      if (controls?.getLength) {
+        for (let i = controls.getLength() - 1; i >= 0; i -= 1) {
+          if (controls.getAt(i) === container) {
+            controls.removeAt(i);
+            break;
+          }
+        }
+      }
+    }
+
+    zoomLockControlRef.current = {
+      map: null,
+      button: null,
+      container: null,
+      clickHandler: null,
+    };
+  }, []);
+
+  useEffect(() => {
+    applyZoomLockControlStyle();
+  }, [applyZoomLockControlStyle]);
+
+  useEffect(() => {
+    zoomMemoryArmedRef.current = Boolean(isZoomMemoryArmed);
+  }, [isZoomMemoryArmed]);
 
   const handleMapLoad = useCallback(
     (map) => {
       mapRef.current = map;
+      teardownZoomLockControl();
       // Store all listener handles so we can remove them on unmount / re-mount
       const handles = [];
 
@@ -3202,9 +3267,87 @@ const UnifiedMapView = () => {
         }
       }));
 
+      const lockContainer = document.createElement("div");
+      lockContainer.style.margin = "10px";
+
+      const lockButton = document.createElement("button");
+      lockButton.type = "button";
+      lockButton.title = "Zoom Memory";
+      lockButton.setAttribute("aria-label", "Zoom Memory");
+      lockButton.textContent = "🔒";
+      lockButton.style.width = "34px";
+      lockButton.style.height = "34px";
+      lockButton.style.borderRadius = "6px";
+      lockButton.style.border = "1px solid #cbd5e1";
+      lockButton.style.boxShadow = "0 1px 4px rgba(0, 0, 0, 0.3)";
+      lockButton.style.cursor = "pointer";
+      lockButton.style.fontSize = "16px";
+      lockButton.style.display = "flex";
+      lockButton.style.alignItems = "center";
+      lockButton.style.justifyContent = "center";
+      lockButton.style.transition = "all 0.2s ease";
+
+      const lockClickHandler = () => {
+        const currentZoom = map.getZoom?.();
+        const currentCenter = map.getCenter?.();
+        if (!zoomMemoryArmedRef.current) {
+          const zoomToStore = Number.isFinite(currentZoom) ? currentZoom : mapZoom;
+          const centerToStore =
+            currentCenter && Number.isFinite(currentCenter.lat?.()) && Number.isFinite(currentCenter.lng?.())
+              ? { lat: currentCenter.lat(), lng: currentCenter.lng() }
+              : null;
+          if (Number.isFinite(zoomToStore)) {
+            storedZoomMemoryRef.current = zoomToStore;
+            setMapZoom((prev) => (prev === zoomToStore ? prev : zoomToStore));
+          }
+          storedCenterMemoryRef.current = centerToStore;
+          zoomMemoryArmedRef.current = true;
+          setIsZoomMemoryArmed(true);
+          return;
+        }
+
+        const savedZoom = Number(storedZoomMemoryRef.current);
+        const savedCenter = storedCenterMemoryRef.current;
+        if (
+          savedCenter &&
+          Number.isFinite(savedCenter.lat) &&
+          Number.isFinite(savedCenter.lng)
+        ) {
+          map.setCenter(savedCenter);
+          setMapCenterFallback((prev) =>
+            areCentersEqual(prev, savedCenter) ? prev : savedCenter,
+          );
+        }
+        if (Number.isFinite(savedZoom)) {
+          map.setZoom(savedZoom);
+          setMapZoom((prev) => (prev === savedZoom ? prev : savedZoom));
+        }
+        storedCenterMemoryRef.current = null;
+        zoomMemoryArmedRef.current = false;
+        setIsZoomMemoryArmed(false);
+      };
+
+      lockButton.addEventListener("click", lockClickHandler);
+      lockContainer.appendChild(lockButton);
+      map.controls[window.google.maps.ControlPosition.RIGHT_TOP].push(lockContainer);
+
+      zoomLockControlRef.current = {
+        map,
+        button: lockButton,
+        container: lockContainer,
+        clickHandler: lockClickHandler,
+      };
+      applyZoomLockControlStyle();
+
       mapListenerHandlesRef.current = handles;
     },
-    [debouncedSetViewport, locations?.length],
+    [
+      applyZoomLockControlStyle,
+      debouncedSetViewport,
+      locations?.length,
+      mapZoom,
+      teardownZoomLockControl,
+    ],
   );
 
   // Clean up Google Maps listeners when the component unmounts
@@ -3216,8 +3359,9 @@ const UnifiedMapView = () => {
         }
       });
       mapListenerHandlesRef.current = [];
+      teardownZoomLockControl();
     };
-  }, []);
+  }, [teardownZoomLockControl]);
 
   const handleResetZoom = useCallback(() => {
     const map = mapRef.current;
@@ -3687,6 +3831,7 @@ const UnifiedMapView = () => {
         setNeighborSquareSize={setNeighborSquareSize}
         ui={ui}
         onUIChange={handleUIChange}
+        onOpenMultiView={handleNavigateToMultiView}
       />
 
       {showAnalytics && (
@@ -3766,9 +3911,10 @@ const UnifiedMapView = () => {
         </Suspense>
       )}
 
-      {shouldRenderSidebar && (
-        <Suspense fallback={null}>
-          <UnifiedMapSidebar
+      <div className="flex flex-1 min-h-0">
+        {shouldRenderSidebar && (
+          <Suspense fallback={null}>
+            <UnifiedMapSidebar
         open={isSideOpen}
         pciThreshold={pciThreshold}
         supportsSessionFilters={isSampleMode}
@@ -3816,6 +3962,7 @@ const UnifiedMapView = () => {
         ui={ui}
         pciRange={pciRange}
         onUIChange={handleUIChange}
+        onOpenMultiView={handleNavigateToMultiView}
         showPolygons={showPolygons}
         setShowPolygons={setShowPolygons}
         polygonSource={polygonSource}
@@ -3874,20 +4021,10 @@ const UnifiedMapView = () => {
         setCoverageViolationThreshold={setCoverageViolationThreshold}
         onAddSiteClick={handleAddSiteClick}
       />
-        </Suspense>
-      )}
+          </Suspense>
+        )}
 
-      <div className="flex-grow relative overflow-hidden">
-        <div className="absolute top-18 right-3 z-10">
-          <button
-            onClick={handleNavigateToMultiView}
-            className="bg-white p-2 rounded-md shadow-md hover:bg-gray-100 text-gray-700 flex items-center justify-center border border-gray-200"
-            title="Open Multi View"
-          >
-            <LayoutGrid size={20} />
-          </button>
-        </div>
-
+      <div className="flex-1 relative overflow-hidden min-w-0">
         <LoadingProgress
           progress={sampleProgress}
           loading={sampleLoading && enableDataToggle && dataToggle === "sample"}
@@ -3910,7 +4047,7 @@ const UnifiedMapView = () => {
         )}
 
         <SiteLegend
-          enabled={enableSiteToggle && !isFetchedStoredGridVisible}
+          enabled={enableSiteToggle && !isStoredGridOverlayVisible}
           sites={manualSiteData}
           colorMode={modeMethod}
           isLoading={manualSiteLoading}
@@ -3978,11 +4115,13 @@ const UnifiedMapView = () => {
               neighborData={filteredNeighbors}
               showNeighbors={showSessionNeighbors}
               neighborSquareSize={neighborSquareSize}
-              neighborOpacity={0.5}
+              neighborOpacity={0.45}
               onNeighborClick={(neighbor) => { }}
               onGridCellsStatsChange={setGridCellStats}
               debugNeighbors={false}
               legendFilter={legendFilter}
+              drawingEnabled={ui.drawEnabled}
+              drawingShapeMode={ui.shapeMode}
             >
               <DrawingToolsLayer
                 map={mapRef.current}
@@ -4012,11 +4151,13 @@ const UnifiedMapView = () => {
                   filterPolygons={rawFilteringPolygons}
                   filterInsidePolygons={onlyInsidePolygons}
                   maxPoints={sectorPredictionGridPoints.length > 0 ? 120000 : 20000}
-                  enableGrid={lteGridEnabled || isFetchedStoredGridVisible}
+                  enableGrid={lteGridEnabled || isStoredGridOverlayVisible}
                   gridSizeMeters={lteGridSizeMeters || 50}
                   gridAggregationMethod={lteGridAggregationMethod || "median"}
                   deltaComparisonMode={isDeltaSiteGridMode}
-                  externalGridCells={storedDeltaGridCells}
+                  externalGridCells={
+                    isStoredGridOverlayVisible ? storedDeltaGridCells : EMPTY_LIST
+                  }
                   mlGridEnabled={mlGridEnabled}
                   mlGridSize={mlGridSize}
                   mlGridAggregation={mlGridAggregation}
@@ -4139,6 +4280,7 @@ const UnifiedMapView = () => {
             </MapWithMultipleCircles>
           )}
         </div>
+      </div>
       </div>
 
       {hoveredPolygon && hoverPosition && (

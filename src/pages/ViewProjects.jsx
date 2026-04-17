@@ -2,7 +2,8 @@
 import React, { useEffect, useState, useCallback, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "react-toastify";
-import { Map, Folder, Calendar, Building2, RefreshCw, Search, Eye, Delete, Trash } from "lucide-react";
+import { Map, Folder, Calendar, RefreshCw, Search, Eye, Trash } from "lucide-react";
+import { GoogleMap, PolygonF, useJsApiLoader } from "@react-google-maps/api";
 import {
   Card,
   CardContent,
@@ -13,15 +14,197 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import Spinner from "@/components/common/Spinner";
 import { mapViewApi } from "@/api/apiEndpoints";
-import { Remove } from "@mui/icons-material";
+import { parseWKTToPolygons } from "@/utils/wkt";
+import { GOOGLE_MAPS_LOADER_OPTIONS } from "@/lib/googleMapsLoader";
 import {
   readProjectsListCache,
   removeProjectFromProjectsCache,
   writeProjectsListCache,
 } from "@/utils/projectsCache";
 
+const normalizeLatLng = (input) => {
+  if (!input) return null;
+  if (Array.isArray(input) && input.length >= 2) {
+    const first = Number(input[0]);
+    const second = Number(input[1]);
+    if (!Number.isFinite(first) || !Number.isFinite(second)) return null;
+    const looksLikeLngLat = Math.abs(first) > 40 && Math.abs(second) < 40;
+    return looksLikeLngLat
+      ? { lat: second, lng: first }
+      : { lat: first, lng: second };
+  }
+
+  if (typeof input === "object") {
+    const lat = Number(input.lat ?? input.latitude ?? input.Lat ?? input.Latitude);
+    const lng = Number(input.lng ?? input.lon ?? input.longitude ?? input.Lng ?? input.Longitude);
+    if (Number.isFinite(lat) && Number.isFinite(lng)) {
+      return { lat, lng };
+    }
+  }
+
+  return null;
+};
+
+const extractPolygonFromGeometryObject = (geometryObject) => {
+  if (!geometryObject || typeof geometryObject !== "object") return [];
+
+  if (geometryObject.type === "Polygon" && Array.isArray(geometryObject.coordinates)) {
+    const outerRing = geometryObject.coordinates[0] || [];
+    return outerRing.map(normalizeLatLng).filter(Boolean);
+  }
+
+  if (geometryObject.type === "MultiPolygon" && Array.isArray(geometryObject.coordinates)) {
+    const outerRing = geometryObject.coordinates[0]?.[0] || [];
+    return outerRing.map(normalizeLatLng).filter(Boolean);
+  }
+
+  if (Array.isArray(geometryObject.polygon)) {
+    return geometryObject.polygon.map(normalizeLatLng).filter(Boolean);
+  }
+
+  return [];
+};
+
+const getProjectPolygonPoints = (project) => {
+  const geometryCandidates = [
+    project?.geometry,
+    project?.Geometry,
+    project?.geometry_wkt,
+    project?.GeometryWkt,
+    project?.region_wkt,
+    project?.RegionWkt,
+    project?.region_blob_b64,
+    project?.regionBlobB64,
+    project?.wkt,
+    project?.WKT,
+    project?.polygon_wkt,
+    project?.polygonWkt,
+    project?.project_polygon,
+    project?.project_geometry,
+  ];
+
+  for (const candidate of geometryCandidates) {
+    if (!candidate) continue;
+
+    if (typeof candidate === "string") {
+      const raw = candidate.trim();
+      if (!raw) continue;
+
+      if (/^(POLYGON|MULTIPOLYGON)/i.test(raw)) {
+        const parsed = parseWKTToPolygons(raw);
+        const firstPath = parsed?.[0]?.paths?.[0];
+        if (Array.isArray(firstPath) && firstPath.length >= 3) {
+          return firstPath;
+        }
+      }
+
+      if ((raw.startsWith("{") && raw.endsWith("}")) || (raw.startsWith("[") && raw.endsWith("]"))) {
+        try {
+          const parsedJson = JSON.parse(raw);
+          const points = extractPolygonFromGeometryObject(parsedJson);
+          if (points.length >= 3) return points;
+        } catch {
+          // Ignore non-json strings
+        }
+      }
+    } else if (typeof candidate === "object") {
+      const points = extractPolygonFromGeometryObject(candidate);
+      if (points.length >= 3) return points;
+    }
+  }
+
+  return [];
+};
+
+const getPolygonCenter = (points) => {
+  if (!Array.isArray(points) || points.length === 0) {
+    return { lat: 20.5937, lng: 78.9629 };
+  }
+  const acc = points.reduce(
+    (sum, point) => ({
+      lat: sum.lat + point.lat,
+      lng: sum.lng + point.lng,
+    }),
+    { lat: 0, lng: 0 },
+  );
+  return {
+    lat: acc.lat / points.length,
+    lng: acc.lng / points.length,
+  };
+};
+
+const ProjectPolygonPreview = ({ points, mapsReady, mapsError }) => {
+  if (!points?.length || points.length < 3) {
+    return (
+      <div className="h-40 rounded-md border border-dashed border-slate-300 bg-slate-50 flex items-center justify-center text-sm text-slate-500">
+        No polygon found
+      </div>
+    );
+  }
+
+  if (mapsError) {
+    return (
+      <div className="h-40 rounded-md border border-dashed border-amber-300 bg-amber-50 flex items-center justify-center text-sm text-amber-700 px-2 text-center">
+        Google Maps failed to load
+      </div>
+    );
+  }
+
+  if (!mapsReady) {
+    return (
+      <div className="h-40 rounded-md border border-slate-200 bg-slate-50 flex items-center justify-center text-sm text-slate-500">
+        Loading map...
+      </div>
+    );
+  }
+
+  const center = getPolygonCenter(points);
+  const onMapLoad = (map) => {
+    if (!window.google?.maps || !Array.isArray(points) || points.length < 3) return;
+    const bounds = new window.google.maps.LatLngBounds();
+    points.forEach((point) => bounds.extend(point));
+    map.fitBounds(bounds, 18);
+  };
+
+  return (
+    <div className="h-40 rounded-md border border-slate-200 bg-slate-50 overflow-hidden">
+      <GoogleMap
+        mapContainerClassName="h-full w-full"
+        center={center}
+        zoom={13}
+        onLoad={onMapLoad}
+        options={{
+          mapTypeControl: false,
+          streetViewControl: false,
+          fullscreenControl: false,
+          zoomControl: false,
+          clickableIcons: false,
+          gestureHandling: "cooperative",
+        }}
+      >
+        <PolygonF
+          paths={points}
+          options={{
+            strokeColor: "#2563eb",
+            strokeOpacity: 1,
+            strokeWeight: 2,
+            fillColor: "#2563eb",
+            fillOpacity: 0.2,
+            clickable: false,
+            editable: false,
+            draggable: false,
+          }}
+        />
+      </GoogleMap>
+    </div>
+  );
+};
+
 const ViewProjectsPage = () => {
   const navigate = useNavigate();
+  const { isLoaded: mapsReady, loadError: mapsError } = useJsApiLoader(
+    GOOGLE_MAPS_LOADER_OPTIONS,
+  );
   const initialCachedProjects = useMemo(() => {
     return readProjectsListCache();
   }, []);
@@ -30,7 +213,81 @@ const ViewProjectsPage = () => {
   const [loading, setLoading] = useState(initialCachedProjects.length === 0);
   const [searchQuery, setSearchQuery] = useState("");
 
-  const formatDate = (d) => (d ? new Date(d).toLocaleDateString() : "N/A");
+  const formatDate = (value) => {
+    if (value == null) return "N/A";
+
+    // Handle object-shaped date payloads from backend serializers
+    if (typeof value === "object") {
+      const candidates = [
+        value.$date,
+        value.date,
+        value.Date,
+        value.value,
+        value.Value,
+        value.created_on,
+        value.createdOn,
+      ];
+
+      // Support structures like { year, month, day } or { Year, Month, Day }
+      const year = Number(value.year ?? value.Year);
+      const month = Number(value.month ?? value.Month);
+      const day = Number(value.day ?? value.Day);
+      if (Number.isFinite(year) && Number.isFinite(month) && Number.isFinite(day)) {
+        const parsed = new Date(year, month - 1, day);
+        if (!Number.isNaN(parsed.getTime())) {
+          return parsed.toLocaleDateString(undefined, {
+            year: "numeric",
+            month: "short",
+            day: "2-digit",
+          });
+        }
+      }
+
+      const nested = candidates.find((c) => c != null && String(c).trim() !== "");
+      if (nested != null) {
+        return formatDate(nested);
+      }
+    }
+
+    const raw = String(value).trim();
+    if (!raw || raw.toLowerCase() === "null" || raw.toLowerCase() === "undefined") {
+      return "N/A";
+    }
+
+    const direct = new Date(raw);
+    if (!Number.isNaN(direct.getTime())) {
+      return direct.toLocaleDateString(undefined, {
+        year: "numeric",
+        month: "short",
+        day: "2-digit",
+      });
+    }
+
+    // Handle common DB string formats like "dd-MM-yyyy HH:mm:ss" or "dd/MM/yyyy HH:mm:ss"
+    const match = raw.match(
+      /^(\d{1,2})[-/](\d{1,2})[-/](\d{2,4})(?:\s+(\d{1,2}):(\d{1,2})(?::(\d{1,2}))?)?$/,
+    );
+    if (match) {
+      const day = Number(match[1]);
+      const month = Number(match[2]);
+      const year = Number(match[3].length === 2 ? `20${match[3]}` : match[3]);
+      const hours = Number(match[4] ?? 0);
+      const minutes = Number(match[5] ?? 0);
+      const seconds = Number(match[6] ?? 0);
+      const parsed = new Date(year, month - 1, day, hours, minutes, seconds);
+      if (!Number.isNaN(parsed.getTime())) {
+        return parsed.toLocaleDateString(undefined, {
+          year: "numeric",
+          month: "short",
+          day: "2-digit",
+        });
+      }
+    }
+
+    // Avoid rendering [object Object] in UI
+    if (raw === "[object Object]") return "N/A";
+    return raw;
+  };
 
   const fetchProjects = useCallback(async ({ background = false } = {}) => {
     if (!background) setLoading(true);
@@ -162,84 +419,59 @@ const ViewProjectsPage = () => {
               <Spinner />
             </div>
           ) : filteredProjects.length ? (
-            <div className="max-h-[500px] overflow-y-auto">
-              <table className="w-full border-collapse">
-                <thead className="sticky top-0 bg-gray-100">
-                  <tr>
-                     <th className="text-left p-3 font-semibold text-gray-700 border-b">
-                      <div className="flex items-center gap-2">
-                        Id
-                      </div>
-                    </th>
-                    <th className="text-left p-3 font-semibold text-gray-700 border-b">
-                      <div className="flex items-center gap-2">
-                        <Map className="h-4 w-4" />
-                        Project Name
-                      </div>
-                    </th>
-                    {/* <th className="text-left p-3 font-semibold text-gray-700 border-b">
-                      <div className="flex items-center gap-2">
-                        <Building2 className="h-4 w-4" />
-                        Provider
-                      </div>
-                    </th> */}
-                    <th className="text-left p-3 font-semibold text-gray-700 border-b">
-                      <div className="flex items-center gap-2">
-                        <Calendar className="h-4 w-4" />
-                        Created On
-                      </div>
-                    </th>
-                    <th className="text-center p-3 font-semibold text-gray-700 border-b">
-                      Actions
-                    </th>
-                    <th className="text-center p-3 font-semibold text-gray-700 border-b">
-                      Delete
-                    </th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filteredProjects.map((project) => (
-                    <tr
-                      key={project.id}
-                      className="hover:bg-gray-50 transition-colors border-b last:border-b-0"
-                    >
-                      <td className="p-3">
-                        <span className="font-medium text-gray-900">
-                          {project.id}
-                        </span>
-                      </td>
-                      <td className="p-3">
-                        <span className="font-medium text-gray-900">
-                          {project.project_name}
-                        </span>
-                      </td>
-                      
-                      <td className="p-3 text-gray-600">
-                        {formatDate(project.created_on)}
-                      </td>
-                      <td className="p-3 text-center">
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => handleViewOnMap(project)}
-                        >
-                          <Eye className="h-4 w-4 mr-2" />
-                          View on Map
-                        </Button>
-                      </td>
-                      <td className="p-3 text-center">
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => handleDeleteProject(project)}
-                        >
-                          <Trash  color="red"/>
-                        </Button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+            <div className="max-h-[70vh] overflow-y-auto pr-1">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                {filteredProjects.map((project) => {
+                  const polygonPoints = getProjectPolygonPoints(project);
+                  return (
+                    <Card key={project.id} className="border-slate-200 shadow-sm aspect-square flex flex-col">
+                      <CardHeader className="pb-3">
+                        <CardTitle className="text-base">
+                          <div className="flex items-start justify-between gap-3">
+                            <div>
+                              <p className="font-semibold text-slate-900">
+                                {project.project_name || "Untitled Project"}
+                              </p>
+                              <p className="text-xs text-slate-500 mt-1">Project ID: {project.id}</p>
+                            </div>
+                            <div className="text-xs text-slate-500 flex items-center gap-1">
+                              <Calendar className="h-3.5 w-3.5" />
+                               {formatDate(project.created_on)}
+                            </div>
+                          </div>
+                        </CardTitle>
+                      </CardHeader>
+                      <CardContent className="space-y-4 flex-1 flex flex-col">
+                        <div className="flex-1 min-h-0">
+                          <ProjectPolygonPreview
+                            points={polygonPoints}
+                            mapsReady={mapsReady}
+                            mapsError={mapsError}
+                          />
+                        </div>
+
+                        <div className="flex items-center justify-end gap-2 mt-auto">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => handleViewOnMap(project)}
+                          >
+                            <Eye className="h-4 w-4 mr-2" />
+                            View on Map
+                          </Button>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => handleDeleteProject(project)}
+                          >
+                            <Trash color="red" />
+                          </Button>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  );
+                })}
+              </div>
             </div>
           ) : (
             <div className="flex flex-col items-center justify-center h-40 text-gray-500">

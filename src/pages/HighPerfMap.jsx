@@ -44,7 +44,7 @@ import { COLOR_SCHEMES } from "@/utils/metrics";
 
 const MAP_ID = import.meta.env.VITE_GOOGLE_MAPS_MAP_ID;
 const DEFAULT_CENTER = { lat: 28.6139, lng: 77.209 };
-const MAP_CONTAINER_STYLE = { height: "calc(100vh - 64px)", width: "100%" };
+const MAP_CONTAINER_STYLE = { height: "100%", width: "100%" };
 
 const toYmdLocal = (d) => {
   if (!(d instanceof Date)) return "";
@@ -872,11 +872,11 @@ const rectCoords = [
     return options;
   }, [ui.basemapStyle]);
 
-  if (loadError) return <div className="flex items-center justify-center h-screen text-red-600">Error loading Google Maps.</div>;
-  if (!isLoaded) return <div className="flex items-center justify-center h-screen text-gray-600">Loading map...</div>;
+  if (loadError) return <div className="flex items-center justify-center h-full text-red-600">Error loading Google Maps.</div>;
+  if (!isLoaded) return <div className="flex items-center justify-center h-full text-gray-600">Loading map...</div>;
 
   return (
-    <div className="h-screen w-full flex flex-col bg-white">
+    <div className="h-full min-h-0 w-full flex flex-col bg-white overflow-hidden">
       <MapHeader
         ui={ui}
         onUIChange={handleUIChange}

@@ -42,6 +42,16 @@ export const generalApi = {
     try {
       return await pythonApi.get("/health");
     } catch (error) {
+      const status = error?.response?.status;
+      if (status === 404) {
+        try {
+          // Some Python deployments expose `/` instead of `/health`.
+          return await pythonApi.get("/");
+        } catch (fallbackError) {
+          console.error("Python backend fallback health check failed:", fallbackError);
+          throw fallbackError;
+        }
+      }
       console.error("Python backend health check failed:", error);
       throw error;
     }
@@ -1214,20 +1224,26 @@ export const excelApi = {
 };
 
 
-export const checkAllServices = async () => {
+export const checkAllServices = async (options = {}) => {
+  const includePython = options?.includePython === true;
+
   try {
-    const [pythonHealth, csharpHealth] = await Promise.allSettled([
-      generalApi.healthCheck(),
+    const checks = [
+      includePython ? generalApi.healthCheck() : Promise.resolve({ skipped: true }),
       authApi.checkStatus(),
-    ]);
+    ];
+    const [pythonHealth, csharpHealth] = await Promise.allSettled(checks);
 
     return {
       python: {
-        healthy: pythonHealth.status === "fulfilled",
+        enabled: includePython,
+        healthy: includePython ? pythonHealth.status === "fulfilled" : true,
         data: pythonHealth.value,
-        error: pythonHealth.reason?.message,
+        error: includePython ? pythonHealth.reason?.message : undefined,
+        skipped: !includePython,
       },
       csharp: {
+        enabled: true,
         healthy: csharpHealth.status === "fulfilled",
         data: csharpHealth.value,
         error: csharpHealth.reason?.message,
@@ -1236,8 +1252,8 @@ export const checkAllServices = async () => {
   } catch (error) {
     console.error("Service check failed:", error);
     return {
-      python: { healthy: false, error: error.message },
-      csharp: { healthy: false, error: error.message },
+      python: { enabled: includePython, healthy: !includePython, error: includePython ? error.message : undefined, skipped: !includePython },
+      csharp: { enabled: true, healthy: false, error: error.message },
     };
   }
 };

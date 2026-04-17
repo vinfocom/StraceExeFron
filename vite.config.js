@@ -25,6 +25,30 @@ export default defineConfig({
       "@": path.resolve(__dirname, "./src"),
     },
   },
+  server: {
+    proxy: {
+      "/api": {
+        target: "http://localhost:5224",
+        changeOrigin: true,
+        secure: false,
+      },
+      "/Admin": {
+        target: "http://localhost:5224",
+        changeOrigin: true,
+        secure: false,
+      },
+      "/Home": {
+        target: "http://localhost:5224",
+        changeOrigin: true,
+        secure: false,
+      },
+      "/ExcelUpload": {
+        target: "http://localhost:5224",
+        changeOrigin: true,
+        secure: false,
+      },
+    },
+  },
   build: {
     outDir: "dist",
     assetsDir: "assets",

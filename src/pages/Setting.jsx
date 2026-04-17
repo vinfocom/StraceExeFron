@@ -125,11 +125,11 @@ const ThresholdRow = memo(({ row, index, onChange, onDelete }) => {
     const currentMax = parseNumber(maxStr);
 
     return (
-        <div className="grid grid-cols-12 gap-2 items-center p-3 bg-slate-700/50 rounded-lg hover:bg-slate-700/70 transition-colors">
+        <div className="grid grid-cols-12 gap-2 items-center p-3.5 bg-slate-900/70 border border-slate-600/70 rounded-xl hover:border-blue-500/40 hover:bg-slate-900 transition-all">
             <div className="col-span-2">
-                <label className="text-xs text-gray-400 block mb-1">Min</label>
+                <label className="text-xs text-slate-300 block mb-1">Min</label>
                 <Input
-                    className="text-white bg-slate-800 border-slate-600 focus:border-blue-500"
+                    className="text-white bg-slate-950 border-slate-600 focus:border-blue-500 rounded-lg"
                     type="number"
                     step="any"
                     value={minStr}
@@ -148,9 +148,9 @@ const ThresholdRow = memo(({ row, index, onChange, onDelete }) => {
             </div>
 
             <div className="col-span-2">
-                <label className="text-xs text-gray-400 block mb-1">Max</label>
+                <label className="text-xs text-slate-300 block mb-1">Max</label>
                 <Input
-                    className="text-white bg-slate-800 border-slate-600 focus:border-blue-500"
+                    className="text-white bg-slate-950 border-slate-600 focus:border-blue-500 rounded-lg"
                     type="number"
                     step="any"
                     value={maxStr}
@@ -169,7 +169,7 @@ const ThresholdRow = memo(({ row, index, onChange, onDelete }) => {
             </div>
 
             <div className="col-span-3">
-                <label className="text-xs text-gray-400 block mb-1">Color</label>
+                <label className="text-xs text-slate-300 block mb-1">Color</label>
                 <div className="flex items-center gap-2">
                     <Input
                         type="color"
@@ -178,10 +178,10 @@ const ThresholdRow = memo(({ row, index, onChange, onDelete }) => {
                             setColor(e.target.value);
                             syncToParent({ color: e.target.value });
                         }}
-                        className="w-10 h-9 p-1 cursor-pointer rounded border-slate-600"
+                        className="w-10 h-9 p-1 cursor-pointer rounded-lg border-slate-600 bg-slate-950"
                     />
                     <Input
-                        className="text-white bg-slate-800 border-slate-600 flex-1 text-xs"
+                        className="text-white bg-slate-950 border-slate-600 flex-1 text-xs rounded-lg"
                         placeholder="#00ff00"
                         value={color}
                         onChange={e => {
@@ -194,26 +194,11 @@ const ThresholdRow = memo(({ row, index, onChange, onDelete }) => {
                 </div>
             </div>
 
-            <div className="col-span-3">
-                <label className="text-xs text-gray-400 block mb-1">Label</label>
-                <Input
-                    className="text-white bg-slate-800 border-slate-600 focus:border-blue-500"
-                    placeholder="e.g., Good, Poor"
-                    value={label}
-                    onChange={e => {
-                        const next = e.target.value;
-                        setLabel(next);
-                        syncToParent({ label: next });
-                    }}
-                    onBlur={() => syncToParent({ label })}
-                />
-            </div>
-
-            <div className="col-span-2 flex items-end gap-2">
+            <div className="col-span-4 flex items-end gap-2">
                 <div className="flex-1">
-                    <label className="text-xs text-gray-400 block mb-1">Range</label>
+                    <label className="text-xs text-slate-300 block mb-1">Range</label>
                     <div 
-                        className="text-xs px-2 py-2 rounded text-center font-medium truncate"
+                        className="text-xs px-2 py-2 rounded-lg text-center font-semibold truncate border"
                         style={{ backgroundColor: color + '40', color: color }}
                     >
                         {generateRangeString(currentMin, currentMax) || 'N/A'}
@@ -223,7 +208,7 @@ const ThresholdRow = memo(({ row, index, onChange, onDelete }) => {
                     variant="ghost"
                     size="icon"
                     onClick={() => onDelete(index)}
-                    className="h-9 w-9 text-red-400 hover:text-red-300 hover:bg-red-900/30"
+                    className="h-9 w-9 text-rose-300 hover:text-rose-200 hover:bg-rose-900/40 rounded-lg"
                 >
                     <X className="h-4 w-4" />
                 </Button>
@@ -278,11 +263,11 @@ const ThresholdForm = memo(({ paramKey, paramName, initialData, onUpdate, onClos
     }, [localData, onUpdate]);
 
     return (
-        <div className="mt-4 p-4 border border-slate-600 rounded-lg bg-slate-800">
-            <div className="flex justify-between items-center mb-4">
+        <div className="mt-5 p-5 border border-slate-700 rounded-2xl bg-gradient-to-b from-slate-900 to-slate-950 shadow-lg">
+            <div className="flex justify-between items-start mb-5">
                 <div>
-                    <h3 className="text-lg font-semibold text-white">{paramName}</h3>
-                    <p className="text-xs text-gray-400 mt-1">
+                    <h3 className="text-lg font-semibold tracking-wide text-white">{paramName}</h3>
+                    <p className="text-xs text-slate-400 mt-1">
                         {localData.length} threshold range(s) configured
                     </p>
                 </div>
@@ -291,13 +276,13 @@ const ThresholdForm = memo(({ paramKey, paramName, initialData, onUpdate, onClos
                         variant="ghost" 
                         size="sm" 
                         onClick={sortByMin}
-                        className="text-gray-400 hover:text-white"
+                        className="text-slate-300 hover:text-white hover:bg-slate-800 rounded-lg"
                         disabled={localData.length < 2}
                     >
                         <ArrowUpDown className="h-4 w-4 mr-1" />
                         Sort
                     </Button>
-                    <Button variant="ghost" size="icon" onClick={onClose}>
+                    <Button variant="ghost" size="icon" onClick={onClose} className="rounded-lg hover:bg-slate-800">
                         <X className="h-4 w-4" />
                     </Button>
                 </div>
@@ -316,27 +301,27 @@ const ThresholdForm = memo(({ paramKey, paramName, initialData, onUpdate, onClos
             </div>
 
             {localData.length === 0 && (
-                <div className="text-center py-8 text-gray-400 border-2 border-dashed border-slate-600 rounded-lg">
+                <div className="text-center py-8 text-slate-400 border-2 border-dashed border-slate-600/70 rounded-xl bg-slate-900/40">
                     <p>No thresholds configured</p>
                     <p className="text-xs mt-1">Click "Add Row" to create a threshold range</p>
                 </div>
             )}
 
             <div className="flex gap-2 mt-4">
-                <Button onClick={addRow} variant="outline" className="flex-1 border-slate-600 hover:bg-slate-700">
+                <Button onClick={addRow} variant="outline" className="flex-1 border-slate-500 bg-slate-800 hover:bg-slate-700 text-slate-100 rounded-lg">
                     <Plus className="h-4 w-4 mr-1" />
                     Add Row
                 </Button>
             </div>
 
             {localData.length > 0 && (
-                <div className="mt-4 pt-4 border-t border-slate-600">
-                    <p className="text-xs text-gray-400 mb-2">Preview:</p>
+                <div className="mt-4 pt-4 border-t border-slate-700">
+                    <p className="text-xs text-slate-400 mb-2 uppercase tracking-wide">Preview</p>
                     <div className="flex flex-wrap gap-1">
                         {localData.map((row) => (
                             <div
                                 key={row.id}
-                                className="px-2 py-1 rounded text-xs font-medium"
+                                className="px-2 py-1 rounded-lg text-xs font-semibold"
                                 style={{ 
                                     backgroundColor: row.color + '30', 
                                     color: row.color,
@@ -368,7 +353,7 @@ const VoLTECallForm = memo(({ value, setValue, onClose }) => {
             } else if (typeof value === 'string') {
                 try {
                     parsed = JSON.parse(value);
-                } catch (e) {
+                } catch {
                     parsed = [];
                 }
             }
@@ -409,11 +394,11 @@ const VoLTECallForm = memo(({ value, setValue, onClose }) => {
     }, [localData, setValue]);
 
     return (
-        <div className="mt-4 p-4 border border-slate-600 rounded-lg bg-slate-800">
-            <div className="flex justify-between items-center mb-4">
+        <div className="mt-5 p-5 border border-slate-700 rounded-2xl bg-gradient-to-b from-slate-900 to-slate-950 shadow-lg">
+            <div className="flex justify-between items-start mb-5">
                 <div>
-                    <h3 className="text-lg font-semibold text-white">VoLTE Call</h3>
-                    <p className="text-xs text-gray-400 mt-1">
+                    <h3 className="text-lg font-semibold tracking-wide text-white">VoLTE Call</h3>
+                    <p className="text-xs text-slate-400 mt-1">
                         {localData.length} threshold range(s) configured
                     </p>
                 </div>
@@ -422,13 +407,13 @@ const VoLTECallForm = memo(({ value, setValue, onClose }) => {
                         variant="ghost" 
                         size="sm" 
                         onClick={sortByMin}
-                        className="text-gray-400 hover:text-white"
+                        className="text-slate-300 hover:text-white hover:bg-slate-800 rounded-lg"
                         disabled={localData.length < 2}
                     >
                         <ArrowUpDown className="h-4 w-4 mr-1" />
                         Sort
                     </Button>
-                    <Button variant="ghost" size="icon" onClick={onClose}>
+                    <Button variant="ghost" size="icon" onClick={onClose} className="rounded-lg hover:bg-slate-800">
                         <X className="h-4 w-4" />
                     </Button>
                 </div>
@@ -447,26 +432,26 @@ const VoLTECallForm = memo(({ value, setValue, onClose }) => {
             </div>
 
             {localData.length === 0 && (
-                <div className="text-center py-8 text-gray-400 border-2 border-dashed border-slate-600 rounded-lg">
+                <div className="text-center py-8 text-slate-400 border-2 border-dashed border-slate-600/70 rounded-xl bg-slate-900/40">
                     <p>No thresholds configured</p>
                 </div>
             )}
 
             <div className="flex gap-2 mt-4">
-                <Button onClick={addRow} variant="outline" className="flex-1 border-slate-600 hover:bg-slate-700">
+                <Button onClick={addRow} variant="outline" className="flex-1 border-slate-500 bg-slate-800 hover:bg-slate-700 text-slate-100 rounded-lg">
                     <Plus className="h-4 w-4 mr-1" />
                     Add Row
                 </Button>
             </div>
 
             {localData.length > 0 && (
-                <div className="mt-4 pt-4 border-t border-slate-600">
-                    <p className="text-xs text-gray-400 mb-2">Preview:</p>
+                <div className="mt-4 pt-4 border-t border-slate-700">
+                    <p className="text-xs text-slate-400 mb-2 uppercase tracking-wide">Preview</p>
                     <div className="flex flex-wrap gap-1">
                         {localData.map((row) => (
                             <div
                                 key={row.id}
-                                className="px-2 py-1 rounded text-xs font-medium"
+                                className="px-2 py-1 rounded-lg text-xs font-semibold"
                                 style={{ 
                                     backgroundColor: row.color + '30', 
                                     color: row.color,
@@ -502,15 +487,15 @@ const CoverageHoleForm = memo(({ value, setValue, onClose }) => {
     const currentValue = parseNumber(localValueStr);
 
     return (
-        <div className="mt-4 p-4 border border-slate-600 rounded-lg bg-slate-800">
-            <div className="flex justify-between items-center mb-4">
+        <div className="mt-5 p-5 border border-slate-700 rounded-2xl bg-gradient-to-b from-slate-900 to-slate-950 shadow-lg">
+            <div className="flex justify-between items-start mb-5">
                 <div>
-                    <h3 className="text-lg font-semibold text-white">Coverage Hole</h3>
-                    <p className="text-xs text-gray-400 mt-1">
+                    <h3 className="text-lg font-semibold tracking-wide text-white">Coverage Hole</h3>
+                    <p className="text-xs text-slate-400 mt-1">
                         RSRP threshold below which is considered a coverage hole
                     </p>
                 </div>
-                <Button variant="ghost" size="icon" onClick={onClose}>
+                <Button variant="ghost" size="icon" onClick={onClose} className="rounded-lg hover:bg-slate-800">
                     <X className="h-4 w-4" />
                 </Button>
             </div>
@@ -527,10 +512,10 @@ const CoverageHoleForm = memo(({ value, setValue, onClose }) => {
                             handleBlur();
                         }
                     }}
-                    className="w-32 text-white bg-slate-700 border-slate-600"
+                    className="w-32 text-white bg-slate-950 border-slate-600 rounded-lg"
                 />
-                <span className="text-gray-400 text-sm">dBm</span>
-                <div className="text-xs text-gray-500">
+                <span className="text-slate-300 text-sm font-medium">dBm</span>
+                <div className="text-xs text-slate-500">
                     (Values below {currentValue} dBm will be marked as coverage holes)
                 </div>
             </div>
@@ -560,8 +545,8 @@ const parseThresholdData = (data) => {
                     parsed = typeof jsonString === 'object' 
                         ? (Array.isArray(jsonString) ? jsonString : [jsonString])
                         : JSON.parse(jsonString);
-                } catch (e) {
-                    console.error(`Error parsing ${key}:`, e);
+                } catch (error) {
+                    console.error(`Error parsing ${key}:`, error);
                     parsed = [];
                 }
             }
@@ -585,7 +570,7 @@ const parseThresholdData = (data) => {
                     parsed = typeof jsonString === 'object' 
                         ? (Array.isArray(jsonString) ? jsonString : [jsonString])
                         : JSON.parse(jsonString);
-                } catch (e) {
+                } catch {
                     parsed = [];
                 }
             }
@@ -602,7 +587,7 @@ const parseThresholdData = (data) => {
             volteCallData = typeof data.volte_call === 'string' 
                 ? JSON.parse(data.volte_call) 
                 : (Array.isArray(data.volte_call) ? data.volte_call : []);
-        } catch (e) {
+        } catch {
             volteCallData = [];
         }
     }
@@ -755,7 +740,7 @@ const SettingsPage = ({ onSaveSuccess }) => {
 
     if (loading) {
         return (
-            <div className="flex items-center justify-center h-full w-full bg-gray-800">
+            <div className="flex items-center justify-center h-full w-full bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950">
                 <Spinner />
             </div>
         );
@@ -763,7 +748,7 @@ const SettingsPage = ({ onSaveSuccess }) => {
 
     if (!thresholds) {
         return (
-            <div className="flex items-center justify-center h-full w-full bg-gray-800 text-white">
+            <div className="flex items-center justify-center h-full w-full bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 text-white">
                 <div className="text-center">
                     <p className="text-xl mb-4">Failed to load settings</p>
                     <Button onClick={() => window.location.reload()}>Retry</Button>
@@ -773,39 +758,18 @@ const SettingsPage = ({ onSaveSuccess }) => {
     }
 
     return (
-        <div className="bg-gray-800 text-white h-full w-full p-4 overflow-auto">
-            <div className="max-w-5xl mx-auto">
-                <div className="flex items-center justify-between mb-6">
-                    <h1 className="text-2xl font-bold">Settings</h1>
-                    <Button 
-                        onClick={handleSave} 
-                        disabled={saving}
-                        className="bg-blue-600 hover:bg-blue-700"
-                    >
-                        {saving ? (
-                            <>
-                                <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
-                                Saving...
-                            </>
-                        ) : (
-                            <>
-                                <Save className="h-4 w-4 mr-2" />
-                                Save All
-                            </>
-                        )}
-                    </Button>
-                </div>
-
-                <Card className="bg-slate-900 border-slate-700">
-                    <CardHeader>
-                        <CardTitle className="text-white">Threshold Configuration</CardTitle>
-                        <CardDescription className="text-gray-400">
+        <div className="bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 text-white min-h-screen w-full p-4 md:p-6 overflow-auto">
+            <div className="max-w-6xl mx-auto">
+                <Card className="bg-slate-900/80 border-slate-700/80 rounded-2xl shadow-xl overflow-hidden">
+                    <CardHeader className="border-b border-slate-700/70 bg-slate-900/90">
+                        <CardTitle className="text-white text-xl tracking-tight">Threshold Configuration</CardTitle>
+                        <CardDescription className="text-slate-400">
                             Configure min/max value ranges and colors for map visualization
                         </CardDescription>
                     </CardHeader>
 
-                    <CardContent>
-                        <div className="flex flex-wrap gap-2">
+                    <CardContent className="pt-5">
+                        <div className="flex flex-wrap gap-2.5">
                             {Object.entries(allParameters).map(([key, name]) => {
                                 const count = getParamCount(key);
                                 const isActive = activeParam === key;
@@ -816,13 +780,13 @@ const SettingsPage = ({ onSaveSuccess }) => {
                                         variant={isActive ? "default" : "outline"}
                                         onClick={() => toggleParam(key)}
                                         className={isActive 
-                                            ? "bg-blue-600 hover:bg-blue-700" 
-                                            : "border-slate-600 hover:bg-slate-700 text-gray-300"
+                                            ? "bg-blue-600 hover:bg-blue-700 text-white ring-2 ring-blue-400/50 rounded-full px-4"
+                                            : "border-slate-500 !bg-slate-600 hover:!bg-slate-700 text-gray-100 rounded-full px-4"
                                         }
                                     >
                                         {name}
                                         {count !== null && count > 0 && (
-                                            <span className="ml-2 px-1.5 py-0.5 text-xs bg-blue-500 rounded-full">
+                                            <span className="ml-2 px-1.5 py-0.5 text-[10px] bg-slate-900/50 border border-slate-300/20 rounded-full">
                                                 {count}
                                             </span>
                                         )}
@@ -859,8 +823,8 @@ const SettingsPage = ({ onSaveSuccess }) => {
                         )}
 
                         {!activeParam && (
-                            <div className="mt-6 p-4 bg-slate-800 rounded-lg border border-slate-700">
-                                <h4 className="text-sm font-semibold text-gray-300 mb-3">
+                            <div className="mt-6 p-5 bg-slate-900/70 rounded-2xl border border-slate-700/70">
+                                <h4 className="text-sm font-semibold text-slate-200 mb-3 uppercase tracking-wide">
                                     Current Configuration Summary
                                 </h4>
                                 <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
@@ -869,10 +833,10 @@ const SettingsPage = ({ onSaveSuccess }) => {
                                             return (
                                                 <div 
                                                     key={key} 
-                                                    className="p-3 bg-slate-700/50 rounded cursor-pointer hover:bg-slate-700"
+                                                    className="p-3.5 bg-gradient-to-br from-slate-800 to-slate-900 border border-slate-700 rounded-xl cursor-pointer hover:border-blue-500/40 transition-all"
                                                     onClick={() => toggleParam(key)}
                                                 >
-                                                    <div className="text-xs text-gray-400">{name}</div>
+                                                    <div className="text-xs text-slate-400">{name}</div>
                                                     <div className="text-lg font-bold text-white">
                                                         {thresholds.coveragehole} dBm
                                                     </div>
@@ -884,10 +848,10 @@ const SettingsPage = ({ onSaveSuccess }) => {
                                         return (
                                             <div 
                                                 key={key} 
-                                                className="p-3 bg-slate-700/50 rounded cursor-pointer hover:bg-slate-700"
+                                                className="p-3.5 bg-gradient-to-br from-slate-800 to-slate-900 border border-slate-700 rounded-xl cursor-pointer hover:border-blue-500/40 transition-all"
                                                 onClick={() => toggleParam(key)}
                                             >
-                                                <div className="text-xs text-gray-400">{name}</div>
+                                                <div className="text-xs text-slate-400">{name}</div>
                                                 <div className="text-lg font-bold text-white">
                                                     {data.length} range{data.length !== 1 ? 's' : ''}
                                                 </div>
@@ -901,7 +865,7 @@ const SettingsPage = ({ onSaveSuccess }) => {
                                                             />
                                                         ))}
                                                         {data.length > 4 && (
-                                                            <span className="text-xs text-gray-400">+{data.length - 4}</span>
+                                                            <span className="text-xs text-slate-400">+{data.length - 4}</span>
                                                         )}
                                                     </div>
                                                 )}
@@ -913,8 +877,8 @@ const SettingsPage = ({ onSaveSuccess }) => {
                         )}
                     </CardContent>
 
-                    <CardFooter className="justify-between border-t border-slate-700 pt-4">
-                        <div className="text-xs text-gray-500">
+                    <CardFooter className="justify-between border-t border-slate-700/70 pt-4 bg-slate-900/90">
+                        <div className="text-xs text-slate-400">
                             User: {user?.name || 'Unknown'} (ID: {user?.id || 'N/A'}) | 
                             Threshold ID: {thresholds?.id || 'New'}
                             {thresholds?.isDefault === 1 ? ' (Default)' : ' (Custom)'}
@@ -922,7 +886,7 @@ const SettingsPage = ({ onSaveSuccess }) => {
                         <Button 
                             onClick={handleSave} 
                             disabled={saving}
-                            className="bg-blue-600 hover:bg-blue-700"
+                            className="bg-blue-600 hover:bg-blue-700 rounded-lg shadow-md"
                         >
                             {saving ? (
                                 <>
@@ -944,3 +908,4 @@ const SettingsPage = ({ onSaveSuccess }) => {
 };
 
 export default SettingsPage;
+

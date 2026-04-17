@@ -148,6 +148,15 @@ const DrawingControlsPanel = memo(function DrawingControlsPanel({
             }
           `}
         >
+            {/* Close Button (kept first so it's always reachable) */}
+            <button
+              onClick={(e) => { e.stopPropagation(); setIsExpanded(false); }}
+              className="p-2 rounded-full hover:bg-slate-100 text-slate-400 hover:text-slate-700 transition-colors flex-shrink-0"
+              title="Close Toolbar"
+            >
+              <X size={18} />
+            </button>
+
             <div className="w-px h-5 bg-gray-300 mx-1 flex-shrink-0" />
 
             {/* Cursor / Select */}
@@ -279,14 +288,6 @@ const DrawingControlsPanel = memo(function DrawingControlsPanel({
               onClick={clearDrawings}
             />
             
-            {/* Close Button */}
-            <button
-              onClick={(e) => { e.stopPropagation(); setIsExpanded(false); }}
-              className="p-2 rounded-full hover:bg-slate-100 text-slate-400 hover:text-slate-700 transition-colors flex-shrink-0"
-              title="Close Toolbar"
-            >
-              <X size={18} />
-            </button>
         </div>
       </div>
 
