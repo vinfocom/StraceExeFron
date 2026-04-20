@@ -188,7 +188,11 @@ const SideBar = ({ compact = false }) => {
           onClick={() => setShowUserMenu((prev) => !prev)}
           className={`w-full flex items-center rounded-lg p-2.5 transition-colors duration-200 text-slate-200 hover:bg-slate-700/80 hover:text-white ${compact ? 'justify-center group-hover/mapSidebar:justify-start' : ''}`}
         >
-          {user?.name?.charAt(0).toUpperCase()}
+          <span
+            className={`${compact ? 'inline group-hover/mapSidebar:hidden' : 'hidden'} text-sm font-semibold`}
+          >
+            {user?.name?.charAt(0).toUpperCase()}
+          </span>
           <span className={`truncate text-sm ${labelClass}`}>
             Welcome, <span className="font-semibold">{user?.name || 'User'}</span>
           </span>

@@ -22,7 +22,7 @@ const AuthProvider = ({ children }) => {
 
   const handleAuthError = useCallback(() => {
     clearSession();
-    navigate('/login', { replace: true });
+    navigate('/', { replace: true });
   }, [clearSession, navigate]);
 
   useEffect(() => {
@@ -53,7 +53,15 @@ const AuthProvider = ({ children }) => {
         const isAuth = error.status === 401 || error.status === 403 || error.isAuthError;
         
         if (isAuth) {
-          clearSession();
+          if (cachedUser && cachedUser !== 'undefined') {
+            try {
+              setUser(JSON.parse(cachedUser));
+            } catch {
+              clearSession();
+            }
+          } else {
+            clearSession();
+          }
         } else if (cachedUser && cachedUser !== 'undefined') {
           // Keep cached user only for non-auth/network failures.
           try {
@@ -81,7 +89,7 @@ const AuthProvider = ({ children }) => {
     const handleStorageChange = (e) => {
       if (e.key === 'logout-event') {
         clearSession();
-        navigate('/login', { replace: true });
+        navigate('/', { replace: true });
       }
     };
     
@@ -132,7 +140,7 @@ const AuthProvider = ({ children }) => {
     } finally {
       clearSession();
       setLoading(false);
-      navigate('/login', { replace: true });
+      navigate('/', { replace: true });
     }
   };
 

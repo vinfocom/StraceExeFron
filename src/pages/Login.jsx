@@ -15,6 +15,8 @@ const LoginPage = () => {
   const [loading, setLoading] = useState(false);
   const { login } = useAuth();
   const navigate = useNavigate();
+  const isElectronRuntime =
+    typeof navigator !== "undefined" && /electron/i.test(navigator.userAgent || "");
 
   useEffect(() => {
     const fetchIp = async () => {
@@ -44,6 +46,7 @@ const LoginPage = () => {
         Email: email,
         Password: password,
         IP: ipAddress,
+        ForceLogin: isElectronRuntime,
       });
 
       if (response.success) {
@@ -55,9 +58,15 @@ const LoginPage = () => {
           response.message.toLowerCase().includes("already logged in");
 
         if (alreadyLoggedIn) {
-          const shouldForceLogin = window.confirm(
-            "This account is reported active on another device. Do you want to continue and force login here?"
-          );
+          const shouldForceLogin = isElectronRuntime
+            ? true
+            : window.confirm(
+                "This account is reported active on another device. Do you want to continue and force login here?"
+              );
+
+          if (isElectronRuntime) {
+            toast.info("Recovering previous session and retrying login...");
+          }
 
           if (shouldForceLogin) {
             const forceResponse = await login({
@@ -72,6 +81,9 @@ const LoginPage = () => {
               navigate("/dashboard");
               return;
             }
+
+            toast.error(forceResponse?.message || "Force login failed. Please try again.");
+            return;
           }
         }
 
@@ -89,6 +101,50 @@ const LoginPage = () => {
       } else {
         displayMessage =
           error.message || (typeof error === "string" ? error : displayMessage);
+      }
+
+      const alreadyLoggedIn =
+        typeof displayMessage === "string" &&
+        displayMessage.toLowerCase().includes("already logged in");
+
+      if (alreadyLoggedIn) {
+        const shouldForceLogin = isElectronRuntime
+          ? true
+          : window.confirm(
+              "This account is reported active on another device. Do you want to continue and force login here?"
+            );
+
+        if (isElectronRuntime) {
+          toast.info("Recovering previous session and retrying login...");
+        }
+
+        if (shouldForceLogin) {
+          try {
+            const forceResponse = await login({
+              Email: email,
+              Password: password,
+              IP: ipAddress,
+              ForceLogin: true,
+            });
+
+            if (forceResponse?.success) {
+              toast.success("Login successful!");
+              navigate("/dashboard");
+              return;
+            }
+
+            toast.error(forceResponse?.message || "Force login failed. Please try again.");
+            return;
+          } catch (forceError) {
+            const forceMessage =
+              forceError?.response?.data?.message ||
+              forceError?.response?.data?.Message ||
+              forceError?.message ||
+              "Force login failed. Please try again.";
+            toast.error(forceMessage);
+            return;
+          }
+        }
       }
 
       toast.error(displayMessage);

@@ -2,7 +2,24 @@
 import axios from 'axios';
 import { clearProjectSessionCache } from '../utils/projectSessionCache';
 
-const API_BASE_URL = import.meta.env.DEV ? "" : (import.meta.env.VITE_CSHARP_API_URL || "");
+const getRuntimeCsharpApiBaseUrl = () => {
+  if (typeof window === "undefined") return "";
+  try {
+    const fromQuery = new URLSearchParams(window.location.search)
+      .get("csharpApiBaseUrl")
+      ?.trim();
+    if (!fromQuery) return "";
+    return fromQuery.replace(/\/+$/, "");
+  } catch {
+    return "";
+  }
+};
+
+const API_BASE_URL = (() => {
+  const runtimeOverride = getRuntimeCsharpApiBaseUrl();
+  if (runtimeOverride) return runtimeOverride;
+  return import.meta.env.DEV ? "" : (import.meta.env.VITE_CSHARP_API_URL || "");
+})();
 
 if (!import.meta.env.DEV && !API_BASE_URL) {
   console.warn(

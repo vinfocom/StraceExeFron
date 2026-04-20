@@ -1363,47 +1363,8 @@ const UnifiedMapSidebar = ({
           </CollapsibleSection>
 
 
-          {/* Data Layer */}
-          <CollapsibleSection
-            title="Data Layer"
-            icon={Database}
-            defaultOpen={true}
-          >
-            <ToggleRow
-              label="Enable Data"
-              checked={enableDataToggle}
-              onChange={setEnableDataToggle}
-              useSwitch={true}
-            />
-
-            {enableDataToggle && (
-              <>
-                <SegmentedControl
-                  value={dataToggle}
-                  onChange={setDataToggle}
-                  options={[
-                    { value: "sample", label: "Sample" },
-                    { value: "prediction", label: "Prediction" },
-                  ]}
-                />
-
-                <div className="space-y-2 pt-1">
-                  <ToggleRow
-                    label="Secondary Logs"
-                    checked={Boolean(showSessionNeighbors)}
-                    onChange={setShowSessionNeighbors}
-                    useSwitch={true}
-                  />
-                </div>
-
-                <ToggleRow
-                  label="Show Num cell "
-                  checked={showNumCells}
-                  onChange={setShowNumCells}
-                />
-              </>
-            )}
-          </CollapsibleSection>
+       
+          
 
          
 
@@ -1760,7 +1721,7 @@ const UnifiedMapSidebar = ({
 
           {/* Dominance/Coverage controls moved under Raster KPI */}
           <CollapsibleSection
-            title="Handovers"
+            title="Mobility Aid"
             icon={ArrowLeftRight}
             badge={
               (techHandover ? (technologyTransitions?.length || 0) : 0) +
@@ -1820,6 +1781,48 @@ const UnifiedMapSidebar = ({
                   color="orange"
                 />
               </div>
+            )}
+          </CollapsibleSection>
+
+
+          <CollapsibleSection
+            title="Data Layer"
+            icon={Database}
+            defaultOpen={true}
+          >
+            <ToggleRow
+              label="Enable Data"
+              checked={enableDataToggle}
+              onChange={setEnableDataToggle}
+              useSwitch={true}
+            />
+
+            {enableDataToggle && (
+              <>
+                <SegmentedControl
+                  value={dataToggle}
+                  onChange={setDataToggle}
+                  options={[
+                    { value: "sample", label: "Sample" },
+                    { value: "prediction", label: "Prediction" },
+                  ]}
+                />
+
+                <div className="space-y-2 pt-1">
+                  <ToggleRow
+                    label="Secondary Logs"
+                    checked={Boolean(showSessionNeighbors)}
+                    onChange={setShowSessionNeighbors}
+                    useSwitch={true}
+                  />
+                </div>
+
+                <ToggleRow
+                  label="Show Num cell "
+                  checked={showNumCells}
+                  onChange={setShowNumCells}
+                />
+              </>
             )}
           </CollapsibleSection>
 
