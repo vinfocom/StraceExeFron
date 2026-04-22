@@ -11,7 +11,8 @@ import {
   normalizeTechName,
   normalizeBandName,
   COLOR_SCHEMES,
-  generateColorFromHash
+  generateColorFromHash,
+  getLogColor,
 } from "@/utils/colorUtils";
 
 const METRIC_RANGE_EPSILON = 1e-9;
@@ -23,6 +24,18 @@ const matchesMetricRange = (value, min, max, includeMax = false) => {
     ? value <= max + METRIC_RANGE_EPSILON
     : value < max - METRIC_RANGE_EPSILON;
   return lowerMatch && upperMatch;
+};
+
+const isUnknownLegendKey = (value) => {
+  const normalized = String(value ?? "").trim().toLowerCase();
+  return (
+    !normalized ||
+    normalized === "unknown" ||
+    normalized === "n/a" ||
+    normalized === "na" ||
+    normalized === "null" ||
+    normalized === "undefined"
+  );
 };
 
 // Helper to get normalized key for counting
@@ -74,18 +87,17 @@ const ColorSchemeLegend = ({ colorBy, logs, activeFilter, onFilterChange }) => {
   if (!scheme) return null;
 
   const { counts, total, usedEntries } = useMemo(() => {
-    const tempCounts = Object.fromEntries(
-      Object.keys(scheme).map((k) => [k, 0]),
-    );
+    const tempCounts = {};
 
     logs?.forEach((log) => {
       const key = getNormalizedKey(log, colorBy, scheme);
-      if (key in tempCounts) tempCounts[key]++;
+      tempCounts[key] = (tempCounts[key] || 0) + 1;
     });
 
-    const used = Object.entries(scheme)
-      .filter(([key]) => tempCounts[key] > 0 && key !== "Unknown")
-      .sort((a, b) => tempCounts[b[0]] - tempCounts[a[0]]);
+    const used = Object.entries(tempCounts)
+      .filter(([key, count]) => count > 0 && !isUnknownLegendKey(key))
+      .sort((a, b) => b[1] - a[1])
+      .map(([key]) => [key, scheme[key] || getLogColor(colorBy, key)]);
 
     return { counts: tempCounts, total: logs?.length || 0, usedEntries: used };
   }, [logs, colorBy, scheme]);

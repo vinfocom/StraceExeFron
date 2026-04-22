@@ -58,6 +58,7 @@ import {
   getBandColor,
   getTechnologyColor,
   getProviderColor,
+  generateColorFromHash,
 } from "@/utils/colorUtils";
 import { PolygonChecker as FastPolygonChecker } from "@/utils/polygonUtils";
 import {
@@ -1105,6 +1106,7 @@ const UnifiedMapView = () => {
   const [opacity, setOpacity] = useState(0.8);
   const [logRadius, setLogRadius] = useState(10);
   const [neighborSquareSize, setNeighborSquareSize] = useState(4);
+  const [triangleScaleMultiplier, setTriangleScaleMultiplier] = useState(1);
   const [showSessionNeighbors, setShowSessionNeighbors] = useState(true);
 
   const [bestNetworkEnabled, setBestNetworkEnabled] = useState(false);
@@ -1806,11 +1808,14 @@ const UnifiedMapView = () => {
       .trim()
       .toLowerCase();
     const metricMode =
+      normalizedStoredGridMetricMode === "avg" ||
       normalizedStoredGridMetricMode === "median" ||
       normalizedStoredGridMetricMode === "max" ||
       normalizedStoredGridMetricMode === "min"
         ? normalizedStoredGridMetricMode
         : "max";
+    const isBestOperatorGridMode = normalizedStoredGridMetricMode === "best_operator";
+    const bestOperatorMode = metricMode === "median" ? "avg" : metricMode;
     const normalizedVersion = String(sitePredictionVersion || "").trim().toLowerCase();
     const isDeltaView = normalizedVersion === "delta";
     const isOptimizedView =
@@ -1845,6 +1850,13 @@ const UnifiedMapView = () => {
       return toFiniteNumber(opt?.[`${metricMode}_rsrp`]);
     };
 
+    const pickBestOperator = (row = {}, variant = "baseline") => {
+      const source = variant === "optimized" ? row?.optimized || {} : row?.baseline || {};
+      if (bestOperatorMode === "min") return String(source?.best_operator_min || "").trim() || null;
+      if (bestOperatorMode === "max") return String(source?.best_operator_max || "").trim() || null;
+      return String(source?.best_operator_avg || "").trim() || null;
+    };
+
     const resolveGridColor = (value, metricName, isDeltaMetric) => {
       if (Number.isFinite(value) && typeof getMetricColorForLog === "function") {
         const color = getMetricColorForLog(value, metricName);
@@ -1877,6 +1889,11 @@ const UnifiedMapView = () => {
         const baselineAvg = pickBaselineAvg(row);
         const optimizedAvg = pickOptimizedAvg(row);
         const difference = pickDiffValue(row);
+        const baselineBestOperator = pickBestOperator(row, "baseline");
+        const optimizedBestOperator = pickBestOperator(row, "optimized");
+        const resolvedBestOperator = isOptimizedView
+          ? optimizedBestOperator
+          : baselineBestOperator;
 
         const displayValue = isDeltaView
           ? Number.isFinite(difference)
@@ -1890,11 +1907,18 @@ const UnifiedMapView = () => {
               ? baselineAvg
               : null;
 
-        const color = resolveGridColor(
-          displayValue,
-          isDeltaView ? "delta" : selectedMetric,
-          isDeltaView,
-        );
+        const rawBestOperator = String(resolvedBestOperator || "").trim();
+        const normalizedBestOperator = normalizeProviderName(rawBestOperator) || null;
+        const providerLabel = normalizedBestOperator || "Unknown";
+        const color = isBestOperatorGridMode
+          ? normalizedBestOperator
+            ? hexToRgbaArray(getProviderColor(normalizedBestOperator), 190)
+            : hexToRgbaArray(generateColorFromHash(providerLabel), 190)
+          : resolveGridColor(
+            displayValue,
+            isDeltaView ? "delta" : selectedMetric,
+            isDeltaView,
+          );
 
         return {
           kind: "grid",
@@ -1918,6 +1942,11 @@ const UnifiedMapView = () => {
           optimizedPointCount: Number(row?.optimized?.point_count || 0),
           baselineSampleCount: Number(row?.baseline?.point_count || 0),
           optimizedSampleCount: Number(row?.optimized?.point_count || 0),
+          bestOperatorMode,
+          baselineBestOperator,
+          optimizedBestOperator,
+          bestOperator: providerLabel,
+          provider: providerLabel,
           lat: centerLat,
           lng: centerLon,
           color,
@@ -2757,6 +2786,9 @@ const UnifiedMapView = () => {
           id: cell.id,
           lat: cell.lat,
           lng: cell.lng,
+          provider: String(cell.provider || cell.bestOperator || "Unknown").trim() || "Unknown",
+          bestOperator:
+            String(cell.bestOperator || cell.provider || "Unknown").trim() || "Unknown",
           delta: cell.difference,
           difference: cell.difference,
           value: Number.isFinite(cell.value) ? cell.value : null,
@@ -2817,6 +2849,12 @@ const UnifiedMapView = () => {
     },
     [isStoredGridOverlayVisible, selectedMetric, sitePredictionVersion],
   );
+  const legendColorBy = useMemo(() => {
+    const isBestOperatorGridMode =
+      String(storedGridMetricMode || "").trim().toLowerCase() === "best_operator";
+    if (isStoredGridOverlayVisible && isBestOperatorGridMode) return "provider";
+    return colorBy;
+  }, [isStoredGridOverlayVisible, storedGridMetricMode, colorBy]);
 
   
 
@@ -3080,6 +3118,8 @@ const UnifiedMapView = () => {
   );
   const shouldRenderSiteLayer =
     Boolean(showSiteMarkers || showSiteSectors) && !isStoredGridOverlayVisible;
+  const triangleSizeAvailable =
+    Boolean(enableSiteToggle) && Boolean(showSiteSectors) && shouldRenderSiteLayer;
   const shouldShowLegend = useMemo(() => {
     if (!Array.isArray(legendLogs) || legendLogs.length === 0) return false;
     return Boolean(showDataCircles || shouldRenderLtePredictionLayer);
@@ -3829,6 +3869,9 @@ const UnifiedMapView = () => {
         neighborLogsAvailable={neighborLogsAvailable}
         neighborSquareSize={neighborSquareSize}
         setNeighborSquareSize={setNeighborSquareSize}
+        triangleSizeAvailable={triangleSizeAvailable}
+        triangleScaleMultiplier={triangleScaleMultiplier}
+        setTriangleScaleMultiplier={setTriangleScaleMultiplier}
         ui={ui}
         onUIChange={handleUIChange}
         onOpenMultiView={handleNavigateToMultiView}
@@ -4034,11 +4077,11 @@ const UnifiedMapView = () => {
           <MapLegend
             thresholds={effectiveThresholds}
             selectedMetric={legendSelectedMetric}
-            colorBy={colorBy}
-            showOperators={colorBy === "provider"}
-            showBands={colorBy === "band"}
-            showTechnologies={colorBy === "technology"}
-            showSignalQuality={!colorBy || colorBy === "metric"}
+            colorBy={legendColorBy}
+            showOperators={legendColorBy === "provider"}
+            showBands={legendColorBy === "band"}
+            showTechnologies={legendColorBy === "technology"}
+            showSignalQuality={!legendColorBy || legendColorBy === "metric"}
             availableFilterOptions={availableFilterOptions}
             logs={legendLogs}
             activeFilter={legendFilter}
@@ -4231,6 +4274,7 @@ const UnifiedMapView = () => {
                   getMetricColor={getMetricColorForLog}
                   onSiteSelect={setSelectedSites}
                   onSectorPredictionPointsChange={setSectorPredictionGridPoints}
+                  triangleScaleMultiplier={triangleScaleMultiplier}
                   options={{
                     scale: 0.6,
                     zIndex: 1000,

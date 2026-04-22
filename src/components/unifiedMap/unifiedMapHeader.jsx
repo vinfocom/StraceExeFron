@@ -315,6 +315,9 @@ function UnifiedHeader({
   neighborLogsAvailable = false,
   neighborSquareSize = 8,
   setNeighborSquareSize,
+  triangleSizeAvailable = false,
+  triangleScaleMultiplier = 1,
+  setTriangleScaleMultiplier,
   onUIChange,
   ui,
   onSettingsSaved,
@@ -525,6 +528,14 @@ function UnifiedHeader({
   const currentNeighborSquareSize = Number.isFinite(Number(neighborSquareSize))
     ? Number(neighborSquareSize)
     : 8;
+  const currentTriangleScaleMultiplier = Number.isFinite(
+    Number(triangleScaleMultiplier),
+  )
+    ? Number(triangleScaleMultiplier)
+    : 1;
+  const minTriangleScale = 0.25;
+  const maxTriangleScale = 3;
+  const triangleScaleStep = 0.25;
 
   const adjustOpacity = (deltaPercent) => {
     const nextPercent = Math.max(
@@ -569,6 +580,25 @@ function UnifiedHeader({
     setNeighborSquareSize(Math.max(3, Math.min(80, Math.round(nextSize))));
   };
 
+  const adjustTriangleScale = (delta) => {
+    if (!setTriangleScaleMultiplier) return;
+    const nextValue = Number(
+      (currentTriangleScaleMultiplier + delta).toFixed(2),
+    );
+    setTriangleScaleMultiplier(
+      Math.max(minTriangleScale, Math.min(maxTriangleScale, nextValue)),
+    );
+  };
+
+  const updateTriangleScaleFromInput = (rawValue) => {
+    if (!setTriangleScaleMultiplier) return;
+    const nextValue = Number(rawValue);
+    if (!Number.isFinite(nextValue)) return;
+    setTriangleScaleMultiplier(
+      Math.max(minTriangleScale, Math.min(maxTriangleScale, nextValue)),
+    );
+  };
+
   const toggleQuickControl = useCallback((controlKey) => {
     setActiveQuickControl((prev) => (prev === controlKey ? null : controlKey));
   }, []);
@@ -578,6 +608,12 @@ function UnifiedHeader({
       setActiveQuickControl(null);
     }
   }, [neighborLogsAvailable, activeQuickControl]);
+
+  useEffect(() => {
+    if (!triangleSizeAvailable && activeQuickControl === "triangle") {
+      setActiveQuickControl(null);
+    }
+  }, [triangleSizeAvailable, activeQuickControl]);
 
   useEffect(() => {
     const handleUtilityAction = (event) => {
@@ -598,6 +634,12 @@ function UnifiedHeader({
         }
         return;
       }
+      if (action === "triangle-size") {
+        if (triangleSizeAvailable) {
+          toggleQuickControl("triangle");
+        }
+        return;
+      }
       if (action === "settings") {
         setOpenSettingsDialog(true);
         return;
@@ -610,7 +652,12 @@ function UnifiedHeader({
     window.addEventListener("stracer:utility-action", handleUtilityAction);
     return () =>
       window.removeEventListener("stracer:utility-action", handleUtilityAction);
-  }, [isMapPage, neighborLogsAvailable, toggleQuickControl]);
+  }, [
+    isMapPage,
+    neighborLogsAvailable,
+    triangleSizeAvailable,
+    toggleQuickControl,
+  ]);
 
   return (
     <header className="h-14 bg-gray-800 text-white shadow-sm flex items-center justify-between px-6 flex-shrink-0 relative z-10">
@@ -766,6 +813,53 @@ function UnifiedHeader({
                 >
                   <Plus className="h-3 w-3" />
                 </button>
+              </div>
+            )}
+
+            {activeQuickControl === "triangle" && triangleSizeAvailable && (
+              <div className="flex items-center gap-2 bg-gray-700/80 rounded-lg px-3 py-1.5 border border-gray-600">
+                <span className="text-xs text-gray-300 font-medium">
+                  Triangle Size
+                </span>
+                <button
+                  type="button"
+                  onClick={() => adjustTriangleScale(-triangleScaleStep)}
+                  className="h-6 w-6 rounded bg-slate-600 hover:bg-slate-500 flex items-center justify-center"
+                  disabled={currentTriangleScaleMultiplier <= minTriangleScale}
+                  title="Decrease triangle size"
+                >
+                  <Minus className="h-3 w-3" />
+                </button>
+                <Input
+                  type="number"
+                  min={minTriangleScale}
+                  max={maxTriangleScale}
+                  step={0.25}
+                  value={currentTriangleScaleMultiplier}
+                  onChange={(e) => updateTriangleScaleFromInput(e.target.value)}
+                  className="h-7 w-16 bg-slate-800 border-slate-600 text-white text-xs text-center px-1"
+                />
+                <button
+                  type="button"
+                  onClick={() => adjustTriangleScale(triangleScaleStep)}
+                  className="h-6 w-6 rounded bg-slate-600 hover:bg-slate-500 flex items-center justify-center"
+                  disabled={currentTriangleScaleMultiplier >= maxTriangleScale}
+                  title="Increase triangle size"
+                >
+                  <Plus className="h-3 w-3" />
+                </button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="secondary"
+                  className="h-6 px-2 text-[11px]"
+                  onClick={() => setTriangleScaleMultiplier?.(1)}
+                  disabled={
+                    Math.abs(currentTriangleScaleMultiplier - 1) < 0.001
+                  }
+                >
+                  Reset
+                </Button>
               </div>
             )}
           </>

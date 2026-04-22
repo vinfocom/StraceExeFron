@@ -12,12 +12,11 @@ import {
   Plus,
   Users,
   LogOut,
-  UserCircle2,
   ChevronRight,
   FileText,
   Building,
 } from 'lucide-react';
-import appLogo from '/favicon.svg';
+import vinfocomvinfocom from '/favicon.png';
 
 const ROLES = {
   SUPER_ADMIN: 3,
@@ -175,8 +174,8 @@ const SideBar = ({ compact = false }) => {
   return (
     <div className="h-full w-full bg-slate-900/90 text-white flex flex-col">
       <div className={`p-4 flex items-center h-16 flex-shrink-0 border-b border-slate-700/40 ${compact ? 'justify-center group-hover/mapSidebar:justify-start' : 'justify-center'}`}>
-        <img src={appLogo} alt="S-Tracer" className="h-8 sm:h-9 object-contain" />
-        <span className={`ml-2 font-semibold tracking-wide text-lg whitespace-nowrap ${titleClass}`}>STracer</span>
+        <img src={vinfocomvinfocom} alt="vinfocom" className="h-11 sm:h-10 object-contain" />
+        <span className={`ml-2 font-semibold tracking-wide text-lg whitespace-nowrap ${titleClass}`}>S-Tracer</span>
       </div>
 
       <nav className="flex-1 overflow-y-auto p-2.5">
@@ -188,11 +187,11 @@ const SideBar = ({ compact = false }) => {
           onClick={() => setShowUserMenu((prev) => !prev)}
           className={`w-full flex items-center rounded-lg p-2.5 transition-colors duration-200 text-slate-200 hover:bg-slate-700/80 hover:text-white ${compact ? 'justify-center group-hover/mapSidebar:justify-start' : ''}`}
         >
-          <span
-            className={`${compact ? 'inline group-hover/mapSidebar:hidden' : 'hidden'} text-sm font-semibold`}
+          <div
+            className={`${compact ? 'inline-flex group-hover/mapSidebar:hidden' : 'hidden'} h-7 w-7 items-center justify-center rounded-full border border-slate-500/70 text-xs font-semibold`}
           >
             {user?.name?.charAt(0).toUpperCase()}
-          </span>
+          </div>
           <span className={`truncate text-sm ${labelClass}`}>
             Welcome, <span className="font-semibold">{user?.name || 'User'}</span>
           </span>

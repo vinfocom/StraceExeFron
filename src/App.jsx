@@ -123,6 +123,7 @@ function App() {
               <Suspense fallback={<PageLoader />}>
                 <Routes>
                   <Route path="/" element={<PublicRoute><LoginPage /></PublicRoute>} />
+                  <Route path="/login" element={<PublicRoute><LoginPage /></PublicRoute>} />
                   <Route path="/company-form" element={<PrivateRoute><CompanyForm /></PrivateRoute>} />
                   
                   {/* Wrap related routes in a fragment if needed, but keeping your structure */}

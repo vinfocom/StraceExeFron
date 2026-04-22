@@ -1,8 +1,37 @@
-import ExcelJS from "exceljs";
-import JSZip from "jszip";
-import { saveAs } from "file-saver";
-import html2canvas from "html2canvas";
 import toast from "react-hot-toast";
+
+let excelJsModulePromise = null;
+let jsZipModulePromise = null;
+let fileSaverModulePromise = null;
+let html2CanvasModulePromise = null;
+
+const loadExcelJS = async () => {
+  if (!excelJsModulePromise) {
+    excelJsModulePromise = import("exceljs").then((m) => m.default || m);
+  }
+  return excelJsModulePromise;
+};
+
+const loadJSZip = async () => {
+  if (!jsZipModulePromise) {
+    jsZipModulePromise = import("jszip").then((m) => m.default || m);
+  }
+  return jsZipModulePromise;
+};
+
+const loadSaveAs = async () => {
+  if (!fileSaverModulePromise) {
+    fileSaverModulePromise = import("file-saver").then((m) => m.saveAs);
+  }
+  return fileSaverModulePromise;
+};
+
+const loadHtml2Canvas = async () => {
+  if (!html2CanvasModulePromise) {
+    html2CanvasModulePromise = import("html2canvas").then((m) => m.default || m);
+  }
+  return html2CanvasModulePromise;
+};
 
 // ============ Constants ============
 const EXCEL_STYLES = {
@@ -661,6 +690,7 @@ const aggregateByField = (locations, fieldName, metricsToAggregate) => {
 
 // ============ Excel Workbook Creation ============
 const createExcelWorkbook = async (params) => {
+  const ExcelJS = await loadExcelJS();
   const workbook = new ExcelJS.Workbook();
   
   // Workbook properties
@@ -686,6 +716,7 @@ const createExcelWorkbook = async (params) => {
 // ============ Chart Capture ============
 const captureAllCharts = async (zip, chartRefs, timestamp) => {
   if (!chartRefs) return;
+  const html2canvas = await loadHtml2Canvas();
 
   const chartFolder = zip.folder("charts");
   const chartCaptures = buildChartCapturesFromRefs(chartRefs);
@@ -832,6 +863,8 @@ export const exportAnalytics = async ({
   
   try {
     toast.loading("Preparing comprehensive export...", { id: toastId });
+    const JSZip = await loadJSZip();
+    const saveAs = await loadSaveAs();
 
     const zip = new JSZip();
     const timestamp = getTimestamp();
@@ -904,6 +937,8 @@ export const exportSingleChart = async (chartRef, chartName) => {
     }
 
     toast.loading("Capturing chart...", { id: toastId });
+    const html2canvas = await loadHtml2Canvas();
+    const saveAs = await loadSaveAs();
 
     const canvas = await html2canvas(chartRef.current, {
       backgroundColor: "#0f172a",
@@ -938,6 +973,7 @@ export const exportExcelOnly = async (params) => {
   
   try {
     toast.loading("Generating Excel file...", { id: toastId });
+    const saveAs = await loadSaveAs();
 
     const workbook = await createExcelWorkbook(params);
     const timestamp = getTimestamp();

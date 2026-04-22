@@ -570,6 +570,10 @@ const LtePredictionLocationLayer = ({
           optimizedPointCount: Number(cell?.optimizedPointCount || 0),
           baselineSampleCount: Number(cell?.baselineSampleCount || 0),
           optimizedSampleCount: Number(cell?.optimizedSampleCount || 0),
+          bestOperatorMode: String(cell?.bestOperatorMode || "").trim().toLowerCase() || null,
+          baselineBestOperator: String(cell?.baselineBestOperator || "").trim() || null,
+          optimizedBestOperator: String(cell?.optimizedBestOperator || "").trim() || null,
+          bestOperator: String(cell?.bestOperator || "").trim() || null,
           lat: Number(cell?.lat),
           lng: Number(cell?.lng),
           color: Array.isArray(cell?.color) ? cell.color : [107, 114, 128, 190],
@@ -935,6 +939,20 @@ const LtePredictionLocationLayer = ({
           <>
             <div>Baseline Avg: {Number.isFinite(hovered.object.baselineAvg) ? hovered.object.baselineAvg.toFixed(2) : "N/A"}</div>
             <div>Optimized Avg: {Number.isFinite(hovered.object.optimizedAvg) ? hovered.object.optimizedAvg.toFixed(2) : "N/A"}</div>
+            {(hovered.object.baselineBestOperator || hovered.object.optimizedBestOperator) && (
+              <>
+                <div>
+                  Best Operator Base ({String(hovered.object.bestOperatorMode || "avg").toUpperCase()}):
+                  {" "}
+                  {hovered.object.baselineBestOperator || "N/A"}
+                </div>
+                <div>
+                  Best Operator Opt ({String(hovered.object.bestOperatorMode || "avg").toUpperCase()}):
+                  {" "}
+                  {hovered.object.optimizedBestOperator || "N/A"}
+                </div>
+              </>
+            )}
             <div className={Number(hovered.object.difference) >= 0 ? "text-emerald-700 font-semibold" : "text-red-700 font-semibold"}>
               Difference (Opt - Base): {Number.isFinite(hovered.object.difference) ? hovered.object.difference.toFixed(2) : "N/A"}
             </div>
@@ -948,6 +966,11 @@ const LtePredictionLocationLayer = ({
         ) : (
           <>
             <div>Value: {hoveredValue}</div>
+            {hovered.object.bestOperator && (
+              <div>
+                Best Operator ({String(hovered.object.bestOperatorMode || "avg").toUpperCase()}): {hovered.object.bestOperator}
+              </div>
+            )}
             <div>Grid Points: {hovered.object.pointCount ?? 0}</div>
             <div>Samples: {hovered.object.sampleCount ?? 0}</div>
           </>

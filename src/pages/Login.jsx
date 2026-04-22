@@ -1,9 +1,10 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import { useAuth } from "../context/AuthContext";
 import { useNavigate } from "react-router-dom";
 import { toast } from "react-toastify";
 import Spinner from "../components/common/Spinner";
 import appLogo from "/favicon.svg";
+import comlog from "/toolLogo.svg";
 import axios from "axios";
 import { Eye, EyeOff } from "lucide-react";
 
@@ -13,10 +14,20 @@ const LoginPage = () => {
   const [showPassword, setShowPassword] = useState(false);
   const [ipAddress, setIpAddress] = useState("");
   const [loading, setLoading] = useState(false);
-  const { login } = useAuth();
+  const { login, isLoggedIn } = useAuth();
   const navigate = useNavigate();
   const isElectronRuntime =
     typeof navigator !== "undefined" && /electron/i.test(navigator.userAgent || "");
+
+  const navigateAfterLogin = useCallback(() => {
+    const redirectAfterLogin = sessionStorage.getItem("redirectAfterLogin");
+    if (redirectAfterLogin) {
+      sessionStorage.removeItem("redirectAfterLogin");
+      navigate(redirectAfterLogin, { replace: true });
+      return;
+    }
+    navigate("/dashboard", { replace: true });
+  }, [navigate]);
 
   useEffect(() => {
     const fetchIp = async () => {
@@ -30,6 +41,12 @@ const LoginPage = () => {
 
     fetchIp();
   }, []);
+
+  useEffect(() => {
+    if (isLoggedIn) {
+      navigateAfterLogin();
+    }
+  }, [isLoggedIn, navigateAfterLogin]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -51,7 +68,6 @@ const LoginPage = () => {
 
       if (response.success) {
         toast.success("Login successful!");
-        navigate("/dashboard");
       } else {
         const alreadyLoggedIn =
           typeof response?.message === "string" &&
@@ -78,7 +94,6 @@ const LoginPage = () => {
 
             if (forceResponse.success) {
               toast.success("Login successful!");
-              navigate("/dashboard");
               return;
             }
 
@@ -129,7 +144,6 @@ const LoginPage = () => {
 
             if (forceResponse?.success) {
               toast.success("Login successful!");
-              navigate("/dashboard");
               return;
             }
 
@@ -155,11 +169,17 @@ const LoginPage = () => {
 
   return (
     <div
-      className="flex items-center justify-center bg-gradient-to-br from-grey-900 via-white to-blue-900 px-4 overflow-hidden min-h-screen"
+      className="relative flex min-h-screen items-center justify-center overflow-hidden bg-gradient-to-br from-slate-100 via-white to-blue-100 px-4"
     >
-      <div className="relative w-full max-w-md p-8 bg-white/80  backdrop-blur-md rounded-2xl shadow-lg space-y-6">
+      <div className="absolute left-4 top-4 sm:left-8 sm:top-6">
+        <img src={comlog} alt="Vinfocom" className="h-10 w-auto sm:h-12" />
+        <p className="mt-1 text-xs font-medium tracking-wide text-slate-600 sm:text-sm">
+          Vinfocom Pvt. Ltd.
+        </p>
+      </div>
+      <div className="relative w-full max-w-md space-y-6 rounded-2xl border border-slate-200 bg-white/85 p-8 shadow-xl backdrop-blur-md">
         {loading && (
-          <div className="absolute inset-0 flex items-center justify-center bg-white/70  rounded-2xl z-10">
+          <div className="absolute inset-0 z-10 flex items-center justify-center rounded-2xl bg-white/70">
             <Spinner />
           </div>
         )}
@@ -170,14 +190,14 @@ const LoginPage = () => {
               <img
                 src={appLogo}
                 alt="S-Tracer"
-                className="w-20 h-20 object-contain border-2 border-slate-400 shadow-2xl rounded-xl p-2"
+                className="h-20 w-20 rounded-xl border-2 border-slate-300 object-contain shadow-lg"
               />
             </div>
           </div>
-          <h2 className="text-2xl font-bold text-gray-900 ">
+          <h2 className="text-2xl font-bold text-gray-900">
             Welcome S-Tracer
           </h2>
-          <p className="mt-1 text-sm text-gray-500 ">
+          <p className="mt-1 text-sm text-gray-500">
             Sign in to continue to your account
           </p>
         </div>
@@ -186,7 +206,7 @@ const LoginPage = () => {
           <div>
             <label
               htmlFor="email-address"
-              className="block text-sm font-medium text-gray-700  mb-1"
+              className="mb-1 block text-sm font-medium text-gray-700"
             >
               Username
             </label>
@@ -196,7 +216,7 @@ const LoginPage = () => {
               type="email"
               autoComplete="email"
               required
-              className="block w-full px-3 py-2 rounded-lg border border-gray-300  bg-white  text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm transition"
+              className="block w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-gray-900 placeholder-gray-400 transition focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 sm:text-sm"
               placeholder="Enter your email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
@@ -217,7 +237,7 @@ const LoginPage = () => {
               type={showPassword ? "text" : "password"}
               autoComplete="current-password"
               required
-              className="block w-full px-3 py-2 pr-10 rounded-lg border border-gray-300 bg-white text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm transition"
+              className="block w-full rounded-lg border border-gray-300 bg-white px-3 py-2 pr-10 text-gray-900 placeholder-gray-400 transition focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 sm:text-sm"
               placeholder="Enter your password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
@@ -235,7 +255,7 @@ const LoginPage = () => {
           <div>
             <button
               type="submit"
-              className="w-full px-4 py-2 text-sm font-medium text-white rounded-lg bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 disabled:bg-indigo-400 shadow-md transition-all duration-200"
+              className="w-full rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white shadow-md transition-all duration-200 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 disabled:bg-indigo-400"
               disabled={loading}
             >
               Sign In

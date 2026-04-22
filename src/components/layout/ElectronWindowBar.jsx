@@ -146,7 +146,7 @@ const ElectronWindowBar = () => {
           onHoverOpen={() => activeMenu && setActiveMenu("File")}
           onActionClick={() => setActiveMenu(null)}
           actions={[
-            { label: "Import From", onClick: () => emitUtilityAction("import") },
+            { label: "Import Site", onClick: () => emitUtilityAction("import") },
             { label: "Reload", onClick: () => callWindowApi("reload") },
             { label: "Quit", onClick: () => callWindowApi("quit") },
           ]}
@@ -202,6 +202,7 @@ const ElectronWindowBar = () => {
             { label: "Opacity", onClick: () => emitUtilityAction("opacity") },
             { label: "Log Radius", onClick: () => emitUtilityAction("log-radius") },
             { label: "Neighbour Radius", onClick: () => emitUtilityAction("neighbor-radius") },
+            { label: "Triangle Size", onClick: () => emitUtilityAction("triangle-size") },
             { label: "Settings", onClick: () => emitUtilityAction("settings") },
           ]}
         />

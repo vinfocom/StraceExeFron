@@ -470,7 +470,6 @@ function isSiteLteDebugEnabled() {
 
 const MIN_TRIANGLE_SCALE_MULTIPLIER = 0.25;
 const MAX_TRIANGLE_SCALE_MULTIPLIER = 3;
-const TRIANGLE_SCALE_STEP = 0.25;
 const SQUARE_MARKER_PATH = "M -1 -1 L 1 -1 L 1 1 L -1 1 Z";
 
 const NUMERIC_FIELD_HINTS = new Set([
@@ -956,6 +955,7 @@ const NetworkPlannerMap = ({
   singleSiteSelection = false,
   showBulkSiteActions = true,
   onSectorPredictionPointsChange = null,
+  triangleScaleMultiplier = 1,
 }) => {
   const siteLteDebugEnabled = useMemo(() => isSiteLteDebugEnabled(), []);
   const { siteData, loading, error, fetchSiteData } = useSiteData({
@@ -987,8 +987,6 @@ const NetworkPlannerMap = ({
   const [dragMode, setDragMode] = useState(null); // "sector" | "site" | null
   const [pendingMovePosition, setPendingMovePosition] = useState(null);
   const [isApplyingDraggedMove, setIsApplyingDraggedMove] = useState(false);
-  const [triangleScaleMultiplier, setTriangleScaleMultiplier] = useState(1);
-
   const effectiveSectorScale = useMemo(() => {
     const baseScaleRaw = Number(options?.scale);
     const baseScale =
@@ -3024,53 +3022,6 @@ const NetworkPlannerMap = ({
         </button>
         <div className="rounded bg-blue-600/90 px-2 py-1 text-[11px] font-semibold text-white shadow">
           {selectedSiteIds.length} selected
-        </div>
-        <div className="flex items-center gap-1 rounded bg-slate-900/90 px-2 py-1 text-[11px] font-semibold text-white shadow">
-          <span className="mr-1 text-slate-200">Triangles</span>
-          <button
-            type="button"
-            onClick={() =>
-              setTriangleScaleMultiplier((prev) =>
-                Math.max(
-                  MIN_TRIANGLE_SCALE_MULTIPLIER,
-                  Number((prev - TRIANGLE_SCALE_STEP).toFixed(2)),
-                ),
-              )
-            }
-            disabled={triangleScaleMultiplier <= MIN_TRIANGLE_SCALE_MULTIPLIER}
-            className="h-5 w-5 rounded bg-slate-700 text-white disabled:cursor-not-allowed disabled:opacity-50"
-            title="Decrease triangle size"
-          >
-            -
-          </button>
-          <span className="min-w-[44px] text-center">
-            {triangleScaleMultiplier.toFixed(2)}x
-          </span>
-          <button
-            type="button"
-            onClick={() =>
-              setTriangleScaleMultiplier((prev) =>
-                Math.min(
-                  MAX_TRIANGLE_SCALE_MULTIPLIER,
-                  Number((prev + TRIANGLE_SCALE_STEP).toFixed(2)),
-                ),
-              )
-            }
-            disabled={triangleScaleMultiplier >= MAX_TRIANGLE_SCALE_MULTIPLIER}
-            className="h-5 w-5 rounded bg-slate-700 text-white disabled:cursor-not-allowed disabled:opacity-50"
-            title="Increase triangle size"
-          >
-            +
-          </button>
-          <button
-            type="button"
-            onClick={() => setTriangleScaleMultiplier(1)}
-            disabled={Math.abs(triangleScaleMultiplier - 1) < 0.001}
-            className="ml-1 rounded bg-slate-700 px-1.5 py-0.5 text-[10px] text-white disabled:cursor-not-allowed disabled:opacity-50"
-            title="Reset triangle size"
-          >
-            Reset
-          </button>
         </div>
       </div>
 

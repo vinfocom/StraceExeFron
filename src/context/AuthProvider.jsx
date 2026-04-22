@@ -106,7 +106,32 @@ const AuthProvider = ({ children }) => {
       const response = await homeApi.login({ Email, Password: hashed, IP, ForceLogin });
 
       if (response.success) {
-        const userData = response.user;
+        let userData =
+          response?.user ||
+          response?.User ||
+          response?.data?.user ||
+          response?.data?.User ||
+          null;
+
+        // Some backend variants return success first and expose user only via auth status.
+        if (!userData) {
+          try {
+            const statusResponse = await homeApi.getAuthStatus();
+            userData =
+              statusResponse?.user ||
+              statusResponse?.User ||
+              statusResponse?.data?.user ||
+              statusResponse?.data?.User ||
+              null;
+          } catch {
+            // Keep login flow alive if status check is temporarily unavailable.
+          }
+        }
+
+        // Last fallback to mark user as authenticated when backend omits profile payload.
+        if (!userData) {
+          userData = { Email };
+        }
         
         setUser(userData);
         sessionStorage.setItem('user', JSON.stringify(userData));

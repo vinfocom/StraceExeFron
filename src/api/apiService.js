@@ -219,11 +219,11 @@ const isAuthorizationScopeError = (status, data) => {
 };
 
 const handleAuthError = (config) => {
-  sessionStorage.removeItem('user');
-  clearProjectSessionCache();
-
   const isAuthEndpoint = config?.url?.includes('/auth/');
   if (isRedirecting || isAuthEndpoint) return;
+
+  sessionStorage.removeItem('user');
+  clearProjectSessionCache();
 
   isRedirecting = true;
 

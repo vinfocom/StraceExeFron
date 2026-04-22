@@ -7,6 +7,9 @@ import {
   writeProjectSessionCache,
 } from '@/utils/projectSessionCache';
 
+const SITE_PREDICTION_PAGE_SIZE = 5000;
+const MAX_SITE_PREDICTION_PAGES = 200;
+
 const getFirstFiniteNumber = (values = [], fallback = 0) => {
   for (const value of values) {
     const numeric = Number(value);
@@ -25,6 +28,141 @@ const normalizeSectorRange = (value, fallback = 220) => {
   const numeric = Number(value);
   if (!Number.isFinite(numeric) || numeric <= 0) return fallback;
   return Math.max(20, Math.min(5000, numeric));
+};
+
+const toFiniteNumberOrNull = (value) => {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric : null;
+};
+
+const extractRowsFromResponse = (response) => {
+  const payload =
+    response?.data?.Data ??
+    response?.data?.data ??
+    response?.Data ??
+    response?.data ??
+    [];
+  return Array.isArray(payload) ? payload : [];
+};
+
+const extractSitePredictionPaginationMeta = (response = {}) => {
+  const root = response?.data || response || {};
+  const pagination =
+    root?.pagination && typeof root.pagination === "object"
+      ? root.pagination
+      : {};
+
+  const page = toFiniteNumberOrNull(
+    pagination.page ??
+      pagination.currentPage ??
+      pagination.current_page ??
+      root.page ??
+      root.currentPage ??
+      root.current_page,
+  );
+  const pageSize = toFiniteNumberOrNull(
+    pagination.pageSize ??
+      pagination.page_size ??
+      pagination.perPage ??
+      pagination.per_page ??
+      pagination.limit ??
+      root.pageSize ??
+      root.page_size ??
+      root.perPage ??
+      root.per_page ??
+      root.limit,
+  );
+  const totalPages = toFiniteNumberOrNull(
+    pagination.totalPages ??
+      pagination.total_pages ??
+      pagination.pageCount ??
+      pagination.page_count ??
+      pagination.lastPage ??
+      pagination.last_page ??
+      root.totalPages ??
+      root.total_pages ??
+      root.pageCount ??
+      root.page_count ??
+      root.lastPage ??
+      root.last_page,
+  );
+  const totalCount = toFiniteNumberOrNull(
+    pagination.total ??
+      pagination.totalCount ??
+      pagination.total_count ??
+      pagination.count ??
+      root.total ??
+      root.totalCount ??
+      root.total_count ??
+      root.count,
+  );
+
+  return { page, pageSize, totalPages, totalCount };
+};
+
+const getSitePredictionRowKey = (row = {}, index = 0) =>
+  [
+    row?.id ??
+      row?.original_id ??
+      row?.cell_id ??
+      row?.cellId ??
+      row?.cell_id_representative ??
+      row?.cellIdRepresentative ??
+      "",
+    row?.site ??
+      row?.site_id ??
+      row?.siteId ??
+      row?.site_key_inferred ??
+      row?.siteKeyInferred ??
+      "",
+    row?.sector ?? row?.sector_id ?? row?.sectorId ?? "",
+    row?.lat_pred ?? row?.lat ?? row?.latitude ?? "",
+    row?.lon_pred ?? row?.lng ?? row?.lon ?? row?.longitude ?? "",
+    index,
+  ].join("|");
+
+const fetchAllSitePredictionRows = async (params = {}) => {
+  const aggregatedRows = [];
+  const seenRows = new Set();
+
+  let page = 1;
+  let totalPagesHint = null;
+  let totalCountHint = null;
+
+  while (page <= MAX_SITE_PREDICTION_PAGES) {
+    const response = await mapViewApi.getSitePrediction({
+      ...params,
+      page,
+      limit: SITE_PREDICTION_PAGE_SIZE,
+    });
+
+    const pageRows = extractRowsFromResponse(response);
+    if (pageRows.length === 0) break;
+
+    let addedThisPage = 0;
+    pageRows.forEach((row, index) => {
+      const key = getSitePredictionRowKey(row, index);
+      if (seenRows.has(key)) return;
+      seenRows.add(key);
+      aggregatedRows.push(row);
+      addedThisPage += 1;
+    });
+
+    const meta = extractSitePredictionPaginationMeta(response);
+    const effectivePage = meta.page ?? page;
+    const effectivePageSize = meta.pageSize ?? SITE_PREDICTION_PAGE_SIZE;
+    totalPagesHint = meta.totalPages ?? totalPagesHint;
+    totalCountHint = meta.totalCount ?? totalCountHint;
+
+    if (totalPagesHint && effectivePage >= totalPagesHint) break;
+    if (totalCountHint && aggregatedRows.length >= totalCountHint) break;
+    if (addedThisPage === 0) break;
+    if (pageRows.length < effectivePageSize) break;
+
+    page += 1;
+  }
+
+  return aggregatedRows;
 };
 
 const normalizeSitePredictionRows = (rows = [], options = {}) => {
@@ -228,7 +366,7 @@ export const useSiteData = ({
           if (normalizedVersion === "delta") {
             response = await mapViewApi.compareSitePrediction(params);
           } else {
-            response = await mapViewApi.getSitePrediction({
+            response = await fetchAllSitePredictionRows({
               ...params,
               version: normalizedVersion,
             });
@@ -241,7 +379,9 @@ export const useSiteData = ({
 
       if (!isMounted.current) return;
 
-      const rawData = response?.data?.Data || response?.data?.data || response?.Data || response?.data || [];
+      const rawData = Array.isArray(response)
+        ? response
+        : response?.data?.Data || response?.data?.data || response?.Data || response?.data || [];
       const normalizedData =
         normalizedVersion === "delta"
           ? normalizeCompareSitePredictionPayload(response)
