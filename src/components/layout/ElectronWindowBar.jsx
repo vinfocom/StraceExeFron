@@ -148,6 +148,7 @@ const ElectronWindowBar = () => {
           actions={[
             { label: "Import Site", onClick: () => emitUtilityAction("import") },
             { label: "Reload", onClick: () => callWindowApi("reload") },
+            
             { label: "Quit", onClick: () => callWindowApi("quit") },
           ]}
         />
@@ -186,10 +187,8 @@ const ElectronWindowBar = () => {
           onHoverOpen={() => activeMenu && setActiveMenu("Project")}
           onActionClick={() => setActiveMenu(null)}
           actions={[
-            { label: "Unified Map", onClick: () => navigateRoute("/unified-map") },
             { label: "View Projects", onClick: () => navigateRoute("/viewProject") },
             { label: "Create Project", onClick: () => navigateRoute("/create-project") },
-            { label: "Multi Map", onClick: () => navigateRoute("/multi-map") },
           ]}
         />
         <MenuGroup
@@ -202,7 +201,7 @@ const ElectronWindowBar = () => {
             { label: "Opacity", onClick: () => emitUtilityAction("opacity") },
             { label: "Log Radius", onClick: () => emitUtilityAction("log-radius") },
             { label: "Neighbour Radius", onClick: () => emitUtilityAction("neighbor-radius") },
-            { label: "Triangle Size", onClick: () => emitUtilityAction("triangle-size") },
+            { label: "Site Size", onClick: () => emitUtilityAction("triangle-size") },
             { label: "Settings", onClick: () => emitUtilityAction("settings") },
           ]}
         />

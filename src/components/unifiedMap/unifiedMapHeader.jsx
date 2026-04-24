@@ -11,8 +11,11 @@ import {
   Minus,
   UploadCloud,
   ArrowLeft,
+  ChevronDown,
+  SlidersHorizontal,
+  Eye,
 } from "lucide-react";
-import { useLocation, useSearchParams } from "react-router-dom";
+import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { mapViewApi, predictionApi } from "@/api/apiEndpoints";
 import { toast } from "react-toastify";
 import { useMapContext } from "@/context/MapContext";
@@ -20,6 +23,14 @@ import Spinner from "@/components/common/Spinner";
 import ProjectsDropdown from "../project/ProjectsDropdown";
 import DrawingControlsPanel from "../map/layout/DrawingControlsPanel";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import SettingsPage from "@/pages/Setting";
 import {
   findProjectInProjectsCache,
@@ -325,7 +336,11 @@ function UnifiedHeader({
 }) {
   const { user, logout } = useAuth();
   const location = useLocation();
+  const navigate = useNavigate();
   const [searchParams] = useSearchParams();
+  const isElectronRuntime =
+    typeof navigator !== "undefined" &&
+    /electron/i.test(navigator.userAgent || "");
 
   const effectiveProjectId =
     projectId || searchParams.get("project_id") || searchParams.get("project");
@@ -339,7 +354,6 @@ function UnifiedHeader({
           .map((id) => id.trim())
           .filter((id) => id)
       : []);
-  // const [project, setProject] = useState(null);
   const [isUploading, setIsUploading] = useState(false);
   const [selectedFile, setSelectedFile] = useState(null);
   const [activeQuickControl, setActiveQuickControl] = useState(null);
@@ -603,6 +617,23 @@ function UnifiedHeader({
     setActiveQuickControl((prev) => (prev === controlKey ? null : controlKey));
   }, []);
 
+  const utilityMenuItems = [
+    { label: "Import Site", action: () => setOpenImportDialog(true) },
+    { label: "Opacity", action: () => toggleQuickControl("opacity") },
+    { label: "Log Radius", action: () => toggleQuickControl("radius") },
+    {
+      label: "Neighbour Radius",
+      action: () => toggleQuickControl("neighbors"),
+      disabled: !neighborLogsAvailable,
+    },
+    {
+      label: "Site Size",
+      action: () => toggleQuickControl("triangle"),
+      disabled: !triangleSizeAvailable,
+    },
+    { label: "Settings", action: () => setOpenSettingsDialog(true) },
+  ];
+
   useEffect(() => {
     if (!neighborLogsAvailable && activeQuickControl === "neighbors") {
       setActiveQuickControl(null);
@@ -660,22 +691,24 @@ function UnifiedHeader({
   ]);
 
   return (
-    <header className="h-14 bg-gray-800 text-white shadow-sm flex items-center justify-between px-6 flex-shrink-0 relative z-10">
-      <div className="flex items-center gap-4">
+    <header className="min-h-14 bg-gray-800 text-white shadow-sm flex flex-wrap xl:flex-nowrap items-center justify-between gap-2 px-3 sm:px-4 xl:px-6 py-2 xl:py-0 flex-shrink-0 relative z-10">
+      <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2 sm:gap-3">
         {isMapPage && (
           <>
             <Button
               onClick={() => onBack?.()}
               size="sm"
-              className="flex gap-1 items-center bg-slate-700 hover:bg-slate-600 text-white border-slate-600"
+              className="h-9 shrink-0 flex gap-1 items-center bg-slate-700 hover:bg-slate-600 text-white border-slate-600"
               title="Back"
             >
               <ArrowLeft className="h-4 w-4" />
             </Button>
 
-            <h1 className="text-lg md:text-xl font-semibold">
-              {project?.project_name || "Unified Map"}
-              <span className="text-sm font-normal text-gray-400 ml-2">
+            <h1 className="min-w-[96px] max-w-[min(42vw,420px)] truncate text-base md:text-xl font-semibold">
+              <span className="truncate align-bottom">
+                {project?.project_name || "Unified Map"}
+              </span>
+              <span className="hidden xl:inline text-sm font-normal text-gray-400 ml-2">
                 {effectiveProjectId && `(Project: ${effectiveProjectId})`}
               </span>
             </h1>
@@ -683,7 +716,8 @@ function UnifiedHeader({
             <Button
               onClick={onToggleControls}
               size="sm"
-              className={`flex gap-1 items-center bg-blue-600 hover:bg-blue-500
+              title={isControlsOpen ? "Hide filters" : "Show filters"}
+              className={`h-9 shrink-0 flex gap-1 items-center bg-blue-600 hover:bg-blue-500
                 ${
                   isControlsOpen
                     ? "bg-red-600 hover:bg-red-500"
@@ -692,33 +726,109 @@ function UnifiedHeader({
                text-white`}
             >
               <Filter className="h-4 w-4" />
-              {isControlsOpen ? "Hide" : "Filter"}
+              <span className="hidden xl:inline">
+                {isControlsOpen ? "Hide" : "Filter"}
+              </span>
             </Button>
 
             <Button
               onClick={onLeftToggle}
               size="sm"
-              className={`flex gap-1 items-center ${
+              title={showAnalytics ? "Hide analytics" : "Show analytics"}
+              className={`h-9 shrink-0 flex gap-1 items-center ${
                 showAnalytics
                   ? "bg-red-600 hover:bg-red-500"
                   : "bg-blue-600 hover:bg-blue-500"
               } text-white`}
             >
               <ChartBar className="h-4 w-4" />
-              {showAnalytics ? "Hide" : "Analytics"}
+              <span className="hidden xl:inline">
+                {showAnalytics ? "Hide" : "Analytics"}
+              </span>
             </Button>
 
             <Button
               onClick={() => onOpenMultiView?.()}
               size="sm"
-              className="flex gap-1 items-center bg-blue-600 hover:bg-blue-500 text-white"
+              title="Multi Map"
+              className="h-9 shrink-0 flex gap-1 items-center bg-blue-600 hover:bg-blue-500 text-white"
             >
               <LayoutGrid className="h-4 w-4" />
-              Multi Map
+              <span className="hidden xl:inline">Multi Map</span>
             </Button>
 
+            {!isElectronRuntime && (
+              <>
+                <Button
+                  type="button"
+                  onClick={() => setOpenImportDialog(true)}
+                  size="sm"
+                  title="Import Site"
+                  className="h-9 shrink-0 flex gap-1 items-center bg-emerald-600 hover:bg-emerald-500 text-white"
+                >
+                  <UploadCloud className="h-4 w-4" />
+                  <span className="hidden xl:inline">Import Site</span>
+                </Button>
+
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button
+                      type="button"
+                      size="sm"
+                      title="View"
+                      className="h-9 shrink-0 flex gap-1 items-center bg-slate-700 hover:bg-slate-600 text-white border-slate-600"
+                    >
+                      <Eye className="h-4 w-4" />
+                      <span className="hidden xl:inline">View</span>
+                      <ChevronDown className="h-3.5 w-3.5" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="start" className="bg-white text-slate-800">
+                    <DropdownMenuItem onClick={() => navigate("/dashboard")}>
+                      Dashboard
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => navigate("/mapview")}>
+                      Map View
+                    </DropdownMenuItem>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem onClick={() => window.location.reload()}>
+                      Reload
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button
+                      type="button"
+                      size="sm"
+                      title="Utility"
+                      className="h-9 shrink-0 flex gap-1 items-center bg-blue-600 hover:bg-blue-500 text-white"
+                    >
+                      <SlidersHorizontal className="h-4 w-4" />
+                      <span className="hidden xl:inline">Utility</span>
+                      <ChevronDown className="h-3.5 w-3.5" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="start" className="bg-white text-slate-800">
+                    <DropdownMenuLabel>Utility</DropdownMenuLabel>
+                    <DropdownMenuSeparator />
+                    {utilityMenuItems.map((item) => (
+                      <DropdownMenuItem
+                        key={item.label}
+                        disabled={item.disabled}
+                        onClick={item.action}
+                      >
+                        {item.label}
+                      </DropdownMenuItem>
+                    ))}
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </>
+            )}
+
             {activeQuickControl === "opacity" && (
-              <div className="flex items-center gap-2 bg-gray-700/80 rounded-lg px-3 py-1.5 border border-gray-600">
+              <div className="flex max-w-full flex-wrap items-center gap-2 bg-gray-700/80 rounded-lg px-3 py-1.5 border border-gray-600">
                 <span className="text-xs text-gray-300 font-medium">
                   Opacity
                 </span>
@@ -751,7 +861,7 @@ function UnifiedHeader({
             )}
 
             {activeQuickControl === "radius" && (
-              <div className="flex items-center gap-2 bg-gray-700/80 rounded-lg px-3 py-1.5 border border-gray-600">
+              <div className="flex max-w-full flex-wrap items-center gap-2 bg-gray-700/80 rounded-lg px-3 py-1.5 border border-gray-600">
                 <span className="text-xs text-gray-300 font-medium">
                   Log Radius
                 </span>
@@ -783,7 +893,7 @@ function UnifiedHeader({
             )}
 
             {activeQuickControl === "neighbors" && neighborLogsAvailable && (
-              <div className="flex items-center gap-2 bg-gray-700/80 rounded-lg px-3 py-1.5 border border-gray-600">
+              <div className="flex max-w-full flex-wrap items-center gap-2 bg-gray-700/80 rounded-lg px-3 py-1.5 border border-gray-600">
                 <span className="text-xs text-gray-300 font-medium">
                   Neighbor Size
                 </span>
@@ -817,7 +927,7 @@ function UnifiedHeader({
             )}
 
             {activeQuickControl === "triangle" && triangleSizeAvailable && (
-              <div className="flex items-center gap-2 bg-gray-700/80 rounded-lg px-3 py-1.5 border border-gray-600">
+              <div className="flex max-w-full flex-wrap items-center gap-2 bg-gray-700/80 rounded-lg px-3 py-1.5 border border-gray-600">
                 <span className="text-xs text-gray-300 font-medium">
                   Triangle Size
                 </span>
@@ -866,17 +976,19 @@ function UnifiedHeader({
         )}
       </div>
 
-      <div>
+      <div className="order-3 w-full overflow-x-auto xl:order-none xl:w-auto xl:shrink-0">
         {isMapPage && (
-          <DrawingControlsPanel
-            position="relative"
-            onUIChange={onUIChange}
-            ui={ui}
-          />
+          <div className="flex min-w-max justify-center xl:min-w-0">
+            <DrawingControlsPanel
+              position="relative"
+              onUIChange={onUIChange}
+              ui={ui}
+            />
+          </div>
         )}
       </div>
 
-      <div className="flex items-center space-x-4">
+      <div className="flex min-w-0 shrink-0 items-center gap-2 sm:gap-3">
         <Dialog open={openImportDialog} onOpenChange={setOpenImportDialog}>
           <DialogContent className="sm:max-w-md bg-gray-800 text-white border-gray-700">
             <div className="p-6 text-center">
@@ -999,15 +1111,7 @@ function UnifiedHeader({
           </span>
         </div>
 
-        <Button
-          onClick={logout}
-          variant="default"
-          size="sm"
-          className="text-white bg-red-600"
-        >
-          <LogOut className="h-4 w-4 mr-2 text-white" />
-          Logout
-        </Button>
+        
       </div>
     </header>
   );

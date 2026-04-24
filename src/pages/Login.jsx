@@ -68,6 +68,7 @@ const LoginPage = () => {
 
       if (response.success) {
         toast.success("Login successful!");
+        navigateAfterLogin();
       } else {
         const alreadyLoggedIn =
           typeof response?.message === "string" &&
@@ -94,6 +95,7 @@ const LoginPage = () => {
 
             if (forceResponse.success) {
               toast.success("Login successful!");
+              navigateAfterLogin();
               return;
             }
 
@@ -144,6 +146,7 @@ const LoginPage = () => {
 
             if (forceResponse?.success) {
               toast.success("Login successful!");
+              navigateAfterLogin();
               return;
             }
 

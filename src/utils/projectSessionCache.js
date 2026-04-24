@@ -100,7 +100,7 @@ export const makeProjectCacheKey = ({
   return `${CACHE_PREFIX}:u:${scope}:p:${safeProjectId}:r:${safeResource}:s:${safeSessions}:v:${safeVariant}`;
 };
 
-export const readProjectSessionCache = (cacheKey) => {
+export const readProjectSessionCacheEntry = (cacheKey) => {
   const storage = getStorage();
   if (!storage || !cacheKey) return null;
 
@@ -113,7 +113,31 @@ export const readProjectSessionCache = (cacheKey) => {
     return null;
   }
 
-  return parsed.data;
+  return {
+    data: parsed.data,
+    createdAt: Number(parsed.createdAt) || 0,
+  };
+};
+
+export const isProjectSessionCacheFresh = (cacheEntry, maxAgeMs = 0) => {
+  if (!cacheEntry || !Number.isFinite(maxAgeMs) || maxAgeMs <= 0) return true;
+  const createdAt = Number(cacheEntry.createdAt) || 0;
+  if (!createdAt) return false;
+  return Date.now() - createdAt <= maxAgeMs;
+};
+
+export const readProjectSessionCache = (cacheKey, options = {}) => {
+  const cacheEntry = readProjectSessionCacheEntry(cacheKey);
+  if (!cacheEntry) return null;
+
+  const maxAgeMs = Number(options?.maxAgeMs);
+  if (Number.isFinite(maxAgeMs) && maxAgeMs > 0) {
+    if (!isProjectSessionCacheFresh(cacheEntry, maxAgeMs)) {
+      return null;
+    }
+  }
+
+  return cacheEntry.data;
 };
 
 export const writeProjectSessionCache = (

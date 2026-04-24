@@ -1103,6 +1103,7 @@ const UnifiedMapView = () => {
   const [drawnPoints, setDrawnPoints] = useState(null);
   const [drawnShapeAnalytics, setDrawnShapeAnalytics] = useState([]);
   const [legendFilter, setLegendFilter] = useState(null);
+  const [siteLegendFilter, setSiteLegendFilter] = useState(null);
   const [opacity, setOpacity] = useState(0.8);
   const [logRadius, setLogRadius] = useState(10);
   const [neighborSquareSize, setNeighborSquareSize] = useState(4);
@@ -1175,6 +1176,7 @@ const UnifiedMapView = () => {
     if (!enableSiteToggle) {
       setManualSiteData([]);
       setSelectedSites([]);
+      setSiteLegendFilter(null);
     }
   }, [enableSiteToggle]);
 
@@ -1330,6 +1332,10 @@ const UnifiedMapView = () => {
     const param = searchParams.get("project_id") ?? searchParams.get("project");
     return param ? Number(param) : null;
   }, [searchParams]);
+
+  useEffect(() => {
+    setSiteLegendFilter(null);
+  }, [modeMethod, sitePredictionVersion, siteToggle, projectId]);
 
   const querySessionParam = useMemo(() => {
     for (const key of SESSION_QUERY_KEYS) {
@@ -1798,7 +1804,6 @@ const UnifiedMapView = () => {
   ]);
 
   const storedDeltaGridCells = useMemo(() => {
-    if (!isCellSiteGridMode) return [];
     if (!Boolean(deltaGridApiState?.gridVisible)) return [];
     const rows = Array.isArray(deltaGridApiState?.grids) ? deltaGridApiState.grids : [];
     if (rows.length === 0) return [];
@@ -1807,15 +1812,25 @@ const UnifiedMapView = () => {
     const normalizedStoredGridMetricMode = String(storedGridMetricMode || "max")
       .trim()
       .toLowerCase();
-    const metricMode =
-      normalizedStoredGridMetricMode === "avg" ||
-      normalizedStoredGridMetricMode === "median" ||
-      normalizedStoredGridMetricMode === "max" ||
-      normalizedStoredGridMetricMode === "min"
-        ? normalizedStoredGridMetricMode
-        : "max";
-    const isBestOperatorGridMode = normalizedStoredGridMetricMode === "best_operator";
-    const bestOperatorMode = metricMode === "median" ? "avg" : metricMode;
+    const isBestOperatorGridMode =
+      normalizedStoredGridMetricMode === "best_operator" ||
+      normalizedStoredGridMetricMode === "operator_min" ||
+      normalizedStoredGridMetricMode === "operator_max";
+    const aggregateMode =
+      normalizedStoredGridMetricMode === "best_operator"
+        ? "avg"
+        : normalizedStoredGridMetricMode === "operator_min"
+          ? "min"
+          : normalizedStoredGridMetricMode === "operator_max"
+            ? "max"
+            : normalizedStoredGridMetricMode === "avg" ||
+                normalizedStoredGridMetricMode === "median" ||
+                normalizedStoredGridMetricMode === "max" ||
+                normalizedStoredGridMetricMode === "min"
+              ? normalizedStoredGridMetricMode
+              : "max";
+    const metricMode = aggregateMode === "median" ? "avg" : aggregateMode;
+    const bestOperatorMode = metricMode;
     const normalizedVersion = String(sitePredictionVersion || "").trim().toLowerCase();
     const isDeltaView = normalizedVersion === "delta";
     const isOptimizedView =
@@ -1954,7 +1969,6 @@ const UnifiedMapView = () => {
       })
       .filter(Boolean);
   }, [
-    isCellSiteGridMode,
     deltaGridApiState?.gridVisible,
     deltaGridApiState?.grids,
     selectedMetric,
@@ -1966,10 +1980,9 @@ const UnifiedMapView = () => {
 
   const isFetchedStoredGridVisible = useMemo(
     () =>
-      Boolean(isCellSiteGridMode) &&
       Boolean(deltaGridApiState?.gridVisible) &&
       storedDeltaGridCells.length > 0,
-    [isCellSiteGridMode, deltaGridApiState?.gridVisible, storedDeltaGridCells.length],
+    [deltaGridApiState?.gridVisible, storedDeltaGridCells.length],
   );
   const isStoredGridOverlayVisible = useMemo(
     () => Boolean(isFetchedStoredGridVisible) && !enableGrid,
@@ -2801,6 +2814,12 @@ const UnifiedMapView = () => {
       });
     }
 
+    // Keep the normal logs legend while sample logs are still drawn, even if
+    // the site layer also renders markers/sectors.
+    if (enableDataToggle && !isDataPredictionMode) {
+      return finalDisplayLocations || EMPTY_LIST;
+    }
+
     // Legend should represent only map-drawn data/grid layers (not site marker/sector layer).
     if (shouldRenderLtePredictionLayer) {
       return lteLayerLocations || EMPTY_LIST;
@@ -2851,7 +2870,9 @@ const UnifiedMapView = () => {
   );
   const legendColorBy = useMemo(() => {
     const isBestOperatorGridMode =
-      String(storedGridMetricMode || "").trim().toLowerCase() === "best_operator";
+      ["best_operator", "operator_min", "operator_max"].includes(
+        String(storedGridMetricMode || "").trim().toLowerCase(),
+      );
     if (isStoredGridOverlayVisible && isBestOperatorGridMode) return "provider";
     return colorBy;
   }, [isStoredGridOverlayVisible, storedGridMetricMode, colorBy]);
@@ -3116,8 +3137,7 @@ const UnifiedMapView = () => {
       sectorPredictionGridPoints.length,
     ],
   );
-  const shouldRenderSiteLayer =
-    Boolean(showSiteMarkers || showSiteSectors) && !isStoredGridOverlayVisible;
+  const shouldRenderSiteLayer = Boolean(showSiteMarkers || showSiteSectors);
   const triangleSizeAvailable =
     Boolean(enableSiteToggle) && Boolean(showSiteSectors) && shouldRenderSiteLayer;
   const shouldShowLegend = useMemo(() => {
@@ -4090,11 +4110,13 @@ const UnifiedMapView = () => {
         )}
 
         <SiteLegend
-          enabled={enableSiteToggle && !isStoredGridOverlayVisible}
+          enabled={enableSiteToggle}
           sites={manualSiteData}
           colorMode={modeMethod}
           isLoading={manualSiteLoading}
           sitePredictionVersion={sitePredictionVersion}
+          activeFilter={siteLegendFilter}
+          onFilterChange={setSiteLegendFilter}
         />
 
         <BestNetworkLegend
@@ -4252,7 +4274,6 @@ const UnifiedMapView = () => {
 
               {shouldRenderSiteLayer && (
                 <NetworkPlannerMap
-                  key={`site-layer-${projectId || "none"}-${siteToggle}-${sitePredictionVersion}`}
                   projectId={projectId}
                   sessionIds={sessionIds}
                   siteToggle={siteToggle}
@@ -4275,6 +4296,7 @@ const UnifiedMapView = () => {
                   onSiteSelect={setSelectedSites}
                   onSectorPredictionPointsChange={setSectorPredictionGridPoints}
                   triangleScaleMultiplier={triangleScaleMultiplier}
+                  siteLegendFilter={siteLegendFilter}
                   options={{
                     scale: 0.6,
                     zIndex: 1000,

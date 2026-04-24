@@ -48,6 +48,8 @@ export default function SiteLegend({
   isLoading = false,
   colorMode = "Operator",
   sitePredictionVersion = "original",
+  activeFilter = null,
+  onFilterChange = null,
 }) {
   const [collapsed, setCollapsed] = useState(false);
 
@@ -97,10 +99,10 @@ export default function SiteLegend({
 
       const items = [];
       if (baselineCount > 0) {
-        items.push({ label: "Baseline", color: "#dc2626", count: baselineCount });
+        items.push({ label: "Baseline", value: "baseline", mode: "delta", color: "#dc2626", count: baselineCount });
       }
       if (optimizedCount > 0) {
-        items.push({ label: "Optimized", color: "#16a34a", count: optimizedCount });
+        items.push({ label: "Optimized", value: "optimized", mode: "delta", color: "#16a34a", count: optimizedCount });
       }
       return items;
     }
@@ -131,6 +133,8 @@ export default function SiteLegend({
       if (!itemMap.has(normalized)) {
         itemMap.set(normalized, {
           label: normalized,
+          value: normalized,
+          mode,
           color: color,
           count: 1
         });
@@ -149,6 +153,19 @@ export default function SiteLegend({
        return a.label.localeCompare(b.label);
     });
   }, [uniqueSectorRows, colorMode, sitePredictionVersion]);
+
+  const handleItemClick = (item) => {
+    if (typeof onFilterChange !== "function") return;
+    const nextFilter = {
+      mode: item.mode,
+      value: item.value ?? item.label,
+      label: item.label,
+    };
+    const isActive =
+      String(activeFilter?.mode || "").toLowerCase() === String(nextFilter.mode || "").toLowerCase() &&
+      String(activeFilter?.value || "").toLowerCase() === String(nextFilter.value || "").toLowerCase();
+    onFilterChange(isActive ? null : nextFilter);
+  };
 
   if (!enabled) return null;
 
@@ -180,7 +197,17 @@ export default function SiteLegend({
           <div className="px-3 pb-3 pt-1 space-y-2 max-h-[250px] overflow-y-auto custom-scrollbar">
             {legendItems.length > 0 ? (
               legendItems.map((item) => (
-                <div key={item.label} className="flex items-center justify-between gap-2.5">
+                <button
+                  key={item.label}
+                  type="button"
+                  onClick={() => handleItemClick(item)}
+                  className={`w-full flex items-center justify-between gap-2.5 rounded px-1.5 py-1 text-left transition-colors ${
+                    String(activeFilter?.mode || "").toLowerCase() === String(item.mode || "").toLowerCase() &&
+                    String(activeFilter?.value || "").toLowerCase() === String(item.value ?? item.label).toLowerCase()
+                      ? "bg-blue-500/20 ring-1 ring-blue-400/40"
+                      : "hover:bg-white/5"
+                  }`}
+                >
                   <div className="flex items-center gap-2.5">
                     <div className="flex items-center justify-center w-4">
                       <div
@@ -193,7 +220,7 @@ export default function SiteLegend({
                   <span className="text-[10px] text-gray-600 bg-gray-800 px-1.5 py-0.5 rounded-full">
                     {item.count}
                   </span>
-                </div>
+                </button>
               ))
             ) : (
               <div className="py-2 text-[10px] text-gray-500 italic text-center">

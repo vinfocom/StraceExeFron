@@ -374,6 +374,52 @@ const ExportDropdown = ({
     }
   };
 
+  const exportNetworkSiteCSV = async () => {
+    setIsExporting(true);
+    setExportType("network-site");
+
+    try {
+      const timestamp = getTimestamp();
+      const networkSiteHeaders = ["band", "operator", "nodeb_id", "cell_id"];
+      const uniqueRows = new Map();
+
+      (locations || []).forEach((loc) => {
+        const row = {
+          band: String(loc?.band ?? loc?.primaryBand ?? "").trim(),
+          operator: String(loc?.operator ?? loc?.provider ?? "").trim(),
+          nodeb_id: String(loc?.nodeb_id ?? "").trim(),
+          cell_id: String(loc?.cell_id ?? loc?.cellId ?? "").trim(),
+        };
+
+        const uniqueKey = networkSiteHeaders
+          .map((header) => normalizeValue(row[header]))
+          .join("|");
+
+        if (!uniqueRows.has(uniqueKey) && uniqueKey.replace(/\|/g, "") !== "") {
+          uniqueRows.set(uniqueKey, row);
+        }
+      });
+
+      if (!uniqueRows.size) {
+        toast.warning("No network site records available to export.");
+        return;
+      }
+
+      downloadFile(
+        convertToCSV(Array.from(uniqueRows.values()), networkSiteHeaders),
+        `network_site_${timestamp}.csv`
+      );
+
+      toast.success("NetworkSite CSV exported successfully!");
+    } catch (error) {
+      toast.error("Failed to export NetworkSite CSV");
+    } finally {
+      setIsExporting(false);
+      setExportType(null);
+      setIsOpen(false);
+    }
+  };
+
   const exportCurrentViewAsImage = async () => {
     setIsExporting(true);
     setExportType("image");
@@ -609,30 +655,58 @@ Technologies: ${dataFilters.technologies?.join(", ") || "None"}
 
   return (
     <div className="relative" ref={dropdownRef}>
-      <button
-        onClick={handleFullExport}
-        disabled={!locations?.length || isExporting}
-        className={`
-          flex items-center gap-2 px-3 py-1.5 rounded-lg font-medium text-sm
-          transition-all duration-200 
-          ${locations?.length && !isExporting
-            ? "bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-500 hover:to-emerald-500 text-white shadow-lg hover:shadow-green-500/25"
-            : "bg-slate-700 text-slate-400 cursor-not-allowed"
-          }
-        `}
-      >
-        {isExporting ? (
-          <>
-            <Loader2 className="h-4 w-4 animate-spin" />
-            <span>Exporting...</span>
-          </>
-        ) : (
-          <>
-            <Download className="h-4 w-4" />
-            <span className="hidden sm:inline">Export</span>
-          </>
-        )}
-      </button>
+      <div className="flex items-center gap-2">
+        <button
+          onClick={exportNetworkSiteCSV}
+          disabled={!locations?.length || isExporting}
+          className={`
+            flex items-center gap-2 px-3 py-1.5 rounded-lg font-medium text-sm
+            transition-all duration-200
+            ${locations?.length && !isExporting
+              ? "bg-gradient-to-r from-violet-600 to-fuchsia-600 hover:from-violet-500 hover:to-fuchsia-500 text-white shadow-lg hover:shadow-violet-500/25"
+              : "bg-slate-700 text-slate-400 cursor-not-allowed"
+            }
+          `}
+          title="Download unique Band, Operator, NodeB ID, and Cell ID rows"
+        >
+          {isExporting && exportType === "network-site" ? (
+            <>
+              <Loader2 className="h-4 w-4 animate-spin" />
+              <span className="hidden sm:inline">Exporting...</span>
+            </>
+          ) : (
+            <>
+              <FileSpreadsheet className="h-4 w-4" />
+              <span className="hidden sm:inline">NetworkSite</span>
+            </>
+          )}
+        </button>
+
+        <button
+          onClick={handleFullExport}
+          disabled={!locations?.length || isExporting}
+          className={`
+            flex items-center gap-2 px-3 py-1.5 rounded-lg font-medium text-sm
+            transition-all duration-200 
+            ${locations?.length && !isExporting
+              ? "bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-500 hover:to-emerald-500 text-white shadow-lg hover:shadow-green-500/25"
+              : "bg-slate-700 text-slate-400 cursor-not-allowed"
+            }
+          `}
+        >
+          {isExporting && exportType !== "network-site" ? (
+            <>
+              <Loader2 className="h-4 w-4 animate-spin" />
+              <span>Exporting...</span>
+            </>
+          ) : (
+            <>
+              <Download className="h-4 w-4" />
+              <span className="hidden sm:inline">Export</span>
+            </>
+          )}
+        </button>
+      </div>
     </div>
   );
 };
@@ -1129,7 +1203,7 @@ function UnifiedDetailLogs({
       <div className="flex items-center justify-between p-3 border-b border-slate-700 bg-slate-900 rounded-t-lg drag-handle cursor-move select-none shrink-0">
         <div className="flex items-center gap-3">
           
-          <h3 className="font-semibold text-lg text-slate-100">Analytics Dashboard</h3>
+          <h3 className="font-semibold text-lg text-slate-100">Analytics </h3>
           {hasActiveFilters && (
             <span className="bg-blue-500 text-white text-xs px-2 py-1 rounded-full flex items-center gap-1">
               <Filter className="h-3 w-3" />
@@ -1166,7 +1240,7 @@ function UnifiedDetailLogs({
               ) : (
                 <>
                   <FileText className="h-4 w-4" />
-                  <span className="hidden sm:inline">Generate PDF</span>
+                  <span className="hidden sm:inline"> PDF</span>
                 </>
               )}
             </button>

@@ -6,6 +6,9 @@ import {
   getProviderColor,
   getBandColor,
   getTechnologyColor,
+  normalizeProviderName,
+  normalizeBandName,
+  normalizeTechName,
 } from "@/utils/colorUtils";
 import { useSiteData } from "@/hooks/useSiteData";
 import { mapViewApi } from "@/api/apiEndpoints";
@@ -291,6 +294,57 @@ function getSectorPredictionMetricValue(item, selectedMetric = "rsrp") {
 
   const value = Number(rawValue);
   return Number.isFinite(value) ? value : null;
+}
+
+function normalizeDeltaVariant(value) {
+  const variant = String(value ?? "").trim().toLowerCase();
+  if (variant === "optimised") return "optimized";
+  return variant;
+}
+
+function getSiteLegendFilterValue(row, colorMode = "Operator", sitePredictionVersion = "original") {
+  const isDeltaMode =
+    String(sitePredictionVersion || "").trim().toLowerCase() === "delta" ||
+    ["baseline", "optimized", "optimised"].includes(
+      String(row?.deltaVariant ?? row?.delta_variant ?? row?.__deltaVariant ?? "")
+        .trim()
+        .toLowerCase(),
+    );
+
+  if (isDeltaMode) {
+    return {
+      mode: "delta",
+      value: normalizeDeltaVariant(row?.deltaVariant ?? row?.delta_variant ?? row?.__deltaVariant ?? ""),
+    };
+  }
+
+  const mode = String(colorMode || "Operator").trim().toLowerCase();
+  if (mode === "band") {
+    return {
+      mode,
+      value: normalizeBandName(row?.band || row?.frequency_band || row?.Band || "Unknown"),
+    };
+  }
+  if (mode === "technology") {
+    return {
+      mode,
+      value: normalizeTechName(row?.tech || row?.Technology || row?.technology || "Unknown"),
+    };
+  }
+
+  return {
+    mode: "operator",
+    value: normalizeProviderName(row?.cluster || row?.operator || row?.network || row?.Network || "Unknown") || "Unknown",
+  };
+}
+
+function matchesSiteLegendFilter(row, activeFilter, colorMode, sitePredictionVersion) {
+  if (!activeFilter?.value) return true;
+  const category = getSiteLegendFilterValue(row, colorMode, sitePredictionVersion);
+  return (
+    String(category.mode || "").toLowerCase() === String(activeFilter.mode || "").toLowerCase() &&
+    String(category.value || "").toLowerCase() === String(activeFilter.value || "").toLowerCase()
+  );
 }
 
 function normalizeLteRows(rawRows = [], fallbackSiteId = "", selectedMetric = "rsrp") {
@@ -755,7 +809,7 @@ function normalizeSiteRows(rows = []) {
         65,
       ),
       range: normalizeSectorRange(getFirstFiniteNumber([item.range, item.radius], 220), 220),
-      operator: item.network || item.Network || item.operator || item.cluster || "Unknown",
+      operator: item.cluster || item.network || item.Network || item.operator || "Unknown",
       band: item.band || item.frequency_band || item.frequency || "Unknown",
       technology: inferTechnologyFromCarrier(
         item.Technology || item.tech || item.technology,
@@ -831,7 +885,7 @@ function generateSectorsFromSite(site, siteIndex, colorMode = "Operator", option
   );
   const range = normalizeSectorRange(getFirstFiniteNumber([site.range, site.radius], 220), 220);
 
-  const network = site.operator || site.network || site.cluster || "Unknown";
+  const network = site.cluster || site.operator || site.network || "Unknown";
   const band = site.band || site.frequency_band || site.frequency || "Unknown";
   const earfcnOrNarfcn = site.earfcn_or_narfcn ?? site.earfcnOrNarfcn ?? site.earfcn ?? null;
   const tech = inferTechnologyFromCarrier(
@@ -956,6 +1010,7 @@ const NetworkPlannerMap = ({
   showBulkSiteActions = true,
   onSectorPredictionPointsChange = null,
   triangleScaleMultiplier = 1,
+  siteLegendFilter = null,
 }) => {
   const siteLteDebugEnabled = useMemo(() => isSiteLteDebugEnabled(), []);
   const { siteData, loading, error, fetchSiteData } = useSiteData({
@@ -1171,13 +1226,28 @@ const NetworkPlannerMap = ({
   }, [clearMapOverlays]);
 
   const filteredSiteData = useMemo(() => {
-    if (!onlyInsidePolygons || normalizedPolygonPaths.length === 0) return siteData;
-    return siteData.filter((site) => {
-      const lat = parseFloat(site.lat ?? site.latitude ?? site.lat_pred ?? 0);
-      const lng = parseFloat(site.lng ?? site.longitude ?? site.lon_pred ?? site.lon ?? 0);
-      return pointInsideAnyPolygon({ lat, lng });
-    });
-  }, [siteData, onlyInsidePolygons, normalizedPolygonPaths, pointInsideAnyPolygon]);
+    const polygonFiltered =
+      !onlyInsidePolygons || normalizedPolygonPaths.length === 0
+        ? siteData
+        : siteData.filter((site) => {
+            const lat = parseFloat(site.lat ?? site.latitude ?? site.lat_pred ?? 0);
+            const lng = parseFloat(site.lng ?? site.longitude ?? site.lon_pred ?? site.lon ?? 0);
+            return pointInsideAnyPolygon({ lat, lng });
+          });
+
+    if (!siteLegendFilter?.value) return polygonFiltered;
+    return polygonFiltered.filter((site) =>
+      matchesSiteLegendFilter(site, siteLegendFilter, colorMode, sitePredictionVersion),
+    );
+  }, [
+    siteData,
+    onlyInsidePolygons,
+    normalizedPolygonPaths,
+    pointInsideAnyPolygon,
+    siteLegendFilter,
+    colorMode,
+    sitePredictionVersion,
+  ]);
 
   const allSectors = useMemo(
     () =>
@@ -1213,6 +1283,7 @@ const NetworkPlannerMap = ({
 
   const siteMarkers = useMemo(() => {
     const isDeltaMode = String(sitePredictionVersion || "").trim().toLowerCase() === "delta";
+    const isCellMode = String(siteToggle || "").trim().toLowerCase() === "cell";
     const bySite = new Map();
 
     filteredSiteData.forEach((item) => {
@@ -1222,9 +1293,21 @@ const NetworkPlannerMap = ({
       const lng = parseFloat(item.lng ?? item.longitude ?? item.lon_pred ?? item.lon ?? 0);
       if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
       const deltaVariant = String(item.deltaVariant ?? item.delta_variant ?? "").trim().toLowerCase();
+      const cellIdentity = String(
+        item.cell_id ??
+          item.cellId ??
+          item.cell_id_representative ??
+          item.cellIdRepresentative ??
+          item.sector ??
+          item.sector_id ??
+          item.sectorId ??
+          "",
+      ).trim();
       const markerKey = isDeltaMode
         ? `${siteId}|${deltaVariant || "unknown"}|${lat.toFixed(6)}|${lng.toFixed(6)}`
-        : siteId;
+        : isCellMode
+          ? `${siteId}|${cellIdentity || "cell"}|${lat.toFixed(6)}|${lng.toFixed(6)}`
+          : siteId;
 
       if (!bySite.has(markerKey)) {
         bySite.set(markerKey, {
@@ -1239,7 +1322,7 @@ const NetworkPlannerMap = ({
     });
 
     return Array.from(bySite.values());
-  }, [filteredSiteData, sitePredictionVersion]);
+  }, [filteredSiteData, sitePredictionVersion, siteToggle]);
 
   const fetchSitePayload = useCallback(
     async (siteMarker) => {
@@ -1657,8 +1740,18 @@ const NetworkPlannerMap = ({
       selectedSiteIds.length > 0 && allSelectedSitesHydrated && selectedSiteSectors.length > 0
         ? selectedSiteSectors
         : uniqueSectors;
+    const filteredSource = !siteLegendFilter?.value
+      ? source
+      : source.filter((sector) =>
+          matchesSiteLegendFilter(
+            sector?.rawSite || sector,
+            siteLegendFilter,
+            colorMode,
+            sitePredictionVersion,
+          ),
+        );
     const seen = new Set();
-    return source.filter((sector, idx) => {
+    return filteredSource.filter((sector, idx) => {
       const key =
         sector.renderKey ||
         [
@@ -1673,7 +1766,16 @@ const NetworkPlannerMap = ({
       seen.add(key);
       return true;
     });
-  }, [showSiteSectors, selectedSiteIds, selectedSiteSectors, uniqueSectors, allSelectedSitesHydrated]);
+  }, [
+    showSiteSectors,
+    selectedSiteIds,
+    selectedSiteSectors,
+    uniqueSectors,
+    allSelectedSitesHydrated,
+    siteLegendFilter,
+    colorMode,
+    sitePredictionVersion,
+  ]);
 
   const visibleSelectedSiteLteLocations = useMemo(() => {
     if (!enableSiteLteOverlay || !Array.isArray(selectedSiteLteLocations)) return [];

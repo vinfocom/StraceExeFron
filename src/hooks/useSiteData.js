@@ -3,12 +3,14 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { mapViewApi } from '@/api/apiEndpoints';
 import {
   makeProjectCacheKey,
-  readProjectSessionCache,
+  readProjectSessionCacheEntry,
+  isProjectSessionCacheFresh,
   writeProjectSessionCache,
 } from '@/utils/projectSessionCache';
 
 const SITE_PREDICTION_PAGE_SIZE = 5000;
 const MAX_SITE_PREDICTION_PAGES = 200;
+const SITE_DATA_CACHE_MAX_AGE_MS = 2 * 60 * 1000;
 
 const getFirstFiniteNumber = (values = [], fallback = 0) => {
   for (const value of values) {
@@ -201,7 +203,7 @@ const normalizeSitePredictionRows = (rows = [], options = {}) => {
           65,
         ),
         range: normalizeSectorRange(getFirstFiniteNumber([item.range, item.radius], 220), 220),
-        operator: item.network || item.Network || item.cluster || item.operator_name || "Unknown",
+        operator: item.cluster || item.network || item.Network || item.operator_name || "Unknown",
         band: item.band || item.frequency_band || item.frequency || "Unknown",
         technology: item.Technology || item.tech || item.technology || inferredTechnology,
         pci:
@@ -336,13 +338,16 @@ export const useSiteData = ({
     });
 
     if (!forceRefresh) {
-      const cachedData = readProjectSessionCache(cacheKey);
-      if (Array.isArray(cachedData)) {
-        setSiteData(cachedData);
-        setLoading(false);
+      const cacheEntry = readProjectSessionCacheEntry(cacheKey);
+      if (Array.isArray(cacheEntry?.data)) {
+        setSiteData(cacheEntry.data);
         setError(null);
         lastFetchParams.current = currentParams;
-        return;
+
+        if (isProjectSessionCacheFresh(cacheEntry, SITE_DATA_CACHE_MAX_AGE_MS)) {
+          setLoading(false);
+          return;
+        }
       }
     }
 

@@ -17,7 +17,8 @@ import { mapViewApi } from "@/api/apiEndpoints";
 import { parseWKTToPolygons } from "@/utils/wkt";
 import { GOOGLE_MAPS_LOADER_OPTIONS } from "@/lib/googleMapsLoader";
 import {
-  readProjectsListCache,
+  readProjectsListCacheEntry,
+  isProjectsListCacheFresh,
   removeProjectFromProjectsCache,
   writeProjectsListCache,
 } from "@/utils/projectsCache";
@@ -205,9 +206,11 @@ const ViewProjectsPage = () => {
   const { isLoaded: mapsReady, loadError: mapsError } = useJsApiLoader(
     GOOGLE_MAPS_LOADER_OPTIONS,
   );
-  const initialCachedProjects = useMemo(() => {
-    return readProjectsListCache();
+  const initialProjectsCache = useMemo(() => {
+    return readProjectsListCacheEntry();
   }, []);
+  const initialCachedProjects = initialProjectsCache?.data || [];
+  const hasFreshInitialProjectsCache = isProjectsListCacheFresh(initialProjectsCache);
 
   const [projects, setProjects] = useState(initialCachedProjects);
   const [loading, setLoading] = useState(initialCachedProjects.length === 0);
@@ -315,8 +318,13 @@ const ViewProjectsPage = () => {
   }, []);
 
   useEffect(() => {
-    fetchProjects({ background: initialCachedProjects.length > 0 });
-  }, [fetchProjects, initialCachedProjects.length]);
+    fetchProjects({ background: initialCachedProjects.length > 0 && hasFreshInitialProjectsCache });
+    const intervalId = window.setInterval(() => {
+      fetchProjects({ background: true });
+    }, 60 * 1000);
+
+    return () => window.clearInterval(intervalId);
+  }, [fetchProjects, hasFreshInitialProjectsCache, initialCachedProjects.length]);
 
   const filteredProjects = useMemo(() => {
     if (!searchQuery.trim()) return projects;

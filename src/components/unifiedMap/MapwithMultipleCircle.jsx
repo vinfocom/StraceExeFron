@@ -1149,8 +1149,27 @@ const MapWithMultipleCircles = ({
     return { lat: sumLat / count, lng: sumLng / count };
   }, [locationsToRender, processedNeighbors, locations, center]);
 
-  const handleMapLoad = useCallback((mapInstance) => {
-    setMap(mapInstance);
+  const autoFitSignature = useMemo(() => {
+    const allPoints = [...locationsToRender, ...processedNeighbors];
+    const locs = allPoints.length > 0 ? allPoints : locations;
+    if (!Array.isArray(locs) || locs.length === 0) return "empty";
+
+    const first = locs[0];
+    const last = locs[locs.length - 1];
+    return [
+      locs.length,
+      Number(first?.lat).toFixed(5),
+      Number(first?.lng).toFixed(5),
+      Number(last?.lat).toFixed(5),
+      Number(last?.lng).toFixed(5),
+    ].join("|");
+  }, [locationsToRender, processedNeighbors, locations]);
+
+  const lastAutoFitSignatureRef = useRef("");
+
+  const applyAutoViewport = useCallback((mapInstance) => {
+    if (!mapInstance) return;
+
     const allPoints = [...locationsToRender, ...processedNeighbors];
     const locs = allPoints.length > 0 ? allPoints : locations;
     if (fitToLocations && locs?.length && window.google) {
@@ -1161,12 +1180,28 @@ const MapWithMultipleCircles = ({
         bounds.extend({ lat: locs[i].lat, lng: locs[i].lng });
       }
       mapInstance.fitBounds(bounds, 50);
-    } else {
-      mapInstance.setCenter(computedCenter);
-      mapInstance.setZoom(defaultZoom);
+      return;
     }
+
+    mapInstance.setCenter(computedCenter);
+    mapInstance.setZoom(defaultZoom);
+  }, [locationsToRender, processedNeighbors, locations, fitToLocations, computedCenter, defaultZoom]);
+
+  const handleMapLoad = useCallback((mapInstance) => {
+    setMap(mapInstance);
+    applyAutoViewport(mapInstance);
+    lastAutoFitSignatureRef.current = autoFitSignature;
     onLoadProp?.(mapInstance);
-  }, [locationsToRender, processedNeighbors, locations, fitToLocations, computedCenter, defaultZoom, onLoadProp]);
+  }, [applyAutoViewport, autoFitSignature, onLoadProp]);
+
+  useEffect(() => {
+    if (!map) return;
+    if (autoFitSignature === "empty") return;
+    if (lastAutoFitSignatureRef.current === autoFitSignature) return;
+
+    applyAutoViewport(map);
+    lastAutoFitSignatureRef.current = autoFitSignature;
+  }, [map, autoFitSignature, applyAutoViewport]);
 
   const handleMapUnmount = useCallback(() => {
     setMap(null);

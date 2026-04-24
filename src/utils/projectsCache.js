@@ -1,11 +1,14 @@
 import {
   makeProjectCacheKey,
   readProjectSessionCache,
+  readProjectSessionCacheEntry,
+  isProjectSessionCacheFresh,
   writeProjectSessionCache,
 } from "@/utils/projectSessionCache";
 
 const PROJECTS_RESOURCE = "projects-list";
 const PROJECTS_SCOPE = "all";
+export const PROJECTS_LIST_CACHE_MAX_AGE_MS = 60 * 1000;
 
 export const getProjectsListCacheKey = () =>
   makeProjectCacheKey({ resource: PROJECTS_RESOURCE, projectId: PROJECTS_SCOPE });
@@ -14,6 +17,17 @@ export const readProjectsListCache = () => {
   const cached = readProjectSessionCache(getProjectsListCacheKey());
   return Array.isArray(cached) ? cached : [];
 };
+
+export const readProjectsListCacheEntry = () => {
+  const cached = readProjectSessionCacheEntry(getProjectsListCacheKey());
+  if (!Array.isArray(cached?.data)) return null;
+  return cached;
+};
+
+export const isProjectsListCacheFresh = (
+  cacheEntry,
+  maxAgeMs = PROJECTS_LIST_CACHE_MAX_AGE_MS,
+) => isProjectSessionCacheFresh(cacheEntry, maxAgeMs);
 
 export const writeProjectsListCache = (projects = []) =>
   writeProjectSessionCache(
