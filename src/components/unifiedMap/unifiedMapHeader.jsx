@@ -329,6 +329,8 @@ function UnifiedHeader({
   triangleSizeAvailable = false,
   triangleScaleMultiplier = 1,
   setTriangleScaleMultiplier,
+  defaultSiteBeamwidth = 65,
+  setDefaultSiteBeamwidth,
   onUIChange,
   ui,
   onSettingsSaved,
@@ -547,9 +549,16 @@ function UnifiedHeader({
   )
     ? Number(triangleScaleMultiplier)
     : 1;
+  const currentDefaultSiteBeamwidth = Number.isFinite(
+    Number(defaultSiteBeamwidth),
+  )
+    ? Number(defaultSiteBeamwidth)
+    : 65;
   const minTriangleScale = 0.25;
   const maxTriangleScale = 3;
   const triangleScaleStep = 0.25;
+  const minBeamwidth = 5;
+  const maxBeamwidth = 180;
 
   const adjustOpacity = (deltaPercent) => {
     const nextPercent = Math.max(
@@ -613,6 +622,23 @@ function UnifiedHeader({
     );
   };
 
+  const adjustDefaultBeamwidth = (delta) => {
+    if (!setDefaultSiteBeamwidth) return;
+    const nextValue = Math.round(currentDefaultSiteBeamwidth + delta);
+    setDefaultSiteBeamwidth(
+      Math.max(minBeamwidth, Math.min(maxBeamwidth, nextValue)),
+    );
+  };
+
+  const updateDefaultBeamwidthFromInput = (rawValue) => {
+    if (!setDefaultSiteBeamwidth) return;
+    const nextValue = Number(rawValue);
+    if (!Number.isFinite(nextValue)) return;
+    setDefaultSiteBeamwidth(
+      Math.max(minBeamwidth, Math.min(maxBeamwidth, Math.round(nextValue))),
+    );
+  };
+
   const toggleQuickControl = useCallback((controlKey) => {
     setActiveQuickControl((prev) => (prev === controlKey ? null : controlKey));
   }, []);
@@ -631,6 +657,7 @@ function UnifiedHeader({
       action: () => toggleQuickControl("triangle"),
       disabled: !triangleSizeAvailable,
     },
+    { label: "Beamwidth", action: () => toggleQuickControl("beamwidth") },
     { label: "Settings", action: () => setOpenSettingsDialog(true) },
   ];
 
@@ -669,6 +696,10 @@ function UnifiedHeader({
         if (triangleSizeAvailable) {
           toggleQuickControl("triangle");
         }
+        return;
+      }
+      if (action === "beamwidth") {
+        toggleQuickControl("beamwidth");
         return;
       }
       if (action === "settings") {
@@ -970,6 +1001,43 @@ function UnifiedHeader({
                 >
                   Reset
                 </Button>
+              </div>
+            )}
+
+            {activeQuickControl === "beamwidth" && (
+              <div className="flex max-w-full flex-wrap items-center gap-2 bg-gray-700/80 rounded-lg px-3 py-1.5 border border-gray-600">
+                <span className="text-xs text-gray-300 font-medium">
+                  Beamwidth
+                </span>
+                <button
+                  type="button"
+                  onClick={() => adjustDefaultBeamwidth(-5)}
+                  className="h-6 w-6 rounded bg-slate-600 hover:bg-slate-500 flex items-center justify-center"
+                  disabled={currentDefaultSiteBeamwidth <= minBeamwidth}
+                  title="Decrease default beamwidth"
+                >
+                  <Minus className="h-3 w-3" />
+                </button>
+                <Input
+                  type="number"
+                  min={minBeamwidth}
+                  max={maxBeamwidth}
+                  value={currentDefaultSiteBeamwidth}
+                  onChange={(e) =>
+                    updateDefaultBeamwidthFromInput(e.target.value)
+                  }
+                  className="h-7 w-16 bg-slate-800 border-slate-600 text-white text-xs text-center px-1"
+                />
+                <button
+                  type="button"
+                  onClick={() => adjustDefaultBeamwidth(5)}
+                  className="h-6 w-6 rounded bg-slate-600 hover:bg-slate-500 flex items-center justify-center"
+                  disabled={currentDefaultSiteBeamwidth >= maxBeamwidth}
+                  title="Increase default beamwidth"
+                >
+                  <Plus className="h-3 w-3" />
+                </button>
+                <span className="text-xs text-blue-300 font-medium">deg</span>
               </div>
             )}
           </>

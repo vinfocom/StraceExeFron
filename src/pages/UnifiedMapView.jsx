@@ -1069,6 +1069,7 @@ const UnifiedMapView = () => {
   const [siteToggle, setSiteToggle] = useState("Cell");
   const [sitePredictionVersion, setSitePredictionVersion] = useState("original");
   const [modeMethod, setModeMethod] = useState("Operator");
+  const [siteLabelField, setSiteLabelField] = useState("none");
   const [showSiteMarkers, setShowSiteMarkers] = useState(true);
   const [showSiteSectors, setShowSiteSectors] = useState(true);
   const [showNeighbors, setShowNeighbors] = useState(false);
@@ -1077,8 +1078,10 @@ const UnifiedMapView = () => {
 
   const [showPolygons, setShowPolygons] = useState(false);
   const [polygonSource, setPolygonSource] = useState("map");
+  const polygonOpacity = 1;
   const [onlyInsidePolygons] = useState(true);
   const [areaEnabled, setAreaEnabled] = useState(false);
+  const [ltePredictionUseBuildings, setLtePredictionUseBuildings] = useState(true);
   const [coverageViolationThreshold, setCoverageViolationThreshold] =
     useState(null);
 
@@ -1108,6 +1111,7 @@ const UnifiedMapView = () => {
   const [logRadius, setLogRadius] = useState(10);
   const [neighborSquareSize, setNeighborSquareSize] = useState(4);
   const [triangleScaleMultiplier, setTriangleScaleMultiplier] = useState(1);
+  const [defaultSiteBeamwidth, setDefaultSiteBeamwidth] = useState(65);
   const [showSessionNeighbors, setShowSessionNeighbors] = useState(true);
 
   const [bestNetworkEnabled, setBestNetworkEnabled] = useState(false);
@@ -2084,6 +2088,7 @@ const UnifiedMapView = () => {
     enableSiteToggle,
     siteToggle,
     sitePredictionVersion,
+    defaultBeamwidth: defaultSiteBeamwidth,
     projectId,
     sessionIds,
     autoFetch: true,
@@ -2900,7 +2905,7 @@ const UnifiedMapView = () => {
       return polygons.map((p) => ({
         ...p,
         fillColor: "#4285F4",
-        fillOpacity: 0.35,
+        fillOpacity: polygonOpacity,
         pointCount: 0,
       }));
     }
@@ -2915,7 +2920,7 @@ const UnifiedMapView = () => {
         return {
           ...poly,
           fillColor: "#ccc",
-          fillOpacity: 0.3,
+          fillOpacity: polygonOpacity,
           pointCount: pointsInside.length,
         };
       }
@@ -2928,7 +2933,7 @@ const UnifiedMapView = () => {
       return {
         ...poly,
         fillColor,
-        fillOpacity: 0.7,
+        fillOpacity: polygonOpacity,
         pointCount: pointsInside.length,
         medianValue: median,
       };
@@ -2940,6 +2945,7 @@ const UnifiedMapView = () => {
     locations,
     selectedMetric,
     effectiveThresholds,
+    polygonOpacity,
   ]);
 
   const areaPolygonsWithColors = useMemo(() => {
@@ -2948,7 +2954,7 @@ const UnifiedMapView = () => {
       return areaData.map((p) => ({
         ...p,
         fillColor: "#9333ea",
-        fillOpacity: 0.25,
+        fillOpacity: polygonOpacity,
         pointCount: 0,
         medianValue: null,
         categoryStats: null,
@@ -2972,7 +2978,7 @@ const UnifiedMapView = () => {
         return {
           ...poly,
           fillColor: "#ccc",
-          fillOpacity: 0.3,
+          fillOpacity: polygonOpacity,
           pointCount: 0,
           medianValue: null,
           categoryStats: null,
@@ -3070,8 +3076,8 @@ const UnifiedMapView = () => {
       return {
         ...poly,
         fillColor,
-        fillOpacity: 0.7,
-        strokeWeight: 2.5,
+        fillOpacity: polygonOpacity,
+        strokeWeight: 1,
         pointCount: pointsInside.length,
         medianValue,
         bestProvider,
@@ -3094,6 +3100,7 @@ const UnifiedMapView = () => {
     selectedMetric,
     baseThresholds,
     colorBy,
+    polygonOpacity,
   ]);
 
   const visiblePolygons = useMemo(() => {
@@ -3180,29 +3187,74 @@ const UnifiedMapView = () => {
   const storedCenterMemoryRef = useRef(null);
   const zoomLockControlRef = useRef({
     map: null,
-    button: null,
+    rootButton: null,
+    storeButton: null,
+    lockButton: null,
     container: null,
-    clickHandler: null,
+    storeHandler: null,
+    lockHandler: null,
   });
 
   const applyZoomLockControlStyle = useCallback(() => {
-    const btn = zoomLockControlRef.current.button;
-    if (!btn) return;
-    if (isZoomMemoryArmed) {
-      btn.style.background = "#2563eb";
-      btn.style.color = "#ffffff";
-      btn.style.borderColor = "#1d4ed8";
-    } else {
-      btn.style.background = "#ffffff";
-      btn.style.color = "#1f2937";
-      btn.style.borderColor = "#cbd5e1";
+    const { rootButton, storeButton, lockButton } = zoomLockControlRef.current;
+    if (rootButton) {
+      rootButton.style.background = isZoomMemoryArmed ? "#2563eb" : "#ffffff";
+      rootButton.style.color = isZoomMemoryArmed ? "#ffffff" : "#1f2937";
+      rootButton.style.borderColor = isZoomMemoryArmed ? "#1d4ed8" : "#cbd5e1";
+      rootButton.textContent = isZoomMemoryArmed ? "ON" : "🔒";
+    }
+    if (storeButton) {
+      storeButton.textContent = isZoomMemoryArmed ? "On" : "Set";
+      storeButton.style.background = isZoomMemoryArmed ? "#dbeafe" : "#ffffff";
+      storeButton.style.color = isZoomMemoryArmed ? "#1d4ed8" : "#1f2937";
+      storeButton.style.fontWeight = isZoomMemoryArmed ? "700" : "600";
+      storeButton.title = isZoomMemoryArmed ? "Clear stored map zoom" : "Store current map zoom";
+      storeButton.setAttribute(
+        "aria-label",
+        isZoomMemoryArmed ? "Clear stored map zoom" : "Store current map zoom",
+      );
+    }
+    if (lockButton) {
+      lockButton.textContent = "Zoom";
+      lockButton.style.background = "#ffffff";
+      lockButton.style.color = isZoomMemoryArmed ? "#1d4ed8" : "#94a3b8";
+      lockButton.style.fontWeight = "700";
+      lockButton.title = "Rezoom to stored map view";
+      lockButton.setAttribute("aria-label", "Rezoom to stored map view");
     }
   }, [isZoomMemoryArmed]);
 
+  const storeCurrentZoomMemory = useCallback((map) => {
+    if (!map) return null;
+    const currentZoom = map.getZoom?.();
+    const currentCenter = map.getCenter?.();
+    const zoomToStore = Number.isFinite(currentZoom) ? currentZoom : mapZoom;
+    const centerToStore =
+      currentCenter &&
+        Number.isFinite(currentCenter.lat?.()) &&
+        Number.isFinite(currentCenter.lng?.())
+        ? { lat: currentCenter.lat(), lng: currentCenter.lng() }
+        : null;
+
+    if (Number.isFinite(zoomToStore)) {
+      storedZoomMemoryRef.current = zoomToStore;
+      setMapZoom((prev) => (prev === zoomToStore ? prev : zoomToStore));
+    } else {
+      storedZoomMemoryRef.current = null;
+    }
+    storedCenterMemoryRef.current = centerToStore;
+    zoomMemoryArmedRef.current = Number.isFinite(zoomToStore);
+    setIsZoomMemoryArmed(Number.isFinite(zoomToStore));
+    return Number.isFinite(zoomToStore) ? zoomToStore : null;
+  }, [mapZoom]);
+
   const teardownZoomLockControl = useCallback(() => {
     const current = zoomLockControlRef.current;
-    if (current.button && current.clickHandler) {
-      current.button.removeEventListener("click", current.clickHandler);
+    if (current.storeButton && current.storeHandler) {
+      current.storeButton.removeEventListener("click", current.storeHandler);
+    }
+    if (current.lockButton && current.lockHandler) {
+      current.lockButton.removeEventListener("click", current.lockHandler);
     }
 
     const map = current.map;
@@ -3221,9 +3273,12 @@ const UnifiedMapView = () => {
 
     zoomLockControlRef.current = {
       map: null,
-      button: null,
+      rootButton: null,
+      storeButton: null,
+      lockButton: null,
       container: null,
-      clickHandler: null,
+      storeHandler: null,
+      lockHandler: null,
     };
   }, []);
 
@@ -3335,35 +3390,87 @@ const UnifiedMapView = () => {
       lockButton.title = "Zoom Memory";
       lockButton.setAttribute("aria-label", "Zoom Memory");
       lockButton.textContent = "🔒";
-      lockButton.style.width = "34px";
-      lockButton.style.height = "34px";
+      lockButton.style.width = "52px";
+      lockButton.style.height = "52px";
       lockButton.style.borderRadius = "6px";
       lockButton.style.border = "1px solid #cbd5e1";
       lockButton.style.boxShadow = "0 1px 4px rgba(0, 0, 0, 0.3)";
       lockButton.style.cursor = "pointer";
-      lockButton.style.fontSize = "16px";
+      lockButton.style.fontSize = "20px";
       lockButton.style.display = "flex";
       lockButton.style.alignItems = "center";
       lockButton.style.justifyContent = "center";
       lockButton.style.transition = "all 0.2s ease";
+      lockButton.style.fontWeight = "700";
+      lockButton.style.userSelect = "none";
+      lockButton.style.fontFamily = "Arial, sans-serif";
+      lockContainer.style.position = "relative";
+      lockContainer.style.width = "52px";
+      lockButton.style.width = "52px";
+      lockButton.style.fontSize = "13px";
+      lockButton.style.letterSpacing = "0";
+
+      const splitPanel = document.createElement("div");
+      splitPanel.style.position = "absolute";
+      splitPanel.style.top = "0";
+      splitPanel.style.right = "0";
+      splitPanel.style.width = "52px";
+      splitPanel.style.height = "52px";
+      splitPanel.style.display = "none";
+      splitPanel.style.flexDirection = "column";
+      splitPanel.style.overflow = "hidden";
+      splitPanel.style.border = "1px solid #cbd5e1";
+      splitPanel.style.borderRadius = "6px";
+      splitPanel.style.boxShadow = "0 1px 4px rgba(0, 0, 0, 0.3)";
+      splitPanel.style.background = "#ffffff";
+
+      const makeSplitButton = (label, title) => {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.textContent = label;
+        button.title = title;
+        button.setAttribute("aria-label", title);
+        button.style.flex = "1 1 0";
+        button.style.border = "0";
+        button.style.background = "#ffffff";
+        button.style.color = "#1f2937";
+        button.style.cursor = "pointer";
+        button.style.fontSize = "11px";
+        button.style.letterSpacing = "0";
+        button.style.display = "flex";
+        button.style.alignItems = "center";
+        button.style.justifyContent = "center";
+        button.style.transition = "background 0.15s ease, color 0.15s ease";
+        return button;
+      };
+
+      const storeButton = makeSplitButton("Set", "Store current map zoom");
+      const splitLockButton = makeSplitButton("Zoom", "Rezoom to stored map view");
+      storeButton.style.borderBottom = "1px solid #e2e8f0";
+
+      lockContainer.addEventListener("mouseenter", () => {
+        splitPanel.style.display = "flex";
+      });
+      lockContainer.addEventListener("mouseleave", () => {
+        splitPanel.style.display = "none";
+      });
+
+      const storeClickHandler = () => {
+        if (zoomMemoryArmedRef.current) {
+          storedZoomMemoryRef.current = null;
+          storedCenterMemoryRef.current = null;
+          zoomMemoryArmedRef.current = false;
+          setIsZoomMemoryArmed(false);
+          return;
+        }
+        storeCurrentZoomMemory(map);
+      };
 
       const lockClickHandler = () => {
-        const currentZoom = map.getZoom?.();
-        const currentCenter = map.getCenter?.();
-        if (!zoomMemoryArmedRef.current) {
-          const zoomToStore = Number.isFinite(currentZoom) ? currentZoom : mapZoom;
-          const centerToStore =
-            currentCenter && Number.isFinite(currentCenter.lat?.()) && Number.isFinite(currentCenter.lng?.())
-              ? { lat: currentCenter.lat(), lng: currentCenter.lng() }
-              : null;
-          if (Number.isFinite(zoomToStore)) {
-            storedZoomMemoryRef.current = zoomToStore;
-            setMapZoom((prev) => (prev === zoomToStore ? prev : zoomToStore));
-          }
-          storedCenterMemoryRef.current = centerToStore;
-          zoomMemoryArmedRef.current = true;
-          setIsZoomMemoryArmed(true);
-          return;
+        if (zoomLockEnabledRef.current) {
+          zoomLockEnabledRef.current = false;
+          lockedZoomRef.current = null;
+          setIsZoomLocked(false);
         }
 
         const savedZoom = Number(storedZoomMemoryRef.current);
@@ -3382,20 +3489,24 @@ const UnifiedMapView = () => {
           map.setZoom(savedZoom);
           setMapZoom((prev) => (prev === savedZoom ? prev : savedZoom));
         }
-        storedCenterMemoryRef.current = null;
-        zoomMemoryArmedRef.current = false;
-        setIsZoomMemoryArmed(false);
       };
 
-      lockButton.addEventListener("click", lockClickHandler);
+      storeButton.addEventListener("click", storeClickHandler);
+      splitLockButton.addEventListener("click", lockClickHandler);
       lockContainer.appendChild(lockButton);
+      splitPanel.appendChild(storeButton);
+      splitPanel.appendChild(splitLockButton);
+      lockContainer.appendChild(splitPanel);
       map.controls[window.google.maps.ControlPosition.RIGHT_TOP].push(lockContainer);
 
       zoomLockControlRef.current = {
         map,
-        button: lockButton,
+        rootButton: lockButton,
+        storeButton,
+        lockButton: splitLockButton,
         container: lockContainer,
-        clickHandler: lockClickHandler,
+        storeHandler: storeClickHandler,
+        lockHandler: lockClickHandler,
       };
       applyZoomLockControlStyle();
 
@@ -3405,7 +3516,7 @@ const UnifiedMapView = () => {
       applyZoomLockControlStyle,
       debouncedSetViewport,
       locations?.length,
-      mapZoom,
+      storeCurrentZoomMemory,
       teardownZoomLockControl,
     ],
   );
@@ -3892,6 +4003,8 @@ const UnifiedMapView = () => {
         triangleSizeAvailable={triangleSizeAvailable}
         triangleScaleMultiplier={triangleScaleMultiplier}
         setTriangleScaleMultiplier={setTriangleScaleMultiplier}
+        defaultSiteBeamwidth={defaultSiteBeamwidth}
+        setDefaultSiteBeamwidth={setDefaultSiteBeamwidth}
         ui={ui}
         onUIChange={handleUIChange}
         onOpenMultiView={handleNavigateToMultiView}
@@ -3990,6 +4103,8 @@ const UnifiedMapView = () => {
         dataToggle={dataToggle}
         modeMethod={modeMethod}
         setModeMethod={setModeMethod}
+        siteLabelField={siteLabelField}
+        setSiteLabelField={setSiteLabelField}
         setTechHandover={setTechHandOver}
         techHandover={techHandOver}
         technologyTransitions={technologyTransitions}
@@ -4030,6 +4145,8 @@ const UnifiedMapView = () => {
         setShowPolygons={setShowPolygons}
         polygonSource={polygonSource}
         setPolygonSource={setPolygonSource}
+        ltePredictionUseBuildings={ltePredictionUseBuildings}
+        setLtePredictionUseBuildings={setLtePredictionUseBuildings}
         onlyInsidePolygons={onlyInsidePolygons}
         polygonCount={polygons?.length || 0}
         showSiteMarkers={showSiteMarkers}
@@ -4177,6 +4294,7 @@ const UnifiedMapView = () => {
               areaEnabled={areaEnabled}
               filterInsidePolygons={onlyInsidePolygons}
               opacity={opacity}
+              polygonOpacity={polygonOpacity}
               neighborData={filteredNeighbors}
               showNeighbors={showSessionNeighbors}
               neighborSquareSize={neighborSquareSize}
@@ -4198,6 +4316,7 @@ const UnifiedMapView = () => {
                 pixelateRect={ui.drawPixelateRect}
                 cellSizeMeters={ui.drawCellSizeMeters}
                 colorizeCells={ui.colorizeCells}
+                polygonOpacity={polygonOpacity}
                 shapeMode={ui.shapeMode}
                 onUIChange={handleUIChange}
                 clearSignal={ui.drawClearSignal}
@@ -4237,12 +4356,12 @@ const UnifiedMapView = () => {
                     paths={poly.paths[0]}
                     options={{
                       fillColor: poly.fillColor || "#4285F4",
-                      fillOpacity: poly.fillOpacity || 0.35,
+                      fillOpacity: poly.fillOpacity ?? polygonOpacity,
                       strokeColor: onlyInsidePolygons
                         ? poly.fillColor
                         : "#2563eb",
-                      strokeWeight: 2,
-                      strokeOpacity: 0.9,
+                      strokeWeight: 1,
+                      strokeOpacity: polygonOpacity,
                       clickable: true,
                       zIndex: 50,
                     }}
@@ -4259,10 +4378,10 @@ const UnifiedMapView = () => {
                     paths={poly.paths[0]}
                     options={{
                       fillColor: poly.fillColor || "#9333ea",
-                      fillOpacity: poly.fillOpacity ?? 0.25,
+                      fillOpacity: poly.fillOpacity ?? polygonOpacity,
                       strokeColor: poly.fillColor || "#7e22ce",
-                      strokeWeight: 2,
-                      strokeOpacity: 0.9,
+                      strokeWeight: 1,
+                      strokeOpacity: polygonOpacity,
                       clickable: true,
                       zIndex: 60,
                     }}
@@ -4278,6 +4397,7 @@ const UnifiedMapView = () => {
                   sessionIds={sessionIds}
                   siteToggle={siteToggle}
                   sitePredictionVersion={sitePredictionVersion}
+                  defaultBeamwidth={defaultSiteBeamwidth}
                   enableSiteToggle={enableSiteToggle}
                   showSiteMarkers={showSiteMarkers}
                   showSiteSectors={showSiteSectors}
@@ -4290,6 +4410,7 @@ const UnifiedMapView = () => {
                   locations={finalDisplayLocations}
                   onDataLoaded={handleSitesLoaded}
                   colorMode={modeMethod}
+                  siteLabelField={siteLabelField}
                   viewport={viewport}
                   thresholds={effectiveThresholds}
                   getMetricColor={getMetricColorForLog}

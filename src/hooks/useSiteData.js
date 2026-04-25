@@ -20,6 +20,15 @@ const getFirstFiniteNumber = (values = [], fallback = 0) => {
   return fallback;
 };
 
+const getFirstPositiveFiniteNumberOrNull = (values = []) => {
+  for (const value of values) {
+    if (value === null || value === undefined || value === "") continue;
+    const numeric = Number(value);
+    if (Number.isFinite(numeric) && numeric > 0) return numeric;
+  }
+  return null;
+};
+
 const normalizeBeamwidth = (value, fallback = 65) => {
   const numeric = Number(value);
   if (!Number.isFinite(numeric) || numeric <= 0) return fallback;
@@ -169,6 +178,7 @@ const fetchAllSitePredictionRows = async (params = {}) => {
 
 const normalizeSitePredictionRows = (rows = [], options = {}) => {
   const deltaVariant = String(options?.deltaVariant || "").trim().toLowerCase();
+  const defaultBeamwidth = normalizeBeamwidth(options?.defaultBeamwidth, 65);
   if (!Array.isArray(rows)) return [];
   return rows
     .map((item, index) => {
@@ -179,6 +189,13 @@ const normalizeSitePredictionRows = (rows = [], options = {}) => {
 
       const lat = parseFloat(item.lat_pred || item.lat || item.latitude || 0);
       const lng = parseFloat(item.lon_pred || item.lng || item.lon || item.longitude || 0);
+      const sourceBeamwidth = getFirstPositiveFiniteNumberOrNull([
+        item.bw,
+        item.bandwidth,
+        item.beamwidth,
+        item.beamwidth_deg_est,
+      ]);
+      const hasBeamwidthValue = sourceBeamwidth !== null;
 
       return {
         ...item,
@@ -199,9 +216,11 @@ const normalizeSitePredictionRows = (rows = [], options = {}) => {
         lng,
         azimuth: getFirstFiniteNumber([item.azimuth_deg_5, item.azimuth_deg_5_soft, item.azimuth], 0),
         beamwidth: normalizeBeamwidth(
-          getFirstFiniteNumber([item.bw, item.bandwidth, item.beamwidth, item.beamwidth_deg_est], 65),
-          65,
+          hasBeamwidthValue ? sourceBeamwidth : defaultBeamwidth,
+          defaultBeamwidth,
         ),
+        hasBeamwidthValue,
+        beamwidthSource: hasBeamwidthValue ? "data" : "default",
         range: normalizeSectorRange(getFirstFiniteNumber([item.range, item.radius], 220), 220),
         operator: item.cluster || item.network || item.Network || item.operator_name || "Unknown",
         band: item.band || item.frequency_band || item.frequency || "Unknown",
@@ -228,7 +247,7 @@ const normalizeSitePredictionRows = (rows = [], options = {}) => {
     .filter((item) => Number.isFinite(item.lat) && Number.isFinite(item.lng) && item.lat !== 0);
 };
 
-const normalizeCompareSitePredictionPayload = (payload) => {
+const normalizeCompareSitePredictionPayload = (payload, options = {}) => {
   const responseRoot = payload?.data || payload;
   const baselineEntries = Array.isArray(responseRoot?.baseline) ? responseRoot.baseline : [];
   const optimizedEntries = Array.isArray(responseRoot?.optimized) ? responseRoot.optimized : [];
@@ -252,8 +271,14 @@ const normalizeCompareSitePredictionPayload = (payload) => {
     .filter((row) => row && typeof row === "object");
 
   return [
-    ...normalizeSitePredictionRows(baselineRows, { deltaVariant: "baseline" }),
-    ...normalizeSitePredictionRows(optimizedRows, { deltaVariant: "optimized" }),
+    ...normalizeSitePredictionRows(baselineRows, {
+      ...options,
+      deltaVariant: "baseline",
+    }),
+    ...normalizeSitePredictionRows(optimizedRows, {
+      ...options,
+      deltaVariant: "optimized",
+    }),
   ];
 };
 
@@ -285,6 +310,7 @@ export const useSiteData = ({
   enableSiteToggle, 
   siteToggle, 
   sitePredictionVersion = "original",
+  defaultBeamwidth = 65,
   projectId, 
   sessionIds,
   autoFetch = false,
@@ -308,6 +334,7 @@ export const useSiteData = ({
   }, []);
 
   const fetchSiteData = useCallback(async (forceRefresh = false) => {
+    const normalizedDefaultBeamwidth = normalizeBeamwidth(defaultBeamwidth, 65);
 
     // If the toggle is not enabled, we clear data and stop
     if (!enableSiteToggle) {
@@ -321,6 +348,7 @@ export const useSiteData = ({
     const currentParams = JSON.stringify({
       siteToggle,
       sitePredictionVersion,
+      defaultBeamwidth: normalizedDefaultBeamwidth,
       projectId,
       sessionIds,
       filterEnabled,
@@ -334,7 +362,7 @@ export const useSiteData = ({
       resource: 'unified-site-data',
       projectId: projectId || 'global',
       sessionIds,
-      variant: `${String(siteToggle || '').toLowerCase()}_${String(sitePredictionVersion || 'original').toLowerCase()}`,
+      variant: `${String(siteToggle || '').toLowerCase()}_${String(sitePredictionVersion || 'original').toLowerCase()}_bw${normalizedDefaultBeamwidth}`,
     });
 
     if (!forceRefresh) {
@@ -389,8 +417,12 @@ export const useSiteData = ({
         : response?.data?.Data || response?.data?.data || response?.Data || response?.data || [];
       const normalizedData =
         normalizedVersion === "delta"
-          ? normalizeCompareSitePredictionPayload(response)
-          : normalizeSitePredictionRows(Array.isArray(rawData) ? rawData : []);
+          ? normalizeCompareSitePredictionPayload(response, {
+              defaultBeamwidth: normalizedDefaultBeamwidth,
+            })
+          : normalizeSitePredictionRows(Array.isArray(rawData) ? rawData : [], {
+              defaultBeamwidth: normalizedDefaultBeamwidth,
+            });
 
       let finalData = normalizedData;
       if (filterEnabled && polygons?.length > 0) {
@@ -412,7 +444,7 @@ export const useSiteData = ({
     } finally {
       if (isMounted.current) setLoading(false);
     }
-  }, [enableSiteToggle, siteToggle, sitePredictionVersion, projectId, sessionIds, siteData.length, filterEnabled, polygons]);
+  }, [enableSiteToggle, siteToggle, sitePredictionVersion, defaultBeamwidth, projectId, sessionIds, siteData.length, filterEnabled, polygons]);
 
   useEffect(() => {
     if (autoFetch) {

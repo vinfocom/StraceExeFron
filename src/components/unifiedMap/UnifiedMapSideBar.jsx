@@ -328,6 +328,8 @@ const UnifiedMapSidebar = ({
   setSitePredictionVersion,
   modeMethod,
   setModeMethod,
+  siteLabelField = "none",
+  setSiteLabelField,
   projectId,
   sessionIds,
   metric,
@@ -349,6 +351,8 @@ const UnifiedMapSidebar = ({
   setShowPolygons,
   polygonSource,
   setPolygonSource,
+  ltePredictionUseBuildings = true,
+  setLtePredictionUseBuildings,
   onlyInsidePolygons,
   polygonCount,
   loading,
@@ -426,7 +430,7 @@ const UnifiedMapSidebar = ({
       { value: "mos", label: "MOS" },
       { value: "pci", label: "PCI" },
       { value: "num_cells", label: "Pilot pollution" },
-      { value: "level", label: "SSI" },
+      { value: "level", label: "Ping pong" },
       { value: "jitter", label: "Jitter" },
       { value: "latency", label: "Latency" },
       { value: "packet_loss", label: "Packet Loss" },
@@ -909,7 +913,7 @@ const UnifiedMapSidebar = ({
         session_ids: validSessionIds,
         grid_value: Number(lteGridSizeMeters) || 25,
         radius_m: Number(ltePredictionRadiusMeters) || 5000,
-        building: true,
+        building: Boolean(ltePredictionUseBuildings),
       });
 
       const jobId = response?.job_id || response?.jobId;
@@ -964,6 +968,7 @@ const UnifiedMapSidebar = ({
     sessionIds,
     lteGridSizeMeters,
     ltePredictionRadiusMeters,
+    ltePredictionUseBuildings,
     stopLtePredictionMonitoring,
     pollLtePredictionStatus,
   ]);
@@ -1462,6 +1467,21 @@ const UnifiedMapSidebar = ({
                       className="pt-2"
                     />
                   )}
+                  <SelectRow
+                    className="pt-2"
+                    value={siteLabelField || "none"}
+                    onChange={(nextValue) => setSiteLabelField?.(nextValue)}
+                    options={[
+                      { value: "none", label: "None" },
+                      { value: "site_id", label: "Site ID" },
+                      { value: "cell_id", label: "Cell ID" },
+                      { value: "technology", label: "Technology" },
+                      { value: "nodeb_id", label: "NodeB ID" },
+                      { value: "pci", label: "PCI" },
+                      { value: "band", label: "Band" },
+                    ]}
+                    placeholder="Site label"
+                  />
                 </div>
 
                 
@@ -1554,6 +1574,13 @@ const UnifiedMapSidebar = ({
                               unit="m"
                             />
                           </div>
+                          <ToggleRow
+                            label="Buildings"
+                            description="Include building data in prediction"
+                            checked={Boolean(ltePredictionUseBuildings)}
+                            onChange={setLtePredictionUseBuildings}
+                            useSwitch={true}
+                          />
                           <Button
                             type="button"
                             onClick={handleRunLtePrediction}
@@ -1782,7 +1809,7 @@ const UnifiedMapSidebar = ({
 
           {/* Dominance/Coverage controls moved under Raster KPI */}
           <CollapsibleSection
-            title="Mobility Aid"
+            title="Mobility"
             icon={ArrowLeftRight}
             badge={
               (techHandover ? (technologyTransitions?.length || 0) : 0) +

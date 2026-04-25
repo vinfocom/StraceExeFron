@@ -112,6 +112,39 @@ function getDisplaySiteId(site) {
   );
 }
 
+function getSiteCellId(site) {
+  const value =
+    site?.cellId ??
+    site?.cell_id ??
+    site?.cellIdRepresentative ??
+    site?.cell_id_representative ??
+    site?.rawSite?.cellId ??
+    site?.rawSite?.cell_id ??
+    site?.rawSite?.cellIdRepresentative ??
+    site?.rawSite?.cell_id_representative ??
+    "";
+  return String(value ?? "").trim();
+}
+
+function getSiteLabelText(site, labelField = "none") {
+  const field = String(labelField || "none").trim().toLowerCase();
+  if (!field || field === "none") return "";
+
+  const valueByField = {
+    site_id: getDisplaySiteId(site),
+    cell_id: getSiteCellId(site),
+    technology: site?.technology ?? site?.rawSite?.technology ?? site?.rawSite?.Technology,
+    nodeb_id: site?.nodebId ?? extractNodebId(site?.rawSite) ?? site?.rawSite?.nodeb_id,
+    pci: site?.pci ?? site?.rawSite?.pci ?? site?.rawSite?.PCI,
+    band: site?.band ?? site?.rawSite?.band ?? site?.rawSite?.frequency_band,
+  };
+
+  const value = valueByField[field];
+  if (value === null || value === undefined) return "";
+  const text = String(value).trim();
+  return text && text.toLowerCase() !== "unknown" ? text : "";
+}
+
 function normalizeComparableSiteId(value) {
   const raw = String(value ?? "").trim();
   if (!raw) return "";
@@ -224,6 +257,15 @@ function getFirstFiniteNumber(values = [], fallback = 0) {
     if (Number.isFinite(numeric)) return numeric;
   }
   return fallback;
+}
+
+function getFirstPositiveFiniteNumberOrNull(values = []) {
+  for (const value of values) {
+    if (value === null || value === undefined || value === "") continue;
+    const numeric = Number(value);
+    if (Number.isFinite(numeric) && numeric > 0) return numeric;
+  }
+  return null;
 }
 
 function normalizeBeamwidth(value, fallback = 65) {
@@ -780,71 +822,85 @@ function pickValueByAliases(source, aliases = []) {
   return undefined;
 }
 
-function normalizeSiteRows(rows = []) {
+function normalizeSiteRows(rows = [], options = {}) {
   if (!Array.isArray(rows)) return [];
+  const defaultBeamwidth = normalizeBeamwidth(options?.defaultBeamwidth, 65);
 
   return rows
-    .map((item, index) => ({
-      ...item,
-      site:
-        item.site ||
-        item.site_id ||
-        item.siteId ||
-        item.site_key_inferred ||
-        item.siteKeyInferred ||
-        item.site_name ||
-        item.siteName ||
-        item.nodeb_id ||
-        item.node_b_id ||
-        item.node_b ||
-        item.nodebId ||
-        item.cell_id_representative ||
-        item.cellIdRepresentative ||
-        `site_${index}`,
-      lat: parseFloat(item.lat_pred || item.lat || item.latitude || 0),
-      lng: parseFloat(item.lon_pred || item.lng || item.lon || item.longitude || 0),
-      azimuth: getFirstFiniteNumber([item.azimuth_deg_5, item.azimuth_deg_5_soft, item.azimuth], 0),
-      beamwidth: normalizeBeamwidth(
-        getFirstFiniteNumber([item.bw, item.bandwidth, item.beamwidth, item.beamwidth_deg_est], 65),
-        65,
-      ),
-      range: normalizeSectorRange(getFirstFiniteNumber([item.range, item.radius], 220), 220),
-      operator: item.cluster || item.network || item.Network || item.operator || "Unknown",
-      band: item.band || item.frequency_band || item.frequency || "Unknown",
-      technology: inferTechnologyFromCarrier(
-        item.Technology || item.tech || item.technology,
-        item.earfcn_or_narfcn ?? item.earfcn,
-      ),
-      pci: item.pci ?? item.PCI ?? item.pci_or_psi ?? item.cell_id ?? item.cell_id_representative,
-      earfcnOrNarfcn: item.earfcn_or_narfcn ?? item.earfcnOrNarfcn ?? item.earfcn ?? null,
-      siteKeyInferred: item.site_key_inferred ?? item.siteKeyInferred ?? null,
-      cellIdRepresentative: item.cell_id_representative ?? item.cellIdRepresentative ?? null,
-      samples: Number.isFinite(Number(item.samples)) ? Number(item.samples) : null,
-      azimuthReliability: Number.isFinite(Number(item.azimuth_reliability))
-        ? Number(item.azimuth_reliability)
-        : null,
-      medianSampleDistanceM: Number.isFinite(Number(item.median_sample_distance_m))
-        ? Number(item.median_sample_distance_m)
-        : null,
-      nodebId:
-        extractNodebId(item) ??
-        normalizeMatchValue(
-          item.site ??
-            item.site_id ??
-            item.siteId ??
-            item.site_key_inferred ??
-            item.site_name ??
-            item.cell_id_representative,
+    .map((item, index) => {
+      const sourceBeamwidth = getFirstPositiveFiniteNumberOrNull([
+        item.bw,
+        item.bandwidth,
+        item.hasBeamwidthValue === false || item.beamwidthSource === "default"
+          ? null
+          : item.beamwidth,
+        item.beamwidth_deg_est,
+      ]);
+      const hasBeamwidthValue = sourceBeamwidth !== null || item.hasBeamwidthValue === true;
+      const effectiveBeamwidth =
+        sourceBeamwidth ?? (item.hasBeamwidthValue === true ? item.beamwidth : defaultBeamwidth);
+
+      return {
+        ...item,
+        site:
+          item.site ||
+          item.site_id ||
+          item.siteId ||
+          item.site_key_inferred ||
+          item.siteKeyInferred ||
+          item.site_name ||
+          item.siteName ||
+          item.nodeb_id ||
+          item.node_b_id ||
+          item.node_b ||
+          item.nodebId ||
+          item.cell_id_representative ||
+          item.cellIdRepresentative ||
+          `site_${index}`,
+        lat: parseFloat(item.lat_pred || item.lat || item.latitude || 0),
+        lng: parseFloat(item.lon_pred || item.lng || item.lon || item.longitude || 0),
+        azimuth: getFirstFiniteNumber([item.azimuth_deg_5, item.azimuth_deg_5_soft, item.azimuth], 0),
+        beamwidth: normalizeBeamwidth(effectiveBeamwidth, defaultBeamwidth),
+        hasBeamwidthValue,
+        beamwidthSource: hasBeamwidthValue ? "data" : "default",
+        range: normalizeSectorRange(getFirstFiniteNumber([item.range, item.radius], 220), 220),
+        operator: item.cluster || item.network || item.Network || item.operator || "Unknown",
+        band: item.band || item.frequency_band || item.frequency || "Unknown",
+        technology: inferTechnologyFromCarrier(
+          item.Technology || item.tech || item.technology,
+          item.earfcn_or_narfcn ?? item.earfcn,
         ),
-      id:
-        item.original_id ??
-        item.id ??
-        item.cell_id ??
-        item.cell_id_representative ??
-        item.site ??
-        item.site_key_inferred ??
-        index,
-    }))
+        pci: item.pci ?? item.PCI ?? item.pci_or_psi ?? item.cell_id ?? item.cell_id_representative,
+        earfcnOrNarfcn: item.earfcn_or_narfcn ?? item.earfcnOrNarfcn ?? item.earfcn ?? null,
+        siteKeyInferred: item.site_key_inferred ?? item.siteKeyInferred ?? null,
+        cellIdRepresentative: item.cell_id_representative ?? item.cellIdRepresentative ?? null,
+        samples: Number.isFinite(Number(item.samples)) ? Number(item.samples) : null,
+        azimuthReliability: Number.isFinite(Number(item.azimuth_reliability))
+          ? Number(item.azimuth_reliability)
+          : null,
+        medianSampleDistanceM: Number.isFinite(Number(item.median_sample_distance_m))
+          ? Number(item.median_sample_distance_m)
+          : null,
+        nodebId:
+          extractNodebId(item) ??
+          normalizeMatchValue(
+            item.site ??
+              item.site_id ??
+              item.siteId ??
+              item.site_key_inferred ??
+              item.site_name ??
+              item.cell_id_representative,
+          ),
+        id:
+          item.original_id ??
+          item.id ??
+          item.cell_id ??
+          item.cell_id_representative ??
+          item.site ??
+          item.site_key_inferred ??
+          index,
+      };
+    })
     .filter((item) => item.lat !== 0 && Number.isFinite(item.lat) && Number.isFinite(item.lng));
 }
 
@@ -879,10 +935,20 @@ function generateSectorsFromSite(site, siteIndex, colorMode = "Operator", option
   const lng = parseFloat(site.lng ?? site.longitude ?? site.lon_pred ?? site.lon ?? site.Lng ?? 0);
 
   const baseAzimuth = getFirstFiniteNumber([site.azimuth, site.azimuth_deg_5, site.azimuth_deg_5_soft], 0);
-  const beamwidth = normalizeBeamwidth(
-    getFirstFiniteNumber([site.bw, site.bandwidth, site.beamwidth, site.beamwidth_deg_est], 65),
-    65,
-  );
+  const defaultBeamwidth = normalizeBeamwidth(options?.defaultBeamwidth, 65);
+  const sourceBeamwidth = getFirstPositiveFiniteNumberOrNull([
+    site.bw,
+    site.bandwidth,
+    site.hasBeamwidthValue === true ? site.beamwidth : null,
+    site.beamwidth_deg_est,
+  ]);
+  const effectiveBeamwidth =
+    sourceBeamwidth ??
+    (site.hasBeamwidthValue === false || site.beamwidthSource === "default"
+      ? defaultBeamwidth
+      : site.beamwidth) ??
+    defaultBeamwidth;
+  const beamwidth = normalizeBeamwidth(effectiveBeamwidth, defaultBeamwidth);
   const range = normalizeSectorRange(getFirstFiniteNumber([site.range, site.radius], 220), 220);
 
   const network = site.cluster || site.operator || site.network || "Unknown";
@@ -990,12 +1056,14 @@ const NetworkPlannerMap = ({
   projectId,
   siteToggle = "NoML",
   sitePredictionVersion = "original",
+  defaultBeamwidth = 65,
   enableSiteToggle = true,
   showSiteMarkers = true,
   showSiteSectors = true,
   onDataLoaded,
   viewport = null,
   colorMode = "Operator",
+  siteLabelField = "none",
   options = {},
   hoveredLog,
   map = null,
@@ -1017,6 +1085,7 @@ const NetworkPlannerMap = ({
     enableSiteToggle,
     siteToggle,
     sitePredictionVersion,
+    defaultBeamwidth,
     projectId,
     autoFetch: true,
     filterEnabled: onlyInsidePolygons,
@@ -1254,9 +1323,10 @@ const NetworkPlannerMap = ({
       filteredSiteData.flatMap((site, idx) =>
         generateSectorsFromSite(site, idx, colorMode, {
           forceSingleSector: String(siteToggle || "").toLowerCase() === "cell",
+          defaultBeamwidth,
         }),
       ),
-    [filteredSiteData, colorMode, siteToggle],
+    [filteredSiteData, colorMode, siteToggle, defaultBeamwidth],
   );
 
   const uniqueSectors = useMemo(() => {
@@ -1314,6 +1384,12 @@ const NetworkPlannerMap = ({
           markerKey,
           siteId,
           siteName: getSiteName(item),
+          cellId: getSiteCellId(item),
+          technology: item.Technology ?? item.tech ?? item.technology ?? null,
+          nodebId: extractNodebId(item),
+          pci: item.pci ?? item.PCI ?? item.pci_or_psi ?? null,
+          band: item.band ?? item.frequency_band ?? item.frequency ?? null,
+          rawSite: item,
           lat,
           lng,
           deltaVariant: deltaVariant || null,
@@ -1360,7 +1436,9 @@ const NetworkPlannerMap = ({
           try {
             const res = await mapViewApi.getSitePrediction(params);
             const rawRows = res?.Data || res?.data?.Data || res?.data || [];
-            const normalizedAll = normalizeSiteRows(rawRows);
+            const normalizedAll = normalizeSiteRows(rawRows, {
+              defaultBeamwidth,
+            });
             const normalizedMatch = normalizedAll.filter(
               (r) => normalizeComparableSiteId(getSiteId(r)) === normalizedSiteId,
             );
@@ -1503,6 +1581,7 @@ const NetworkPlannerMap = ({
     [
       projectId,
       sitePredictionVersion,
+      defaultBeamwidth,
       filteredSiteData,
       colorMode,
       selectedMetric,
@@ -1891,11 +1970,6 @@ const NetworkPlannerMap = ({
         s.lng <= viewport.east,
     );
   }, [siteMarkers, viewport]);
-
-  const isDeltaPredictionMode = useMemo(
-    () => String(sitePredictionVersion || "").trim().toLowerCase() === "delta",
-    [sitePredictionVersion],
-  );
 
   const logCoords = useMemo(() => {
     if (!hoveredLog) return null;
@@ -3217,16 +3291,6 @@ const NetworkPlannerMap = ({
               strokeColor: "#ffffff",
               strokeWeight: 1.5,
             }}
-            label={
-              isDeltaPredictionMode
-                ? {
-                    text: String(getDisplaySiteId(site) || ""),
-                    color: "#111827",
-                    fontSize: "11px",
-                    fontWeight: "700",
-                  }
-                : undefined
-            }
             zIndex={selectedSiteIdSet.has(site.siteId) ? 4001 : 3001}
             onClick={() => {
               void handleSiteMarkerClick(site);
@@ -3366,6 +3430,7 @@ const NetworkPlannerMap = ({
         const infoSector = isSelectedSector ? selectedSectorInfo || effectiveSector : effectiveSector;
         const infoSectorSiteId = getDisplaySiteId(infoSector);
         const canEditSitePrediction = String(siteToggle || "").toLowerCase() === "cell";
+        const sectorLabelText = getSiteLabelText(effectiveSector, siteLabelField);
 
         return (
           <React.Fragment key={sectorRenderKey}>
@@ -3398,6 +3463,26 @@ const NetworkPlannerMap = ({
                 if (polygon) polygonRefs.current.delete(polygon);
               }}
             />
+
+            {sectorLabelText && (
+              <MarkerF
+                position={infoPos}
+                clickable={false}
+                icon={{
+                  path: window.google.maps.SymbolPath.CIRCLE,
+                  scale: 0,
+                  fillOpacity: 0,
+                  strokeOpacity: 0,
+                }}
+                label={{
+                  text: sectorLabelText,
+                  color: "#111827",
+                  fontSize: "11px",
+                  fontWeight: "700",
+                }}
+                zIndex={isSelectedSector ? 5400 : 5300}
+              />
+            )}
 
             {isHoveredMatch && activeCoords && (
               <PolylineF

@@ -236,6 +236,12 @@ function getPolylineDetails(polyline) {
   return { length: len, center: mid };
 }
 
+const clampOpacity = (value, fallback = 0.35) => {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.max(0, Math.min(1, parsed));
+};
+
 // --- Component Definition ---
 
 function DrawingToolsLayerComponent({
@@ -253,6 +259,7 @@ function DrawingToolsLayerComponent({
   onDrawingsChange,
   clearSignal = 0,
   colorizeCells = true,
+  polygonOpacity = 0.35,
   onUIChange, // ✅ NEW PROP: To reset state after drawing
 }) {
   const managerRef = useRef(null);
@@ -263,6 +270,7 @@ function DrawingToolsLayerComponent({
   const callbacksRef = useRef({ onSummary, onDrawingsChange, onUIChange });
   const reAnalyzeShapeRef = useRef(null);
   const shapeModeRef = useRef(shapeMode);
+  const resolvedPolygonOpacity = clampOpacity(polygonOpacity);
 
   useEffect(() => {
     callbacksRef.current = { onSummary, onDrawingsChange, onUIChange };
@@ -446,9 +454,9 @@ function DrawingToolsLayerComponent({
           window.google.maps.drawing.OverlayType.POLYLINE,
         ],
       },
-      polygonOptions: { clickable: true, editable: true, draggable: true, strokeWeight: 2, strokeColor: "#1d4ed8", fillColor: "#1d4ed8", fillOpacity: 0.08 },
-      rectangleOptions: { clickable: true, editable: true, draggable: true, strokeWeight: 2, strokeColor: "#1d4ed8", fillColor: "#1d4ed8", fillOpacity: 0.06 },
-      circleOptions: { clickable: true, editable: true, draggable: true, strokeWeight: 2, strokeColor: "#1d4ed8", fillColor: "#1d4ed8", fillOpacity: 0.06 },
+      polygonOptions: { clickable: true, editable: true, draggable: true, strokeWeight: 2, strokeColor: "#1d4ed8", strokeOpacity: resolvedPolygonOpacity, fillColor: "#1d4ed8", fillOpacity: resolvedPolygonOpacity },
+      rectangleOptions: { clickable: true, editable: true, draggable: true, strokeWeight: 2, strokeColor: "#1d4ed8", strokeOpacity: resolvedPolygonOpacity, fillColor: "#1d4ed8", fillOpacity: resolvedPolygonOpacity },
+      circleOptions: { clickable: true, editable: true, draggable: true, strokeWeight: 2, strokeColor: "#1d4ed8", strokeOpacity: resolvedPolygonOpacity, fillColor: "#1d4ed8", fillOpacity: resolvedPolygonOpacity },
       polylineOptions: { clickable: true, editable: true, draggable: true, strokeWeight: 3, strokeColor: "#ea580c" },
     });
 
@@ -467,7 +475,17 @@ function DrawingToolsLayerComponent({
       managerRef.current?.setMap(null);
       managerRef.current = null;
     };
-  }, [map, enabled, shapeMode, showDrawingControl, registerCompletedShape]);
+  }, [map, enabled, shapeMode, showDrawingControl, registerCompletedShape, resolvedPolygonOpacity]);
+
+  useEffect(() => {
+    shapesRef.current.forEach(({ type, overlay }) => {
+      if (!overlay || type === "polyline") return;
+      overlay.setOptions?.({
+        strokeOpacity: resolvedPolygonOpacity,
+        fillOpacity: resolvedPolygonOpacity,
+      });
+    });
+  }, [resolvedPolygonOpacity]);
 
   // Keep DrawingManager mode in sync when tool or enabled state changes.
   useEffect(() => {

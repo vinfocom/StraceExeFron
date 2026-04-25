@@ -724,6 +724,7 @@ const MapWithMultipleCircles = ({
   legendFilter = null,
   drawingEnabled = false,
   drawingShapeMode = null,
+  polygonOpacity = 0.35,
 }) => {
   const { 
     getMetricColor: getMetricColorFromHook, 
@@ -757,6 +758,11 @@ const MapWithMultipleCircles = ({
   useEffect(() => { onFilteredNeighborsChangeRef.current = onFilteredNeighborsChange; }, [onFilteredNeighborsChange]);
 
   // ✅ Unified Color Resolver - UPDATED TO SUPPORT TAC
+  const resolvedPolygonOpacity = Math.max(
+    0,
+    Math.min(1, Number.isFinite(Number(polygonOpacity)) ? Number(polygonOpacity) : 0.35),
+  );
+
   const resolveColor = useCallback((value, metricOrType) => {
     if (!metricOrType) return "#808080";
 
@@ -1326,7 +1332,7 @@ const MapWithMultipleCircles = ({
           <PolygonF
             key={`polygon-${idx}`}
             paths={path}
-            options={{ fillColor: "transparent", fillOpacity: 0, strokeColor: "#2563eb", strokeWeight: 3, strokeOpacity: 0.95, zIndex: 2500,clickable: false
+            options={{ fillColor: "transparent", fillOpacity: 0, strokeColor: "#2563eb", strokeWeight: 1, strokeOpacity: resolvedPolygonOpacity, zIndex: 2500,clickable: false
 
 
              }}
@@ -1338,7 +1344,7 @@ const MapWithMultipleCircles = ({
          <PolygonF
            key={zone.uid}
            paths={zone.paths}
-           options={{ fillColor: "#3b82f6", fillOpacity: 0.2, strokeColor: "#2563eb", strokeWeight: 2, zIndex: 5, clickable: false }}
+           options={{ fillColor: "#3b82f6", fillOpacity: resolvedPolygonOpacity, strokeColor: "#2563eb", strokeOpacity: resolvedPolygonOpacity, strokeWeight: 1, zIndex: 5, clickable: false }}
          />
        ))}
        
