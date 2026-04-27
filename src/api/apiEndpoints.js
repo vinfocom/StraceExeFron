@@ -67,6 +67,80 @@ export const generalApi = {
   },
 };
 
+export const dataDeletionApi = {
+  sendOtp: async ({ phoneNumber }) => {
+    try {
+      return await api.post(
+        "/api/data-deletion/send-otp",
+        { phone_number: phoneNumber },
+        {
+          skipAuthRedirect: true,
+          dedupe: false,
+        },
+      );
+    } catch (error) {
+      console.error("Data deletion send OTP error:", error);
+      throw error;
+    }
+  },
+
+  verifyOtp: async ({ phoneNumber, otp }) => {
+    try {
+      return await api.post(
+        "/api/data-deletion/verify-otp",
+        {
+          phone_number: phoneNumber,
+          otp,
+        },
+        {
+          skipAuthRedirect: true,
+          dedupe: false,
+        },
+      );
+    } catch (error) {
+      console.error("Data deletion verify OTP error:", error);
+      throw error;
+    }
+  },
+
+  getPreview: async ({ deletionToken }) => {
+    try {
+      return await api.get("/api/data-deletion/data-preview", {
+        headers: {
+          Authorization: `Bearer ${String(deletionToken || "").trim()}`,
+        },
+        skipAuthRedirect: true,
+        dedupe: false,
+      });
+    } catch (error) {
+      console.error("Data deletion preview error:", error);
+      throw error;
+    }
+  },
+
+  requestDeletion: async ({ deletionToken, confirmPermanentDeletion = true }) => {
+    try {
+      return await api.post(
+        "/api/data-deletion/request-deletion",
+        {
+          deletion_token: String(deletionToken || "").trim(),
+          confirm_permanent_deletion: Boolean(confirmPermanentDeletion),
+        },
+        {
+          headers: {
+            Authorization: `Bearer ${String(deletionToken || "").trim()}`,
+          },
+          skipAuthRedirect: true,
+          dedupe: false,
+        },
+      );
+    } catch (error) {
+      console.error("Data deletion request error:", error);
+      throw error;
+    }
+  },
+};
+
 export const buildingApi = {
   generateBuildings: async (polygonData) => {
     try {

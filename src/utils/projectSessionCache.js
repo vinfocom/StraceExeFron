@@ -1,6 +1,7 @@
 import { clearIndexedDbByPrefix } from "@/utils/indexedDbCache";
 
 const CACHE_PREFIX = "stracer:project-cache:v1";
+const USER_SCOPE_STORAGE_KEY = "stracer:user-scope";
 const DEFAULT_MAX_ENTRIES = 80;
 const DEFAULT_MAX_PAYLOAD_BYTES = 750 * 1024; // Avoid filling localStorage quota.
 
@@ -25,19 +26,49 @@ const getSessionScope = () => {
   if (typeof window === "undefined") return "guest";
   try {
     const rawUser = window.sessionStorage.getItem("user");
-    if (!rawUser || rawUser === "undefined") return "guest";
-    const user = safeJsonParse(rawUser, {});
-    const candidate =
-      user?.id ??
-      user?.Id ??
-      user?.user_id ??
-      user?.UserId ??
-      user?.email ??
-      user?.Email ??
-      "guest";
-    return String(candidate).trim() || "guest";
+    if (rawUser && rawUser !== "undefined") {
+      const user = safeJsonParse(rawUser, {});
+      const candidate =
+        user?.id ??
+        user?.Id ??
+        user?.user_id ??
+        user?.UserId ??
+        user?.email ??
+        user?.Email ??
+        "guest";
+      const resolved = String(candidate).trim() || "guest";
+      if (resolved && resolved !== "guest") {
+        window.localStorage.setItem(USER_SCOPE_STORAGE_KEY, resolved);
+      }
+      return resolved;
+    }
+
+    const fallbackScope = String(
+      window.localStorage.getItem(USER_SCOPE_STORAGE_KEY) || "",
+    ).trim();
+    if (fallbackScope) return fallbackScope;
+    return "guest";
   } catch {
     return "guest";
+  }
+};
+
+export const setProjectSessionCacheUserScope = (userLike) => {
+  if (typeof window === "undefined") return;
+  try {
+    const candidate =
+      userLike?.id ??
+      userLike?.Id ??
+      userLike?.user_id ??
+      userLike?.UserId ??
+      userLike?.email ??
+      userLike?.Email ??
+      null;
+    const scope = String(candidate ?? "").trim();
+    if (!scope) return;
+    window.localStorage.setItem(USER_SCOPE_STORAGE_KEY, scope);
+  } catch {
+    // noop
   }
 };
 
@@ -178,5 +209,10 @@ export const clearProjectSessionCache = () => {
 
   const keys = listCacheKeys(storage);
   keys.forEach((key) => storage.removeItem(key));
+  try {
+    window.localStorage.removeItem(USER_SCOPE_STORAGE_KEY);
+  } catch {
+    // noop
+  }
   void clearIndexedDbByPrefix(CACHE_PREFIX);
 };

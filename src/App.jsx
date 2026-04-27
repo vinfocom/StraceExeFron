@@ -7,6 +7,7 @@ import {
   Route,
   Navigate,
   Link,
+  useLocation,
 } from "react-router-dom";
 import { SWRConfig } from "swr";
 import { ToastContainer } from "react-toastify";
@@ -39,6 +40,7 @@ const MultiViewPage = lazy(() => import("./pages/MultiViewPage"));
 const SuperAdminCompanies = lazy(() => import("@/pages/SuperAdmin"));
 const CompanyForm = lazy(() => import("./pages/CompanyForm"));  
 const CompanyLicensesPage = lazy(() => import("./pages/CompanyLicenses"));
+const DataDeletionPage = lazy(() => import("./pages/DataDeletion"));
 
 // Loading Component for Suspense
 const PageLoader = () => (
@@ -89,6 +91,50 @@ const swrConfig = {
   // ... rest of your existing swrConfig settings
 };
 
+function AppShell({ isElectronRuntime }) {
+  const location = useLocation();
+  const isStandaloneDeletion = location.pathname.startsWith("/data-deletion");
+
+  return (
+    <>
+      {!isStandaloneDeletion && <ElectronWindowBar />}
+      <ToastContainer position="top-right" autoClose={3000} theme="colored" />
+
+      <div className={isElectronRuntime && !isStandaloneDeletion ? "electron-content pt-8" : ""}>
+        <Suspense fallback={<PageLoader />}>
+          <Routes>
+            <Route path="/" element={<PublicRoute><LoginPage /></PublicRoute>} />
+            <Route path="/login" element={<PublicRoute><LoginPage /></PublicRoute>} />
+            <Route path="/data-deletion" element={<DataDeletionPage />} />
+            <Route path="/company-form" element={<PrivateRoute><CompanyForm /></PrivateRoute>} />
+
+            <Route path="/debug-map" element={<PrivateRoute><SessionMapDebug /></PrivateRoute>} />
+            <Route path="/dashboard" element={<PrivateRoute><DashboardPage /></PrivateRoute>} />
+            <Route path="/drive-test-sessions" element={<PrivateRoute><DriveTestSessionsPage /></PrivateRoute>} />
+            <Route path="/mapview" element={<PrivateRoute><HighPerfMap /></PrivateRoute>} />
+            <Route path="/map" element={<PrivateRoute><SimpleMapView /></PrivateRoute>} />
+            <Route path="/multi-map" element={<MultiViewPage />} />
+            <Route path="/manage-users" element={<PrivateRoute><ManageUsersPage /></PrivateRoute>} />
+            <Route path="/upload-data" element={<PrivateRoute><UploadDataPage /></PrivateRoute>} />
+            <Route path="/settings" element={<PrivateRoute><SettingsPage /></PrivateRoute>} />
+            <Route path="/logscircles" element={<PrivateRoute><LogsCirclesPage /></PrivateRoute>} />
+            <Route path="/create-project" element={<PrivateRoute><ProjectsPage /></PrivateRoute>} />
+            <Route path="/prediction-map" element={<PrivateRoute><PredictionMapPage /></PrivateRoute>} />
+            <Route path="/getreport" element={<PrivateRoute><GetReportPage /></PrivateRoute>} />
+            <Route path="/unified-map" element={<PrivateRoute><UnifiedMapView /></PrivateRoute>} />
+            <Route path="/viewProject" element={<PrivateRoute><ViewProjectsPage /></PrivateRoute>} />
+
+            <Route path="/companies" element={<SuperAdminRoute><SuperAdminCompanies /></SuperAdminRoute>} />
+            <Route path="/company-licenses" element={<SuperAdminRoute><CompanyLicensesPage /></SuperAdminRoute>} />
+
+            <Route path="*" element={<NotFoundPage />} />
+          </Routes>
+        </Suspense>
+      </div>
+    </>
+  );
+}
+
 function App() {
   const isElectronRuntime =
     typeof navigator !== "undefined" &&
@@ -115,41 +161,7 @@ function App() {
       <AuthProvider>
         <MapProvider>
           <SWRConfig value={swrConfig}>
-            <ElectronWindowBar />
-            <ToastContainer position="top-right" autoClose={3000} theme="colored" />
-            
-            {/* Suspense handles the loading state while lazy components are being fetched */}
-            <div className={isElectronRuntime ? "electron-content pt-8" : ""}>
-              <Suspense fallback={<PageLoader />}>
-                <Routes>
-                  <Route path="/" element={<PublicRoute><LoginPage /></PublicRoute>} />
-                  <Route path="/login" element={<PublicRoute><LoginPage /></PublicRoute>} />
-                  <Route path="/company-form" element={<PrivateRoute><CompanyForm /></PrivateRoute>} />
-                  
-                  {/* Wrap related routes in a fragment if needed, but keeping your structure */}
-                  <Route path="/debug-map" element={<PrivateRoute><SessionMapDebug /></PrivateRoute>} />
-                  <Route path="/dashboard" element={<PrivateRoute><DashboardPage /></PrivateRoute>} />
-                  <Route path="/drive-test-sessions" element={<PrivateRoute><DriveTestSessionsPage /></PrivateRoute>} />
-                  <Route path="/mapview" element={<PrivateRoute><HighPerfMap /></PrivateRoute>} />
-                  <Route path="/map" element={<PrivateRoute><SimpleMapView /></PrivateRoute>} />
-                  <Route path="/multi-map" element={<MultiViewPage />} />
-                  <Route path="/manage-users" element={<PrivateRoute><ManageUsersPage /></PrivateRoute>} />
-                  <Route path="/upload-data" element={<PrivateRoute><UploadDataPage /></PrivateRoute>} />
-                  <Route path="/settings" element={<PrivateRoute><SettingsPage /></PrivateRoute>} />
-                  <Route path="/logscircles" element={<PrivateRoute><LogsCirclesPage /></PrivateRoute>} />
-                  <Route path="/create-project" element={<PrivateRoute><ProjectsPage /></PrivateRoute>} />
-                  <Route path="/prediction-map" element={<PrivateRoute><PredictionMapPage /></PrivateRoute>} />
-                  <Route path="/getreport" element={<PrivateRoute><GetReportPage /></PrivateRoute>} />
-                  <Route path="/unified-map" element={<PrivateRoute><UnifiedMapView /></PrivateRoute>} />
-                  <Route path="/viewProject" element={<PrivateRoute><ViewProjectsPage /></PrivateRoute>} />
-                  
-                  <Route path="/companies" element={<SuperAdminRoute><SuperAdminCompanies /></SuperAdminRoute>} />
-                  <Route path="/company-licenses" element={<SuperAdminRoute><CompanyLicensesPage /></SuperAdminRoute>} />
-                  
-                  <Route path="*" element={<NotFoundPage />} />
-                </Routes>
-              </Suspense>
-            </div>
+            <AppShell isElectronRuntime={isElectronRuntime} />
           </SWRConfig>
         </MapProvider>
       </AuthProvider>

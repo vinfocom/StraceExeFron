@@ -219,6 +219,7 @@ const isAuthorizationScopeError = (status, data) => {
 };
 
 const handleAuthError = (config) => {
+  if (config?.skipAuthRedirect) return;
   const isAuthEndpoint = config?.url?.includes('/auth/');
   if (isRedirecting || isAuthEndpoint) return;
 

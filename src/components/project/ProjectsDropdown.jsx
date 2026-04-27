@@ -14,6 +14,7 @@ import {
 import { Button } from "@/components/ui/button";
 import Spinner from "@/components/common/Spinner";
 import { mapViewApi } from "@/api/apiEndpoints";
+import { useAuth } from "@/context/AuthContext";
 import { useNavigate } from "react-router-dom";
 import {
   getProjectsListCacheKey,
@@ -24,10 +25,19 @@ import {
 const ProjectsDropdown = ({ currentProjectId }) => {
   const [open, setOpen] = useState(false);
   const navigate = useNavigate();
-  const projectsCacheKey = useMemo(() => getProjectsListCacheKey(), []);
+  const { user } = useAuth();
+  const userScope =
+    user?.id ??
+    user?.Id ??
+    user?.user_id ??
+    user?.UserId ??
+    user?.email ??
+    user?.Email ??
+    "guest";
+  const projectsCacheKey = useMemo(() => getProjectsListCacheKey(), [userScope]);
   const cachedProjects = useMemo(() => {
     return readProjectsListCache();
-  }, []);
+  }, [userScope]);
 
   // 1. Define the fetcher function
   const fetchProjects = async () => {

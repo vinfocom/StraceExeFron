@@ -4,7 +4,10 @@ import { homeApi } from '../api/apiEndpoints';
 import { sha256 } from 'js-sha256';
 import { setAuthErrorHandler } from '../api/apiService';
 import { AuthContext } from './AuthContextBase'; // Import from Base
-import { clearProjectSessionCache } from '../utils/projectSessionCache';
+import {
+  clearProjectSessionCache,
+  setProjectSessionCacheUserScope,
+} from '../utils/projectSessionCache';
 
 const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
@@ -38,10 +41,13 @@ const AuthProvider = ({ children }) => {
         if (response?.user) {
           setUser(response.user);
           sessionStorage.setItem('user', JSON.stringify(response.user));
+          setProjectSessionCacheUserScope(response.user);
         } else if (cachedUser && cachedUser !== 'undefined') {
           // API returned success but no user object — trust the cache
           try {
-            setUser(JSON.parse(cachedUser));
+            const parsedUser = JSON.parse(cachedUser);
+            setUser(parsedUser);
+            setProjectSessionCacheUserScope(parsedUser);
           } catch {
             clearSession();
           }
@@ -57,19 +63,13 @@ const AuthProvider = ({ children }) => {
         const isAuth = error.status === 401 || error.status === 403 || error.isAuthError;
         
         if (isAuth) {
-          if (cachedUser && cachedUser !== 'undefined') {
-            try {
-              setUser(JSON.parse(cachedUser));
-            } catch {
-              clearSession();
-            }
-          } else {
-            clearSession();
-          }
+          clearSession();
         } else if (cachedUser && cachedUser !== 'undefined') {
           // Keep cached user only for non-auth/network failures.
           try {
-            setUser(JSON.parse(cachedUser));
+            const parsedUser = JSON.parse(cachedUser);
+            setUser(parsedUser);
+            setProjectSessionCacheUserScope(parsedUser);
           } catch {
             clearSession();
           }
@@ -139,8 +139,10 @@ const AuthProvider = ({ children }) => {
           userData = { Email };
         }
         
+        clearProjectSessionCache();
         setUser(userData);
         sessionStorage.setItem('user', JSON.stringify(userData));
+        setProjectSessionCacheUserScope(userData);
         
         return { success: true, user: userData };
       } else {
@@ -182,6 +184,7 @@ const AuthProvider = ({ children }) => {
       if (!prevUser) return null;
       const updatedUser = { ...prevUser, ...updates };
       sessionStorage.setItem('user', JSON.stringify(updatedUser));
+      setProjectSessionCacheUserScope(updatedUser);
       return updatedUser;
     });
   }, []);
@@ -192,6 +195,7 @@ const AuthProvider = ({ children }) => {
       if (response?.user) {
         setUser(response.user);
         sessionStorage.setItem('user', JSON.stringify(response.user));
+        setProjectSessionCacheUserScope(response.user);
         return response.user;
       }
     } catch (error) {

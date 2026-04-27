@@ -1,5 +1,5 @@
 // src/pages/ViewProjectsPage.jsx
-import React, { useEffect, useState, useCallback, useMemo } from "react";
+import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "react-toastify";
 import { Map, Folder, Calendar, RefreshCw, Search, Eye, Trash } from "lucide-react";
@@ -280,50 +280,38 @@ const ViewProjectsPage = () => {
     return raw;
   };
 
-  const fetchProjects = useCallback(async ({ background = false } = {}) => {
-    if (!background) setLoading(true);
+  const fetchProjects = async () => {
+    setLoading(true);
     try {
       const res = await mapViewApi.getProjects();
       if (res?.Data && Array.isArray(res.Data)) {
         setProjects(res.Data);
       } else {
         setProjects([]);
-        if (!background) {
-          toast.warn("No projects found.");
-        }
+        toast.warn("No projects found.");
       }
     } catch (error) {
-      if (!background) {
-        toast.error("Failed to load projects.");
-      } else {
-        console.warn("Failed to refresh project list in background.", error);
-      }
+      console.error("Failed to load projects.", error);
+      toast.error("Failed to load projects.");
     } finally {
-      if (!background) setLoading(false);
+      setLoading(false);
     }
-  }, []);
+  };
 
   useEffect(() => {
     fetchProjects();
-    const intervalId = window.setInterval(() => {
-      fetchProjects({ background: true });
-    }, 60 * 1000);
+  }, []);
 
-    return () => window.clearInterval(intervalId);
-  }, [fetchProjects]);
-
-  const filteredProjects = useMemo(() => {
-    if (!searchQuery.trim()) return projects;
-    
-    const query = searchQuery.toLowerCase();
-    return projects.filter((project) => {
-      return (
-        project.project_name?.toLowerCase().includes(query) ||
-        project.provider?.toLowerCase().includes(query) ||
-        project.id?.toString().includes(query)
-      );
-    });
-  }, [projects, searchQuery]);
+  const filteredProjects = !searchQuery.trim()
+    ? projects
+    : projects.filter((project) => {
+        const query = searchQuery.toLowerCase();
+        return (
+          project.project_name?.toLowerCase().includes(query) ||
+          project.provider?.toLowerCase().includes(query) ||
+          project.id?.toString().includes(query)
+        );
+      });
 
   const handleViewOnMap = (project) => {
     if (!project || !project.id) {
@@ -360,7 +348,7 @@ const ViewProjectsPage = () => {
         toast.success("Project deleted successfully.");
         const updatedProjects = projects.filter((item) => Number(item.id) !== Number(project.id));
         setProjects(updatedProjects);
-        fetchProjects({ background: true });
+        fetchProjects();
       } else {
         toast.error("Failed to delete project.");
       }
