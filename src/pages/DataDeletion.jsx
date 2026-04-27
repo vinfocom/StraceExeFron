@@ -265,7 +265,7 @@ const DataDeletionPage = () => {
                 Data deletion
               </div>
               <h1 className="max-w-2xl text-4xl font-black tracking-tight text-slate-950">
-                Data deletion Request Form
+                User Data Deletion Request Form
               </h1>
              
             </div>

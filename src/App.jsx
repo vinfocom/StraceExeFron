@@ -93,7 +93,7 @@ const swrConfig = {
 
 function AppShell({ isElectronRuntime }) {
   const location = useLocation();
-  const isStandaloneDeletion = location.pathname.startsWith("/data-deletion");
+  const isStandaloneDeletion = location.pathname.startsWith("/uSeR-daTa-dEleTion");
 
   return (
     <>
