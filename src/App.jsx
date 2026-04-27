@@ -105,7 +105,7 @@ function AppShell({ isElectronRuntime }) {
           <Routes>
             <Route path="/" element={<PublicRoute><LoginPage /></PublicRoute>} />
             <Route path="/login" element={<PublicRoute><LoginPage /></PublicRoute>} />
-            <Route path="/data-deletion" element={<DataDeletionPage />} />
+            <Route path="/uSeR-daTa-dEleTion" element={<DataDeletionPage />} />
             <Route path="/company-form" element={<PrivateRoute><CompanyForm /></PrivateRoute>} />
 
             <Route path="/debug-map" element={<PrivateRoute><SessionMapDebug /></PrivateRoute>} />
