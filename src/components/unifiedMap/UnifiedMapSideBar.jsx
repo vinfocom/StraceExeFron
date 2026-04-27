@@ -162,15 +162,15 @@ const SelectRow = memo(
     disabled = false,
     className = "",
   }) => (
-    <div className={`space-y-1.5 ${className}`}>
-      <Label className="text-xs text-slate-400">{label}</Label>
+    <div className={`min-w-0 flex-1 space-y-1.5 ${className}`}>
+      {label && <Label className="text-xs text-slate-400">{label}</Label>}
       <Select value={value} onValueChange={onChange} disabled={disabled}>
-        <SelectTrigger className="bg-slate-800 border-slate-600 text-white h-8 text-sm">
+        <SelectTrigger className="h-8 w-full min-w-0 bg-slate-800 border-slate-600 text-sm text-white [&>span]:truncate">
           <SelectValue placeholder={placeholder} />
         </SelectTrigger>
-        <SelectContent>
+        <SelectContent className="max-w-[260px]">
           {options.map((opt) => (
-            <SelectItem key={opt.value} value={opt.value}>
+            <SelectItem key={opt.value} value={opt.value} className="pr-8">
               {opt.label}
             </SelectItem>
           ))}
@@ -1440,7 +1440,7 @@ const UnifiedMapSidebar = ({
 
             {enableSiteToggle && (
               <>
-                <div className="flex  flex-row gap-4">
+                <div className="grid grid-cols-3 gap-2">
                   <SelectRow
                   className="pt-2"
                   value={siteToggle}

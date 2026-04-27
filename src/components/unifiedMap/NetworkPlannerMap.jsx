@@ -10,6 +10,7 @@ import {
   normalizeBandName,
   normalizeTechName,
 } from "@/utils/colorUtils";
+import { getPciColor } from "@/utils/metrics";
 import { useSiteData } from "@/hooks/useSiteData";
 import { mapViewApi } from "@/api/apiEndpoints";
 import { toast } from "react-toastify";
@@ -361,6 +362,12 @@ function getSiteLegendFilterValue(row, colorMode = "Operator", sitePredictionVer
   }
 
   const mode = String(colorMode || "Operator").trim().toLowerCase();
+  if (mode === "pci") {
+    return {
+      mode,
+      value: String(row?.pci ?? row?.PCI ?? row?.pci_or_psi ?? row?.physical_cell_id ?? "Unknown").trim() || "Unknown",
+    };
+  }
   if (mode === "band") {
     return {
       mode,
@@ -567,6 +574,11 @@ function isSiteLteDebugEnabled() {
 const MIN_TRIANGLE_SCALE_MULTIPLIER = 0.25;
 const MAX_TRIANGLE_SCALE_MULTIPLIER = 3;
 const SQUARE_MARKER_PATH = "M -1 -1 L 1 -1 L 1 1 L -1 1 Z";
+const MAX_RENDERED_SITE_SECTORS = 4000;
+const MAX_RENDERED_SITE_LABELS = 450;
+const MIN_SITE_LABEL_ZOOM = 14;
+const MAX_SITE_LABEL_CHARS = 14;
+const SITE_LABEL_COLOR_FIELDS = new Set(["pci", "band", "technology"]);
 
 const NUMERIC_FIELD_HINTS = new Set([
   "site",
@@ -659,6 +671,53 @@ function isPrimitiveValue(value) {
     typeof value === "number" ||
     typeof value === "boolean"
   );
+}
+
+function truncateSiteLabelText(value) {
+  const text = String(value ?? "").trim();
+  if (text.length <= MAX_SITE_LABEL_CHARS) return text;
+  return `${text.slice(0, MAX_SITE_LABEL_CHARS - 1)}...`;
+}
+
+function getSiteSectorColorField(siteLabelField, colorMode) {
+  const labelField = String(siteLabelField || "").trim().toLowerCase();
+  if (SITE_LABEL_COLOR_FIELDS.has(labelField)) return labelField;
+  return String(colorMode || "Operator").trim().toLowerCase();
+}
+
+function resolveSiteSectorColor({ deltaVariant, colorField, band, tech, network, pci }) {
+  if (deltaVariant === "baseline") return "#dc2626";
+  if (deltaVariant === "optimized" || deltaVariant === "optimised") return "#16a34a";
+
+  if (colorField === "pci") return getPciColor(pci);
+  if (colorField === "band") return getBandColor(band);
+  if (colorField === "technology") return getTechnologyColor(tech);
+  return getProviderColor(network);
+}
+
+function downsampleItems(items = [], maxCount = MAX_RENDERED_SITE_SECTORS, keepPredicate = null) {
+  if (!Array.isArray(items)) return [];
+  if (items.length <= maxCount) return items;
+
+  const kept = [];
+  const pool = [];
+  items.forEach((item) => {
+    if (typeof keepPredicate === "function" && keepPredicate(item)) {
+      kept.push(item);
+    } else {
+      pool.push(item);
+    }
+  });
+
+  const remaining = Math.max(0, maxCount - kept.length);
+  if (remaining === 0) return kept.slice(0, maxCount);
+
+  const stride = Math.ceil(pool.length / remaining);
+  const sampled = [];
+  for (let i = 0; i < pool.length && sampled.length < remaining; i += stride) {
+    sampled.push(pool[i]);
+  }
+  return [...kept, ...sampled];
 }
 
 function toComparableValue(value) {
@@ -989,21 +1048,15 @@ function generateSectorsFromSite(site, siteIndex, colorMode = "Operator", option
     .trim()
     .toLowerCase();
 
-  let color;
-  if (deltaVariant === "baseline") {
-    color = "#dc2626";
-  } else if (deltaVariant === "optimized" || deltaVariant === "optimised") {
-    color = "#16a34a";
-  } else {
-    const mode = colorMode.toLowerCase();
-    if (mode === "band") {
-      color = getBandColor(band);
-    } else if (mode === "technology") {
-      color = getTechnologyColor(tech);
-    } else {
-      color = getProviderColor(network);
-    }
-  }
+  const colorField = getSiteSectorColorField(options?.siteLabelField, colorMode);
+  const color = resolveSiteSectorColor({
+    deltaVariant,
+    colorField,
+    band,
+    tech,
+    network,
+    pci,
+  });
 
   if (Number.isNaN(lat) || Number.isNaN(lng) || (lat === 0 && lng === 0)) return [];
 
@@ -1111,6 +1164,10 @@ const NetworkPlannerMap = ({
   const [dragMode, setDragMode] = useState(null); // "sector" | "site" | null
   const [pendingMovePosition, setPendingMovePosition] = useState(null);
   const [isApplyingDraggedMove, setIsApplyingDraggedMove] = useState(false);
+  const [mapZoom, setMapZoom] = useState(() => {
+    const zoom = map?.getZoom?.();
+    return Number.isFinite(zoom) ? zoom : 13;
+  });
   const effectiveSectorScale = useMemo(() => {
     const baseScaleRaw = Number(options?.scale);
     const baseScale =
@@ -1124,6 +1181,10 @@ const NetworkPlannerMap = ({
       : 1;
     return baseScale * multiplier;
   }, [options?.scale, triangleScaleMultiplier]);
+  const siteSectorColorField = useMemo(
+    () => getSiteSectorColorField(siteLabelField, colorMode),
+    [siteLabelField, colorMode],
+  );
 
   const normalizedPolygonPaths = useMemo(() => {
     if (!Array.isArray(filterPolygons) || filterPolygons.length === 0) return [];
@@ -1294,6 +1355,23 @@ const NetworkPlannerMap = ({
     };
   }, [clearMapOverlays]);
 
+  useEffect(() => {
+    if (!map || typeof map.addListener !== "function") return undefined;
+    const syncZoom = () => {
+      const zoom = map.getZoom?.();
+      if (Number.isFinite(zoom)) {
+        setMapZoom((prev) => (prev === zoom ? prev : zoom));
+      }
+    };
+    syncZoom();
+    const listener = map.addListener("zoom_changed", syncZoom);
+    return () => {
+      if (listener && window.google?.maps?.event?.removeListener) {
+        window.google.maps.event.removeListener(listener);
+      }
+    };
+  }, [map]);
+
   const filteredSiteData = useMemo(() => {
     const polygonFiltered =
       !onlyInsidePolygons || normalizedPolygonPaths.length === 0
@@ -1324,9 +1402,10 @@ const NetworkPlannerMap = ({
         generateSectorsFromSite(site, idx, colorMode, {
           forceSingleSector: String(siteToggle || "").toLowerCase() === "cell",
           defaultBeamwidth,
+          siteLabelField,
         }),
       ),
-    [filteredSiteData, colorMode, siteToggle, defaultBeamwidth],
+    [filteredSiteData, colorMode, siteToggle, defaultBeamwidth, siteLabelField],
   );
 
   const uniqueSectors = useMemo(() => {
@@ -1470,6 +1549,8 @@ const NetworkPlannerMap = ({
         .flatMap((site, idx) =>
           generateSectorsFromSite(site, idx, colorMode, {
             forceSingleSector: String(siteToggle || "").toLowerCase() === "cell",
+            defaultBeamwidth,
+            siteLabelField,
           }),
         )
         .filter((s) => pointInsideAnyPolygon({ lat: s.lat, lng: s.lng }));
@@ -1584,6 +1665,7 @@ const NetworkPlannerMap = ({
       defaultBeamwidth,
       filteredSiteData,
       colorMode,
+      siteLabelField,
       selectedMetric,
       pointInsideAnyPolygon,
       siteToggle,
@@ -1607,6 +1689,7 @@ const NetworkPlannerMap = ({
         cached &&
         cached.metricKey === metricKey &&
         cached.colorMode === colorMode &&
+        cached.siteSectorColorField === siteSectorColorField &&
         cached.versionKey === versionKey &&
         cached.overlayKey === overlayKey
       ) {
@@ -1634,6 +1717,7 @@ const NetworkPlannerMap = ({
             lteRows,
             metricKey,
             colorMode,
+            siteSectorColorField,
             versionKey,
             overlayKey,
             hydrated: true,
@@ -1655,6 +1739,7 @@ const NetworkPlannerMap = ({
     },
     [
       colorMode,
+      siteSectorColorField,
       fetchSitePayload,
       selectedMetric,
       selectedSiteDataById,
@@ -1741,6 +1826,7 @@ const NetworkPlannerMap = ({
         !cached ||
         cached.metricKey !== metricKey ||
         cached.colorMode !== colorMode ||
+        cached.siteSectorColorField !== siteSectorColorField ||
         cached.versionKey !== versionKey ||
         cached.overlayKey !== overlayKey
       ) {
@@ -1749,6 +1835,7 @@ const NetworkPlannerMap = ({
     });
   }, [
     colorMode,
+    siteSectorColorField,
     loadSiteData,
     selectedMetric,
     selectedSiteDataById,
@@ -1970,6 +2057,22 @@ const NetworkPlannerMap = ({
         s.lng <= viewport.east,
     );
   }, [siteMarkers, viewport]);
+
+  const renderedSectors = useMemo(() => {
+    const selectedRenderKey = selectedSectorInfo?.renderKey;
+    return downsampleItems(visibleSectors, MAX_RENDERED_SITE_SECTORS, (sector) => {
+      if (selectedRenderKey && sector.renderKey === selectedRenderKey) return true;
+      if (!hoveredLog) return false;
+      const sectorPci = normalizeMatchValue(sector?.pci);
+      const hoveredPci = extractPciValue(hoveredLog);
+      return sectorPci !== null && hoveredPci !== null && sectorPci === hoveredPci;
+    });
+  }, [visibleSectors, selectedSectorInfo?.renderKey, hoveredLog]);
+
+  const shouldRenderSectorLabels =
+    String(siteLabelField || "none").toLowerCase() !== "none" &&
+    mapZoom >= MIN_SITE_LABEL_ZOOM &&
+    renderedSectors.length <= MAX_RENDERED_SITE_LABELS;
 
   const logCoords = useMemo(() => {
     if (!hoveredLog) return null;
@@ -3395,7 +3498,7 @@ const NetworkPlannerMap = ({
         );
       })}
 
-      {visibleSectors.map((sector, index) => {
+      {renderedSectors.map((sector, index) => {
         const sectorRenderKey =
           sector.renderKey ||
           [
@@ -3419,6 +3522,11 @@ const NetworkPlannerMap = ({
           lat: (p0.lat + p1.lat + p2.lat) / 3,
           lng: (p0.lng + p1.lng + p2.lng) / 3,
         };
+        const labelPos = computeOffset(
+          p0,
+          r + Math.max(12, Math.min(40, r * 0.16)),
+          effectiveSector.azimuth,
+        );
 
         const activeCoords = logCoords;
         const sectorPci = normalizeMatchValue(effectiveSector.pci);
@@ -3430,7 +3538,9 @@ const NetworkPlannerMap = ({
         const infoSector = isSelectedSector ? selectedSectorInfo || effectiveSector : effectiveSector;
         const infoSectorSiteId = getDisplaySiteId(infoSector);
         const canEditSitePrediction = String(siteToggle || "").toLowerCase() === "cell";
-        const sectorLabelText = getSiteLabelText(effectiveSector, siteLabelField);
+        const sectorLabelText = shouldRenderSectorLabels
+          ? truncateSiteLabelText(getSiteLabelText(effectiveSector, siteLabelField))
+          : "";
 
         return (
           <React.Fragment key={sectorRenderKey}>
@@ -3466,7 +3576,7 @@ const NetworkPlannerMap = ({
 
             {sectorLabelText && (
               <MarkerF
-                position={infoPos}
+                position={labelPos}
                 clickable={false}
                 icon={{
                   path: window.google.maps.SymbolPath.CIRCLE,
@@ -3481,6 +3591,7 @@ const NetworkPlannerMap = ({
                   fontWeight: "700",
                 }}
                 zIndex={isSelectedSector ? 5400 : 5300}
+                title={getSiteLabelText(effectiveSector, siteLabelField)}
               />
             )}
 

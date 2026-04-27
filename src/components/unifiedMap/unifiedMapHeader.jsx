@@ -960,14 +960,14 @@ function UnifiedHeader({
             {activeQuickControl === "triangle" && triangleSizeAvailable && (
               <div className="flex max-w-full flex-wrap items-center gap-2 bg-gray-700/80 rounded-lg px-3 py-1.5 border border-gray-600">
                 <span className="text-xs text-gray-300 font-medium">
-                  Triangle Size
+                  Site Size
                 </span>
                 <button
                   type="button"
                   onClick={() => adjustTriangleScale(-triangleScaleStep)}
                   className="h-6 w-6 rounded bg-slate-600 hover:bg-slate-500 flex items-center justify-center"
                   disabled={currentTriangleScaleMultiplier <= minTriangleScale}
-                  title="Decrease triangle size"
+                  title="Decrease Site size"
                 >
                   <Minus className="h-3 w-3" />
                 </button>
@@ -985,7 +985,7 @@ function UnifiedHeader({
                   onClick={() => adjustTriangleScale(triangleScaleStep)}
                   className="h-6 w-6 rounded bg-slate-600 hover:bg-slate-500 flex items-center justify-center"
                   disabled={currentTriangleScaleMultiplier >= maxTriangleScale}
-                  title="Increase triangle size"
+                  title="Increase Site size"
                 >
                   <Plus className="h-3 w-3" />
                 </button>

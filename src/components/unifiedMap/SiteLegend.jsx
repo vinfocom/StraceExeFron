@@ -10,6 +10,7 @@ import {
   getTechnologyColor,
   normalizeTechName
 } from "@/utils/colorUtils";
+import { getPciColor } from "@/utils/metrics";
 
 const normalizeDeltaVariant = (value) => {
   const variant = String(value ?? "").trim().toLowerCase();
@@ -115,7 +116,11 @@ export default function SiteLegend({
       let normalized = "Unknown";
       let color = "#9ca3af";
 
-      if (mode === "band") {
+      if (mode === "pci") {
+        rawName = site.pci || site.PCI || site.pci_or_psi || site.physical_cell_id || "Unknown";
+        normalized = String(rawName ?? "").trim() || "Unknown";
+        color = getPciColor(normalized);
+      } else if (mode === "band") {
         rawName = site.band || site.frequency_band || site.Band || "Unknown";
         normalized = normalizeBandName(rawName);
         color = getBandColor(normalized);
@@ -145,6 +150,11 @@ export default function SiteLegend({
 
     // Sort: Bands numerically if possible, otherwise alphabetical
     return Array.from(itemMap.values()).sort((a, b) => {
+       if (mode === "pci") {
+         const numA = parseInt(a.label, 10);
+         const numB = parseInt(b.label, 10);
+         if (!isNaN(numA) && !isNaN(numB)) return numA - numB;
+       }
        if (mode === "band") {
          const numA = parseInt(a.label.replace(/\D/g, ''));
          const numB = parseInt(b.label.replace(/\D/g, ''));

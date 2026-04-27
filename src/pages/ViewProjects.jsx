@@ -16,12 +16,6 @@ import Spinner from "@/components/common/Spinner";
 import { mapViewApi } from "@/api/apiEndpoints";
 import { parseWKTToPolygons } from "@/utils/wkt";
 import { GOOGLE_MAPS_LOADER_OPTIONS } from "@/lib/googleMapsLoader";
-import {
-  readProjectsListCacheEntry,
-  isProjectsListCacheFresh,
-  removeProjectFromProjectsCache,
-  writeProjectsListCache,
-} from "@/utils/projectsCache";
 
 const normalizeLatLng = (input) => {
   if (!input) return null;
@@ -206,14 +200,8 @@ const ViewProjectsPage = () => {
   const { isLoaded: mapsReady, loadError: mapsError } = useJsApiLoader(
     GOOGLE_MAPS_LOADER_OPTIONS,
   );
-  const initialProjectsCache = useMemo(() => {
-    return readProjectsListCacheEntry();
-  }, []);
-  const initialCachedProjects = initialProjectsCache?.data || [];
-  const hasFreshInitialProjectsCache = isProjectsListCacheFresh(initialProjectsCache);
-
-  const [projects, setProjects] = useState(initialCachedProjects);
-  const [loading, setLoading] = useState(initialCachedProjects.length === 0);
+  const [projects, setProjects] = useState([]);
+  const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
 
   const formatDate = (value) => {
@@ -298,10 +286,8 @@ const ViewProjectsPage = () => {
       const res = await mapViewApi.getProjects();
       if (res?.Data && Array.isArray(res.Data)) {
         setProjects(res.Data);
-        writeProjectsListCache(res.Data);
       } else {
         setProjects([]);
-        writeProjectsListCache([]);
         if (!background) {
           toast.warn("No projects found.");
         }
@@ -318,13 +304,13 @@ const ViewProjectsPage = () => {
   }, []);
 
   useEffect(() => {
-    fetchProjects({ background: initialCachedProjects.length > 0 && hasFreshInitialProjectsCache });
+    fetchProjects();
     const intervalId = window.setInterval(() => {
       fetchProjects({ background: true });
     }, 60 * 1000);
 
     return () => window.clearInterval(intervalId);
-  }, [fetchProjects, hasFreshInitialProjectsCache, initialCachedProjects.length]);
+  }, [fetchProjects]);
 
   const filteredProjects = useMemo(() => {
     if (!searchQuery.trim()) return projects;
@@ -374,8 +360,6 @@ const ViewProjectsPage = () => {
         toast.success("Project deleted successfully.");
         const updatedProjects = projects.filter((item) => Number(item.id) !== Number(project.id));
         setProjects(updatedProjects);
-        removeProjectFromProjectsCache(project.id);
-        writeProjectsListCache(updatedProjects);
         fetchProjects({ background: true });
       } else {
         toast.error("Failed to delete project.");

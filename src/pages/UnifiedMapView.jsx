@@ -1339,7 +1339,7 @@ const UnifiedMapView = () => {
 
   useEffect(() => {
     setSiteLegendFilter(null);
-  }, [modeMethod, sitePredictionVersion, siteToggle, projectId]);
+  }, [modeMethod, siteLabelField, sitePredictionVersion, siteToggle, projectId]);
 
   const querySessionParam = useMemo(() => {
     for (const key of SESSION_QUERY_KEYS) {
@@ -2882,6 +2882,12 @@ const UnifiedMapView = () => {
     return colorBy;
   }, [isStoredGridOverlayVisible, storedGridMetricMode, colorBy]);
 
+  const siteLegendColorMode = useMemo(() => {
+    const labelField = String(siteLabelField || "").trim().toLowerCase();
+    if (["pci", "band", "technology"].includes(labelField)) return labelField;
+    return modeMethod;
+  }, [siteLabelField, modeMethod]);
+
   
 
   const {
@@ -4229,7 +4235,7 @@ const UnifiedMapView = () => {
         <SiteLegend
           enabled={enableSiteToggle}
           sites={manualSiteData}
-          colorMode={modeMethod}
+          colorMode={siteLegendColorMode}
           isLoading={manualSiteLoading}
           sitePredictionVersion={sitePredictionVersion}
           activeFilter={siteLegendFilter}
@@ -4409,7 +4415,7 @@ const UnifiedMapView = () => {
                   hoveredLog={hoveredLog}
                   locations={finalDisplayLocations}
                   onDataLoaded={handleSitesLoaded}
-                  colorMode={modeMethod}
+                  colorMode={siteLegendColorMode}
                   siteLabelField={siteLabelField}
                   viewport={viewport}
                   thresholds={effectiveThresholds}
