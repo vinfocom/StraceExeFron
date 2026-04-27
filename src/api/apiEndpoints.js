@@ -1204,7 +1204,7 @@ export const excelApi = {
     }),
 
   downloadTemplate: (fileType) => {
-    const url = `https://api.stracer.vinfocom.co.in/ExcelUpload/DownloadExcel?fileType=${fileType}`;
+    const url = `https://s-traccceer.vinfocom.co.in/ExcelUpload/DownloadExcel?fileType=${fileType}`;
     window.open(url, "_blank");
     return Promise.resolve({ success: true });
   },
