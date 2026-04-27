@@ -1,46 +1,44 @@
 // src/components/SiteMarkers.jsx
 import React, { useMemo, useState, memo } from "react";
-import { CircleF, InfoWindowF } from "@react-google-maps/api";
+import { MarkerF, InfoWindowF } from "@react-google-maps/api";
 
-const SiteMarker = memo(({ site, onSiteClick, isSelected, onSelect, circleRadius }) => {
+const SiteMarker = memo(({ site, onSiteClick, isSelected, onSelect }) => {
   const position = { lat: site.lat, lng: site.lng };
+  const handleClick = () => {
+    onSelect(site);
+    onSiteClick?.(site);
+  };
   
   return (
     <>
-      <CircleF
-        center={position}
-        radius={circleRadius}
-        options={{
+      <MarkerF
+        position={position}
+        zIndex={100}
+        icon={{
+          path: window.google.maps.SymbolPath.CIRCLE,
+          scale: isSelected ? 11 : 9,
           fillColor: "#3b82f6",
-          fillOpacity: 0.1,
+          fillOpacity: 0.15,
           strokeColor: "#3b82f6",
           strokeWeight: 2,
-          strokeOpacity: 0.8,
-          clickable: true,
-          zIndex: 100,
+          strokeOpacity: 0.7,
         }}
-        onClick={() => {
-          onSelect(site);
-          onSiteClick?.(site);
-        }}
+        onClick={handleClick}
       />
-      
-      <CircleF
-        center={position}
-        radius={8}
-        options={{
+
+      <MarkerF
+        position={position}
+        zIndex={101}
+        icon={{
+          path: window.google.maps.SymbolPath.CIRCLE,
+          scale: isSelected ? 6 : 5,
           fillColor: "#3b82f6",
-          fillOpacity: 0.9,
+          fillOpacity: 0.95,
           strokeColor: "#ffffff",
           strokeWeight: 2,
           strokeOpacity: 1,
-          clickable: true,
-          zIndex: 101,
         }}
-        onClick={() => {
-          onSelect(site);
-          onSiteClick?.(site);
-        }}
+        onClick={handleClick}
       />
 
       {isSelected && (

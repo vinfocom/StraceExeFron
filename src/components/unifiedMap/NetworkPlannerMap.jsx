@@ -242,6 +242,17 @@ function extractPciValue(source) {
   ]);
 }
 
+function isSectorMatchingHoveredLog(sector, hoveredLogPci, hoveredLogNodebId) {
+  const sectorPci = extractPciValue(sector);
+  if (sectorPci === null || hoveredLogPci === null || sectorPci !== hoveredLogPci) return false;
+
+  // If hovered log has no NodeB ID, PCI match alone is enough.
+  if (hoveredLogNodebId === null) return true;
+
+  const sectorNodebId = extractNodebId(sector);
+  return sectorNodebId !== null && sectorNodebId === hoveredLogNodebId;
+}
+
 function inferTechnologyFromCarrier(technologyValue, earfcnValue) {
   const techRaw = String(technologyValue ?? "").trim();
   if (techRaw) return techRaw;
@@ -579,6 +590,13 @@ const MAX_RENDERED_SITE_LABELS = 450;
 const MIN_SITE_LABEL_ZOOM = 14;
 const MAX_SITE_LABEL_CHARS = 14;
 const SITE_LABEL_COLOR_FIELDS = new Set(["pci", "band", "technology"]);
+
+function getSiteMarkerFillColor(site, isSelected) {
+  if (isSelected) return "#dc2626";
+  if (site?.deltaVariant === "baseline") return "#dc2626";
+  if (site?.deltaVariant === "optimized" || site?.deltaVariant === "optimised") return "#16a34a";
+  return "#2563eb";
+}
 
 const NUMERIC_FIELD_HINTS = new Set([
   "site",
@@ -2060,12 +2078,12 @@ const NetworkPlannerMap = ({
 
   const renderedSectors = useMemo(() => {
     const selectedRenderKey = selectedSectorInfo?.renderKey;
+    const hoveredPci = extractPciValue(hoveredLog);
+    const hoveredNodebId = extractNodebId(hoveredLog);
     return downsampleItems(visibleSectors, MAX_RENDERED_SITE_SECTORS, (sector) => {
       if (selectedRenderKey && sector.renderKey === selectedRenderKey) return true;
       if (!hoveredLog) return false;
-      const sectorPci = normalizeMatchValue(sector?.pci);
-      const hoveredPci = extractPciValue(hoveredLog);
-      return sectorPci !== null && hoveredPci !== null && sectorPci === hoveredPci;
+      return isSectorMatchingHoveredLog(sector, hoveredPci, hoveredNodebId);
     });
   }, [visibleSectors, selectedSectorInfo?.renderKey, hoveredLog]);
 
@@ -2087,6 +2105,11 @@ const NetworkPlannerMap = ({
   const logPci = useMemo(() => {
     if (!hoveredLog) return null;
     return extractPciValue(hoveredLog);
+  }, [hoveredLog]);
+
+  const logNodebId = useMemo(() => {
+    if (!hoveredLog) return null;
+    return extractNodebId(hoveredLog);
   }, [hoveredLog]);
 
   const openSectorInfo = useCallback((sector, infoPos) => {
@@ -3380,19 +3403,14 @@ const NetworkPlannerMap = ({
           <MarkerF
             key={`site-${site.markerKey || site.siteId}`}
             position={{ lat: site.lat, lng: site.lng }}
+            optimized={false}
             icon={{
               path: window.google.maps.SymbolPath.CIRCLE,
-              scale: selectedSiteIdSet.has(site.siteId) ? 7 : 5,
-              fillColor: selectedSiteIdSet.has(site.siteId)
-                ? "#dc2626"
-                : site.deltaVariant === "baseline"
-                  ? "#dc2626"
-                  : site.deltaVariant === "optimized" || site.deltaVariant === "optimised"
-                    ? "#16a34a"
-                    : "#2563eb",
+              scale: 5,
+              fillColor: getSiteMarkerFillColor(site, selectedSiteIdSet.has(site.siteId)),
               fillOpacity: 0.95,
               strokeColor: "#ffffff",
-              strokeWeight: 1.5,
+              strokeWeight: selectedSiteIdSet.has(site.siteId) ? 2 : 1.5,
             }}
             zIndex={selectedSiteIdSet.has(site.siteId) ? 4001 : 3001}
             onClick={() => {
@@ -3529,8 +3547,7 @@ const NetworkPlannerMap = ({
         );
 
         const activeCoords = logCoords;
-        const sectorPci = normalizeMatchValue(effectiveSector.pci);
-        const isHoveredMatch = logPci !== null && sectorPci !== null && sectorPci === logPci;
+        const isHoveredMatch = isSectorMatchingHoveredLog(effectiveSector, logPci, logNodebId);
         const isSelectedSector = selectedSectorInfo?.renderKey === sectorRenderKey;
         const isSectorDataActive =
           Array.isArray(sectorPredictionRowsByRenderKey?.[sectorRenderKey]) &&

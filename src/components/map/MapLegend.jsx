@@ -237,7 +237,7 @@ const PciLegend = ({ logs, activeFilter, onFilterChange }) => {
     });
 
     return {
-      allPcis: [...pciMap.entries()].sort((a, b) => b[1] - a[1]),
+      allPcis: [...pciMap.entries()].sort((a, b) => a[0] - b[0]),
       uniqueCount: pciMap.size,
       validCount,
       invalidCount,
