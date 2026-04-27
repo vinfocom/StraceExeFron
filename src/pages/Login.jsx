@@ -4,8 +4,7 @@ import { useNavigate } from "react-router-dom";
 import { toast } from "react-toastify";
 import Spinner from "../components/common/Spinner";
 import appLogo from "/favicon.svg";
-// import comlog from "/toolLogo.svg";
-import comlog from "/comp.jpeg"
+import comlog from "/logo.svg";
 import axios from "axios";
 import { Eye, EyeOff } from "lucide-react";
 
