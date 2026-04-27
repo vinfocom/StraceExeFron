@@ -4,7 +4,8 @@ import { useNavigate } from "react-router-dom";
 import { toast } from "react-toastify";
 import Spinner from "../components/common/Spinner";
 import appLogo from "/favicon.svg";
-import comlog from "/toolLogo.svg";
+// import comlog from "/toolLogo.svg";
+import comlog from "/comp.jpeg"
 import axios from "axios";
 import { Eye, EyeOff } from "lucide-react";
 
@@ -175,10 +176,8 @@ const LoginPage = () => {
       className="relative flex min-h-screen items-center justify-center overflow-hidden bg-gradient-to-br from-slate-100 via-white to-blue-100 px-4"
     >
       <div className="absolute left-4 top-4 sm:left-8 sm:top-6">
-        <img src={comlog} alt="Vinfocom" className="h-10 w-auto sm:h-12" />
-        <p className="mt-1 text-xs font-medium tracking-wide text-slate-600 sm:text-sm">
-          Vinfocom Pvt. Ltd.
-        </p>
+        <img src={comlog} alt="Vinfocom" className="h-24 w-auto sm:h-22" />
+        
       </div>
       <div className="relative w-full max-w-md space-y-6 rounded-2xl border border-slate-200 bg-white/85 p-8 shadow-xl backdrop-blur-md">
         {loading && (
