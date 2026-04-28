@@ -32,9 +32,36 @@ import {
   areaBreakdownApi,
   predictionApi,
 } from "../../api/apiEndpoints";
+import { useAuth } from "../../context/AuthContext";
 import Spinner from "../common/Spinner";
 
 const DEFAULT_MIN_SAMPLES = 10;
+
+const resolveCompanyId = (user) => {
+  const directCompanyId = Number(
+    user?.company_id ?? user?.CompanyId ?? user?.companyId ?? 0
+  );
+  if (Number.isFinite(directCompanyId) && directCompanyId > 0) {
+    return directCompanyId;
+  }
+
+  if (typeof window === "undefined") return 0;
+
+  try {
+    const cachedUser = JSON.parse(sessionStorage.getItem("user") || "null");
+    const cachedCompanyId = Number(
+      cachedUser?.company_id ??
+        cachedUser?.CompanyId ??
+        cachedUser?.companyId ??
+        0
+    );
+    return Number.isFinite(cachedCompanyId) && cachedCompanyId > 0
+      ? cachedCompanyId
+      : 0;
+  } catch {
+    return 0;
+  }
+};
 
 const PolygonDropdown = ({
   polygons,
@@ -316,6 +343,7 @@ export const ProjectForm = ({
   loading: parentLoading,
   onProjectCreated,
 }) => {
+  const { user } = useAuth();
   const [projectName, setProjectName] = useState("");
   const [selectedPolygon, setSelectedPolygon] = useState(null);
   const [selectedPolygonData, setSelectedPolygonData] = useState(null);
@@ -421,6 +449,9 @@ export const ProjectForm = ({
         PolygonIds: [selectedPolygon],
         SessionIds: selectedSessions,
         GridSize: String(parseFloat(gridSize)),
+        ...(Number.isFinite(scopedCompanyId) && scopedCompanyId > 0
+          ? { company_id: scopedCompanyId }
+          : {}),
       };
 
       const projectRes = await mapViewApi.createProjectWithPolygons(
@@ -614,6 +645,7 @@ export const ProjectForm = ({
     parseFloat(gridSize) > 0;
   const isLoadingPolygons =
     parentLoading && (!polygons || polygons.length === 0);
+  const scopedCompanyId = resolveCompanyId(user);
 
   return (
     <Card className="shadow-lg border-gray-200">

@@ -3,13 +3,42 @@ import React, { useState, useEffect, useCallback, useRef } from "react";
 import { toast } from "react-toastify";
 import { mapViewApi } from "../api/apiEndpoints";
 import { ProjectForm } from "../components/project/ProjectForm";
+import { useAuth } from "../context/AuthContext";
 import { Button } from "@/components/ui/button";
 import { RefreshCw } from "lucide-react";
 
+const resolveCompanyId = (user) => {
+  const directCompanyId = Number(
+    user?.company_id ?? user?.CompanyId ?? user?.companyId ?? 0
+  );
+  if (Number.isFinite(directCompanyId) && directCompanyId > 0) {
+    return directCompanyId;
+  }
+
+  if (typeof window === "undefined") return 0;
+
+  try {
+    const cachedUser = JSON.parse(sessionStorage.getItem("user") || "null");
+    const cachedCompanyId = Number(
+      cachedUser?.company_id ??
+        cachedUser?.CompanyId ??
+        cachedUser?.companyId ??
+        0
+    );
+    return Number.isFinite(cachedCompanyId) && cachedCompanyId > 0
+      ? cachedCompanyId
+      : 0;
+  } catch {
+    return 0;
+  }
+};
+
 const CreateProjectPage = () => {
+  const { user } = useAuth();
   const [polygons, setPolygons] = useState([]);
   const [loading, setLoading] = useState(false);
   const inFlightFetchRef = useRef(null);
+  const scopedCompanyId = resolveCompanyId(user);
 
   const fetchPolygons = useCallback(async ({ silent = false } = {}) => {
     if (inFlightFetchRef.current) {
@@ -19,7 +48,12 @@ const CreateProjectPage = () => {
     setLoading(true);
     const task = (async () => {
       try {
-        const polygonsRes = await mapViewApi.getAvailablePolygons();
+        const polygonsRes = await mapViewApi.getAvailablePolygons(
+          undefined,
+          Number.isFinite(scopedCompanyId) && scopedCompanyId > 0
+            ? scopedCompanyId
+            : undefined
+        );
         const shapeList = Array.isArray(polygonsRes?.data)
           ? polygonsRes.data
           : [];
@@ -52,7 +86,7 @@ const CreateProjectPage = () => {
 
     inFlightFetchRef.current = task;
     return task;
-  }, []);
+  }, [scopedCompanyId]);
 
   useEffect(() => {
     fetchPolygons({ silent: true });
