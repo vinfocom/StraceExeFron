@@ -19,6 +19,7 @@ import {
   PlusCircle,
   Check,
   MapPin,
+  TowerControl,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { predictionApi } from "@/api/apiEndpoints";
@@ -613,6 +614,14 @@ const UnifiedMapSidebar = ({
   const ltePredictionPollingRef = useRef(null);
   const ltePredictionToastIdRef = useRef(null);
   const ltePredictionJobIdRef = useRef(null);
+  const [isRunningLteTiltRecommendation, setIsRunningLteTiltRecommendation] = useState(false);
+  const [lteTiltRecommendationOperator, setLteTiltRecommendationOperator] = useState("all");
+  const [lteTiltRecommendationRsrp, setLteTiltRecommendationRsrp] = useState(-105);
+  const [lteTiltRecommendationRsrq, setLteTiltRecommendationRsrq] = useState(-15);
+  const [lteTiltRecommendationSinr, setLteTiltRecommendationSinr] = useState(0);
+  const lteTiltRecommendationPollingRef = useRef(null);
+  const lteTiltRecommendationToastIdRef = useRef(null);
+  const lteTiltRecommendationJobIdRef = useRef(null);
   const [isRunningLteOptimisedPrediction, setIsRunningLteOptimisedPrediction] = useState(false);
   const lteOptimisedPredictionPollingRef = useRef(null);
   const lteOptimisedPredictionToastIdRef = useRef(null);
@@ -649,6 +658,15 @@ const UnifiedMapSidebar = ({
       numericProjectId <= 0
     );
   }, [canRunPrediction, isRunningLteOptimisedPrediction, projectId]);
+  const lteTiltRecommendationButtonDisabled = useMemo(() => {
+    const numericProjectId = Number(projectId);
+    return (
+      !canRunPrediction ||
+      isRunningLteTiltRecommendation ||
+      !Number.isFinite(numericProjectId) ||
+      numericProjectId <= 0
+    );
+  }, [canRunPrediction, isRunningLteTiltRecommendation, projectId]);
   const showDeltaGridAdvancedControls = useMemo(
     () =>
       Boolean(deltaGridApiState?.gridVisible) ||
@@ -746,12 +764,29 @@ const UnifiedMapSidebar = ({
     }
   }, []);
 
+  const stopLteTiltRecommendationMonitoring = useCallback((dismissToast = false) => {
+    if (lteTiltRecommendationPollingRef.current) {
+      clearInterval(lteTiltRecommendationPollingRef.current);
+      lteTiltRecommendationPollingRef.current = null;
+    }
+
+    if (dismissToast && lteTiltRecommendationToastIdRef.current) {
+      toast.dismiss(lteTiltRecommendationToastIdRef.current);
+    }
+
+    lteTiltRecommendationJobIdRef.current = null;
+    if (dismissToast) {
+      lteTiltRecommendationToastIdRef.current = null;
+    }
+  }, []);
+
   useEffect(() => {
     return () => {
       stopLtePredictionMonitoring(true);
+      stopLteTiltRecommendationMonitoring(true);
       stopLteOptimisedPredictionMonitoring(true);
     };
-  }, [stopLteOptimisedPredictionMonitoring, stopLtePredictionMonitoring]);
+  }, [stopLteOptimisedPredictionMonitoring, stopLtePredictionMonitoring, stopLteTiltRecommendationMonitoring]);
 
   const pollLtePredictionStatus = useCallback(async () => {
     const jobId = ltePredictionJobIdRef.current;
@@ -882,6 +917,81 @@ const UnifiedMapSidebar = ({
       console.error("LTE optimized status polling failed:", msg);
     }
   }, [stopLteOptimisedPredictionMonitoring]);
+
+  const pollLteTiltRecommendationStatus = useCallback(async () => {
+    const jobId = lteTiltRecommendationJobIdRef.current;
+    const toastId = lteTiltRecommendationToastIdRef.current;
+
+    if (!jobId || !toastId) return;
+
+    try {
+      const statusResponse = await predictionApi.getLteTiltRecommendationStatus(jobId);
+      const status = String(statusResponse?.status || "").trim().toLowerCase();
+      const progressText = statusResponse?.progress
+        ? String(statusResponse.progress).trim()
+        : "";
+
+      if (status === "done") {
+        stopLteTiltRecommendationMonitoring(false);
+        setIsRunningLteTiltRecommendation(false);
+
+        const scenario = statusResponse?.scenario;
+        const outputFile = statusResponse?.output;
+        const downloadUrl = predictionApi.getLteTiltRecommendationDownloadUrl(outputFile);
+
+        toast.update(toastId, {
+          render: scenario
+            ? `LTE tilt recommendation completed. Scenario ${scenario} saved.`
+            : "LTE tilt recommendation completed.",
+          type: "success",
+          isLoading: false,
+          autoClose: 5000,
+          closeOnClick: true,
+          draggable: true,
+        });
+
+        if (downloadUrl) {
+          window.open(downloadUrl, "_blank", "noopener,noreferrer");
+        }
+
+        lteTiltRecommendationToastIdRef.current = null;
+        return;
+      }
+
+      if (status === "failed") {
+        stopLteTiltRecommendationMonitoring(false);
+        setIsRunningLteTiltRecommendation(false);
+        const errorMessage =
+          statusResponse?.error || "LTE tilt recommendation failed in Python service.";
+        toast.update(toastId, {
+          render: `LTE tilt recommendation failed: ${errorMessage}`,
+          type: "error",
+          isLoading: false,
+          autoClose: 7000,
+          closeOnClick: true,
+          draggable: true,
+        });
+        lteTiltRecommendationToastIdRef.current = null;
+        return;
+      }
+
+      const statusLabel = status ? status.toUpperCase() : "RUNNING";
+      const liveMessage = progressText
+        ? `LTE tilt ${statusLabel}: ${progressText}`
+        : `LTE tilt ${statusLabel}...`;
+
+      toast.update(toastId, {
+        render: liveMessage,
+        isLoading: true,
+        autoClose: false,
+        closeOnClick: false,
+        draggable: false,
+      });
+    } catch (statusError) {
+      const msg = statusError?.message || "Unable to fetch LTE tilt recommendation status.";
+      console.error("LTE tilt recommendation polling failed:", msg);
+    }
+  }, [stopLteTiltRecommendationMonitoring]);
 
   const handleRunLtePrediction = useCallback(async () => {
     if (!canRunPrediction) {
@@ -1063,6 +1173,93 @@ const UnifiedMapSidebar = ({
     ltePredictionRadiusMeters,
     stopLteOptimisedPredictionMonitoring,
     pollLteOptimisedPredictionStatus,
+  ]);
+
+  const handleRunLteTiltRecommendation = useCallback(async () => {
+    if (!canRunPrediction) {
+      toast.error("Prediction is disabled for your license.");
+      return;
+    }
+
+    const numericProjectId = Number(projectId);
+    if (!Number.isFinite(numericProjectId) || numericProjectId <= 0) {
+      toast.error("Please select a valid project before running LTE tilt recommendation.");
+      return;
+    }
+
+    setIsRunningLteTiltRecommendation(true);
+    stopLteTiltRecommendationMonitoring(true);
+    const loadingToastId = toast.loading("Starting LTE tilt recommendation...", {
+      autoClose: false,
+      closeOnClick: false,
+      draggable: false,
+    });
+    lteTiltRecommendationToastIdRef.current = loadingToastId;
+
+    try {
+      const response = await predictionApi.runLteTiltRecommendation({
+        project_id: numericProjectId,
+        operator: lteTiltRecommendationOperator,
+        rsrp: lteTiltRecommendationRsrp,
+        rsrq: lteTiltRecommendationRsrq,
+        sinr: lteTiltRecommendationSinr,
+      });
+
+      const jobId = response?.job_id || response?.jobId;
+      if (!jobId) {
+        setIsRunningLteTiltRecommendation(false);
+        toast.update(loadingToastId, {
+          render: "LTE tilt recommendation started, but no job id was returned.",
+          type: "warning",
+          isLoading: false,
+          autoClose: 6000,
+          closeOnClick: true,
+          draggable: true,
+        });
+        lteTiltRecommendationToastIdRef.current = null;
+        return;
+      }
+
+      lteTiltRecommendationJobIdRef.current = jobId;
+      toast.update(loadingToastId, {
+        render: `LTE tilt recommendation queued. Job: ${jobId}. Monitoring progress...`,
+        isLoading: true,
+        autoClose: false,
+        closeOnClick: false,
+        draggable: false,
+      });
+
+      await pollLteTiltRecommendationStatus();
+      lteTiltRecommendationPollingRef.current = setInterval(() => {
+        pollLteTiltRecommendationStatus();
+      }, 3000);
+    } catch (error) {
+      setIsRunningLteTiltRecommendation(false);
+      const failureMessage = error?.message || "Failed to start LTE tilt recommendation.";
+      if (lteTiltRecommendationToastIdRef.current) {
+        toast.update(lteTiltRecommendationToastIdRef.current, {
+          render: failureMessage,
+          type: "error",
+          isLoading: false,
+          autoClose: 7000,
+          closeOnClick: true,
+          draggable: true,
+        });
+      } else {
+        toast.error(failureMessage);
+      }
+      stopLteTiltRecommendationMonitoring(false);
+      lteTiltRecommendationToastIdRef.current = null;
+    }
+  }, [
+    canRunPrediction,
+    projectId,
+    lteTiltRecommendationOperator,
+    lteTiltRecommendationRsrp,
+    lteTiltRecommendationRsrq,
+    lteTiltRecommendationSinr,
+    stopLteTiltRecommendationMonitoring,
+    pollLteTiltRecommendationStatus,
   ]);
 
   const selectedEnvironment = useMemo(() => {
@@ -1398,37 +1595,7 @@ const UnifiedMapSidebar = ({
                   className="pt-1"
                 />
 
-                {/* <div className="border-t border-slate-700/50 pt-3">
-                  <div className="flex items-center justify-between mb-2">
-                    <span className="text-xs text-slate-400">
-                      PCI Appearance Filter
-                    </span>
-                  </div>
-
-                  <div className="px-1 flex items-center justify-between gap-2">
-                    <ThresholdInput
-                      value={clampedPciThreshold}
-                      onChange={(next) => setPciThreshold(parseFloat(next))}
-                      min={normalizedPciRange.min}
-                      max={normalizedPciRange.max}
-                      step={1}
-                      unit="%"
-                      disabled={!supportsSessionFilters}
-                    />
-                    <span className="text-[10px] text-slate-500 whitespace-nowrap">
-                      {normalizedPciRange.min}% - {normalizedPciRange.max}%
-                    </span>
-                  </div>
-                  <p className="text-[10px] text-slate-500 mt-2 italic">
-                    Hides PCIs that appear less than {clampedPciThreshold}% of
-                    the time in this session.
-                  </p>
-                  {!supportsSessionFilters && (
-                    <p className="text-[10px] text-amber-400 mt-1">
-                      Available only in Data Layer sample mode.
-                    </p>
-                  )}
-                </div> */}
+                
 
                 {activeDataFiltersCount > 0 && (
                   <div className="mt-1 p-2 bg-blue-900/20 border border-blue-700/50 rounded text-xs text-blue-300">
@@ -1462,7 +1629,7 @@ const UnifiedMapSidebar = ({
                   onChange={setSiteToggle}
                   options={[
                     { value: "Cell", label: "Cell" },
-                    { value: "NoML", label: "NoML" },
+                    { value: "NoML", label: "ML" },
                   ]}
                 />
 
@@ -1696,6 +1863,8 @@ const UnifiedMapSidebar = ({
                 </div>
 
                 <div className="mt-3 pt-3 border-t border-slate-700/50 space-y-1.5">
+                  
+
                   <Label className="text-xs font-semibold text-blue-400 flex items-center gap-1">
                     <Palette className="w-3 h-3" /> Color Sites By
                   </Label>
@@ -1974,6 +2143,93 @@ const UnifiedMapSidebar = ({
               )}
             </CollapsibleSection>
           )}
+
+          <CollapsibleSection
+          title="Optimisation" 
+          icon={TowerControl} >
+                <div className="mt-3 pt-3 border-t border-slate-700/50 space-y-1.5">
+            {canRunPrediction && (
+              <>
+                      <Label className="text-xs font-semibold text-cyan-400 flex items-center gap-1">
+                        <Radio className="w-3 h-3" /> LTE Tilt Recommendation
+                      </Label>
+                      
+                      <div className="rounded-lg bg-slate-800/60 p-2">
+                        <Label className="mb-1 block text-[11px] text-slate-400">
+                          Operator
+                        </Label>
+                        <Input
+                          value={lteTiltRecommendationOperator}
+                          onChange={(e) => setLteTiltRecommendationOperator(e.target.value)}
+                          placeholder="all / Airtel / Jio / Vi"
+                          className="h-8 bg-slate-800 border-slate-600 text-white text-sm"
+                        />
+                      </div>
+                      <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+                        <div className="rounded-lg bg-slate-800/60 p-2">
+                          <div className="flex items-center justify-between text-xs mb-2">
+                            <span className="text-slate-400">RSRP</span>
+                          </div>
+                          <ThresholdInput
+                            value={Number(lteTiltRecommendationRsrp) || -105}
+                            onChange={(next) => setLteTiltRecommendationRsrp(Number(next))}
+                            min={-140}
+                            max={0}
+                            step={1}
+                            unit="dBm"
+                            showButtons={false}
+                          />
+                        </div>
+                        <div className="rounded-lg bg-slate-800/60 p-2">
+                          <div className="flex items-center justify-between text-xs mb-2">
+                            <span className="text-slate-400">RSRQ</span>
+                          </div>
+                          <ThresholdInput
+                            value={Number(lteTiltRecommendationRsrq) || -15}
+                            onChange={(next) => setLteTiltRecommendationRsrq(Number(next))}
+                            min={-40}
+                            max={0}
+                            step={1}
+                            unit="dB"
+                            showButtons={false}
+                          />
+                        </div>
+                        <div className="rounded-lg bg-slate-800/60 p-2">
+                          <div className="flex items-center justify-between text-xs mb-2">
+                            <span className="text-slate-400">SINR</span>
+                          </div>
+                          <ThresholdInput
+                            value={Number(lteTiltRecommendationSinr) || 0}
+                            onChange={(next) => setLteTiltRecommendationSinr(Number(next))}
+                            min={-20}
+                            max={40}
+                            step={1}
+                            unit="dB"
+                            showButtons={false}
+                          />
+                        </div>
+                      </div>
+                      <Button
+                        type="button"
+                        onClick={handleRunLteTiltRecommendation}
+                        disabled={lteTiltRecommendationButtonDisabled}
+                        className="w-full h-8 text-xs font-semibold bg-cyan-600 hover:bg-cyan-500"
+                        title={!canRunPrediction ? "Disabled by license" : "Run LTE tilt recommendation"}
+                      >
+                        {isRunningLteTiltRecommendation ? (
+                          <span className="inline-flex items-center gap-2">
+                            <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+                            Running...
+                          </span>
+                        ) : (
+                          "Run LTE Tilt Recommendation"
+                        )}
+                      </Button>
+                    </>
+                  )}
+            </div>
+          
+            </CollapsibleSection>
         </div>
 
         {/* Footer */}

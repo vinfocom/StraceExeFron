@@ -1,7 +1,7 @@
 // src/api/apiEndpoints.js
 import { CleaningServices } from "@mui/icons-material";
 import { api } from "./apiService"; // C# Backend
-import { pythonApi } from "./pythonApiService"; // Python Backend
+import { pythonApi, PYTHON_BASE_URL_EXPORT } from "./pythonApiService"; // Python Backend
 import axios from "axios";
 import { isCancelledError } from './apiService'; // Import the utility
 
@@ -533,6 +533,56 @@ export const predictionApi = {
       }
       throw error;
     }
+  },
+
+  runLteTiltRecommendation: async (params) => {
+    try {
+      if (!params.project_id) throw new Error("project_id is required");
+
+      const payload = {
+        project_id: params.project_id,
+      };
+
+      const operator = String(params.operator || "").trim();
+      if (operator && operator.toLowerCase() !== "all") {
+        payload.operator = operator;
+      }
+
+      if (params.rsrp !== undefined && params.rsrp !== null && params.rsrp !== "") {
+        payload.rsrp = Number(params.rsrp);
+      }
+      if (params.rsrq !== undefined && params.rsrq !== null && params.rsrq !== "") {
+        payload.rsrq = Number(params.rsrq);
+      }
+      if (params.sinr !== undefined && params.sinr !== null && params.sinr !== "") {
+        payload.sinr = Number(params.sinr);
+      }
+
+      return await pythonApi.post("/api/lte-tilt-recommendation/optimize", payload, {
+        timeout: 600000,
+      });
+    } catch (error) {
+      console.error("LTE tilt recommendation run error:", error);
+      if (error.code === "ECONNABORTED") {
+        throw new Error("LTE tilt recommendation timed out.");
+      }
+      throw error;
+    }
+  },
+
+  getLteTiltRecommendationStatus: async (jobId) => {
+    try {
+      if (!jobId) throw new Error("jobId is required");
+      return await pythonApi.get(`/api/lte-tilt-recommendation/status/${jobId}`);
+    } catch (error) {
+      console.error("LTE tilt recommendation status error:", error);
+      throw error;
+    }
+  },
+
+  getLteTiltRecommendationDownloadUrl: (filePath) => {
+    if (!filePath) return "";
+    return `${PYTHON_BASE_URL_EXPORT}/api/lte-tilt-recommendation/download?file=${encodeURIComponent(filePath)}`;
   },
 
   getLtePredictionStatus: async (jobId) => {
