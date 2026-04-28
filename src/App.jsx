@@ -82,13 +82,11 @@ const NotFoundPage = () => (
   </div>
 );
 
-// SWR Config moved outside component to prevent recreation on re-render
 const swrConfig = {
   provider: indexedDBProvider,
   revalidateOnFocus: false,
   revalidateOnReconnect: true,
   revalidateOnMount: true,
-  // ... rest of your existing swrConfig settings
 };
 
 function AppShell({ isElectronRuntime }) {
