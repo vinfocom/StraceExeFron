@@ -167,6 +167,7 @@ const DataDeletionPage = () => {
       toast.success(response?.message || "OTP sent successfully");
     } catch (error) {
       toast.error(error?.message || "Failed to send OTP");
+      window.alert(error?.message)
     } finally {
       setSendingOtp(false);
     }

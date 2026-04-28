@@ -1286,7 +1286,6 @@ const UnifiedMapView = () => {
         currentMetric === "dominance" ||
         currentMetric === "coverage_violation"
       ) {
-        // Revert to default RSRP only if we just turned off dominance/violation
         return "rsrp";
       }
       return currentMetric;
