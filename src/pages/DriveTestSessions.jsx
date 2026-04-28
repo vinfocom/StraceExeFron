@@ -27,8 +27,36 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Trash2, Map, ChevronLeft, ChevronRight, MapPin } from "lucide-react";
 import { useNavigate } from "react-router-dom";
+import { useAuth } from "../context/AuthContext";
+
+const resolveCompanyId = (user) => {
+  const directCompanyId = Number(
+    user?.company_id ?? user?.CompanyId ?? user?.companyId ?? 0,
+  );
+  if (Number.isFinite(directCompanyId) && directCompanyId > 0) {
+    return directCompanyId;
+  }
+
+  if (typeof window === "undefined") return 0;
+
+  try {
+    const cachedUser = JSON.parse(sessionStorage.getItem("user") || "null");
+    const cachedCompanyId = Number(
+      cachedUser?.company_id ??
+        cachedUser?.CompanyId ??
+        cachedUser?.companyId ??
+        0,
+    );
+    return Number.isFinite(cachedCompanyId) && cachedCompanyId > 0
+      ? cachedCompanyId
+      : 0;
+  } catch {
+    return 0;
+  }
+};
 
 const DriveTestSessionsPage = () => {
+  const { user } = useAuth();
   const [sessions, setSessions] = useState([]);
   const [loading, setLoading] = useState(true);
   const [selectedSessions, setSelectedSessions] = useState([]);
@@ -59,6 +87,7 @@ const DriveTestSessionsPage = () => {
 
   const [projectName, setProjectName] = useState("");
   const [isDialogOpen, setIsDialogOpen] = useState(false);
+  const scopedCompanyId = resolveCompanyId(user);
 
   // Column visibility state
   const [visibleColumns, setVisibleColumns] = useState({
@@ -425,9 +454,48 @@ const DriveTestSessionsPage = () => {
   };
 
   const handleCreateProject = async () => {
+    if (!projectName.trim()) {
+      toast.warning("Project name is required");
+      return;
+    }
+    if (selectedSessions.length === 0) {
+      toast.warning("Please select at least one session");
+      return;
+    }
+
+    const normalizedSessionIds = selectedSessions
+      .map((id) => Number(id))
+      .filter((id) => Number.isFinite(id) && id > 0);
+
+    const selectedCompanyIds = [
+      ...new Set(
+        sessions
+          .filter((s) => normalizedSessionIds.includes(Number(s?.id)))
+          .map((s) =>
+            Number(s?.company_id ?? s?.CompanyId ?? s?.companyId ?? 0),
+          )
+          .filter((id) => Number.isFinite(id) && id > 0),
+      ),
+    ];
+
+    const inferredCompanyId =
+      Number.isFinite(scopedCompanyId) && scopedCompanyId > 0
+        ? scopedCompanyId
+        : selectedCompanyIds.length === 1
+          ? selectedCompanyIds[0]
+          : 0;
+
+    if (selectedCompanyIds.length > 1 && inferredCompanyId <= 0) {
+      toast.error(
+        "Selected sessions belong to multiple companies. Please select sessions from one company.",
+      );
+      return;
+    }
+
     const payload = {
-      projectName: projectName,
-      sessionIds: selectedSessions,
+      ProjectName: projectName.trim(),
+      SessionIds: normalizedSessionIds,
+      ...(inferredCompanyId > 0 ? { company_id: inferredCompanyId } : {}),
     };
     try {
       const res = await mapViewApi.createProject(payload);
@@ -557,6 +625,7 @@ const DriveTestSessionsPage = () => {
                       <Button
                         onClick={handleCreateProject}
                         className="w-full rounded-xl"
+                        disabled={!projectName.trim() || selectedSessions.length === 0}
                       >
                         Create Project
                       </Button>

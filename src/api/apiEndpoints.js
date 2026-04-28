@@ -968,6 +968,16 @@ export const mapViewApi = {
       return response;
     } catch (error) {
       console.error(" Project creation error:", error);
+      if (error.response?.data) {
+        const data = error.response.data;
+        const details = data.Details || data.InnerException;
+        if (details) {
+          throw new Error(`Database Error: ${details}`);
+        }
+        if (data.Message) {
+          throw new Error(data.Message);
+        }
+      }
       throw error;
     }
   },
