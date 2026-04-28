@@ -14,7 +14,7 @@ const AppLayout = ({ children }) => {
     cancelAllRequests();
   }, [location.pathname]);
 
-  const pathsWithoutHeader = ["/mapview", "/prediction-map", "/map", "/unified-map"];
+  const pathsWithoutHeader = ["/mapview", "/prediction-map", "/unified-map"];
   const pathsWithoutSidebar = ["/unified-map"];
 
   const shouldShowHeader = !pathsWithoutHeader.some((path) =>

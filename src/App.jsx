@@ -22,7 +22,6 @@ import ElectronWindowBar from "./components/layout/ElectronWindowBar";
 // --- Lazy Load Pages for Optimization ---
 const LoginPage = lazy(() => import("./pages/Login"));
 const DashboardPage = lazy(() => import("./pages/Dashboard"));
-const SimpleMapView = lazy(() => import("./pages/MapView"));
 const ManageUsersPage = lazy(() => import("./pages/ManageUser"));
 const DriveTestSessionsPage = lazy(() => import("./pages/DriveTestSessions"));
 const AppLayout = lazy(() => import("./components/layout/AppLayout"));
@@ -30,7 +29,6 @@ const UploadDataPage = lazy(() => import("./pages/UploadData"));
 const SettingsPage = lazy(() => import("./pages/Setting"));
 const UnifiedMapView = lazy(() => import("./pages/UnifiedMapView"));
 const HighPerfMap = lazy(() => import("@/pages/HighPerfMap"));
-const LogsCirclesPage = lazy(() => import("@/pages/LogsCirclesPage"));
 const ProjectsPage = lazy(() => import("./pages/Projects"));
 const PredictionMapPage = lazy(() => import("./pages/PredictionMap"));
 const GetReportPage = lazy(() => import("./pages/GetReport"));
@@ -110,12 +108,10 @@ function AppShell({ isElectronRuntime }) {
             <Route path="/dashboard" element={<PrivateRoute><DashboardPage /></PrivateRoute>} />
             <Route path="/drive-test-sessions" element={<PrivateRoute><DriveTestSessionsPage /></PrivateRoute>} />
             <Route path="/mapview" element={<PrivateRoute><HighPerfMap /></PrivateRoute>} />
-            <Route path="/map" element={<PrivateRoute><SimpleMapView /></PrivateRoute>} />
             <Route path="/multi-map" element={<MultiViewPage />} />
             <Route path="/manage-users" element={<PrivateRoute><ManageUsersPage /></PrivateRoute>} />
             <Route path="/upload-data" element={<PrivateRoute><UploadDataPage /></PrivateRoute>} />
             <Route path="/settings" element={<PrivateRoute><SettingsPage /></PrivateRoute>} />
-            <Route path="/logscircles" element={<PrivateRoute><LogsCirclesPage /></PrivateRoute>} />
             <Route path="/create-project" element={<PrivateRoute><ProjectsPage /></PrivateRoute>} />
             <Route path="/prediction-map" element={<PrivateRoute><PredictionMapPage /></PrivateRoute>} />
             <Route path="/getreport" element={<PrivateRoute><GetReportPage /></PrivateRoute>} />

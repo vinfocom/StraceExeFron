@@ -102,6 +102,40 @@ const DEFAULT_DATA_FILTERS = {
   indoorOutdoor: [],
 };
 
+const DRAWN_POLYGON_OPACITY = 0.58;
+const DRAWN_POLYGON_FILL_OPACITY = 0;
+
+const coordinatesToWktPolygon = (coords) => {
+  if (!Array.isArray(coords) || coords.length < 3) return null;
+  const points = coords
+    .map((p) => {
+      const lat = Number(typeof p?.lat === "function" ? p.lat() : p?.lat);
+      const lng = Number(typeof p?.lng === "function" ? p.lng() : p?.lng);
+      if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+      return { lat, lng };
+    })
+    .filter(Boolean);
+  if (points.length < 3) return null;
+  const pointsString = points.map((p) => `${p.lat} ${p.lng}`).join(", ");
+  const firstPointString = `${points[0].lat} ${points[0].lng}`;
+  return `POLYGON((${pointsString}, ${firstPointString}))`;
+};
+
+const extractPolygonIdFromSaveResponse = (response) => {
+  const candidates = [
+    response?.PolygonId,
+    response?.polygonId,
+    response?.Id,
+    response?.id,
+    response?.Data?.PolygonId,
+    response?.Data?.polygonId,
+    response?.Data?.Id,
+    response?.Data?.id,
+  ];
+  const match = candidates.find((value) => Number.isFinite(Number(value)) && Number(value) > 0);
+  return match ? Number(match) : null;
+};
+
 const hexToRgbaArray = (hexColor, alpha = 190) => {
   const hex = String(hexColor || "").trim();
   const short = /^#([a-fA-F0-9]{3})$/;
@@ -1078,6 +1112,9 @@ const UnifiedMapView = () => {
 
   const [showPolygons, setShowPolygons] = useState(false);
   const [polygonSource, setPolygonSource] = useState("map");
+  const [projectPolygonEditEnabled, setProjectPolygonEditEnabled] =
+    useState(false);
+  const [editedProjectPolygons, setEditedProjectPolygons] = useState({});
   const polygonOpacity = 1;
   const [onlyInsidePolygons] = useState(true);
   const [areaEnabled, setAreaEnabled] = useState(false);
@@ -1105,6 +1142,8 @@ const UnifiedMapView = () => {
 
   const [drawnPoints, setDrawnPoints] = useState(null);
   const [drawnShapeAnalytics, setDrawnShapeAnalytics] = useState([]);
+  const [newProjectPolygonName, setNewProjectPolygonName] = useState("");
+  const [isSavingProjectPolygon, setIsSavingProjectPolygon] = useState(false);
   const [legendFilter, setLegendFilter] = useState(null);
   const [siteLegendFilter, setSiteLegendFilter] = useState(null);
   const [opacity, setOpacity] = useState(0.8);
@@ -1518,12 +1557,25 @@ const UnifiedMapView = () => {
     refetch: refetchAreaPolygons,
   } = useAreaPolygons(projectId, areaEnabled);
 
+  const effectiveProjectPolygons = useMemo(() => {
+    if (!polygons?.length) return [];
+    return polygons.map((poly) => {
+      const edited = editedProjectPolygons[poly.uid];
+      if (!edited) return poly;
+      return {
+        ...poly,
+        paths: edited.paths,
+        bbox: edited.bbox || poly.bbox,
+      };
+    });
+  }, [editedProjectPolygons, polygons]);
+
   const rawFilteringPolygons = useMemo(
     () => [
-      ...(polygons ? polygons : []),
+      ...(effectiveProjectPolygons ? effectiveProjectPolygons : []),
       ...(areaEnabled && areaData ? areaData : []),
     ],
-    [polygons, areaEnabled, areaData],
+    [effectiveProjectPolygons, areaEnabled, areaData],
   );
   const hasFilteringPolygons = rawFilteringPolygons.length > 0;
   const filteringPolygonChecker = useMemo(
@@ -2906,9 +2958,9 @@ const UnifiedMapView = () => {
   }, [finalDisplayLocations]);
 
   const polygonsWithColors = useMemo(() => {
-    if (!showPolygons || !polygons?.length) return [];
+    if (!showPolygons || !effectiveProjectPolygons?.length) return [];
     if (!onlyInsidePolygons || !locations?.length) {
-      return polygons.map((p) => ({
+      return effectiveProjectPolygons.map((p) => ({
         ...p,
         fillColor: "#4285F4",
         fillOpacity: polygonOpacity,
@@ -2917,7 +2969,7 @@ const UnifiedMapView = () => {
     }
     const thresholdKey = getThresholdKey(selectedMetric);
     const currentThresholds = effectiveThresholds[thresholdKey] || [];
-    return polygons.map((poly) => {
+    return effectiveProjectPolygons.map((poly) => {
       const pointsInside = locations.filter((pt) => isPointInPolygon(pt, poly));
       const values = pointsInside
         .map((p) => parseFloat(p[selectedMetric]))
@@ -2946,7 +2998,7 @@ const UnifiedMapView = () => {
     });
   }, [
     showPolygons,
-    polygons,
+    effectiveProjectPolygons,
     onlyInsidePolygons,
     locations,
     selectedMetric,
@@ -3109,10 +3161,156 @@ const UnifiedMapView = () => {
     polygonOpacity,
   ]);
 
+  const buildPolygonBBoxFromPaths = useCallback((paths = []) => {
+    let north = -Infinity;
+    let south = Infinity;
+    let east = -Infinity;
+    let west = Infinity;
+
+    paths.forEach((ring) => {
+      ring.forEach((point) => {
+        const lat = Number(point?.lat);
+        const lng = Number(point?.lng);
+        if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
+        north = Math.max(north, lat);
+        south = Math.min(south, lat);
+        east = Math.max(east, lng);
+        west = Math.min(west, lng);
+      });
+    });
+
+    if (![north, south, east, west].every(Number.isFinite)) return null;
+    return { north, south, east, west };
+  }, []);
+
+  const handleProjectPolygonPathChange = useCallback(
+    (uid, nextPaths) => {
+      if (!uid || !Array.isArray(nextPaths) || nextPaths.length === 0) return;
+
+      setEditedProjectPolygons((prev) => ({
+        ...prev,
+        [uid]: {
+          paths: nextPaths,
+          bbox: buildPolygonBBoxFromPaths(nextPaths),
+        },
+      }));
+    },
+    [buildPolygonBBoxFromPaths],
+  );
+
+  useEffect(() => {
+    setEditedProjectPolygons({});
+  }, [projectId, polygonSource]);
+
+  useEffect(() => {
+    if (!showPolygons || polygonSource !== "map") {
+      setProjectPolygonEditEnabled(false);
+    }
+  }, [showPolygons, polygonSource]);
+
+  const displayPolygons = useMemo(
+    () => polygonsWithColors,
+    [polygonsWithColors],
+  );
+
+  const editableBoundaryPolygonIds = useMemo(() => {
+    if (!(projectPolygonEditEnabled && polygonSource === "map")) return [];
+    return effectiveProjectPolygons.map((poly) => poly.uid).filter(Boolean);
+  }, [effectiveProjectPolygons, projectPolygonEditEnabled, polygonSource]);
+
+  const latestDrawnProjectPolygon = useMemo(() => {
+    const polygonsOnly = (drawnShapeAnalytics || []).filter(
+      (item) =>
+        item?.type === "polygon" &&
+        item?.geometry?.type === "polygon" &&
+        Array.isArray(item?.geometry?.polygon) &&
+        item.geometry.polygon.length >= 3,
+    );
+    return polygonsOnly.length ? polygonsOnly[polygonsOnly.length - 1] : null;
+  }, [drawnShapeAnalytics]);
+
+  const canSaveDrawnPolygonToProject = useMemo(() => {
+    return !hasFilteringPolygons && Boolean(latestDrawnProjectPolygon);
+  }, [hasFilteringPolygons, latestDrawnProjectPolygon]);
+
+  const handleSaveDrawnPolygonToProject = useCallback(async () => {
+    const numericProjectId = Number(projectId);
+    if (!Number.isFinite(numericProjectId) || numericProjectId <= 0) {
+      toast.warn("Open a valid project before saving a polygon.");
+      return;
+    }
+    if (!latestDrawnProjectPolygon?.geometry?.polygon?.length) {
+      toast.warn("Draw a polygon on the map first.");
+      return;
+    }
+    if (!newProjectPolygonName.trim()) {
+      toast.warn("Enter a polygon name first.");
+      return;
+    }
+
+    const wkt = coordinatesToWktPolygon(latestDrawnProjectPolygon.geometry.polygon);
+    if (!wkt) {
+      toast.error("Could not convert the drawn polygon into a savable boundary.");
+      return;
+    }
+
+    const payload = {
+      Name: newProjectPolygonName.trim(),
+      WKT: wkt,
+      SessionIds: Array.isArray(latestDrawnProjectPolygon.session)
+        ? latestDrawnProjectPolygon.session
+        : [],
+      Area: Number.isFinite(Number(latestDrawnProjectPolygon.area))
+        ? Number(latestDrawnProjectPolygon.area)
+        : null,
+    };
+
+    setIsSavingProjectPolygon(true);
+    try {
+      const saveResponse = await mapViewApi.savePolygon(payload);
+      if (!(saveResponse?.Status === 1 || saveResponse?.status === 1)) {
+        toast.error(saveResponse?.Message || "Failed to save the drawn polygon.");
+        return;
+      }
+
+      const polygonId = extractPolygonIdFromSaveResponse(saveResponse);
+      if (!polygonId) {
+        toast.warning("Polygon was saved, but assignment to the project could not be confirmed automatically.");
+        return;
+      }
+
+      const assignResponse = await mapViewApi.assignPolygonToProject(
+        polygonId,
+        numericProjectId,
+      );
+      if (!(assignResponse?.Status === 1 || assignResponse?.status === 1)) {
+        toast.error(assignResponse?.Message || "Polygon saved, but project assignment failed.");
+        return;
+      }
+
+      toast.success(`Polygon "${newProjectPolygonName.trim()}" saved to this project.`);
+      setNewProjectPolygonName("");
+      setShowPolygons(true);
+      setPolygonSource("map");
+      await refetchPolygons?.();
+    } catch (error) {
+      toast.error(error?.message || "Failed to save polygon to project.");
+    } finally {
+      setIsSavingProjectPolygon(false);
+    }
+  }, [
+    latestDrawnProjectPolygon,
+    newProjectPolygonName,
+    projectId,
+    refetchPolygons,
+    setPolygonSource,
+    setShowPolygons,
+  ]);
+
   const visiblePolygons = useMemo(() => {
-    if (!showPolygons || !polygonsWithColors?.length) return [];
-    if (!viewport) return polygonsWithColors;
-    return polygonsWithColors.filter((poly) => {
+    if (!showPolygons || !displayPolygons?.length) return [];
+    if (!viewport) return displayPolygons;
+    return displayPolygons.filter((poly) => {
       if (!poly.bbox) return true;
       return !(
         poly.bbox.west > viewport.east ||
@@ -3121,7 +3319,7 @@ const UnifiedMapView = () => {
         poly.bbox.north < viewport.south
       );
     });
-  }, [showPolygons, polygonsWithColors, viewport]);
+  }, [showPolygons, displayPolygons, viewport]);
 
   const mapCenter = useMemo(() => {
     if (!locations?.length) return mapCenterFallback || DEFAULT_CENTER;
@@ -3624,6 +3822,8 @@ const UnifiedMapView = () => {
       return {
         id: drawing?.id ?? null,
         type: drawing?.type ?? "shape",
+        geometry: drawing?.geometry ?? null,
+        session: Array.isArray(drawing?.session) ? drawing.session : [],
         count: Number(drawing?.count) || 0,
         area: Number.isFinite(areaMeters) ? areaMeters : null,
         areaInSqKm,
@@ -4039,7 +4239,7 @@ const UnifiedMapView = () => {
             enableSiteToggle={enableSiteToggle}
             showSiteMarkers={showSiteMarkers}
             showSiteSectors={showSiteSectors}
-            polygons={polygonsWithColors}
+            polygons={displayPolygons}
             visiblePolygons={visiblePolygons}
             polygonSource={polygonSource}
             showPolygons={showPolygons}
@@ -4151,6 +4351,13 @@ const UnifiedMapView = () => {
         setShowPolygons={setShowPolygons}
         polygonSource={polygonSource}
         setPolygonSource={setPolygonSource}
+        projectPolygonEditEnabled={projectPolygonEditEnabled}
+        setProjectPolygonEditEnabled={setProjectPolygonEditEnabled}
+        canSaveDrawnPolygonToProject={canSaveDrawnPolygonToProject}
+        newProjectPolygonName={newProjectPolygonName}
+        setNewProjectPolygonName={setNewProjectPolygonName}
+        isSavingProjectPolygon={isSavingProjectPolygon}
+        onSaveDrawnPolygonToProject={handleSaveDrawnPolygonToProject}
         ltePredictionUseBuildings={ltePredictionUseBuildings}
         setLtePredictionUseBuildings={setLtePredictionUseBuildings}
         onlyInsidePolygons={onlyInsidePolygons}
@@ -4248,6 +4455,31 @@ const UnifiedMapView = () => {
           enabled={bestNetworkEnabled}
         />
 
+        {canSaveDrawnPolygonToProject && (
+          <div className="absolute bottom-4 right-4 z-[600] w-[280px] rounded-xl border border-blue-500/30 bg-slate-950/92 p-3 shadow-xl backdrop-blur-sm">
+            <div className="text-sm font-semibold text-white">
+              Save Polygon
+            </div>
+            <div className="mt-1 text-xs text-slate-300">
+              No raw filter polygon is available. Save the drawn polygon to this project.
+            </div>
+            <input
+              value={newProjectPolygonName}
+              onChange={(e) => setNewProjectPolygonName(e.target.value)}
+              placeholder="Polygon name"
+              className="mt-3 h-9 w-full rounded-md border border-slate-700 bg-slate-900 px-3 text-sm text-white outline-none transition focus:border-blue-500"
+            />
+            <button
+              type="button"
+              onClick={handleSaveDrawnPolygonToProject}
+              disabled={isSavingProjectPolygon || !newProjectPolygonName.trim()}
+              className="mt-3 h-9 w-full rounded-md bg-blue-600 text-sm font-medium text-white transition hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {isSavingProjectPolygon ? "Saving..." : "Save Polygon To Project"}
+            </button>
+          </div>
+        )}
+
         <div className="relative h-full w-full">
           {isLoading &&
             (locations?.length || 0) === 0 &&
@@ -4295,6 +4527,11 @@ const UnifiedMapView = () => {
               filterPolygons={rawFilteringPolygons}
               externalPolygonsLoading={polygonLoading || areaLoading}
               showPolygonBoundary={true}
+              projectPolygonEditEnabled={
+                projectPolygonEditEnabled && polygonSource === "map"
+              }
+              editableBoundaryPolygonIds={editableBoundaryPolygonIds}
+              onProjectPolygonBoundaryChange={handleProjectPolygonPathChange}
               enableGrid={enableGrid}
               gridSizeMeters={gridSizeMeters}
               areaEnabled={areaEnabled}
@@ -4322,7 +4559,8 @@ const UnifiedMapView = () => {
                 pixelateRect={ui.drawPixelateRect}
                 cellSizeMeters={ui.drawCellSizeMeters}
                 colorizeCells={ui.colorizeCells}
-                polygonOpacity={polygonOpacity}
+                polygonOpacity={DRAWN_POLYGON_OPACITY}
+                polygonFillOpacity={DRAWN_POLYGON_FILL_OPACITY}
                 shapeMode={ui.shapeMode}
                 onUIChange={handleUIChange}
                 clearSignal={ui.drawClearSignal}

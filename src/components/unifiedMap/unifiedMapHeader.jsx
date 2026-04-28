@@ -648,7 +648,7 @@ function UnifiedHeader({
     { label: "Opacity", action: () => toggleQuickControl("opacity") },
     { label: "Log Radius", action: () => toggleQuickControl("radius") },
     {
-      label: "Neighbour Radius",
+      label: "Secondary Radius",
       action: () => toggleQuickControl("neighbors"),
       disabled: !neighborLogsAvailable,
     },
@@ -657,7 +657,7 @@ function UnifiedHeader({
       action: () => toggleQuickControl("triangle"),
       disabled: !triangleSizeAvailable,
     },
-    { label: "Beamwidth", action: () => toggleQuickControl("beamwidth") },
+    { label: "Beamwidth", action: () => toggleQuickControl("beamwidth"), disabled: !triangleSizeAvailable,},
     { label: "Settings", action: () => setOpenSettingsDialog(true) },
   ];
 
@@ -801,32 +801,34 @@ function UnifiedHeader({
                   <span className="hidden xl:inline">Import Site</span>
                 </Button>
 
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <Button
-                      type="button"
-                      size="sm"
-                      title="View"
-                      className="h-9 shrink-0 flex gap-1 items-center bg-slate-700 hover:bg-slate-600 text-white border-slate-600"
-                    >
-                      <Eye className="h-4 w-4" />
-                      <span className="hidden xl:inline">View</span>
-                      <ChevronDown className="h-3.5 w-3.5" />
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="start" className="bg-white text-slate-800">
-                    <DropdownMenuItem onClick={() => navigate("/dashboard")}>
-                      Dashboard
-                    </DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => navigate("/mapview")}>
-                      Map View
-                    </DropdownMenuItem>
-                    <DropdownMenuSeparator />
-                    <DropdownMenuItem onClick={() => window.location.reload()}>
-                      Reload
-                    </DropdownMenuItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
+                {isElectronRuntime && (
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button
+                        type="button"
+                        size="sm"
+                        title="View"
+                        className="h-9 shrink-0 flex gap-1 items-center bg-slate-700 hover:bg-slate-600 text-white border-slate-600"
+                      >
+                        <Eye className="h-4 w-4" />
+                        <span className="hidden xl:inline">View</span>
+                        <ChevronDown className="h-3.5 w-3.5" />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="start" className="bg-white text-slate-800">
+                      <DropdownMenuItem onClick={() => navigate("/dashboard")}>
+                        Dashboard
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onClick={() => navigate("/mapview")}>
+                        Map View
+                      </DropdownMenuItem>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem onClick={() => window.location.reload()}>
+                        Reload
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                )}
 
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
@@ -926,7 +928,7 @@ function UnifiedHeader({
             {activeQuickControl === "neighbors" && neighborLogsAvailable && (
               <div className="flex max-w-full flex-wrap items-center gap-2 bg-gray-700/80 rounded-lg px-3 py-1.5 border border-gray-600">
                 <span className="text-xs text-gray-300 font-medium">
-                  Neighbor Size
+                  Secondary Size
                 </span>
                 <button
                   type="button"

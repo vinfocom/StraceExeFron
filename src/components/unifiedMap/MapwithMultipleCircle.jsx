@@ -322,6 +322,7 @@ const normalizeExternalPolygonData = (polygons = []) => {
 
       return {
         id: poly?.id ?? poly?.uid ?? `external-${idx}`,
+        uid: poly?.uid ?? poly?.id ?? `external-${idx}`,
         path,
         bbox: poly?.bbox || getPolygonBounds(path),
       };
@@ -725,6 +726,9 @@ const MapWithMultipleCircles = ({
   drawingEnabled = false,
   drawingShapeMode = null,
   polygonOpacity = 0.35,
+  projectPolygonEditEnabled = false,
+  editableBoundaryPolygonIds = [],
+  onProjectPolygonBoundaryChange,
 }) => {
   const { 
     getMetricColor: getMetricColorFromHook, 
@@ -740,6 +744,7 @@ const MapWithMultipleCircles = ({
   const [polygonData, setPolygonData] = useState([]);
   const [polygonsFetched, setPolygonsFetched] = useState(false);
   const [fetchError, setFetchError] = useState(null);
+  const boundaryPolygonListenersRef = useRef(new Map());
   const [selectedNeighbor, setSelectedNeighbor] = useState(null);
   const [selectedLog, setSelectedLog] = useState(null);
   const [selectedImageLog, setSelectedImageLog] = useState(null);
@@ -859,6 +864,92 @@ const MapWithMultipleCircles = ({
     if (externalPolygonData.length > 0) return externalPolygonData;
     return polygonData;
   }, [hasExternalPolygonControl, externalPolygonData, polygonData]);
+
+  const editableBoundaryPolygonIdSet = useMemo(
+    () => new Set(Array.isArray(editableBoundaryPolygonIds) ? editableBoundaryPolygonIds : []),
+    [editableBoundaryPolygonIds],
+  );
+
+  const serializeBoundaryPolygonPaths = useCallback((polygonInstance) => {
+    const allPaths = polygonInstance?.getPaths?.()?.getArray?.() || [];
+    return allPaths.map((path) =>
+      path.getArray().map((point) => ({
+        lat: point.lat(),
+        lng: point.lng(),
+      })),
+    );
+  }, []);
+
+  const handleBoundaryPolygonLoad = useCallback(
+    (polygonKey, polygonInstance) => {
+      if (
+        !polygonInstance ||
+        !projectPolygonEditEnabled ||
+        !editableBoundaryPolygonIdSet.has(polygonKey) ||
+        boundaryPolygonListenersRef.current.has(polygonKey)
+      ) {
+        return;
+      }
+
+      const emitChange = () => {
+        onProjectPolygonBoundaryChange?.(
+          polygonKey,
+          serializeBoundaryPolygonPaths(polygonInstance),
+        );
+      };
+
+      const listeners = [];
+      const polygonPaths = polygonInstance.getPaths?.()?.getArray?.() || [];
+      polygonPaths.forEach((path) => {
+        ["set_at", "insert_at", "remove_at"].forEach((eventName) => {
+          listeners.push(
+            window.google.maps.event.addListener(path, eventName, emitChange),
+          );
+        });
+      });
+
+      ["dragend", "mouseup"].forEach((eventName) => {
+        listeners.push(
+          window.google.maps.event.addListener(
+            polygonInstance,
+            eventName,
+            emitChange,
+          ),
+        );
+      });
+
+      boundaryPolygonListenersRef.current.set(polygonKey, listeners);
+    },
+    [
+      editableBoundaryPolygonIdSet,
+      onProjectPolygonBoundaryChange,
+      projectPolygonEditEnabled,
+      serializeBoundaryPolygonPaths,
+    ],
+  );
+
+  const handleBoundaryPolygonUnmount = useCallback((polygonKey) => {
+    const listeners = boundaryPolygonListenersRef.current.get(polygonKey) || [];
+    listeners.forEach((listener) => {
+      try {
+        window.google?.maps?.event?.removeListener?.(listener);
+      } catch {}
+    });
+    boundaryPolygonListenersRef.current.delete(polygonKey);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      boundaryPolygonListenersRef.current.forEach((listeners) => {
+        listeners.forEach((listener) => {
+          try {
+            window.google?.maps?.event?.removeListener?.(listener);
+          } catch {}
+        });
+      });
+      boundaryPolygonListenersRef.current.clear();
+    };
+  }, []);
 
   const activePolygonChecker = useMemo(
     () => new PolygonChecker(activePolygonData),
@@ -1328,17 +1419,30 @@ const MapWithMultipleCircles = ({
         defaultCenter={computedCenter}
         zoom={defaultZoom}
       >
-        {showPolygonBoundary && activePolygonData.map(({ path }, idx) => (
-          <PolygonF
-            key={`polygon-${idx}`}
-            paths={path}
-            options={{ fillColor: "transparent", fillOpacity: 0, strokeColor: "#2563eb", strokeWeight: 1, strokeOpacity: resolvedPolygonOpacity, zIndex: 2500,clickable: false
-
-
-             }}
-            
-          />
-        ))}
+        {showPolygonBoundary && activePolygonData.map(({ path, uid, id }, idx) => {
+          const polygonKey = uid ?? id ?? `polygon-${idx}`;
+          const isEditableBoundary =
+            projectPolygonEditEnabled && editableBoundaryPolygonIdSet.has(polygonKey);
+          return (
+            <PolygonF
+              key={polygonKey}
+              paths={path}
+              options={{
+                fillColor: "transparent",
+                fillOpacity: 0,
+                strokeColor: "#2563eb",
+                strokeWeight: 1,
+                strokeOpacity: resolvedPolygonOpacity,
+                zIndex: 2500,
+                clickable: isEditableBoundary,
+                editable: isEditableBoundary,
+                draggable: isEditableBoundary,
+              }}
+              onLoad={(polygon) => handleBoundaryPolygonLoad(polygonKey, polygon)}
+              onUnmount={() => handleBoundaryPolygonUnmount(polygonKey)}
+            />
+          );
+        })}
 
         {areaEnabled && areaData.map((zone) => (
          <PolygonF

@@ -260,6 +260,7 @@ function DrawingToolsLayerComponent({
   clearSignal = 0,
   colorizeCells = true,
   polygonOpacity = 0.35,
+  polygonFillOpacity = null,
   onUIChange, // ✅ NEW PROP: To reset state after drawing
 }) {
   const managerRef = useRef(null);
@@ -271,6 +272,8 @@ function DrawingToolsLayerComponent({
   const reAnalyzeShapeRef = useRef(null);
   const shapeModeRef = useRef(shapeMode);
   const resolvedPolygonOpacity = clampOpacity(polygonOpacity);
+  const resolvedPolygonFillOpacity =
+    polygonFillOpacity === null ? resolvedPolygonOpacity : clampOpacity(polygonFillOpacity, 0);
 
   useEffect(() => {
     callbacksRef.current = { onSummary, onDrawingsChange, onUIChange };
@@ -454,9 +457,9 @@ function DrawingToolsLayerComponent({
           window.google.maps.drawing.OverlayType.POLYLINE,
         ],
       },
-      polygonOptions: { clickable: true, editable: true, draggable: true, strokeWeight: 2, strokeColor: "#1d4ed8", strokeOpacity: resolvedPolygonOpacity, fillColor: "#1d4ed8", fillOpacity: resolvedPolygonOpacity },
-      rectangleOptions: { clickable: true, editable: true, draggable: true, strokeWeight: 2, strokeColor: "#1d4ed8", strokeOpacity: resolvedPolygonOpacity, fillColor: "#1d4ed8", fillOpacity: resolvedPolygonOpacity },
-      circleOptions: { clickable: true, editable: true, draggable: true, strokeWeight: 2, strokeColor: "#1d4ed8", strokeOpacity: resolvedPolygonOpacity, fillColor: "#1d4ed8", fillOpacity: resolvedPolygonOpacity },
+      polygonOptions: { clickable: true, editable: true, draggable: true, strokeWeight: 2, strokeColor: "#1d4ed8", strokeOpacity: resolvedPolygonOpacity, fillColor: "#1d4ed8", fillOpacity: resolvedPolygonFillOpacity },
+      rectangleOptions: { clickable: true, editable: true, draggable: true, strokeWeight: 2, strokeColor: "#1d4ed8", strokeOpacity: resolvedPolygonOpacity, fillColor: "#1d4ed8", fillOpacity: resolvedPolygonFillOpacity },
+      circleOptions: { clickable: true, editable: true, draggable: true, strokeWeight: 2, strokeColor: "#1d4ed8", strokeOpacity: resolvedPolygonOpacity, fillColor: "#1d4ed8", fillOpacity: resolvedPolygonFillOpacity },
       polylineOptions: { clickable: true, editable: true, draggable: true, strokeWeight: 3, strokeColor: "#ea580c" },
     });
 

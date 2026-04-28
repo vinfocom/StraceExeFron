@@ -102,14 +102,25 @@ const AuthProvider = ({ children }) => {
     return () => window.removeEventListener('storage', handleStorageChange);
   }, [clearSession, navigate]);
 
-  const login = async ({ Email, Password, IP = '', ForceLogin = false }) => {
+  const login = async ({ Email, Password, IP = '', ForceLogin = false, country_code }) => {
     try {
       setAuthError(null);
       setLoading(true);
       authRequestVersionRef.current += 1;
       
       const hashed = sha256(Password || '');
-      const response = await homeApi.login({ Email, Password: hashed, IP, ForceLogin });
+      const loginPayload = {
+        Email,
+        Password: hashed,
+        IP,
+        ForceLogin,
+      };
+
+      if (country_code) {
+        loginPayload.country_code = country_code;
+      }
+
+      const response = await homeApi.login(loginPayload);
 
       if (response.success) {
         let userData =

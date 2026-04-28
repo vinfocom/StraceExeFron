@@ -105,7 +105,7 @@ export default function PredictionSide({
     if (projectId) q.set("project_id", String(projectId));
     if (sessionId) q.set("session", String(sessionId));
     
-    const finalUrl = `/map?${q.toString()}`;
+    const finalUrl = `/mapview?${q.toString()}`;
     
     navigate(finalUrl);
   }, [projectId, sessionId, navigate]);

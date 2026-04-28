@@ -200,7 +200,7 @@ const ElectronWindowBar = () => {
           actions={[
             { label: "Opacity", onClick: () => emitUtilityAction("opacity") },
             { label: "Log Radius", onClick: () => emitUtilityAction("log-radius") },
-            { label: "Neighbour Radius", onClick: () => emitUtilityAction("neighbor-radius") },
+            { label: "Secondary Radius", onClick: () => emitUtilityAction("neighbor-radius") },
             { label: "Site Size", onClick: () => emitUtilityAction("triangle-size") },
             { label: "Beamwidth", onClick: () => emitUtilityAction("beamwidth") },
             { label: "Settings", onClick: () => emitUtilityAction("settings") },

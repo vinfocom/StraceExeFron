@@ -351,6 +351,13 @@ const UnifiedMapSidebar = ({
   setShowPolygons,
   polygonSource,
   setPolygonSource,
+  projectPolygonEditEnabled = false,
+  setProjectPolygonEditEnabled,
+  canSaveDrawnPolygonToProject = false,
+  newProjectPolygonName = "",
+  setNewProjectPolygonName,
+  isSavingProjectPolygon = false,
+  onSaveDrawnPolygonToProject,
   ltePredictionUseBuildings = true,
   setLtePredictionUseBuildings,
   onlyInsidePolygons,
@@ -1174,6 +1181,14 @@ const UnifiedMapSidebar = ({
                 setShowPolygons?.(false);
                 setPolygonSource?.("map");
               }}
+              useSwitch={true}
+            />
+
+            <ToggleRow
+              label="Edit Polygon"
+              description="Enable drag and reshape for the map boundary polygon"
+              checked={Boolean(projectPolygonEditEnabled)}
+              onChange={setProjectPolygonEditEnabled}
               useSwitch={true}
             />
 
