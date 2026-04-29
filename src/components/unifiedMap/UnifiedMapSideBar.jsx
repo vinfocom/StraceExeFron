@@ -1182,6 +1182,10 @@ const UnifiedMapSidebar = ({
     }
 
     const numericProjectId = Number(projectId);
+    const validSessionIds = (Array.isArray(sessionIds) ? sessionIds : [])
+      .map((value) => Number(value))
+      .filter((value) => Number.isFinite(value) && value > 0);
+
     if (!Number.isFinite(numericProjectId) || numericProjectId <= 0) {
       toast.error("Please select a valid project before running LTE tilt recommendation.");
       return;
@@ -1199,6 +1203,7 @@ const UnifiedMapSidebar = ({
     try {
       const response = await predictionApi.runLteTiltRecommendation({
         project_id: numericProjectId,
+        session_ids: validSessionIds,
         operator: lteTiltRecommendationOperator,
         rsrp: lteTiltRecommendationRsrp,
         rsrq: lteTiltRecommendationRsrq,
@@ -1254,6 +1259,7 @@ const UnifiedMapSidebar = ({
   }, [
     canRunPrediction,
     projectId,
+    sessionIds,
     lteTiltRecommendationOperator,
     lteTiltRecommendationRsrp,
     lteTiltRecommendationRsrq,

@@ -548,6 +548,12 @@ export const predictionApi = {
         payload.operator = operator;
       }
 
+      if (Array.isArray(params.session_ids) && params.session_ids.length > 0) {
+        payload.session_ids = params.session_ids
+          .map((value) => Number(value))
+          .filter((value) => Number.isFinite(value) && value > 0);
+      }
+
       if (params.rsrp !== undefined && params.rsrp !== null && params.rsrp !== "") {
         payload.rsrp = Number(params.rsrp);
       }
