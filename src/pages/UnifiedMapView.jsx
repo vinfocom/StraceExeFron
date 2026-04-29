@@ -50,6 +50,7 @@ import { useSessionNeighbors } from "@/hooks/useSessionNeighbors";
 import { useSubSessionAnalytics } from "@/hooks/useSubSessionAnalytics";
 import { useProjectPolygons } from "@/hooks/useProjectPolygons";
 import { useAreaPolygons } from "@/hooks/useAreaPolygons";
+import { useUnifiedGridViewData } from "@/hooks/useUnifiedGridViewData";
 
 // Utils
 import {
@@ -94,6 +95,25 @@ const DEFAULT_COVERAGE_FILTERS = {
   rsrq: { enabled: false, threshold: -15 },
   sinr: { enabled: false, threshold: 0 },
 };
+
+const GRID_VIEW_SUPPORTED_METRICS = Object.freeze([
+  "rsrp",
+  "rsrq",
+  "sinr",
+  "dl_thpt",
+  "ul_thpt",
+  "mos",
+  "latency",
+  "jitter",
+  "best_operator",
+  "best_technology",
+  "best_pci",
+]);
+const GRID_ONLY_METRICS = Object.freeze([
+  "best_operator",
+  "best_technology",
+  "best_pci",
+]);
 
 const DEFAULT_DATA_FILTERS = {
   providers: [],
@@ -1230,6 +1250,24 @@ const UnifiedMapView = () => {
   }, [enableDataToggle]);
 
   useEffect(() => {
+    const normalizedMetric = String(selectedMetric || "").trim().toLowerCase();
+    if (!enableGrid) {
+      if (GRID_ONLY_METRICS.includes(normalizedMetric)) {
+        setSelectedMetric("rsrp");
+      }
+      return;
+    }
+
+    if (!GRID_VIEW_SUPPORTED_METRICS.includes(normalizedMetric)) {
+      setSelectedMetric("rsrp");
+    }
+
+    if (colorBy && String(colorBy).trim().toLowerCase() !== "metric") {
+      setColorBy(null);
+    }
+  }, [enableGrid, selectedMetric, colorBy, setSelectedMetric]);
+
+  useEffect(() => {
     if (!showSubSession) {
       setSelectedSubSessionTarget(null);
     }
@@ -1585,6 +1623,13 @@ const UnifiedMapView = () => {
     [rawFilteringPolygons],
   );
   const siteLayerPolygonFiltering = Boolean(enableSiteToggle && rawFilteringPolygons.length > 0);
+  const canEnableUnifiedGridView = hasFilteringPolygons;
+
+  useEffect(() => {
+    if (enableGrid && !canEnableUnifiedGridView) {
+      setEnableGrid(false);
+    }
+  }, [enableGrid, canEnableUnifiedGridView]);
 
   const shouldFetchSamples =
     isSampleMode && sessionIds.length > 0 && !hasPassedLocations;
@@ -2757,6 +2802,27 @@ const UnifiedMapView = () => {
     filteringPolygonChecker,
   ]);
 
+  const gridDisplayData = useUnifiedGridViewData({
+    enabled: enableGrid,
+    locations: finalDisplayLocations,
+    selectedMetric,
+    gridSizeMeters,
+    aggregationMethod: lteGridAggregationMethod,
+  });
+
+  const gridFilteredData = useUnifiedGridViewData({
+    enabled: enableGrid,
+    locations: filteredLocations,
+    selectedMetric,
+    gridSizeMeters,
+    aggregationMethod: lteGridAggregationMethod,
+  });
+
+  const isUnifiedGridView = useMemo(
+    () => Boolean(enableGrid) && !isStoredGridOverlayVisible,
+    [enableGrid, isStoredGridOverlayVisible],
+  );
+
   const lteLayerLocations = useMemo(() => {
     const baseLocations = Array.isArray(ltePredictionLocations)
       ? ltePredictionLocations
@@ -2870,6 +2936,10 @@ const UnifiedMapView = () => {
       });
     }
 
+    if (isUnifiedGridView) {
+      return gridDisplayData.gridLocations || EMPTY_LIST;
+    }
+
     // Keep the normal logs legend while sample logs are still drawn, even if
     // the site layer also renders markers/sectors.
     if (enableDataToggle && !isDataPredictionMode) {
@@ -2896,6 +2966,8 @@ const UnifiedMapView = () => {
     sectorPredictionGridPoints.length,
     lteLayerLocations,
     finalDisplayLocations,
+    isUnifiedGridView,
+    gridDisplayData.gridLocations,
     isStoredGridOverlayVisible,
     storedDeltaGridCells,
     sitePredictionVersion,
@@ -2903,18 +2975,30 @@ const UnifiedMapView = () => {
   ]);
 
   const analyticsPanelLocations = useMemo(
-    () => (isStoredGridOverlayVisible ? legendLogs : finalDisplayLocations),
-    [isStoredGridOverlayVisible, legendLogs, finalDisplayLocations],
+    () =>
+      isStoredGridOverlayVisible
+        ? legendLogs
+        : isUnifiedGridView
+          ? gridDisplayData.gridLocations
+          : finalDisplayLocations,
+    [isStoredGridOverlayVisible, isUnifiedGridView, legendLogs, gridDisplayData.gridLocations, finalDisplayLocations],
   );
 
   const analyticsPanelFilteredLocations = useMemo(
-    () => (isStoredGridOverlayVisible ? legendLogs : filteredLocations),
-    [isStoredGridOverlayVisible, legendLogs, filteredLocations],
+    () =>
+      isStoredGridOverlayVisible
+        ? legendLogs
+        : isUnifiedGridView
+          ? gridFilteredData.gridLocations
+          : filteredLocations,
+    [isStoredGridOverlayVisible, isUnifiedGridView, legendLogs, gridFilteredData.gridLocations, filteredLocations],
   );
   const deferredAnalyticsPanelLocations = useDeferredValue(analyticsPanelLocations);
   const deferredAnalyticsPanelFilteredLocations = useDeferredValue(
     analyticsPanelFilteredLocations,
   );
+  const deferredRawAnalyticsLocations = useDeferredValue(finalDisplayLocations);
+  const deferredRawAnalyticsFilteredLocations = useDeferredValue(filteredLocations);
 
   const legendSelectedMetric = useMemo(
     () => {
@@ -2924,14 +3008,27 @@ const UnifiedMapView = () => {
     },
     [isStoredGridOverlayVisible, selectedMetric, sitePredictionVersion],
   );
+  const effectiveGridColorBy = useMemo(() => {
+    if (!isUnifiedGridView) return colorBy;
+    const normalizedMetric = String(selectedMetric || "").trim().toLowerCase();
+    if (normalizedMetric === "best_operator") return "provider";
+    if (normalizedMetric === "best_technology") return "technology";
+    return colorBy;
+  }, [isUnifiedGridView, selectedMetric, colorBy]);
   const legendColorBy = useMemo(() => {
     const isBestOperatorGridMode =
       ["best_operator", "operator_min", "operator_max"].includes(
         String(storedGridMetricMode || "").trim().toLowerCase(),
       );
     if (isStoredGridOverlayVisible && isBestOperatorGridMode) return "provider";
-    return colorBy;
-  }, [isStoredGridOverlayVisible, storedGridMetricMode, colorBy]);
+    if (isUnifiedGridView && String(selectedMetric || "").trim().toLowerCase() === "best_operator") {
+      return "provider";
+    }
+    if (isUnifiedGridView && String(selectedMetric || "").trim().toLowerCase() === "best_technology") {
+      return "technology";
+    }
+    return effectiveGridColorBy;
+  }, [isStoredGridOverlayVisible, storedGridMetricMode, isUnifiedGridView, selectedMetric, effectiveGridColorBy]);
 
   const siteLegendColorMode = useMemo(() => {
     const labelField = String(siteLabelField || "").trim().toLowerCase();
@@ -4213,6 +4310,9 @@ const UnifiedMapView = () => {
         ui={ui}
         onUIChange={handleUIChange}
         onOpenMultiView={handleNavigateToMultiView}
+        gridViewEnabled={enableGrid}
+        onGridViewToggle={setEnableGrid}
+        canEnableGridView={canEnableUnifiedGridView}
       />
 
       {showAnalytics && (
@@ -4226,6 +4326,8 @@ const UnifiedMapView = () => {
           <UnifiedDetailLogs
             locations={deferredAnalyticsPanelLocations}
             allFilteredLocations={deferredAnalyticsPanelFilteredLocations}
+            rawLocations={deferredRawAnalyticsLocations}
+            rawFilteredLocations={deferredRawAnalyticsFilteredLocations}
             onHighlightLogs={setHighlightedLogs}
             totalLocations={locations?.length || 0}
             filteredCount={finalDisplayLocations?.length || 0}
@@ -4280,6 +4382,7 @@ const UnifiedMapView = () => {
             sitePredictionVersion={sitePredictionVersion}
             enableGrid={enableGrid}
             gridCellStats={gridCellStats}
+            canEnableGridView={canEnableUnifiedGridView}
             lteGridEnabled={lteGridEnabled}
             lteGridSizeMeters={lteGridSizeMeters}
             isCellSiteGridMode={isCellSiteGridMode}
@@ -4288,6 +4391,8 @@ const UnifiedMapView = () => {
             storedGridMetricMode={storedGridMetricMode}
             conditionLogsLocations={legendLogs}
             conditionSectorLocations={finalDisplayLocations}
+            gridViewEnabled={isUnifiedGridView}
+            gridViewSummary={gridFilteredData.summary}
           />
         </Suspense>
       )}
@@ -4384,6 +4489,8 @@ const UnifiedMapView = () => {
         setEnableGrid={setEnableGrid}
         gridSizeMeters={gridSizeMeters}
         setGridSizeMeters={setGridSizeMeters}
+        gridAggregationSummary={gridFilteredData.summary}
+        canEnableGridView={canEnableUnifiedGridView}
         lteGridAvailable={lteGridAvailable}
         lteGridSizeMeters={lteGridSizeMeters}
         setLteGridSizeMeters={setLteGridSizeMeters}
@@ -4510,7 +4617,7 @@ const UnifiedMapView = () => {
               // techHandOver={techHandOver}
               onMarkerHover={handleMarkerHover} // Pass the new handler
               hoveredCellId={hoveredCellId}
-              colorBy={colorBy}
+              colorBy={effectiveGridColorBy}
               activeMarkerIndex={null}
               onMarkerClick={() => { }}
               options={mapOptions}

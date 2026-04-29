@@ -1,5 +1,6 @@
 // src/components/UnifiedMapSidebar.jsx
 import React, { useMemo, useCallback, memo, useState, useEffect, useRef } from "react";
+import { Rnd } from "react-rnd";
 import { toast } from "react-toastify";
 import {
   X,
@@ -169,7 +170,7 @@ const SelectRow = memo(
         <SelectTrigger className="h-8 w-full min-w-0 bg-slate-800 border-slate-600 text-sm text-white [&>span]:truncate">
           <SelectValue placeholder={placeholder} />
         </SelectTrigger>
-        <SelectContent className="max-w-[260px]">
+        <SelectContent className="max-w-[340px] min-w-[240px]">
           {options.map((opt) => (
             <SelectItem key={opt.value} value={opt.value} className="pr-8">
               {opt.label}
@@ -282,10 +283,31 @@ const ThresholdInput = memo(
 );
 ThresholdInput.displayName = "ThresholdInput";
 
+const GRID_VIEW_ALLOWED_METRICS = Object.freeze([
+  "rsrp",
+  "rsrq",
+  "sinr",
+  "dl_thpt",
+  "ul_thpt",
+  "mos",
+  "latency",
+  "jitter",
+  "best_operator",
+  "best_technology",
+  "best_pci",
+]);
+const GRID_ONLY_METRICS = Object.freeze([
+  "best_operator",
+  "best_technology",
+  "best_pci",
+]);
+
 // Info Badge
 const InfoBadge = memo(({ label, value, color = "blue" }) => {
   const colors = {
     blue: "text-blue-400",
+    cyan: "text-cyan-400",
+    teal: "text-teal-400",
     green: "text-green-400",
     orange: "text-orange-400",
     yellow: "text-yellow-400",
@@ -385,6 +407,8 @@ const UnifiedMapSidebar = ({
   setEnableGrid,
   gridSizeMeters,
   setGridSizeMeters,
+  gridAggregationSummary = null,
+  canEnableGridView = false,
   lteGridAvailable = false,
   lteGridSizeMeters,
   setLteGridSizeMeters,
@@ -409,6 +433,16 @@ const UnifiedMapSidebar = ({
 }) => {
   const { user, refreshUser } = useAuth();
   const [showCurrentViewInfo, setShowCurrentViewInfo] = useState(false);
+  const [sidebarWidth, setSidebarWidth] = useState(340);
+
+  useEffect(() => {
+    if (!open) return;
+    setSidebarWidth((prev) => {
+      if (!Number.isFinite(prev)) return 340;
+      return Math.min(Math.max(prev, 280), 620);
+    });
+  }, [open]);
+
   useEffect(() => {
     refreshUser?.();
   }, [refreshUser]);
@@ -421,42 +455,67 @@ const UnifiedMapSidebar = ({
     [user],
   );
 
-  const sideClasses = useMemo(() => {
-    const base =
-      "relative h-full z-20 bg-slate-950 text-white transition-[width] duration-200 ease-out flex flex-col shrink-0 overflow-hidden";
-    return open ? `${base} w-[340px]` : `${base} w-0`;
-  }, [open]);
+  const sidebarShellStyle = useMemo(
+    () => ({
+      width: open ? sidebarWidth : 0,
+    }),
+    [open, sidebarWidth],
+  );
 
-  // Metric options
-  const metricOptions = useMemo(
-    () => [
-      { value: "rsrp", label: "RSRP" },
-      { value: "rsrq", label: "RSRQ" },
-      { value: "sinr", label: "SINR" },
-      { value: "dl_thpt", label: "DL Throughput" },
-      { value: "ul_thpt", label: "UL Throughput" },
-      { value: "mos", label: "MOS" },
-      { value: "pci", label: "PCI" },
-      { value: "num_cells", label: "Pilot pollution" },
-      { value: "level", label: "Ping pong" },
-      { value: "jitter", label: "Jitter" },
-      { value: "latency", label: "Latency" },
-      { value: "packet_loss", label: "Packet Loss" },
-      { value: "tac", label: "TAC" },
-      { value: "dominance", label: "Dominance Analysis" },
-      { value: "coverage_violation", label: "Coverage Violation" },
-    ],
+  const sidebarPanelStyle = useMemo(
+    () => ({
+      position: "relative",
+    }),
     [],
   );
 
+  // Metric options
+  const metricOptions = useMemo(
+    () => {
+      const allOptions = [
+        { value: "rsrp", label: "RSRP" },
+        { value: "rsrq", label: "RSRQ" },
+        { value: "sinr", label: "SINR" },
+        { value: "dl_thpt", label: "DL Throughput" },
+        { value: "ul_thpt", label: "UL Throughput" },
+        { value: "mos", label: "MOS" },
+        { value: "pci", label: "PCI" },
+        { value: "num_cells", label: "Pilot pollution" },
+        { value: "level", label: "Ping pong" },
+        { value: "jitter", label: "Jitter" },
+        { value: "latency", label: "Latency" },
+        { value: "packet_loss", label: "Packet Loss" },
+        { value: "tac", label: "TAC" },
+        { value: "dominance", label: "Dominance Analysis" },
+        { value: "coverage_violation", label: "Coverage Violation" },
+      ];
+
+      if (!enableGrid) return allOptions;
+      return [
+        ...allOptions.filter((option) =>
+          GRID_VIEW_ALLOWED_METRICS.includes(option.value),
+        ),
+        { value: "best_operator", label: "Best Operator" },
+        { value: "best_technology", label: "Best Technology" },
+        { value: "best_pci", label: "Best PCI" },
+      ];
+    },
+    [enableGrid],
+  );
+
   const colorOptions = useMemo(
-    () => [
-      { value: "metric", label: "By Metric Value" },
-      { value: "provider", label: "By Provider" },
-      { value: "band", label: "By Band" },
-      { value: "technology", label: "By Technology" },
-    ],
-    [],
+    () => {
+      if (enableGrid) {
+        return [{ value: "metric", label: "By Metric Value" }];
+      }
+      return [
+        { value: "metric", label: "By Metric Value" },
+        { value: "provider", label: "By Provider" },
+        { value: "band", label: "By Band" },
+        { value: "technology", label: "By Technology" },
+      ];
+    },
+    [enableGrid],
   );
 
   // Filter handlers
@@ -1287,84 +1346,121 @@ const UnifiedMapSidebar = ({
 
   return (
     <>
-      <div className={sideClasses}>
-        {/* Header */}
-        <div className="flex items-center justify-between p-3 border-b border-slate-700 bg-slate-900 shrink-0">
-          <h2 className="text-base font-semibold">Map Controls</h2>
-          <button
-            className="p-1.5 rounded-md hover:bg-slate-800 transition-colors"
-            onClick={() => onOpenChange?.(false)}
+      <div
+        className="relative h-full z-20 shrink-0 overflow-hidden transition-[width] duration-200 ease-out"
+        style={sidebarShellStyle}
+      >
+        {open && (
+          <Rnd
+            disableDragging
+            size={{ width: sidebarWidth, height: "100%" }}
+            position={{ x: 0, y: 0 }}
+            minWidth={280}
+            maxWidth={620}
+            enableResizing={{
+              right: true,
+              left: false,
+              top: false,
+              bottom: false,
+              topRight: false,
+              bottomRight: false,
+              topLeft: false,
+              bottomLeft: false,
+            }}
+            onResize={(event, direction, ref) => {
+              setSidebarWidth(ref.offsetWidth);
+            }}
+            onResizeStop={(event, direction, ref) => {
+              setSidebarWidth(ref.offsetWidth);
+            }}
+            className="h-full border-r border-slate-800 bg-slate-950 text-white overflow-hidden flex flex-col"
+            style={sidebarPanelStyle}
+            resizeHandleClasses={{
+              right: "group/sidebar-resize-handle",
+            }}
+            resizeHandleStyles={{
+              right: {
+                width: "10px",
+                right: "-5px",
+                cursor: "col-resize",
+              },
+            }}
           >
-            <X className="h-4 w-4" />
-          </button>
-        </div>
+            <div className="h-full min-h-0 flex flex-col">
+              {/* Header */}
+              <div className="flex items-center justify-between p-3 border-b border-slate-700 bg-slate-900 shrink-0">
+                <div className="flex items-center gap-3">
+                  <h2 className="text-base font-semibold">Map Controls</h2>
+                </div>
+                <button
+                  className="p-1.5 rounded-md hover:bg-slate-800 transition-colors"
+                  onClick={() => onOpenChange?.(false)}
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
 
-        {/* Scrollable Content */}
-        <div className="flex-1 overflow-y-auto p-3 space-y-2">
-          {/* Current View Info */}
-          {(projectId || sessionIds?.length > 0) && (
-            <div className="bg-slate-800/50 rounded-lg text-xs border border-slate-700/50 overflow-hidden">
-              <button
-                type="button"
-                onClick={() => setShowCurrentViewInfo((prev) => !prev)}
-                className="w-full flex items-center justify-between px-2.5 py-2 text-left hover:bg-slate-700/30 transition-colors"
-              >
-                <span className="text-slate-200 font-medium">Sessions</span>
-                {showCurrentViewInfo ? (
-                  <ChevronDown className="h-4 w-4 text-slate-400" />
-                ) : (
-                  <ChevronRight className="h-4 w-4 text-slate-400" />
-                )}
-              </button>
+              {/* Scrollable Content */}
+              <div className="flex-1 min-h-0 overflow-y-auto p-3 space-y-2">
+              {/* Current View Info */}
+              {(projectId || sessionIds?.length > 0) && (
+                <div className="bg-slate-800/50 rounded-lg text-xs border border-slate-700/50 overflow-hidden">
+                  <button
+                    type="button"
+                    onClick={() => setShowCurrentViewInfo((prev) => !prev)}
+                    className="w-full flex items-center justify-between px-2.5 py-2 text-left hover:bg-slate-700/30 transition-colors"
+                  >
+                    <span className="text-slate-200 font-medium">Sessions</span>
+                    {showCurrentViewInfo ? (
+                      <ChevronDown className="h-4 w-4 text-slate-400" />
+                    ) : (
+                      <ChevronRight className="h-4 w-4 text-slate-400" />
+                    )}
+                  </button>
 
-              {showCurrentViewInfo && (
-                <div className="px-2.5 pb-2.5 space-y-1 border-t border-slate-700/50">
-                  {projectId && <InfoBadge label="Project" value={projectId} />}
-                  {sessionIds?.length > 0 && (
-                    <div className="text-xs">
-                      <div className="text-slate-500 mb-1">Sessions</div>
-                      <div className="bg-slate-900/60 border border-slate-700 rounded p-1.5 max-h-20 overflow-y-auto text-green-400 break-all">
-                        {sessionIds.join(", ")}
-                      </div>
+                  {showCurrentViewInfo && (
+                    <div className="px-2.5 pb-2.5 space-y-1 border-t border-slate-700/50">
+                      {projectId && <InfoBadge label="Project" value={projectId} />}
+                      {sessionIds?.length > 0 && (
+                        <div className="text-xs">
+                          <div className="text-slate-500 mb-1">Sessions</div>
+                          <div className="bg-slate-900/60 border border-slate-700 rounded p-1.5 max-h-20 overflow-y-auto text-green-400 break-all">
+                            {sessionIds.join(", ")}
+                          </div>
+                        </div>
+                      )}
+                      {enableGrid && (
+                        <div className="grid grid-cols-2 gap-2 pt-1">
+                          <InfoBadge
+                            label="Grid Cells"
+                            value={gridAggregationSummary?.populatedCells ?? 0}
+                            color="cyan"
+                          />
+                          <InfoBadge
+                            label="Grid Size"
+                            value={`${Number(gridSizeMeters) || 20}m`}
+                            color="teal"
+                          />
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>
               )}
-            </div>
-          )}
 
-          <CollapsibleSection
-            title="Data Layer"
-            icon={Database}
-            defaultOpen={true}
-          >
-            <ToggleRow
-              label="Log View"
-              checked={enableDataToggle}
-              onChange={setEnableDataToggle}
-              useSwitch={true}
-            />
-
-            {enableDataToggle && (
-              <>
-                <SegmentedControl
-                  value={dataToggle}
-                  onChange={setDataToggle}
-                  options={[
-                    { value: "sample", label: "Sample" },
-                    { value: "prediction", label: "Prediction" },
-                  ]}
-                />
-
-
-
+              <CollapsibleSection
+                title="Data Layer"
+                icon={Database}
+                defaultOpen={true}
+              >
                 <ToggleRow
-                  label="Show Num cell "
-                  checked={showNumCells}
-                  onChange={setShowNumCells}
+                  label="Log View"
+                  checked={enableDataToggle}
+                  onChange={setEnableDataToggle}
+                  useSwitch={true}
                 />
-              </>
-            )}
+
+                
             <ToggleRow
               label="Secondary Logs"
               checked={Boolean(showSessionNeighbors)}
@@ -1408,6 +1504,132 @@ const UnifiedMapSidebar = ({
                   onChange={setShowSubSession}
                   useSwitch={true}
                 />
+
+                {enableDataToggle && (
+                  <>
+                    <ToggleRow
+                      label="Grid View"
+                      description="Aggregate logs into threshold-colored cells"
+                      checked={Boolean(enableGrid)}
+                      onChange={setEnableGrid}
+                      disabled={!canEnableGridView}
+                      useSwitch={true}
+                    />
+
+                    {!canEnableGridView && (
+                      <div className="rounded-lg border border-amber-700/40 bg-amber-950/20 px-2 py-1.5 text-xs text-amber-200">
+                        Grid view requires at least one raw filter polygon.
+                      </div>
+                    )}
+
+                    {enableGrid && (
+                      <div className="rounded-lg border border-cyan-700/40 bg-cyan-950/20 p-2 text-xs space-y-2">
+                        <div className="grid grid-cols-2 gap-2">
+                          <InfoBadge
+                            label="Cells"
+                            value={gridAggregationSummary?.populatedCells ?? 0}
+                            color="cyan"
+                          />
+                          <InfoBadge
+                            label="Samples"
+                            value={gridAggregationSummary?.totalSamples ?? 0}
+                            color="blue"
+                          />
+                        </div>
+                        <div className="grid grid-cols-2 gap-2">
+                          <InfoBadge
+                            label="Avg/Cell"
+                            value={
+                              Number.isFinite(Number(gridAggregationSummary?.averageSamplesPerCell))
+                                ? Number(gridAggregationSummary.averageSamplesPerCell).toFixed(1)
+                                : "0.0"
+                            }
+                            color="teal"
+                          />
+                          <InfoBadge
+                            label="Metric Avg"
+                            value={
+                              Number.isFinite(Number(gridAggregationSummary?.selectedMetricAverage))
+                                ? Number(gridAggregationSummary.selectedMetricAverage).toFixed(1)
+                                : "N/A"
+                            }
+                            color="green"
+                          />
+                        </div>
+                        <SelectRow
+                          label="Grid Aggregate"
+                          value={lteGridAggregationMethod || "median"}
+                          onChange={setLteGridAggregationMethod}
+                          options={[
+                            { value: "avg", label: "Average" },
+                            { value: "median", label: "Median" },
+                            { value: "mean", label: "Mean" },
+                            { value: "min", label: "Min" },
+                            { value: "max", label: "Max" },
+                          ]}
+                          placeholder="Select grid aggregate"
+                        />
+                        <div className="grid grid-cols-2 gap-2">
+                          <InfoBadge
+                            label="Average"
+                            value={
+                              Number.isFinite(Number(gridAggregationSummary?.selectedMetricStats?.avg))
+                                ? Number(gridAggregationSummary.selectedMetricStats.avg).toFixed(1)
+                                : "N/A"
+                            }
+                            color="cyan"
+                          />
+                          <InfoBadge
+                            label="Median"
+                            value={
+                              Number.isFinite(Number(gridAggregationSummary?.selectedMetricStats?.median))
+                                ? Number(gridAggregationSummary.selectedMetricStats.median).toFixed(1)
+                                : "N/A"
+                            }
+                            color="teal"
+                          />
+                        </div>
+                        <div className="grid grid-cols-2 gap-2">
+                          <InfoBadge
+                            label="Minimum"
+                            value={
+                              Number.isFinite(Number(gridAggregationSummary?.selectedMetricStats?.min))
+                                ? Number(gridAggregationSummary.selectedMetricStats.min).toFixed(1)
+                                : "N/A"
+                            }
+                            color="blue"
+                          />
+                          <InfoBadge
+                            label="Maximum"
+                            value={
+                              Number.isFinite(Number(gridAggregationSummary?.selectedMetricStats?.max))
+                                ? Number(gridAggregationSummary.selectedMetricStats.max).toFixed(1)
+                                : "N/A"
+                            }
+                            color="green"
+                          />
+                        </div>
+                      </div>
+                    )}
+
+                <SegmentedControl
+                  value={dataToggle}
+                  onChange={setDataToggle}
+                  options={[
+                    { value: "sample", label: "Sample" },
+                    { value: "prediction", label: "Prediction" },
+                  ]}
+                />
+
+
+
+                <ToggleRow
+                  label="Show Num cell "
+                  checked={showNumCells}
+                  onChange={setShowNumCells}
+                />
+              </>
+            )}
           </CollapsibleSection>
 
           <CollapsibleSection
@@ -2233,24 +2455,26 @@ const UnifiedMapSidebar = ({
                       </Button>
                     </>
                   )}
-            </div>
-          
-            </CollapsibleSection>
-        </div>
+                </div>
+              </CollapsibleSection>
+              </div>
 
-        {/* Footer */}
-        <div className="p-3 border-t border-slate-700 bg-slate-900 shrink-0">
-          <Button
-            className="w-full bg-blue-600 hover:bg-blue-700 h-9"
-            onClick={reloadData}
-            disabled={loading}
-          >
-            <RefreshCw
-              className={`h-4 w-4 mr-2 ${loading ? "animate-spin" : ""}`}
-            />
-            {loading ? "Loading..." : "Reload Data"}
-          </Button>
-        </div>
+              {/* Footer */}
+              <div className="p-3 border-t border-slate-700 bg-slate-900 shrink-0">
+                <Button
+                  className="w-full bg-blue-600 hover:bg-blue-700 h-9"
+                  onClick={reloadData}
+                  disabled={loading}
+                >
+                  <RefreshCw
+                    className={`h-4 w-4 mr-2 ${loading ? "animate-spin" : ""}`}
+                  />
+                  {loading ? "Loading..." : "Reload Data"}
+                </Button>
+              </div>
+            </div>
+          </Rnd>
+        )}
       </div>
     </>
   );

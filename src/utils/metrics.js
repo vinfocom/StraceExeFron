@@ -235,6 +235,24 @@ export const METRIC_CONFIG = {
     unit: '',
     fields: ['pci', 'PCI', 'Pci', 'physical_cell_id'],
   },
+  best_pci: {
+    thresholdKey: 'pci',
+    label: 'Best PCI',
+    unit: '',
+    fields: ['best_pci', 'pci'],
+  },
+  best_operator: {
+    thresholdKey: 'best_operator',
+    label: 'Best Operator',
+    unit: '',
+    fields: ['best_operator'],
+  },
+  best_technology: {
+    thresholdKey: 'best_technology',
+    label: 'Best Technology',
+    unit: '',
+    fields: ['best_technology'],
+  },
   num_cells: {
     thresholdKey: 'num_cells',
     label: 'Pilot Pollution',
@@ -380,11 +398,12 @@ export const getMetricValueFromLog = (log, metric) => {
 };
 
 export const getColorForMetric = (metric, value, thresholds) => {
-  if (String(metric).toLowerCase() === 'pci') {
+  const metricKey = String(metric).toLowerCase();
+  const config = getMetricConfig(metric);
+  if (metricKey === 'pci' || config.thresholdKey === 'pci') {
     return getPciColor(value);
   }
 
-  const config = getMetricConfig(metric);
   const metricThresholds = thresholds?.[config.thresholdKey] || [];
   const numValue = parseFloat(value);
 

@@ -74,6 +74,8 @@ export const OverviewTab = ({
   distance,
   drawnShapeAnalytics = [],
   sessionIds: sessionIdsProp = [],
+  gridViewEnabled = false,
+  gridViewSummary = null,
 }) => {
   const [searchParams] = useSearchParams();
   const [providerVolume, setProviderVolume] = useState({});
@@ -464,8 +466,17 @@ export const OverviewTab = ({
         />
         <StatCard
           icon={Activity}
-          label="Displayed"
-          value={filteredCount.toLocaleString()}
+          label={gridViewEnabled ? "Grid Showing" : "Displayed"}
+          value={
+            gridViewEnabled
+              ? Number(gridViewSummary?.populatedCells) || 0
+              : filteredCount.toLocaleString()
+          }
+          subValue={
+            gridViewEnabled
+              ? `${Number(gridViewSummary?.totalSamples) || 0} samples`
+              : undefined
+          }
           color="green"
         />
 

@@ -28,6 +28,7 @@ export const SignalTab = ({
         locations={locations}
         metric={selectedMetric}
         thresholds={thresholds}
+        showCdf={false}
       />
     </div>
   );

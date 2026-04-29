@@ -373,6 +373,7 @@ export const OperatorComparisonChart = React.forwardRef(
       individualStatMode = false,
       wrapMetricCharts = false,
       highContrastText = false,
+      showCdf = true,
     },
     ref
   ) => {
@@ -458,6 +459,35 @@ export const OperatorComparisonChart = React.forwardRef(
         return tech === selectedTechnology;
       });
     }, [locations, selectedTechnology]);
+
+    const isGridCellDataset = useMemo(
+      () => (technologyFilteredLocations || []).some((loc) => Boolean(loc?.is_grid_cell)),
+      [technologyFilteredLocations],
+    );
+    const isGridPciMetric = useCallback(
+      (metricKey) => metricKey === "pci" && isGridCellDataset,
+      [isGridCellDataset],
+    );
+    const getDisplayMetricValue = useCallback(
+      (operator, metricKey, currentMode) => {
+        if (isGridPciMetric(metricKey)) {
+          const rawTopValue = operator?.[metricKey]?.topValue;
+          const numericTopValue = Number(rawTopValue);
+          return Number.isFinite(numericTopValue) ? numericTopValue : null;
+        }
+        return getMetricValue(operator, metricKey, currentMode);
+      },
+      [isGridPciMetric],
+    );
+    const formatDisplayMetricValue = useCallback(
+      (value, metricKey) => {
+        if (isGridPciMetric(metricKey)) {
+          return value == null ? "N/A" : String(Math.round(value));
+        }
+        return formatMetricValue(value, metricKey);
+      },
+      [isGridPciMetric],
+    );
 
     const operatorData = useMemo(() => {
       if (!technologyFilteredLocations?.length) return [];
@@ -618,11 +648,11 @@ export const OperatorComparisonChart = React.forwardRef(
       return chartOrderedOperators.map((op) => {
         const data = { name: op.name, samples: op.samples, color: op.color };
         selectedMetrics.forEach((metricKey) => {
-          data[metricKey] = getMetricValue(op, metricKey, resolveStatMode(metricKey));
+          data[metricKey] = getDisplayMetricValue(op, metricKey, resolveStatMode(metricKey));
         });
         return data;
       });
-    }, [chartOrderedOperators, selectedMetrics, resolveStatMode]);
+    }, [chartOrderedOperators, selectedMetrics, resolveStatMode, getDisplayMetricValue]);
 
     const cdfChartsByTechnology = useMemo(() => {
       if (!technologyFilteredLocations?.length) return [];
@@ -707,14 +737,14 @@ export const OperatorComparisonChart = React.forwardRef(
         const dataPoint = { metric: config.label };
 
         operatorData.forEach((op) => {
-          const rawValue = getMetricValue(op, metricKey, resolveStatMode(metricKey));
+          const rawValue = getDisplayMetricValue(op, metricKey, resolveStatMode(metricKey));
           dataPoint[op.name] = normalizers[metricKey]?.(rawValue) || 0;
           dataPoint[`${op.name}_raw`] = rawValue;
         });
 
         return dataPoint;
       });
-    }, [operatorData, selectedMetrics, resolveStatMode]);
+    }, [operatorData, selectedMetrics, resolveStatMode, getDisplayMetricValue]);
 
     const toggleMetric = useCallback((metricKey) => {
       if (showAllMetrics) return;
@@ -780,7 +810,7 @@ export const OperatorComparisonChart = React.forwardRef(
                 forcedStatMode || resolveStatMode(metricKey);
               const stats = operator[metricKey];
               const otherStats = getOtherStats(stats, metricKey, currentMode);
-              const value = getMetricValue(operator, metricKey, currentMode);
+              const value = getDisplayMetricValue(operator, metricKey, currentMode);
 
               return (
                 <div key={idx} className="text-xs">
@@ -793,8 +823,8 @@ export const OperatorComparisonChart = React.forwardRef(
                       <span className="text-white">{config.label}</span>
                     </div>
                     <span className="text-white font-semibold">
-                      {formatMetricValue(value, metricKey)}{" "}
-                      {config.unit}
+                      {formatDisplayMetricValue(value, metricKey)}{" "}
+                      {isGridPciMetric(metricKey) ? "" : config.unit}
                     </span>
                   </div>
 
@@ -803,13 +833,13 @@ export const OperatorComparisonChart = React.forwardRef(
                       {otherStats.map((s) => (
                         <span key={s.key}>
                           {s.label}:{" "}
-                          {formatMetricValue(s.value, metricKey)}
+                          {formatDisplayMetricValue(s.value, metricKey)}
                         </span>
                       ))}
                       <span>
                         Range:{" "}
-                        {formatMetricValue(stats?.min, metricKey)} -{" "}
-                        {formatMetricValue(stats?.max, metricKey)}
+                        {formatDisplayMetricValue(stats?.min, metricKey)} -{" "}
+                        {formatDisplayMetricValue(stats?.max, metricKey)}
                       </span>
                     </div>
                   )}
@@ -817,11 +847,15 @@ export const OperatorComparisonChart = React.forwardRef(
                   {isCountOnlyMetric(metricKey) && (
                     <>
                       <div className="text-[12px] text-cyan-300 mt-0.5">
-                        Most Occurring: {stats?.topValue || "N/A"}
+                        {metricKey === "pci" && isGridCellDataset
+                          ? `Best PCI: ${stats?.topValue || "N/A"}`
+                          : `Most Occurring: ${stats?.topValue || "N/A"}`}
                       </div>
-                      <div className="text-[10px] text-cyan-200 mt-0.5">
-                        Unique Count: {stats?.uniqueCount ?? 0}
-                      </div>
+                      {!(metricKey === "pci" && isGridCellDataset) && (
+                        <div className="text-[10px] text-cyan-200 mt-0.5">
+                          Unique Count: {stats?.uniqueCount ?? 0}
+                        </div>
+                      )}
                     </>
                   )}
                 </div>
@@ -891,7 +925,7 @@ export const OperatorComparisonChart = React.forwardRef(
       const currentMode = resolveStatMode(metricKey);
       const chartData = chartOrderedOperators.map((op) => ({
         name: op.name,
-        value: getMetricValue(op, metricKey, currentMode),
+        value: getDisplayMetricValue(op, metricKey, currentMode),
         color: op.color,
       }));
 
@@ -907,10 +941,10 @@ export const OperatorComparisonChart = React.forwardRef(
           <div className="sticky top-0 z-10 bg-slate-900/95 backdrop-blur border-b border-slate-700 px-3 py-2">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div className={`text-xs font-medium ${primaryTextClass}`}>
-              {config.label} ({isCountOnlyMetric(metricKey) ? "Count" : STAT_MODES[currentMode]?.label}
+              {config.label} ({isGridPciMetric(metricKey) ? "Best PCI" : isCountOnlyMetric(metricKey) ? "Count" : STAT_MODES[currentMode]?.label}
               {config.unit ? ` • ${config.unit}` : ""})
               </div>
-              {!isCountOnlyMetric(metricKey) && individualStatMode && (
+              {!isCountOnlyMetric(metricKey) && !isGridPciMetric(metricKey) && individualStatMode && (
                 <div className="flex rounded-lg overflow-hidden border border-slate-600">
                   {Object.entries(STAT_MODES).map(([modeKey, mode]) => (
                     <button
@@ -938,13 +972,15 @@ export const OperatorComparisonChart = React.forwardRef(
             </div>
             {isCountOnlyMetric(metricKey) && (
               <div className={`text-[10px] mt-1 ${secondaryTextClass}`}>
-                Shows count of most occurring{" "}
-                {metricKey === "pci"
-                  ? "PCI ID"
-                  : metricKey === "cell"
-                    ? "Cell ID / CI"
-                    : "Node ID"}{" "}
-                per operator and unique count.
+                {metricKey === "pci" && isGridCellDataset
+                  ? "Shows dominant grid PCI per operator."
+                  : `Shows count of most occurring ${
+                      metricKey === "pci"
+                        ? "PCI ID"
+                        : metricKey === "cell"
+                          ? "Cell ID / CI"
+                          : "Node ID"
+                    } per operator and unique count.`}
               </div>
             )}
           </div>
@@ -1221,10 +1257,12 @@ export const OperatorComparisonChart = React.forwardRef(
                       >
                         <div>{config.label}</div>
                         <div className="text-[9px] text-white/70 mt-0.5">
-                          {isCountOnlyMetric(metricKey)
-                            ? "Count"
-                            : STAT_MODES[resolveStatMode(metricKey)]?.label || "Mean"}
-                          {config.unit ? ` (${config.unit})` : ""}
+                          {isGridPciMetric(metricKey)
+                            ? "Best PCI"
+                            : isCountOnlyMetric(metricKey)
+                              ? "Count"
+                              : STAT_MODES[resolveStatMode(metricKey)]?.label || "Mean"}
+                          {isGridPciMetric(metricKey) ? "" : config.unit ? ` (${config.unit})` : ""}
                         </div>
                       </th>
                     );
@@ -1262,10 +1300,10 @@ export const OperatorComparisonChart = React.forwardRef(
                       const config = AVAILABLE_METRICS[metricKey];
                       const stats = op[metricKey];
                       const metricMode = resolveStatMode(metricKey);
-                      const value = getMetricValue(op, metricKey, metricMode);
+                      const value = getDisplayMetricValue(op, metricKey, metricMode);
 
                       const allValues = operatorData
-                        .map((o) => getMetricValue(o, metricKey, metricMode))
+                        .map((o) => getDisplayMetricValue(o, metricKey, metricMode))
                         .filter((v) => v !== null && v !== undefined);
 
                       const isBest =
@@ -1287,7 +1325,7 @@ export const OperatorComparisonChart = React.forwardRef(
                         >
                           <div className="font-medium">
                             {typeof value === "number"
-                              ? formatMetricValue(value, metricKey)
+                              ? formatDisplayMetricValue(value, metricKey)
                               : "-"}
                             {isBest && (
                               <span className="ml-1 text-yellow-400 text-[10px]">
@@ -1301,7 +1339,7 @@ export const OperatorComparisonChart = React.forwardRef(
                                 <span key={s.key}>
                                   {s.label}:{" "}
                                   {typeof s.value === "number"
-                                    ? formatMetricValue(s.value, metricKey)
+                                    ? formatDisplayMetricValue(s.value, metricKey)
                                     : "-"}
                                 </span>
                               ))}
@@ -1310,11 +1348,15 @@ export const OperatorComparisonChart = React.forwardRef(
                           {isCountOnlyMetric(metricKey) && (
                             <>
                               <div className="text-[13px] text-cyan-300">
-                                Most: {stats?.topValue || "N/A"}
+                                {metricKey === "pci" && isGridCellDataset
+                                  ? `Best PCI: ${stats?.topValue || "N/A"}`
+                                  : `Most: ${stats?.topValue || "N/A"}`}
                               </div>
-                              <div className="text-[13px] text-cyan-200">
-                                Unique: {stats?.uniqueCount ?? 0}
-                              </div>
+                              {!(metricKey === "pci" && isGridCellDataset) && (
+                                <div className="text-[13px] text-cyan-200">
+                                  Unique: {stats?.uniqueCount ?? 0}
+                                </div>
+                              )}
                             </>
                           )}
                         </td>
@@ -1334,7 +1376,7 @@ export const OperatorComparisonChart = React.forwardRef(
           </div>
         )}
 
-        {cdfChartsByTechnology.length > 0 && (
+        {showCdf && cdfChartsByTechnology.length > 0 && (
           <div className="mt-4 pt-3 border-t border-slate-700/50 space-y-3">
             <div className={`text-xs font-semibold ${primaryTextClass}`}>
               RSRP CDF By Technology

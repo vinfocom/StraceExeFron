@@ -569,7 +569,7 @@ export default function MapLegend({
       };
     }
 
-    if (selectedMetric?.toLowerCase() === "pci") {
+    if (["pci", "best_pci"].includes(String(selectedMetric || "").toLowerCase())) {
       return {
         content: (
           <PciLegend
@@ -578,7 +578,7 @@ export default function MapLegend({
             onFilterChange={onFilterChange}
           />
         ),
-        title: "PCI",
+        title: String(selectedMetric || "").toLowerCase() === "best_pci" ? "Best PCI" : "PCI",
       };
     }
 

@@ -383,7 +383,7 @@ const ExportDropdown = ({
       const networkSiteHeaders = ["band", "operator", "nodeb_id", "cell_id"];
       const uniqueRows = new Map();
 
-      (locations || []).forEach((loc) => {
+      ((rawLocations && rawLocations.length > 0) ? rawLocations : locations || []).forEach((loc) => {
         const row = {
           band: String(loc?.band ?? loc?.primaryBand ?? "").trim(),
           operator: String(loc?.operator ?? loc?.provider ?? "").trim(),
@@ -758,6 +758,8 @@ const getSignalQuality = (value) => {
 function UnifiedDetailLogs({
   locations = [],
   allFilteredLocations = [],
+  rawLocations = [],
+  rawFilteredLocations = [],
   distance,
   totalLocations = 0,
   filteredCount = 0,
@@ -802,6 +804,7 @@ function UnifiedDetailLogs({
   onActiveTabExternalChange,
   sitePredictionVersion = "original",
   enableGrid = false,
+  canEnableGridView = false,
   gridCellStats = { total: 0, populated: 0 },
   lteGridEnabled = false,
   lteGridSizeMeters = 50,
@@ -812,6 +815,8 @@ function UnifiedDetailLogs({
   conditionLogsLocations = [],
   conditionSectorLocations = [],
   viewport = null,
+  gridViewEnabled = false,
+  gridViewSummary = null,
 }) {
   const [collapsed, setCollapsed] = useState(false);
   const [expanded, setExpanded] = useState(false);
@@ -944,6 +949,7 @@ function UnifiedDetailLogs({
   }, [dataFilters]);
 
   const deferredLocations = useDeferredValue(locations);
+  const deferredRawLocations = useDeferredValue(rawLocations);
   const filteredLocations = useMemo(
     () =>
       hasActiveFilters
@@ -951,13 +957,23 @@ function UnifiedDetailLogs({
         : deferredLocations,
     [deferredLocations, dataFilters, hasActiveFilters],
   );
+  const filteredRawLocations = useMemo(
+    () =>
+      hasActiveFilters
+        ? applyDataFiltersToLocations(deferredRawLocations, dataFilters)
+        : deferredRawLocations,
+    [deferredRawLocations, dataFilters, hasActiveFilters],
+  );
 
   const exportLocations = useMemo(() => {
+    if (Array.isArray(rawFilteredLocations) && rawFilteredLocations.length > 0) {
+      return rawFilteredLocations;
+    }
     if (Array.isArray(allFilteredLocations) && allFilteredLocations.length > 0) {
       return allFilteredLocations;
     }
-    return filteredLocations;
-  }, [allFilteredLocations, filteredLocations]);
+    return filteredRawLocations.length > 0 ? filteredRawLocations : filteredLocations;
+  }, [rawFilteredLocations, allFilteredLocations, filteredRawLocations, filteredLocations]);
 
   const availableTabs = useMemo(() => {
     let tabs = [...TABS];
@@ -1317,6 +1333,8 @@ function UnifiedDetailLogs({
         ))}
       </div>
 
+    
+
       <div
         ref={contentRef}
         className="flex-1 min-h-0 overflow-y-auto  p-4 space-y-4 cursor-default"
@@ -1327,10 +1345,10 @@ function UnifiedDetailLogs({
 
         <Suspense fallback={<LoadingSpinner />}>
           {activeTab === "overview" &&
-            (filteredLocations.length > 0 || drawnShapeAnalytics.length > 0) && (
+            (filteredLocations.length > 0 || filteredRawLocations.length > 0 || drawnShapeAnalytics.length > 0) && (
             <OverviewTab
               totalLocations={totalLocations}
-              filteredCount={filteredLocations.length}
+              filteredCount={filteredRawLocations.length || filteredLocations.length}
               siteData={siteData}
               distance={distance}
               siteToggle={siteToggle}
@@ -1342,11 +1360,13 @@ function UnifiedDetailLogs({
               ioSummary={ioSummary}
               durationData={durationTime}
               duration={duration}
-              locations={filteredLocations}
+              locations={filteredRawLocations.length > 0 ? filteredRawLocations : filteredLocations}
               expanded={expanded}
               tptVolume={tptVolume}
               drawnShapeAnalytics={drawnShapeAnalytics}
               sessionIds={sessionIds}
+              gridViewEnabled={gridViewEnabled}
+              gridViewSummary={gridViewSummary}
             />
             )}
 
@@ -1383,7 +1403,7 @@ function UnifiedDetailLogs({
 
           {activeTab === "operatorComparison" && (
             <OperatorComparisonTab
-              locations={filteredLocations}
+              locations={filteredRawLocations}
               chartRefs={chartRefs}
               expanded={expanded}
             />
@@ -1391,7 +1411,7 @@ function UnifiedDetailLogs({
 
           {activeTab === "network" && (
             <NetworkTab
-              locations={filteredLocations}
+              locations={gridViewEnabled ? filteredLocations : filteredRawLocations}
               expanded={expanded}
               chartRefs={chartRefs}
             />
@@ -1399,7 +1419,7 @@ function UnifiedDetailLogs({
 
           {activeTab === "performance" && (
             <PerformanceTab
-              locations={filteredLocations}
+              locations={filteredRawLocations}
               expanded={expanded}
               chartRefs={chartRefs}
               onHighlightLogs={onHighlightLogs}
@@ -1433,7 +1453,7 @@ function UnifiedDetailLogs({
               n78NeighborLoading={n78NeighborLoading}
               thresholds={thresholds}
               expanded={expanded}
-              primaryData={filteredLocations}
+              primaryData={filteredRawLocations.length > 0 ? filteredRawLocations : filteredLocations}
             />
           )}
 

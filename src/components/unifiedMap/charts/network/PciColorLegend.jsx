@@ -465,6 +465,17 @@ const sortData = (data, sortConfig, options) => {
   return sorted;
 };
 
+const resolvePciValue = (loc) => {
+  const rawPci =
+    loc?.best_pci ??
+    loc?.bestPci ??
+    loc?.pci ??
+    loc?.PCI ??
+    loc?.physical_cell_id;
+  if (rawPci == null || rawPci === "") return "Unknown";
+  return String(rawPci);
+};
+
 export const PciColorLegend = React.forwardRef(({ locations }, ref) => {
   const [viewMode, setViewMode] = useState("color-map");
   const [selectedPci, setSelectedPci] = useState(null);
@@ -472,6 +483,10 @@ export const PciColorLegend = React.forwardRef(({ locations }, ref) => {
   const [pciSortConfig, setPciSortConfig] = useState({ key: 'count', direction: 'desc' });
   const [providerSortConfig, setProviderSortConfig] = useState({ key: 'count', direction: 'desc' });
   const [cellSortConfig, setCellSortConfig] = useState({ key: 'count', direction: 'desc' });
+  const isGridDataset = useMemo(
+    () => (locations || []).some((loc) => Boolean(loc?.is_grid_cell)),
+    [locations],
+  );
 
   // ============================================
   // ENHANCED PCI DATA PROCESSING
@@ -480,7 +495,7 @@ export const PciColorLegend = React.forwardRef(({ locations }, ref) => {
     if (!locations?.length) return [];
 
     const pciStats = locations.reduce((acc, loc) => {
-      const pci = loc.pci != null ? String(loc.pci) : "Unknown";
+      const pci = resolvePciValue(loc);
       
       if (!acc[pci]) {
         acc[pci] = {
@@ -598,7 +613,7 @@ export const PciColorLegend = React.forwardRef(({ locations }, ref) => {
 
     locations.forEach((loc) => {
       const provider = loc.provider || "Unknown";
-      const pci = loc.pci != null ? String(loc.pci) : "Unknown";
+      const pci = resolvePciValue(loc);
       const technology = loc.technology || "Unknown";
       const band = normalizeBandName(loc.band || loc.primaryBand);
 
@@ -788,7 +803,8 @@ export const PciColorLegend = React.forwardRef(({ locations }, ref) => {
       }
 
       cellStats[key].count++;
-      if (loc.pci != null) cellStats[key].pcis.add(String(loc.pci));
+      const resolvedPci = resolvePciValue(loc);
+      if (resolvedPci !== "Unknown") cellStats[key].pcis.add(resolvedPci);
       
       const provider = loc.provider || "Unknown";
       const tech = loc.technology || "Unknown";
@@ -833,8 +849,8 @@ export const PciColorLegend = React.forwardRef(({ locations }, ref) => {
 
   if (!pciColorMap.length) {
     return (
-      <ChartContainer ref={ref} title="PCI Analysis" icon={Antenna}>
-        <EmptyState message="No PCI data available" />
+      <ChartContainer ref={ref} title={isGridDataset ? "Best PCI Analysis" : "PCI Analysis"} icon={Antenna}>
+        <EmptyState message={isGridDataset ? "No best PCI data available" : "No PCI data available"} />
       </ChartContainer>
     );
   }
@@ -856,7 +872,7 @@ export const PciColorLegend = React.forwardRef(({ locations }, ref) => {
   return (
     <ChartContainer 
       ref={ref} 
-      title={`PCI Analysis (${pciColorMap.length} PCIs)`} 
+      title={`${isGridDataset ? "Best PCI Analysis" : "PCI Analysis"} (${pciColorMap.length} ${isGridDataset ? "Best PCIs" : "PCIs"})`} 
       icon={Antenna}
       subtitle={`${providerPciData.summary.totalSamples} samples • ${providerPciData.summary.totalNodebs} cells`}
       collapsible
@@ -875,6 +891,7 @@ export const PciColorLegend = React.forwardRef(({ locations }, ref) => {
           onSelectPci={setSelectedPci}
           sortConfig={pciSortConfig}
           onSortChange={setPciSortConfig}
+          isGridDataset={isGridDataset}
         />
       )}
 
@@ -900,7 +917,14 @@ export const PciColorLegend = React.forwardRef(({ locations }, ref) => {
 // ==================== SUB-COMPONENTS ====================
 
 // Enhanced Color Map View - SHOWING SORTED METRIC VALUE
-const PCIColorMapView = ({ pciColorMap, selectedPci, onSelectPci, sortConfig, onSortChange }) => {
+const PCIColorMapView = ({
+  pciColorMap,
+  selectedPci,
+  onSelectPci,
+  sortConfig,
+  onSortChange,
+  isGridDataset = false,
+}) => {
   const [expandedPci, setExpandedPci] = useState(null);
 
   // Get the display info for current sort option
@@ -915,7 +939,7 @@ const PCIColorMapView = ({ pciColorMap, selectedPci, onSelectPci, sortConfig, on
           options={SORT_OPTIONS}
         />
         <div className="text-[13px] text-white font-medium">
-          {pciColorMap.length} PCIs
+          {pciColorMap.length} {isGridDataset ? "Best PCIs" : "PCIs"}
         </div>
       </div>
 
@@ -948,7 +972,7 @@ const PCIColorMapView = ({ pciColorMap, selectedPci, onSelectPci, sortConfig, on
                 
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2">
-                    <span className="font-bold text-white text-[14px]">PCI {item.pci}</span>
+                    <span className="font-bold text-white text-[14px]">{isGridDataset ? "Best PCI" : "PCI"} {item.pci}</span>
                     <span className="text-[11px] px-1.5 py-0.5 rounded bg-slate-700 text-white">
                       {item.count}
                     </span>

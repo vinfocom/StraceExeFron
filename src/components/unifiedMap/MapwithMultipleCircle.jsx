@@ -6,7 +6,7 @@ import DeckGLOverlay from "@/components/maps/DeckGLOverlay";
 import { Zap, Layers, Radio, Square, Circle } from "lucide-react";
 // import TechHandoverMarkers from "../unifiedMap/TechHandoverMarkers";
 import useColorForLog from "@/hooks/useColorForLog";
-import { getMetricValueFromLog, COLOR_SCHEMES } from "@/utils/metrics";
+import { getMetricValueFromLog, COLOR_SCHEMES, getPciColor } from "@/utils/metrics";
 import { normalizeProviderName, normalizeTechName, getLogColor, generateColorFromHash } from "@/utils/colorUtils";
 
 const DEFAULT_CENTER = { lat: 28.64453086, lng: 77.37324242 };
@@ -291,6 +291,42 @@ const getPolygonBounds = (path) => {
   return { north: maxLat, south: minLat, east: maxLng, west: minLng };
 };
 
+const buildBoundsPolygonFromLocations = (locations = []) => {
+  if (!Array.isArray(locations) || locations.length === 0) return null;
+
+  let north = -Infinity;
+  let south = Infinity;
+  let east = -Infinity;
+  let west = Infinity;
+
+  for (const loc of locations) {
+    const lat = Number(loc?.lat ?? loc?.latitude);
+    const lng = Number(loc?.lng ?? loc?.lon ?? loc?.longitude);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) continue;
+    if (lat > north) north = lat;
+    if (lat < south) south = lat;
+    if (lng > east) east = lng;
+    if (lng < west) west = lng;
+  }
+
+  if (![north, south, east, west].every(Number.isFinite)) return null;
+
+  const path = [
+    { lat: south, lng: west },
+    { lat: south, lng: east },
+    { lat: north, lng: east },
+    { lat: north, lng: west },
+  ];
+
+  return {
+    uid: "grid-fallback-bounds",
+    id: "grid-fallback-bounds",
+    path,
+    bbox: { north, south, east, west },
+    synthetic: true,
+  };
+};
+
 const normalizeExternalPathPoint = (point) => {
   if (!point) return null;
 
@@ -365,6 +401,12 @@ const generateGridCellsOptimized = (
   colorBy = null
 ) => {
   if (!polygonData?.length || !locations?.length) return [];
+  const categoryGridMetric = String(metric || "").trim().toLowerCase();
+  const isBestOperatorMetric = categoryGridMetric === "best_operator";
+  const isBestTechnologyMetric = categoryGridMetric === "best_technology";
+  const isBestPciMetric = categoryGridMetric === "best_pci";
+  const isCategoryGridMetric =
+    isBestOperatorMetric || isBestTechnologyMetric || isBestPciMetric;
 
   let globalBounds = null;
   for (const { bbox } of polygonData) {
@@ -418,6 +460,10 @@ const generateGridCellsOptimized = (
       log?.technology ?? log?.networkType ?? log?.network ?? "",
       log?.band ?? log?.primaryBand,
     ) || "Unknown";
+  const resolvePciValue = (log) => {
+    const pciValue = getMetricValueFromLog(log, "pci");
+    return Number.isFinite(pciValue) ? Math.round(pciValue) : null;
+  };
   const resolveCategoryValue = (log) => {
     if (normalizedColorBy === "provider" || normalizedColorBy === "operator") {
       return resolveProviderName(log);
@@ -468,16 +514,39 @@ const generateGridCellsOptimized = (
       if (count > 0) {
         const operatorMetricBuckets = new Map();
         const categoryMetricBuckets = new Map();
+        const providerCountBuckets = new Map();
+        const technologyCountBuckets = new Map();
+        const pciCountBuckets = new Map();
         let validCount = 0;
         for (const idx of cellLocationIndices) {
           const log = locations[idx];
+          const provider = resolveProviderName(log);
+          const technology = resolveTechnologyName(log);
+          const pci = resolvePciValue(log);
+
+          if (provider && provider !== "Unknown") {
+            providerCountBuckets.set(provider, (providerCountBuckets.get(provider) || 0) + 1);
+          }
+          if (technology && technology !== "Unknown") {
+            technologyCountBuckets.set(
+              technology,
+              (technologyCountBuckets.get(technology) || 0) + 1,
+            );
+          }
+          if (Number.isFinite(pci)) {
+            pciCountBuckets.set(pci, (pciCountBuckets.get(pci) || 0) + 1);
+          }
+
+          if (isCategoryGridMetric) {
+            continue;
+          }
+
           const v = getMetricValueFromLog(log, metric);
           if (v != null && !isNaN(v) && Number.isFinite(v)) {
             if (validCount < valuesBuffer.length) {
               valuesBuffer[validCount++] = v;
             }
 
-            const provider = resolveProviderName(log);
             if (provider && provider !== "Unknown") {
               const current = operatorMetricBuckets.get(provider) || {
                 sum: 0,
@@ -506,7 +575,36 @@ const generateGridCellsOptimized = (
           }
         }
         
-        if (validCount > 0) {
+        if (isCategoryGridMetric) {
+          if (isBestOperatorMetric && providerCountBuckets.size > 0) {
+            const rankedProviders = Array.from(providerCountBuckets.entries()).sort(
+              (a, b) => b[1] - a[1],
+            );
+            bestOperator = { name: rankedProviders[0][0], count: rankedProviders[0][1] };
+            fillColor = getLogColor("provider", rankedProviders[0][0]);
+          } else if (isBestTechnologyMetric && technologyCountBuckets.size > 0) {
+            const rankedTechnologies = Array.from(technologyCountBuckets.entries()).sort(
+              (a, b) => b[1] - a[1],
+            );
+            bestByColor = {
+              label: "Technology",
+              name: rankedTechnologies[0][0],
+              count: rankedTechnologies[0][1],
+            };
+            fillColor = getLogColor("technology", rankedTechnologies[0][0]);
+          } else if (isBestPciMetric && pciCountBuckets.size > 0) {
+            const rankedPcis = Array.from(pciCountBuckets.entries()).sort(
+              (a, b) => b[1] - a[1],
+            );
+            aggregatedValue = rankedPcis[0][0];
+            bestByColor = {
+              label: "PCI",
+              name: rankedPcis[0][0],
+              count: rankedPcis[0][1],
+            };
+            fillColor = getPciColor(rankedPcis[0][0]);
+          }
+        } else if (validCount > 0) {
           const values = valuesBuffer.subarray(0, validCount);
           aggregatedValue = aggregateFn(Array.from(values));
           
@@ -555,6 +653,7 @@ const generateGridCellsOptimized = (
         fillColor,
         bestOperator,
         bestByColor,
+        gridMetric: categoryGridMetric,
       });
     }
   }
@@ -772,6 +871,10 @@ const MapWithMultipleCircles = ({
     if (!metricOrType) return "#808080";
 
     const typeKey = metricOrType.toLowerCase();
+
+    if (typeKey === "pci" || typeKey === "best_pci") {
+      return getPciColor(value);
+    }
     
     // ✅ 1. Explicitly handle TAC (Tracking Area Code) to use dynamic hashing
     if (typeKey === 'tac') {
@@ -1029,6 +1132,13 @@ const MapWithMultipleCircles = ({
     hasActivePolygons,
   ]);
 
+  const gridPolygonData = useMemo(() => {
+    if (activePolygonData.length > 0) return activePolygonData;
+    if (!enableGrid) return EMPTY_ARRAY;
+    const fallbackPolygon = buildBoundsPolygonFromLocations(locationsToRender);
+    return fallbackPolygon ? [fallbackPolygon] : EMPTY_ARRAY;
+  }, [activePolygonData, enableGrid, locationsToRender]);
+
   const handleHover = useCallback((info) => {
     if (info.object) {
       onMarkerHover?.(info.object);
@@ -1173,10 +1283,10 @@ const MapWithMultipleCircles = ({
   }, [processedNeighbors]);
 
   const gridCells = useMemo(() => {
-    if (!enableGrid || !activePolygonData.length || !locationsToRender.length) return [];
+    if (!enableGrid || !gridPolygonData.length || !locationsToRender.length) return [];
     
     return generateGridCellsOptimized(
-      activePolygonData, 
+      gridPolygonData, 
       gridSizeMeters, 
       locationsToRender, 
       selectedMetric, 
@@ -1185,7 +1295,7 @@ const MapWithMultipleCircles = ({
       spatialIndexRef.current,
       colorBy
     );
-  }, [enableGrid, gridSizeMeters, activePolygonData, locationsToRender, selectedMetric, gridAggregationMethod, resolveColor, colorBy]);
+  }, [enableGrid, gridSizeMeters, gridPolygonData, locationsToRender, selectedMetric, gridAggregationMethod, resolveColor, colorBy]);
 
   useEffect(() => {
     if (typeof onGridCellsStatsChange !== "function") return;
@@ -1590,7 +1700,12 @@ const MapWithMultipleCircles = ({
               <div className="flex justify-between text-gray-700 gap-2">
                 <span>Best {hoveredCell.bestByColor.label}:</span>
                 <span className="font-medium text-right">
-                  {hoveredCell.bestByColor.name} ({hoveredCell.bestByColor.average?.toFixed?.(1)})
+                  {hoveredCell.bestByColor.name}
+                  {Number.isFinite(hoveredCell.bestByColor.average)
+                    ? ` (${hoveredCell.bestByColor.average.toFixed(1)})`
+                    : Number.isFinite(hoveredCell.bestByColor.count)
+                      ? ` (${hoveredCell.bestByColor.count})`
+                      : ""}
                 </span>
               </div>
             )}
@@ -1598,7 +1713,12 @@ const MapWithMultipleCircles = ({
               <div className="flex justify-between text-gray-700 gap-2">
                 <span>Best Operator:</span>
                 <span className="font-medium text-right">
-                  {hoveredCell.bestOperator.name} ({hoveredCell.bestOperator.average?.toFixed?.(1)})
+                  {hoveredCell.bestOperator.name}
+                  {Number.isFinite(hoveredCell.bestOperator.average)
+                    ? ` (${hoveredCell.bestOperator.average.toFixed(1)})`
+                    : Number.isFinite(hoveredCell.bestOperator.count)
+                      ? ` (${hoveredCell.bestOperator.count})`
+                      : ""}
                 </span>
               </div>
             )}

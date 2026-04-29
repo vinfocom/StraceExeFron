@@ -335,6 +335,9 @@ function UnifiedHeader({
   ui,
   onSettingsSaved,
   onOpenMultiView,
+  gridViewEnabled = false,
+  onGridViewToggle,
+  canEnableGridView = false,
 }) {
   const { user, logout } = useAuth();
   const location = useLocation();
@@ -787,6 +790,40 @@ function UnifiedHeader({
               <LayoutGrid className="h-4 w-4" />
               <span className="hidden xl:inline">Multi Map</span>
             </Button>
+
+            <button
+              type="button"
+              role="switch"
+              aria-checked={gridViewEnabled}
+              onClick={() => canEnableGridView && onGridViewToggle?.(!gridViewEnabled)}
+              title={
+                !canEnableGridView
+                  ? "Grid view requires a raw filter polygon"
+                  : gridViewEnabled
+                    ? "Disable grid view"
+                    : "Enable grid view"
+              }
+              disabled={!canEnableGridView}
+              className={`h-9 shrink-0 inline-flex items-center gap-2 rounded-lg border px-3 text-sm font-medium transition ${
+                canEnableGridView
+                  ? "border-slate-600 bg-slate-800 text-white hover:bg-slate-700"
+                  : "cursor-not-allowed border-slate-700 bg-slate-800/70 text-slate-500"
+              }`}
+            >
+              <Eye className="h-4 w-4" />
+              <span className="hidden xl:inline">Grid View</span>
+              <span
+                className={`relative h-5 w-9 rounded-full transition ${
+                  gridViewEnabled ? "bg-cyan-500" : "bg-slate-600"
+                }`}
+              >
+                <span
+                  className={`absolute top-0.5 h-4 w-4 rounded-full bg-white transition ${
+                    gridViewEnabled ? "left-4" : "left-0.5"
+                  }`}
+                />
+              </span>
+            </button>
 
             {!isElectronRuntime && (
               <>
