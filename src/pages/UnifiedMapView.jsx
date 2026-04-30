@@ -2570,14 +2570,6 @@ const UnifiedMapView = () => {
       if (providerName && !isUnknownOption(providerName)) {
         providers.add(providerName);
       }
-      if (n.primaryBand) {
-        const norm = normalizeBandName(n.primaryBand);
-        if (norm && norm !== "Unknown") bands.add(norm);
-      }
-      if (n.neighbourBand) {
-        const norm = normalizeBandName(n.neighbourBand);
-        if (norm && norm !== "Unknown") bands.add(norm);
-      }
       if (n.networkType) {
         const technologyName = normalizeTechName(
           n.networkType,
