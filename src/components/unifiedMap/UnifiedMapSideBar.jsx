@@ -397,6 +397,8 @@ const UnifiedMapSidebar = ({
   setShowSubSession,
   showSessionNeighbors,
   setShowSessionNeighbors,
+  neighborLogsAvailable = false,
+  sessionNeighborLoading = false,
   gridCellStats = { total: 0, populated: 0 },
   subSessionMarkerCount = 0,
   subSessionLoading = false,
@@ -1463,8 +1465,19 @@ const UnifiedMapSidebar = ({
                 
             <ToggleRow
               label="Secondary Logs"
+              description={
+                sessionNeighborLoading
+                  ? "Checking data..."
+                  : neighborLogsAvailable
+                    ? undefined
+                    : "No secondary logs available"
+              }
               checked={Boolean(showSessionNeighbors)}
-              onChange={setShowSessionNeighbors}
+              onChange={(checked) => {
+                if (!neighborLogsAvailable) return;
+                setShowSessionNeighbors?.(checked);
+              }}
+              disabled={!neighborLogsAvailable || sessionNeighborLoading}
               useSwitch={true}
             />
 
@@ -1840,7 +1853,7 @@ const UnifiedMapSidebar = ({
             )}
           </CollapsibleSection>
 
-          <CollapsibleSection title="Prediction" icon={Radio}>
+          <CollapsibleSection title="Site & Prediction" icon={Radio}>
             <ToggleRow
               label="Sites"
               checked={enableSiteToggle}
@@ -1882,7 +1895,7 @@ const UnifiedMapSidebar = ({
                     value={siteLabelField || "none"}
                     onChange={(nextValue) => setSiteLabelField?.(nextValue)}
                     options={[
-                      { value: "none", label: "None" },
+                      { value: "none", label: "Label" },
                       { value: "site_id", label: "Site ID" },
                       { value: "cell_id", label: "Cell ID" },
                       { value: "technology", label: "Technology" },
@@ -1951,9 +1964,7 @@ const UnifiedMapSidebar = ({
                           <Label className="text-xs font-semibold text-blue-400 flex items-center gap-1">
                             <Radio className="w-3 h-3" /> Baseline LTE Prediction
                           </Label>
-                          <p className="text-[10px] text-slate-400">
-                            Set grid size and radius, then run Python LTE prediction for the selected sessions.
-                          </p>
+                        
                           <div className="pt-1 bg-slate-800/60 rounded-lg p-2">
                             <div className="flex items-center justify-between text-xs mb-2">
                               <span className="text-slate-400">Grid Size</span>
@@ -2090,23 +2101,7 @@ const UnifiedMapSidebar = ({
                   )}
                 </div>
 
-                <div className="mt-3 pt-3 border-t border-slate-700/50 space-y-1.5">
-                  
-
-                  <Label className="text-xs font-semibold text-blue-400 flex items-center gap-1">
-                    <Palette className="w-3 h-3" /> Color Sites By
-                  </Label>
-                  <SegmentedControl
-                    value={modeMethod}
-                    onChange={setModeMethod}
-                    options={[
-                      { value: "Operator", label: "Operator" },
-                      { value: "band", label: "Band" },
-                      { value: "technology", label: "Tech" },
-                    ]}
-                  />
-                </div>
-
+                
                 {/* Add Site Button */}
                 <div className="mt-3 pt-3 border-t border-slate-700/50 space-y-2">
                   <button

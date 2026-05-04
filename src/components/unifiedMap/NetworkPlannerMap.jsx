@@ -13,6 +13,7 @@ import {
 import { getPciColor } from "@/utils/metrics";
 import { useSiteData } from "@/hooks/useSiteData";
 import { mapViewApi } from "@/api/apiEndpoints";
+import { clearProjectSessionCacheByProjectResource } from "@/utils/projectSessionCache";
 import { toast } from "react-toastify";
 import EditSiteFormDialog from "@/components/unifiedMap/EditSiteFormDialog";
 
@@ -54,7 +55,7 @@ function buildSectorInfoPosition(sector, radiusMeters = 120, sectorScale = 1) {
   const p0 = { lat: Number(sector?.lat), lng: Number(sector?.lng) };
   if (!Number.isFinite(p0.lat) || !Number.isFinite(p0.lng)) return { lat: 0, lng: 0 };
 
-  const safeBeamwidth = normalizeBeamwidth(sector?.beamwidth, 65);
+  const safeBeamwidth = normalizeBeamwidth(sector?.beamwidth, 30);
   const sectorRange = Number(sector?.range);
   const radius =
     (Number.isFinite(sectorRange) && sectorRange > 0 ? sectorRange : Number(radiusMeters) || 120) *
@@ -280,7 +281,7 @@ function getFirstPositiveFiniteNumberOrNull(values = []) {
   return null;
 }
 
-function normalizeBeamwidth(value, fallback = 65) {
+function normalizeBeamwidth(value, fallback = 30) {
   const numeric = Number(value);
   if (!Number.isFinite(numeric) || numeric <= 0) return fallback;
   return Math.max(5, Math.min(180, numeric));
@@ -593,9 +594,32 @@ const SITE_LABEL_COLOR_FIELDS = new Set(["pci", "band", "technology"]);
 
 function getSiteMarkerFillColor(site, isSelected) {
   if (isSelected) return "#dc2626";
+  if (isSitePredictionUpdated(site)) return "#16a34a";
   if (site?.deltaVariant === "baseline") return "#dc2626";
   if (site?.deltaVariant === "optimized" || site?.deltaVariant === "optimised") return "#16a34a";
   return "#2563eb";
+}
+
+function isSitePredictionUpdated(site) {
+  const raw = site?.rawSite && typeof site.rawSite === "object" ? site.rawSite : {};
+  const status = String(site?.status ?? raw.status ?? "").trim().toLowerCase();
+  const updatedFlag =
+    site?.is_updated ??
+    site?.isUpdated ??
+    site?.optimized_id ??
+    site?.optimizedId ??
+    raw.is_updated ??
+    raw.isUpdated ??
+    raw.optimized_id ??
+    raw.optimizedId;
+
+  if (status === "updated" || status === "optimized" || status === "optimised") return true;
+  if (typeof updatedFlag === "boolean") return updatedFlag;
+  if (updatedFlag === null || updatedFlag === undefined || updatedFlag === "") return false;
+
+  const numeric = Number(updatedFlag);
+  if (Number.isFinite(numeric)) return numeric > 0;
+  return String(updatedFlag).trim().toLowerCase() === "true";
 }
 
 const NUMERIC_FIELD_HINTS = new Set([
@@ -706,6 +730,7 @@ function getSiteSectorColorField(siteLabelField, colorMode) {
 function resolveSiteSectorColor({ deltaVariant, colorField, band, tech, network, pci }) {
   if (deltaVariant === "baseline") return "#dc2626";
   if (deltaVariant === "optimized" || deltaVariant === "optimised") return "#16a34a";
+  if (deltaVariant === "updated") return "#16a34a";
 
   if (colorField === "pci") return getPciColor(pci);
   if (colorField === "band") return getBandColor(band);
@@ -765,6 +790,29 @@ function convertFormValueForApi(key, rawValue, originalValue) {
 function toFiniteNumberOrNull(value) {
   const numeric = Number(value);
   return Number.isFinite(numeric) ? numeric : null;
+}
+
+function getSitePredictionSourceRowId(source) {
+  const raw = source?.rawSite && typeof source.rawSite === "object" ? source.rawSite : {};
+  const value =
+    source?.sourceRowId ??
+    source?.source_id ??
+    source?.sourceId ??
+    source?.original_id ??
+    source?.originalId ??
+    source?.site_prediction_id ??
+    source?.sitePredictionId ??
+    source?.id ??
+    raw.sourceRowId ??
+    raw.source_id ??
+    raw.sourceId ??
+    raw.original_id ??
+    raw.originalId ??
+    raw.site_prediction_id ??
+    raw.sitePredictionId ??
+    raw.id;
+  const numeric = Number(value);
+  return Number.isFinite(numeric) && numeric > 0 ? numeric : null;
 }
 
 function extractApiErrorDetails(error) {
@@ -857,8 +905,8 @@ function mergeSectorWithFetchedRow(sector, fetchedRow) {
     Number(sector?.azimuth) || 0,
   );
   const mergedBeamwidth = normalizeBeamwidth(
-    getFirstFiniteNumber([sector?.beamwidth, row.bw, row.bandwidth, row.beamwidth, row.beamwidth_deg_est], 65),
-    65,
+    getFirstFiniteNumber([sector?.beamwidth, row.bw, row.bandwidth, row.beamwidth, row.beamwidth_deg_est], 30),
+    30,
   );
   const mergedRange = normalizeSectorRange(
     getFirstFiniteNumber([sector?.range, row.range, row.radius], 220),
@@ -885,8 +933,9 @@ function mergeSectorWithFetchedRow(sector, fetchedRow) {
     lat: Number.isFinite(Number(mergedLat)) ? Number(mergedLat) : Number(sector?.lat) || 0,
     lng: Number.isFinite(Number(mergedLng)) ? Number(mergedLng) : Number(sector?.lng) || 0,
     azimuth: Number.isFinite(Number(mergedAzimuth)) ? Number(mergedAzimuth) : Number(sector?.azimuth) || 0,
-    beamwidth: Number.isFinite(Number(mergedBeamwidth)) ? Number(mergedBeamwidth) : Number(sector?.beamwidth) || 65,
+    beamwidth: Number.isFinite(Number(mergedBeamwidth)) ? Number(mergedBeamwidth) : Number(sector?.beamwidth) || 30,
     range: Number.isFinite(Number(mergedRange)) ? Number(mergedRange) : Number(sector?.range) || 220,
+    sourceRowId: getSitePredictionSourceRowId(row) ?? getSitePredictionSourceRowId(sector),
   };
 }
 
@@ -901,7 +950,7 @@ function pickValueByAliases(source, aliases = []) {
 
 function normalizeSiteRows(rows = [], options = {}) {
   if (!Array.isArray(rows)) return [];
-  const defaultBeamwidth = normalizeBeamwidth(options?.defaultBeamwidth, 65);
+  const defaultBeamwidth = normalizeBeamwidth(options?.defaultBeamwidth, 30);
 
   return rows
     .map((item, index) => {
@@ -1012,7 +1061,7 @@ function generateSectorsFromSite(site, siteIndex, colorMode = "Operator", option
   const lng = parseFloat(site.lng ?? site.longitude ?? site.lon_pred ?? site.lon ?? site.Lng ?? 0);
 
   const baseAzimuth = getFirstFiniteNumber([site.azimuth, site.azimuth_deg_5, site.azimuth_deg_5_soft], 0);
-  const defaultBeamwidth = normalizeBeamwidth(options?.defaultBeamwidth, 65);
+  const defaultBeamwidth = normalizeBeamwidth(options?.defaultBeamwidth, 30);
   const sourceBeamwidth = getFirstPositiveFiniteNumberOrNull([
     site.bw,
     site.bandwidth,
@@ -1065,10 +1114,11 @@ function generateSectorsFromSite(site, siteIndex, colorMode = "Operator", option
   )
     .trim()
     .toLowerCase();
+  const effectiveDeltaVariant = isSitePredictionUpdated(site) ? "updated" : deltaVariant;
 
   const colorField = getSiteSectorColorField(options?.siteLabelField, colorMode);
   const color = resolveSiteSectorColor({
-    deltaVariant,
+    deltaVariant: effectiveDeltaVariant,
     colorField,
     band,
     tech,
@@ -1086,10 +1136,7 @@ function generateSectorsFromSite(site, siteIndex, colorMode = "Operator", option
     const sectorPart = String(site.sector ?? site.sector_id ?? i);
     sectors.push({
       id: `sector-${siteIdPart}-${rowIdPart}-${sectorPart}-${i}`,
-      sourceRowId:
-        Number.isFinite(Number(site.id)) && Number(site.id) > 0
-          ? Number(site.id)
-          : null,
+      sourceRowId: getSitePredictionSourceRowId(site),
       rawSite: site,
       lat,
       lng,
@@ -1097,7 +1144,8 @@ function generateSectorsFromSite(site, siteIndex, colorMode = "Operator", option
       beamwidth,
       color,
       network,
-      deltaVariant: deltaVariant || null,
+      deltaVariant: effectiveDeltaVariant || null,
+      isUpdated: isSitePredictionUpdated(site),
       technology: tech,
       band,
       earfcnOrNarfcn,
@@ -1127,7 +1175,7 @@ const NetworkPlannerMap = ({
   projectId,
   siteToggle = "NoML",
   sitePredictionVersion = "original",
-  defaultBeamwidth = 65,
+  defaultBeamwidth = 30,
   enableSiteToggle = true,
   showSiteMarkers = true,
   showSiteSectors = true,
@@ -1203,6 +1251,12 @@ const NetworkPlannerMap = ({
     () => getSiteSectorColorField(siteLabelField, colorMode),
     [siteLabelField, colorMode],
   );
+  const clearUnifiedSiteDataCache = useCallback(() => {
+    clearProjectSessionCacheByProjectResource({
+      projectId: projectId || "global",
+      resource: "unified-site-data",
+    });
+  }, [projectId]);
 
   const normalizedPolygonPaths = useMemo(() => {
     if (!Array.isArray(filterPolygons) || filterPolygons.length === 0) return [];
@@ -1489,7 +1543,8 @@ const NetworkPlannerMap = ({
           rawSite: item,
           lat,
           lng,
-          deltaVariant: deltaVariant || null,
+          deltaVariant: isSitePredictionUpdated(item) ? "updated" : deltaVariant || null,
+          isUpdated: isSitePredictionUpdated(item),
         });
       }
     });
@@ -2076,6 +2131,62 @@ const NetworkPlannerMap = ({
     );
   }, [siteMarkers, viewport]);
 
+  const movedDeltaLinks = useMemo(() => {
+    if (String(sitePredictionVersion || "").trim().toLowerCase() !== "delta") return [];
+    const baselineByKey = new Map();
+    const optimizedByKey = new Map();
+
+    filteredSiteData.forEach((row) => {
+      const variant = normalizeDeltaVariant(row?.deltaVariant ?? row?.delta_variant ?? row?.__deltaVariant ?? "");
+      if (variant !== "baseline" && variant !== "optimized") return;
+
+      const siteId = getSiteId(row);
+      if (!siteId) return;
+      const sector = String(row?.sector ?? row?.sector_id ?? row?.sectorId ?? "").trim();
+      const cellId = String(row?.cell_id ?? row?.cellId ?? row?.cell_id_representative ?? row?.cellIdRepresentative ?? "").trim();
+      const key = [siteId, sector || cellId || "site"].join("|");
+      const lat = Number(row?.lat ?? row?.latitude ?? row?.lat_pred);
+      const lng = Number(row?.lng ?? row?.longitude ?? row?.lon_pred ?? row?.lon);
+      if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
+
+      const entry = { siteId, sector, cellId, lat, lng };
+      if (variant === "baseline") baselineByKey.set(key, entry);
+      else optimizedByKey.set(key, entry);
+    });
+
+    const links = [];
+    optimizedByKey.forEach((optimized, key) => {
+      const baseline = baselineByKey.get(key);
+      if (!baseline) return;
+      const distance = computeDistanceMeters(baseline, optimized);
+      if (!Number.isFinite(distance) || distance < 1) return;
+      links.push({
+        key,
+        siteId: optimized.siteId || baseline.siteId,
+        sector: optimized.sector || baseline.sector,
+        from: { lat: baseline.lat, lng: baseline.lng },
+        to: { lat: optimized.lat, lng: optimized.lng },
+        distance,
+      });
+    });
+
+    return links.slice(0, 500);
+  }, [filteredSiteData, sitePredictionVersion]);
+
+  const visibleMovedDeltaLinks = useMemo(() => {
+    if (!viewport) return movedDeltaLinks;
+    return movedDeltaLinks.filter((link) => {
+      const points = [link.from, link.to];
+      return points.some(
+        (point) =>
+          point.lat >= viewport.south &&
+          point.lat <= viewport.north &&
+          point.lng >= viewport.west &&
+          point.lng <= viewport.east,
+      );
+    });
+  }, [movedDeltaLinks, viewport]);
+
   const renderedSectors = useMemo(() => {
     const selectedRenderKey = selectedSectorInfo?.renderKey;
     const hoveredPci = extractPciValue(hoveredLog);
@@ -2525,30 +2636,63 @@ const NetworkPlannerMap = ({
       return;
     }
 
-    const rowIds =
-      dragMode === "site"
-        ? Array.from(
-            new Set(
-              [
-                ...(selectedSiteDataById[selectedSectorInfo.siteId]?.sectors || []),
-                ...allSectors.filter((s) => s.siteId === selectedSectorInfo.siteId),
-              ]
-                .map((s) => Number(s?.sourceRowId))
-                .filter((id) => Number.isFinite(id) && id > 0),
-            ),
-          )
-        : [Number(selectedSectorInfo.sourceRowId)].filter((id) => Number.isFinite(id) && id > 0);
+    const selectedSiteId = getDisplaySiteId(selectedSectorInfo) || selectedSectorInfo.siteId;
+    let payload = [];
+    if (dragMode === "site") {
+      if (!selectedSiteId) {
+        toast.error("Unable to identify site to move.");
+        return;
+      }
+      payload = [
+        {
+          project_id: Number(projectId) || undefined,
+          site_selector: selectedSiteId,
+          move_entire_site: true,
+          latitude: lat,
+          longitude: lng,
+        },
+      ];
+    } else {
+      const uniquePayloadByKey = new Map();
+      [selectedSectorInfo].forEach((sector) => {
+        const rowId = getSitePredictionSourceRowId(sector);
+        if (rowId) {
+          uniquePayloadByKey.set(`row-${rowId}`, {
+            id: rowId,
+            source_id: rowId,
+            latitude: lat,
+            longitude: lng,
+          });
+          return;
+        }
 
-    if (rowIds.length === 0) {
+        const siteSelector = getDisplaySiteId(sector);
+        const sectorSelector = String(
+          sector?.sector ??
+            sector?.rawSite?.sector ??
+            sector?.rawSite?.sector_id ??
+            sector?.rawSite?.sectorId ??
+            "",
+        ).trim();
+        if (siteSelector && sectorSelector) {
+          uniquePayloadByKey.set(`selector-${siteSelector}-${sectorSelector}`, {
+            site_selector: siteSelector,
+            sector_selector: sectorSelector,
+            latitude: lat,
+            longitude: lng,
+          });
+        }
+      });
+      payload = Array.from(uniquePayloadByKey.values());
+    }
+    const rowIds = payload
+      .map((item) => Number(item.source_id ?? item.id))
+      .filter((id) => Number.isFinite(id) && id > 0);
+
+    if (payload.length === 0) {
       toast.error("No valid rows found to update.");
       return;
     }
-
-    const payload = rowIds.map((id) => ({
-      id,
-      latitude: lat,
-      longitude: lng,
-    }));
 
     setIsApplyingDraggedMove(true);
     try {
@@ -2569,11 +2713,17 @@ const NetworkPlannerMap = ({
           next[siteId] = {
             ...existing,
             sectors: existing.sectors.map((sector) => {
-              if (!rowIds.includes(Number(sector.sourceRowId))) return sector;
+              const isMoved =
+                dragMode === "site"
+                  ? getDisplaySiteId(sector) === selectedSiteId
+                  : rowIds.includes(Number(getSitePredictionSourceRowId(sector)));
+              if (!isMoved) return sector;
               return {
                 ...sector,
                 lat,
                 lng,
+                isUpdated: true,
+                deltaVariant: "updated",
                 rawSite: {
                   ...(sector.rawSite || {}),
                   latitude: lat,
@@ -2592,6 +2742,8 @@ const NetworkPlannerMap = ({
               ...prev,
               lat,
               lng,
+              isUpdated: true,
+              deltaVariant: "updated",
               infoPos: { lat, lng },
               rawSite: {
                 ...(prev.rawSite || {}),
@@ -2605,7 +2757,8 @@ const NetworkPlannerMap = ({
       setDragMode(null);
       setPendingMovePosition(null);
 
-      await fetchSiteData();
+      clearUnifiedSiteDataCache();
+      await fetchSiteData(true);
       if (map?.panTo) map.panTo({ lat, lng });
     } catch (error) {
       toast.error(extractApiErrorDetails(error) || "Failed to update moved location.");
@@ -2618,6 +2771,7 @@ const NetworkPlannerMap = ({
     pendingMovePosition,
     allSectors,
     selectedSiteDataById,
+    clearUnifiedSiteDataCache,
     fetchSiteData,
     map,
   ]);
@@ -2631,7 +2785,7 @@ const NetworkPlannerMap = ({
 
     const raw = sector.rawSite && typeof sector.rawSite === "object" ? sector.rawSite : {};
     const source = { ...raw };
-    const seed = { id: raw.id ?? sector.sourceRowId ?? null };
+    const seed = { id: getSitePredictionSourceRowId(sector) ?? null };
 
     EDITABLE_SITE_FIELDS.forEach((field) => {
       const aliases = EDIT_FIELD_ALIAS_MAP[field] || [field];
@@ -2676,13 +2830,32 @@ const NetworkPlannerMap = ({
 
   const handleSectorEditSave = useCallback(async () => {
     if (!selectedSectorInfo) return;
-    const rowId = Number(
-      selectedSectorInfo.sourceRowId ??
-        sectorEditOriginalData.original_id ??
-        sectorEditOriginalData.id,
-    );
-    if (!Number.isFinite(rowId) || rowId <= 0) {
-      toast.error("Unable to update this site row: missing row id.");
+    const rowId = getSitePredictionSourceRowId({
+      ...selectedSectorInfo,
+      rawSite: {
+        ...(selectedSectorInfo.rawSite || {}),
+        ...(sectorEditOriginalData || {}),
+      },
+    });
+    const siteSelector = String(
+      getDisplaySiteId(selectedSectorInfo) ||
+        selectedSectorInfo.siteId ||
+        selectedSectorInfo?.rawSite?.site ||
+        selectedSectorInfo?.rawSite?.site_id ||
+        sectorEditOriginalData.site ||
+        sectorEditOriginalData.site_id ||
+        "",
+    ).trim();
+    const sectorSelector = String(
+      selectedSectorInfo.sector ??
+        selectedSectorInfo?.rawSite?.sector ??
+        selectedSectorInfo?.rawSite?.sector_id ??
+        sectorEditOriginalData.sector ??
+        sectorEditOriginalData.sector_id ??
+        "",
+    ).trim();
+    if (!rowId && (!siteSelector || !sectorSelector)) {
+      toast.error("Unable to update this site row: missing row id and site/sector selector.");
       return;
     }
 
@@ -2713,22 +2886,10 @@ const NetworkPlannerMap = ({
       }
     }
 
-    // For sector edit, always target the single source row only.
     const payloadItem = {
-      id: rowId,
-      source_id: rowId,
-      site_id_selector: String(
-        selectedSectorInfo.siteId ??
-          selectedSectorInfo?.rawSite?.site ??
-          selectedSectorInfo?.rawSite?.site_id ??
-          "",
-      ).trim(),
-      sector_selector: String(
-        selectedSectorInfo.sector ??
-          selectedSectorInfo?.rawSite?.sector ??
-          selectedSectorInfo?.rawSite?.sector_id ??
-          "",
-      ).trim(),
+      ...(rowId ? { id: rowId, source_id: rowId } : {}),
+      ...(siteSelector ? { site_id_selector: siteSelector, site_selector: siteSelector } : {}),
+      ...(sectorSelector ? { sector_selector: sectorSelector } : {}),
     };
     Object.keys(sectorEditFormData).forEach((key) => {
       if (key === "id") return;
@@ -2739,7 +2900,7 @@ const NetworkPlannerMap = ({
       }
     });
 
-    const payloadControlKeys = new Set(["id", "source_id", "site_id_selector", "sector_selector"]);
+    const payloadControlKeys = new Set(["id", "source_id", "site_id_selector", "site_selector", "sector_selector"]);
     const hasAnyChangedField = Object.keys(payloadItem).some((key) => !payloadControlKeys.has(key));
     if (!hasAnyChangedField) {
       toast.info("No changes to save.");
@@ -2762,7 +2923,9 @@ const NetworkPlannerMap = ({
       const nextRaw = {
         ...(selectedSectorInfo.rawSite || {}),
         ...payloadItem,
-        id: rowId,
+        ...(rowId ? { id: rowId, source_id: rowId } : {}),
+        is_updated: 1,
+        status: "updated",
       };
       const nextSiteName = String(nextRaw.site_name ?? selectedSectorInfo.siteNameRaw ?? "").trim();
       const nextSector = String(nextRaw.sector ?? selectedSectorInfo.sector ?? "").trim();
@@ -2770,9 +2933,9 @@ const NetworkPlannerMap = ({
       const nextBeamwidth = normalizeBeamwidth(
         getFirstFiniteNumber(
           [nextRaw.bw, nextRaw.bandwidth, nextRaw.beamwidth, selectedSectorInfo.beamwidth],
-          selectedSectorInfo.beamwidth ?? 65,
+          selectedSectorInfo.beamwidth ?? 30,
         ),
-        selectedSectorInfo.beamwidth ?? 65,
+        selectedSectorInfo.beamwidth ?? 30,
       );
       const nextBand = String(nextRaw.band ?? selectedSectorInfo.band ?? "").trim();
       const nextPci =
@@ -2806,10 +2969,25 @@ const NetworkPlannerMap = ({
           next[siteId] = {
             ...existing,
             sectors: existing.sectors.map((sector) => {
-              if (Number(sector.sourceRowId) !== rowId) return sector;
+              const sectorRowId = getSitePredictionSourceRowId(sector);
+              const sectorSite = getDisplaySiteId(sector);
+              const sectorSector = String(
+                sector?.sector ??
+                  sector?.rawSite?.sector ??
+                  sector?.rawSite?.sector_id ??
+                  sector?.rawSite?.sectorId ??
+                  "",
+              ).trim();
+              const isSameTarget =
+                (rowId && sectorRowId === rowId) ||
+                (!rowId && siteSelector && sectorSelector && sectorSite === siteSelector && sectorSector === sectorSelector);
+              if (!isSameTarget) return sector;
               return {
                 ...sector,
                 rawSite: nextRaw,
+                sourceRowId: rowId ?? sector.sourceRowId ?? null,
+                isUpdated: true,
+                deltaVariant: "updated",
                 siteNameRaw: nextSiteName,
                 siteName: nextSiteName || sector.siteName || sector.siteId || "Unknown",
                 sector: nextSector || null,
@@ -2831,10 +3009,19 @@ const NetworkPlannerMap = ({
       });
 
       setSelectedSectorInfo((prev) =>
-        prev && Number(prev.sourceRowId) === rowId
+        prev &&
+        ((rowId && getSitePredictionSourceRowId(prev) === rowId) ||
+          (!rowId &&
+            siteSelector &&
+            sectorSelector &&
+            getDisplaySiteId(prev) === siteSelector &&
+            String(prev?.sector ?? prev?.rawSite?.sector ?? prev?.rawSite?.sector_id ?? "").trim() === sectorSelector))
           ? {
               ...prev,
               rawSite: nextRaw,
+              sourceRowId: rowId ?? prev.sourceRowId ?? null,
+              isUpdated: true,
+              deltaVariant: "updated",
               siteNameRaw: nextSiteName,
               siteName: nextSiteName || prev.siteName || prev.siteId || "Unknown",
               sector: nextSector || null,
@@ -2874,14 +3061,15 @@ const NetworkPlannerMap = ({
 
       // Always refetch after edit so non-location fields (azimuth/bw/tilts) are refreshed
       // across baseline/updated/delta modes.
-      await fetchSiteData();
+      clearUnifiedSiteDataCache();
+      await fetchSiteData(true);
 
       const marker = siteMarkers.find((item) => item.siteId === selectedSectorInfo.siteId);
       if (marker) {
         void loadSiteData(marker, true);
       }
       if ("latitude" in payloadItem || "longitude" in payloadItem) {
-        await fetchSiteData();
+        await fetchSiteData(true);
         if (Number.isFinite(nextLat) && Number.isFinite(nextLng)) {
           const movedPoint = { lat: nextLat, lng: nextLng };
           const outsidePolygonFilter =
@@ -2914,6 +3102,7 @@ const NetworkPlannerMap = ({
     sectorEditFormData,
     sectorEditOriginalData,
     siteMarkers,
+    clearUnifiedSiteDataCache,
     loadSiteData,
     fetchSiteData,
     map,
@@ -2973,7 +3162,8 @@ const NetworkPlannerMap = ({
       }
 
       clearSelectedSectorConfiguration();
-      await fetchSiteData();
+      clearUnifiedSiteDataCache();
+      await fetchSiteData(true);
 
       if (siteIdForDelete) {
         const marker = siteMarkers.find((item) => item.siteId === siteIdForDelete);
@@ -2986,6 +3176,7 @@ const NetworkPlannerMap = ({
     }
   }, [
     clearSelectedSectorConfiguration,
+    clearUnifiedSiteDataCache,
     fetchSiteData,
     loadSiteData,
     projectId,
@@ -3047,12 +3238,14 @@ const NetworkPlannerMap = ({
         return next;
       });
 
-      await fetchSiteData();
+      clearUnifiedSiteDataCache();
+      await fetchSiteData(true);
     } catch (error) {
       toast.error(extractApiErrorDetails(error) || "Failed to delete site.");
     }
   }, [
     clearSelectedSectorConfiguration,
+    clearUnifiedSiteDataCache,
     fetchSiteData,
     onSiteSelect,
     projectId,
@@ -3106,7 +3299,8 @@ const NetworkPlannerMap = ({
       }
 
       clearSelectedSectorConfiguration();
-      await fetchSiteData();
+      clearUnifiedSiteDataCache();
+      await fetchSiteData(true);
 
       const marker = siteMarkers.find((item) => item.siteId === siteIdForRevert);
       if (marker) {
@@ -3117,6 +3311,7 @@ const NetworkPlannerMap = ({
     }
   }, [
     clearSelectedSectorConfiguration,
+    clearUnifiedSiteDataCache,
     fetchSiteData,
     loadSiteData,
     projectId,
@@ -3277,7 +3472,8 @@ const NetworkPlannerMap = ({
       await mapViewApi.addSitePrediction(payload);
       toast.success(`Added sector ${Math.round(nextSectorId)} to site ${siteIdValue}.`);
 
-      await fetchSiteData();
+      clearUnifiedSiteDataCache();
+      await fetchSiteData(true);
       const marker = siteMarkers.find((item) => item.siteId === siteIdValue);
       if (marker) {
         void loadSiteData(marker, true);
@@ -3287,6 +3483,7 @@ const NetworkPlannerMap = ({
     }
   }, [
     allSectors,
+    clearUnifiedSiteDataCache,
     fetchSiteData,
     loadSiteData,
     projectId,
@@ -3342,6 +3539,11 @@ const NetworkPlannerMap = ({
 
           <div className="mb-2 text-[11px] text-slate-600">
             Site: <span className="font-semibold">{getDisplaySiteId(selectedSectorInfo) || "N/A"}</span>
+            {isSitePredictionUpdated(selectedSectorInfo) && (
+              <span className="ml-2 rounded bg-emerald-100 px-1.5 py-0.5 font-semibold text-emerald-700">
+                Updated
+              </span>
+            )}
           </div>
 
           {String(siteToggle || "").toLowerCase() !== "cell" ? (
@@ -3413,6 +3615,7 @@ const NetworkPlannerMap = ({
               strokeWeight: selectedSiteIdSet.has(site.siteId) ? 2 : 1.5,
             }}
             zIndex={selectedSiteIdSet.has(site.siteId) ? 4001 : 3001}
+            title={site.isUpdated ? `Updated site: ${site.siteId}` : `Baseline site: ${site.siteId}`}
             onClick={() => {
               void handleSiteMarkerClick(site);
             }}
@@ -3483,6 +3686,25 @@ const NetworkPlannerMap = ({
           );
         })}
 
+      {visibleMovedDeltaLinks.map((link, index) => (
+        <PolylineF
+          key={`delta-move-${link.key}-${index}`}
+          path={[link.from, link.to]}
+          options={{
+            strokeColor: "#f59e0b",
+            strokeOpacity: 0.95,
+            strokeWeight: 3,
+            zIndex: 3900,
+          }}
+          onLoad={(polyline) => {
+            if (polyline) polylineRefs.current.add(polyline);
+          }}
+          onUnmount={(polyline) => {
+            if (polyline) polylineRefs.current.delete(polyline);
+          }}
+        />
+      ))}
+
       {shouldRenderLegacySectorPredictionMarkers &&
         renderedAllSectorPredictionRows.map((point, index) => {
         const pointValue = getSectorPredictionMetricValue(point, selectedMetric);
@@ -3533,7 +3755,7 @@ const NetworkPlannerMap = ({
           : { ...sector, renderKey: sectorRenderKey };
         const p0 = { lat: effectiveSector.lat, lng: effectiveSector.lng };
         const r = (effectiveSector.range || radius) * effectiveSectorScale;
-        const safeBeamwidth = normalizeBeamwidth(effectiveSector.beamwidth, 65);
+        const safeBeamwidth = normalizeBeamwidth(effectiveSector.beamwidth, 30);
         const p1 = computeOffset(p0, r, effectiveSector.azimuth - safeBeamwidth / 2);
         const p2 = computeOffset(p0, r, effectiveSector.azimuth + safeBeamwidth / 2);
         const infoPos = {

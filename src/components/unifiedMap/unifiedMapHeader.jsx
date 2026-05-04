@@ -329,7 +329,7 @@ function UnifiedHeader({
   triangleSizeAvailable = false,
   triangleScaleMultiplier = 1,
   setTriangleScaleMultiplier,
-  defaultSiteBeamwidth = 65,
+  defaultSiteBeamwidth = 30,
   setDefaultSiteBeamwidth,
   onUIChange,
   ui,
@@ -556,7 +556,7 @@ function UnifiedHeader({
     Number(defaultSiteBeamwidth),
   )
     ? Number(defaultSiteBeamwidth)
-    : 65;
+    : 30;
   const minTriangleScale = 0.25;
   const maxTriangleScale = 3;
   const triangleScaleStep = 0.25;

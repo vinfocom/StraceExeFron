@@ -381,11 +381,11 @@ export const ProjectForm = ({
     const file = e.target.files[0];
     if (file) {
       const ext = file.name.split(".").pop().toLowerCase();
-      if (["csv", "xlsx", "xls"].includes(ext)) {
+      if (ext === "csv") {
         setSiteFile(file);
         toast.success(`File selected: ${file.name}`);
       } else {
-        toast.error("Invalid file type. Only CSV, XLSX, XLS allowed");
+        toast.error("Invalid file type. Only CSV is supported for site prediction upload");
         e.target.value = null;
       }
     }
@@ -526,19 +526,22 @@ export const ProjectForm = ({
       }
 
       if (siteFile) {
-        setCurrentStep(`Processing ${siteFile.name}...`);
+        setCurrentStep(`Saving ${siteFile.name} to site prediction...`);
 
         try {
           const formData = new FormData();
-          formData.append("file", siteFile);
-          formData.append("project_id", projectId.toString());
-          formData.append("project_name", projectName.trim());
-          formData.append("method", "noml");
+          formData.append("ProjectId", projectId.toString());
+          formData.append("File", siteFile);
 
-          const uploadRes = await cellSiteApi.uploadSite(formData);
+          const uploadRes = await cellSiteApi.uploadSitePredictionCsv(formData);
 
           if (uploadRes.success || uploadRes.Status === 1) {
-            toast.success("Site file processed");
+            const inserted = Number(uploadRes.Inserted ?? uploadRes.inserted ?? 0);
+            toast.success(
+              inserted > 0
+                ? `Site prediction saved (${inserted} rows)`
+                : "Site file processed"
+            );
             completedSteps.push("site_uploaded");
           }
         } catch (err) {
@@ -773,7 +776,7 @@ export const ProjectForm = ({
                 <Input
                   ref={fileInputRef}
                   type="file"
-                  accept=".csv,.xlsx,.xls"
+                  accept=".csv"
                   onChange={handleFileChange}
                   disabled={loading}
                   className="file:mr-3 file:py-1.5 file:px-3 file:rounded-md file:border-0 file:text-xs file:font-medium file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"

@@ -1170,8 +1170,8 @@ const UnifiedMapView = () => {
   const [logRadius, setLogRadius] = useState(10);
   const [neighborSquareSize, setNeighborSquareSize] = useState(4);
   const [triangleScaleMultiplier, setTriangleScaleMultiplier] = useState(1);
-  const [defaultSiteBeamwidth, setDefaultSiteBeamwidth] = useState(65);
-  const [showSessionNeighbors, setShowSessionNeighbors] = useState(true);
+  const [defaultSiteBeamwidth, setDefaultSiteBeamwidth] = useState(30);
+  const [showSessionNeighbors, setShowSessionNeighbors] = useState(false);
 
   const [bestNetworkEnabled, setBestNetworkEnabled] = useState(false);
   const [bestNetworkWeights, setBestNetworkWeights] = useState(DEFAULT_WEIGHTS);
@@ -2117,7 +2117,7 @@ const UnifiedMapView = () => {
   });
 
   // ✅ 3. Use Session Neighbors Hook
-  const shouldFetchNeighbors = !hasPassedNeighbors && showSessionNeighbors;
+  const shouldFetchNeighbors = !hasPassedNeighbors && sessionIds.length > 0;
 
   const {
     neighborData: fetchedNeighbors,
@@ -4026,6 +4026,12 @@ const UnifiedMapView = () => {
     sessionNeighborData,
     filteredNeighbors,
   ]);
+
+  useEffect(() => {
+    if (!sessionNeighborLoading && !neighborLogsAvailable && showSessionNeighbors) {
+      setShowSessionNeighbors(false);
+    }
+  }, [neighborLogsAvailable, sessionNeighborLoading, showSessionNeighbors]);
 
   const handlePolygonMouseOver = useCallback((poly, e) => {
     setHoveredPolygon(poly);

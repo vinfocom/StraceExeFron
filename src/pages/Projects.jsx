@@ -38,6 +38,7 @@ const CreateProjectPage = () => {
   const [polygons, setPolygons] = useState([]);
   const [loading, setLoading] = useState(false);
   const inFlightFetchRef = useRef(null);
+  const isSuperAdmin = Number(user?.m_user_type_id ?? user?.UserTypeId ?? 0) === 3;
   const scopedCompanyId = resolveCompanyId(user);
 
   const fetchPolygons = useCallback(async ({ silent = false } = {}) => {
@@ -50,7 +51,7 @@ const CreateProjectPage = () => {
       try {
         const polygonsRes = await mapViewApi.getAvailablePolygons(
           undefined,
-          Number.isFinite(scopedCompanyId) && scopedCompanyId > 0
+          !isSuperAdmin && Number.isFinite(scopedCompanyId) && scopedCompanyId > 0
             ? scopedCompanyId
             : undefined
         );
@@ -86,7 +87,7 @@ const CreateProjectPage = () => {
 
     inFlightFetchRef.current = task;
     return task;
-  }, [scopedCompanyId]);
+  }, [isSuperAdmin, scopedCompanyId]);
 
   useEffect(() => {
     fetchPolygons({ silent: true });

@@ -248,6 +248,31 @@ export const cellSiteApi = {
     }
   },
 
+  uploadSitePredictionCsv: async (formData, onUploadProgress = null) => {
+    try {
+      const response = await api.post("/api/MapView/UploadSitePredictionCsv", formData, {
+        timeout: 300000,
+        onUploadProgress:
+          onUploadProgress ||
+          ((progressEvent) => {
+            const percentCompleted = Math.round(
+              (progressEvent.loaded * 100) / progressEvent.total
+            );
+          }),
+      });
+
+      return response;
+    } catch (error) {
+      console.error(" Site prediction upload error:", error);
+
+      if (error.code === "ECONNABORTED") {
+        throw new Error("Upload timed out. File may be too large.");
+      }
+
+      throw error;
+    }
+  },
+
 
   uploadSessions: async (payload) => {
     try {

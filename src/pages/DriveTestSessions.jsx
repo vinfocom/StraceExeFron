@@ -89,7 +89,6 @@ const DriveTestSessionsPage = () => {
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const scopedCompanyId = resolveCompanyId(user);
 
-  // Column visibility state
   const [visibleColumns, setVisibleColumns] = useState({
     sessionId: true,
     userDetails: true,
@@ -485,7 +484,7 @@ const DriveTestSessionsPage = () => {
           ? selectedCompanyIds[0]
           : 0;
 
-    if (selectedCompanyIds.length > 1 && inferredCompanyId <= 0) {
+    if (!isSuperAdmin && selectedCompanyIds.length > 1 && inferredCompanyId <= 0) {
       toast.error(
         "Selected sessions belong to multiple companies. Please select sessions from one company.",
       );

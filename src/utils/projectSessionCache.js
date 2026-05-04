@@ -216,3 +216,20 @@ export const clearProjectSessionCache = () => {
   }
   void clearIndexedDbByPrefix(CACHE_PREFIX);
 };
+
+export const clearProjectSessionCacheByProjectResource = ({
+  projectId = "global",
+  resource = "",
+} = {}) => {
+  const storage = getStorage();
+  if (!storage || !resource) return;
+
+  const safeProjectId = String(projectId ?? "global");
+  const safeResource = String(resource || "unknown")
+    .replace(/[^a-zA-Z0-9_-]/g, "_")
+    .slice(0, 60);
+  const marker = `:p:${safeProjectId}:r:${safeResource}:`;
+  listCacheKeys(storage)
+    .filter((key) => key.includes(marker))
+    .forEach((key) => storage.removeItem(key));
+};

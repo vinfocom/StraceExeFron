@@ -29,7 +29,7 @@ const getFirstPositiveFiniteNumberOrNull = (values = []) => {
   return null;
 };
 
-const normalizeBeamwidth = (value, fallback = 65) => {
+const normalizeBeamwidth = (value, fallback = 30) => {
   const numeric = Number(value);
   if (!Number.isFinite(numeric) || numeric <= 0) return fallback;
   return Math.max(5, Math.min(180, numeric));
@@ -178,7 +178,7 @@ const fetchAllSitePredictionRows = async (params = {}) => {
 
 const normalizeSitePredictionRows = (rows = [], options = {}) => {
   const deltaVariant = String(options?.deltaVariant || "").trim().toLowerCase();
-  const defaultBeamwidth = normalizeBeamwidth(options?.defaultBeamwidth, 65);
+  const defaultBeamwidth = normalizeBeamwidth(options?.defaultBeamwidth, 30);
   if (!Array.isArray(rows)) return [];
   return rows
     .map((item, index) => {
@@ -310,7 +310,7 @@ export const useSiteData = ({
   enableSiteToggle, 
   siteToggle, 
   sitePredictionVersion = "original",
-  defaultBeamwidth = 65,
+  defaultBeamwidth = 30,
   projectId, 
   sessionIds,
   autoFetch = false,
@@ -334,7 +334,7 @@ export const useSiteData = ({
   }, []);
 
   const fetchSiteData = useCallback(async (forceRefresh = false) => {
-    const normalizedDefaultBeamwidth = normalizeBeamwidth(defaultBeamwidth, 65);
+    const normalizedDefaultBeamwidth = normalizeBeamwidth(defaultBeamwidth, 30);
 
     // If the toggle is not enabled, we clear data and stop
     if (!enableSiteToggle) {
@@ -343,6 +343,15 @@ export const useSiteData = ({
       lastFetchParams.current = null;
       return;
     }
+
+    const normalizedVersionRaw = String(sitePredictionVersion || "original").trim().toLowerCase();
+    const normalizedVersion =
+      normalizedVersionRaw === "updated"
+        ? "updated"
+        : normalizedVersionRaw === "delta"
+          ? "delta"
+          : "original";
+    const shouldUseLocalCache = normalizedVersion !== "delta";
 
     // Prevents duplicate calls
     const currentParams = JSON.stringify({
@@ -354,7 +363,7 @@ export const useSiteData = ({
       filterEnabled,
       polygons,
     });
-    if (lastFetchParams.current === currentParams && siteData.length > 0) {
+    if (!forceRefresh && lastFetchParams.current === currentParams && siteData.length > 0) {
       return;
     }
 
@@ -365,7 +374,7 @@ export const useSiteData = ({
       variant: `${String(siteToggle || '').toLowerCase()}_${String(sitePredictionVersion || 'original').toLowerCase()}_bw${normalizedDefaultBeamwidth}`,
     });
 
-    if (!forceRefresh) {
+    if (shouldUseLocalCache && !forceRefresh) {
       const cacheEntry = readProjectSessionCacheEntry(cacheKey);
       if (Array.isArray(cacheEntry?.data)) {
         setSiteData(cacheEntry.data);
@@ -386,18 +395,14 @@ export const useSiteData = ({
     try {
       const params = { projectId: projectId || '' };
       let response;
-      const normalizedVersionRaw = String(sitePredictionVersion || "original").trim().toLowerCase();
-      const normalizedVersion =
-        normalizedVersionRaw === "updated"
-          ? "updated"
-          : normalizedVersionRaw === "delta"
-            ? "delta"
-            : "original";
 
       switch (siteToggle) {
         case 'Cell':
           if (normalizedVersion === "delta") {
-            response = await mapViewApi.compareSitePrediction(params);
+            response = await mapViewApi.compareSitePrediction({
+              ...params,
+              limit: SITE_PREDICTION_PAGE_SIZE,
+            });
           } else {
             response = await fetchAllSitePredictionRows({
               ...params,
@@ -432,7 +437,7 @@ export const useSiteData = ({
       }
 
       setSiteData(finalData);
-      if (!filterEnabled || polygons?.length === 0) {
+      if (shouldUseLocalCache && (!filterEnabled || polygons?.length === 0)) {
         writeProjectSessionCache(cacheKey, finalData);
       }
 
