@@ -168,14 +168,16 @@ const GridSizeInput = ({
   gridSize,
   setGridSize,
   disabled,
+  label = "Area Grid Size (meters)",
+  description = "Grid block size for area breakdown",
+  presets = [50, 100, 200, 500],
+  max = 10000,
 }) => {
-  const presets = [50, 100, 200, 500];
-
   return (
     <div className="space-y-4 p-4 bg-gray-50 border border-gray-200 rounded-lg">
       <div className="space-y-2">
         <Label className="text-sm font-semibold text-gray-700">
-          Area Grid Size (meters) <span className="text-red-500">*</span>
+          {label} <span className="text-red-500">*</span>
         </Label>
         <div className="flex flex-wrap gap-2 items-center">
           <Input
@@ -184,7 +186,7 @@ const GridSizeInput = ({
             onChange={(e) => setGridSize(e.target.value)}
             disabled={disabled}
             min="1"
-            max="10000"
+            max={String(max)}
             className="w-24 h-9"
           />
           <div className="flex gap-1.5">
@@ -204,7 +206,7 @@ const GridSizeInput = ({
           </div>
         </div>
         <p className="text-xs text-gray-500">
-          Grid block size for area breakdown
+          {description}
         </p>
       </div>
     </div>
@@ -349,6 +351,7 @@ export const ProjectForm = ({
   const [selectedPolygonData, setSelectedPolygonData] = useState(null);
   const [selectedSessions, setSelectedSessions] = useState([]);
   const [gridSize, setGridSize] = useState("100");
+  const [logGridSize, setLogGridSize] = useState("20");
   const [siteFile, setSiteFile] = useState(null);
 
   const [runPrediction, setRunPrediction] = useState(false);
@@ -412,6 +415,15 @@ export const ProjectForm = ({
       errors.push("Grid size must be between 1 and 10000");
     }
 
+    const numLogGridSize = parseFloat(logGridSize);
+    if (
+      isNaN(numLogGridSize) ||
+      numLogGridSize < 1 ||
+      numLogGridSize > 10000
+    ) {
+      errors.push("Log grid size must be between 1 and 10000");
+    }
+
     if (runPrediction) {
       const numPredictionGrid = parseFloat(predictionGrid);
       if (
@@ -449,6 +461,8 @@ export const ProjectForm = ({
         PolygonIds: [selectedPolygon],
         SessionIds: selectedSessions,
         GridSize: String(parseFloat(gridSize)),
+        LogGrid: String(parseFloat(logGridSize)),
+        log_grid: String(parseFloat(logGridSize)),
         ...(Number.isFinite(scopedCompanyId) && scopedCompanyId > 0
           ? { company_id: scopedCompanyId }
           : {}),
@@ -609,6 +623,7 @@ export const ProjectForm = ({
       setSelectedSessions([]);
       setSiteFile(null);
       setGridSize("100");
+      setLogGridSize("20");
       setRunPrediction(false);
       setIndoorMode("heuristic");
       setPredictionGrid("22");
@@ -621,6 +636,7 @@ export const ProjectForm = ({
           completedSteps,
           predictionResult,
           gridSize: parseFloat(gridSize),
+          logGridSize: parseFloat(logGridSize),
           minSamples: DEFAULT_MIN_SAMPLES,
           predictionGrid: parseFloat(predictionGrid),
         });
@@ -645,7 +661,8 @@ export const ProjectForm = ({
   const canSubmit =
     projectName.trim() &&
     selectedPolygon &&
-    parseFloat(gridSize) > 0;
+    parseFloat(gridSize) > 0 &&
+    parseFloat(logGridSize) > 0;
   const isLoadingPolygons =
     parentLoading && (!polygons || polygons.length === 0);
   const scopedCompanyId = resolveCompanyId(user);
@@ -712,11 +729,21 @@ export const ProjectForm = ({
             )}
 
             {selectedPolygonData && (
-              <GridSizeInput
-                gridSize={gridSize}
-                setGridSize={setGridSize}
-                disabled={loading}
-              />
+              <div className="space-y-3">
+                <GridSizeInput
+                  gridSize={gridSize}
+                  setGridSize={setGridSize}
+                  disabled={loading}
+                />
+                <GridSizeInput
+                  gridSize={logGridSize}
+                  setGridSize={setLogGridSize}
+                  disabled={loading}
+                  label="Log Grid Size (meters)"
+                  description="Grid size used by Unified Map grid view"
+                  presets={[10, 20, 25, 50]}
+                />
+              </div>
             )}
           </div>
 

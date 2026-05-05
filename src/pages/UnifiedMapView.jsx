@@ -1395,7 +1395,7 @@ const UnifiedMapView = () => {
 
   const [project, setProject] = useState(passedProject || null);
 
-  const projectGridSizeMeters = useMemo(() => {
+  const projectAreaGridSizeMeters = useMemo(() => {
     const raw =
       project?.grid_size ??
       project?.gridSize ??
@@ -1407,6 +1407,22 @@ const UnifiedMapView = () => {
     if (!Number.isFinite(parsed) || parsed <= 0) return null;
     return Math.max(5, Math.round(parsed));
   }, [project, passedProject]);
+
+  const projectLogGridSizeMeters = useMemo(() => {
+    const raw =
+      project?.log_grid ??
+      project?.logGrid ??
+      project?.LogGrid ??
+      project?.LogGridSize ??
+      passedProject?.log_grid ??
+      passedProject?.logGrid ??
+      passedProject?.LogGrid ??
+      passedProject?.LogGridSize ??
+      projectAreaGridSizeMeters;
+    const parsed = Number(raw);
+    if (!Number.isFinite(parsed) || parsed <= 0) return null;
+    return Math.max(5, Math.round(parsed));
+  }, [project, passedProject, projectAreaGridSizeMeters]);
 
   const projectId = useMemo(() => {
     const param = searchParams.get("project_id") ?? searchParams.get("project");
@@ -1476,20 +1492,28 @@ const UnifiedMapView = () => {
   }, [project]);
 
   useEffect(() => {
-    if (!Number.isFinite(projectGridSizeMeters) || projectGridSizeMeters <= 0) {
-      return;
+    if (
+      Number.isFinite(projectAreaGridSizeMeters) &&
+      projectAreaGridSizeMeters > 0
+    ) {
+      setLteGridSizeMeters((prev) =>
+        Math.abs((Number(prev) || 0) - projectAreaGridSizeMeters) < 0.001
+          ? prev
+          : projectAreaGridSizeMeters,
+      );
     }
-    setLteGridSizeMeters((prev) =>
-      Math.abs((Number(prev) || 0) - projectGridSizeMeters) < 0.001
-        ? prev
-        : projectGridSizeMeters,
-    );
-    setGridSizeMeters((prev) =>
-      Math.abs((Number(prev) || 0) - projectGridSizeMeters) < 0.001
-        ? prev
-        : projectGridSizeMeters,
-    );
-  }, [projectGridSizeMeters]);
+
+    if (
+      Number.isFinite(projectLogGridSizeMeters) &&
+      projectLogGridSizeMeters > 0
+    ) {
+      setGridSizeMeters((prev) =>
+        Math.abs((Number(prev) || 0) - projectLogGridSizeMeters) < 0.001
+          ? prev
+          : projectLogGridSizeMeters,
+      );
+    }
+  }, [projectAreaGridSizeMeters, projectLogGridSizeMeters]);
 
   useEffect(() => {
     if (!projectId || projectSessionParam) return;
@@ -2095,12 +2119,27 @@ const UnifiedMapView = () => {
     colorSettings: predictionColorSettings,
     loading: predictionLoading,
     error: predictionError,
+    hasFetched: predictionHasFetched,
+    hasData: predictionHasData,
     refetch: refetchPrediction,
   } = usePredictionData(
     projectId,
     selectedMetric,
     shouldFetchPredictionLogs,
   );
+
+  const predictionDataUnavailable = useMemo(
+    () =>
+      Boolean(predictionHasFetched) &&
+      !predictionLoading &&
+      !predictionHasData,
+    [predictionHasFetched, predictionLoading, predictionHasData],
+  );
+
+  useEffect(() => {
+    if (!isDataPredictionMode || !predictionDataUnavailable) return;
+    setDataToggle("sample");
+  }, [isDataPredictionMode, predictionDataUnavailable]);
 
   // ✅ 2b. Use LTE Prediction Hook
   const {
@@ -4411,6 +4450,8 @@ const UnifiedMapView = () => {
         dataToggle={dataToggle}
         modeMethod={modeMethod}
         setModeMethod={setModeMethod}
+        predictionLoading={predictionLoading}
+        predictionDataUnavailable={predictionDataUnavailable}
         siteLabelField={siteLabelField}
         setSiteLabelField={setSiteLabelField}
         setTechHandover={setTechHandOver}
@@ -4430,6 +4471,8 @@ const UnifiedMapView = () => {
         setSitePredictionVersion={setSitePredictionVersion}
         showSessionNeighbors={showSessionNeighbors}
         setShowSessionNeighbors={setShowSessionNeighbors}
+        neighborLogsAvailable={neighborLogsAvailable}
+        sessionNeighborLoading={sessionNeighborLoading}
         gridCellStats={gridCellStats}
         showNumCells={showNumCells}
         setShowNumCells={setShowNumCells}
@@ -4638,6 +4681,7 @@ const UnifiedMapView = () => {
               onProjectPolygonBoundaryChange={handleProjectPolygonPathChange}
               enableGrid={enableGrid}
               gridSizeMeters={gridSizeMeters}
+              gridAggregationMethod={lteGridAggregationMethod || "median"}
               areaEnabled={areaEnabled}
               filterInsidePolygons={onlyInsidePolygons}
               opacity={opacity}

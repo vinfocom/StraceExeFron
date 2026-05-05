@@ -4,8 +4,8 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import Spinner from '../components/common/Spinner';
-import { X, Plus, Save, RefreshCw, ArrowUpDown } from 'lucide-react';
-import { settingApi } from '../api/apiEndpoints';
+import { X, Plus, Save, RefreshCw, ArrowUpDown, Upload, MapPinned } from 'lucide-react';
+import { settingApi, mapViewApi } from '../api/apiEndpoints';
 import { useAuth } from '@/context/AuthContext';
 
 const PARAMETERS = {
@@ -79,6 +79,88 @@ const createNewRow = () => ({
 const extractResponseData = (response) => {
     return response?.data || response;
 };
+
+const resolveCompanyId = (user) => {
+    const directCompanyId = Number(user?.company_id ?? user?.CompanyId ?? user?.companyId ?? 0);
+    if (Number.isFinite(directCompanyId) && directCompanyId > 0) {
+        return directCompanyId;
+    }
+
+    if (typeof window === "undefined") return 0;
+
+    try {
+        const cachedUser = JSON.parse(sessionStorage.getItem("user") || "null");
+        const cachedCompanyId = Number(
+            cachedUser?.company_id ?? cachedUser?.CompanyId ?? cachedUser?.companyId ?? 0
+        );
+        return Number.isFinite(cachedCompanyId) && cachedCompanyId > 0 ? cachedCompanyId : 0;
+    } catch {
+        return 0;
+    }
+};
+
+const closeLinearRing = (ring) => {
+    if (!Array.isArray(ring) || ring.length < 3) return ring || [];
+    const first = ring[0];
+    const last = ring[ring.length - 1];
+    if (first?.[0] === last?.[0] && first?.[1] === last?.[1]) return ring;
+    return [...ring, first];
+};
+
+const ringToWkt = (ring) =>
+    `(${closeLinearRing(ring)
+        .map((point) => {
+            const lon = Number(point?.[0]);
+            const lat = Number(point?.[1]);
+            if (!Number.isFinite(lon) || !Number.isFinite(lat)) {
+                throw new Error("GeoJSON coordinates must be numeric [longitude, latitude] pairs.");
+            }
+            return `${lon} ${lat}`;
+        })
+        .join(", ")})`;
+
+const geometryToWkt = (geometry) => {
+    const geom = geometry?.type === "Feature" ? geometry.geometry : geometry;
+    if (!geom?.type) throw new Error("GeoJSON must contain a Polygon or MultiPolygon geometry.");
+
+    if (geom.type === "Polygon") {
+        return `POLYGON(${geom.coordinates.map(ringToWkt).join(", ")})`;
+    }
+
+    if (geom.type === "MultiPolygon") {
+        return `MULTIPOLYGON(${geom.coordinates
+            .map((polygon) => `(${polygon.map(ringToWkt).join(", ")})`)
+            .join(", ")})`;
+    }
+
+    throw new Error("Only Polygon and MultiPolygon imports are supported.");
+};
+
+const normalizePolygonInput = (raw) => {
+    const text = String(raw || "").trim();
+    if (!text) throw new Error("Paste a WKT polygon or upload a GeoJSON/WKT file.");
+
+    if (/^(POLYGON|MULTIPOLYGON)\s*\(/i.test(text)) {
+        return text;
+    }
+
+    const parsed = JSON.parse(text);
+    if (parsed?.type === "FeatureCollection") {
+        const feature = parsed.features?.find((item) =>
+            ["Polygon", "MultiPolygon"].includes(item?.geometry?.type)
+        );
+        if (!feature) throw new Error("FeatureCollection does not contain a polygon geometry.");
+        return geometryToWkt(feature);
+    }
+
+    return geometryToWkt(parsed);
+};
+
+const parseSessionIds = (value) =>
+    String(value || "")
+        .split(",")
+        .map((item) => Number(item.trim()))
+        .filter((item) => Number.isInteger(item) && item > 0);
 
 const ThresholdRow = memo(({ row, index, onChange, onDelete }) => {
     const [minStr, setMinStr] = useState(String(row.min ?? 0));
@@ -634,8 +716,166 @@ const buildSavePayload = (thresholds, userId) => {
     return payload;
 };
 
+const PolygonImportPanel = ({ user }) => {
+    const [name, setName] = useState("");
+    const [polygonText, setPolygonText] = useState("");
+    const [sessionIdsText, setSessionIdsText] = useState("");
+    const [area, setArea] = useState("");
+    const [importing, setImporting] = useState(false);
+
+    const handleFileChange = useCallback((event) => {
+        const file = event.target.files?.[0];
+        if (!file) return;
+
+        const reader = new FileReader();
+        reader.onload = () => {
+            setPolygonText(String(reader.result || ""));
+            if (!name.trim()) {
+                setName(file.name.replace(/\.(geojson|json|wkt|txt)$/i, ""));
+            }
+        };
+        reader.onerror = () => toast.error("Failed to read polygon file");
+        reader.readAsText(file);
+    }, [name]);
+
+    const handleImport = useCallback(async () => {
+        if (!name.trim()) {
+            toast.error("Polygon name is required");
+            return;
+        }
+
+        setImporting(true);
+        try {
+            const wkt = normalizePolygonInput(polygonText);
+            const sessionIds = parseSessionIds(sessionIdsText);
+            const scopedCompanyId = resolveCompanyId(user);
+            const numericArea = area === "" ? null : Number(area);
+
+            if (numericArea !== null && !Number.isFinite(numericArea)) {
+                throw new Error("Area must be a valid number.");
+            }
+
+            const response = await mapViewApi.importPolygon({
+                Name: name.trim(),
+                WKT: wkt,
+                Wkt: wkt,
+                SessionIds: sessionIds,
+                session_id: sessionIds.join(","),
+                Area: numericArea,
+                company_id: scopedCompanyId || undefined,
+                CompanyId: scopedCompanyId || undefined,
+                CreatedByUserId: user?.id || undefined,
+                created_by_user_id: user?.id || undefined,
+            });
+            const data = extractResponseData(response);
+
+            if (data?.Status === 1 || data?.status === 1 || data?.success === true) {
+                toast.success("Polygon imported into map regions");
+                setName("");
+                setPolygonText("");
+                setSessionIdsText("");
+                setArea("");
+            } else {
+                toast.error(data?.Message || data?.message || "Polygon import failed");
+            }
+        } catch (error) {
+            toast.error(error?.message || "Polygon import failed");
+        } finally {
+            setImporting(false);
+        }
+    }, [area, name, polygonText, sessionIdsText, user]);
+
+    return (
+        <div className="space-y-5">
+            <div className="grid grid-cols-1 lg:grid-cols-[1fr_220px] gap-4">
+                <div className="space-y-2">
+                    <label className="text-xs font-semibold text-slate-300 uppercase tracking-wide">
+                        Polygon Name
+                    </label>
+                    <Input
+                        value={name}
+                        onChange={(event) => setName(event.target.value)}
+                        placeholder="Region name"
+                        className="bg-slate-950/70 border-slate-700 text-white"
+                    />
+                </div>
+
+                <div className="space-y-2">
+                    <label className="text-xs font-semibold text-slate-300 uppercase tracking-wide">
+                        Area
+                    </label>
+                    <Input
+                        type="number"
+                        value={area}
+                        onChange={(event) => setArea(event.target.value)}
+                        placeholder="Optional"
+                        className="bg-slate-950/70 border-slate-700 text-white"
+                    />
+                </div>
+            </div>
+
+            <div className="space-y-2">
+                <label className="text-xs font-semibold text-slate-300 uppercase tracking-wide">
+                    Polygon Data
+                </label>
+                <textarea
+                    value={polygonText}
+                    onChange={(event) => setPolygonText(event.target.value)}
+                    placeholder="Paste WKT POLYGON/MULTIPOLYGON or GeoJSON Polygon/MultiPolygon"
+                    className="min-h-[220px] w-full rounded-lg border border-slate-700 bg-slate-950/70 px-3 py-2 text-sm text-white outline-none focus:border-blue-500"
+                />
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-[1fr_auto] gap-4 items-end">
+                <div className="space-y-2">
+                    <label className="text-xs font-semibold text-slate-300 uppercase tracking-wide">
+                        Session IDs
+                    </label>
+                    <Input
+                        value={sessionIdsText}
+                        onChange={(event) => setSessionIdsText(event.target.value)}
+                        placeholder="Optional comma-separated session ids"
+                        className="bg-slate-950/70 border-slate-700 text-white"
+                    />
+                </div>
+
+                <div className="flex flex-wrap gap-2">
+                    <label className="inline-flex cursor-pointer items-center rounded-lg border border-slate-600 bg-slate-800 px-3 py-2 text-sm text-slate-100 hover:bg-slate-700">
+                        <Upload className="h-4 w-4 mr-2" />
+                        Import File
+                        <input
+                            type="file"
+                            accept=".geojson,.json,.wkt,.txt"
+                            onChange={handleFileChange}
+                            className="hidden"
+                        />
+                    </label>
+                    <Button
+                        onClick={handleImport}
+                        disabled={importing}
+                        className="bg-blue-600 hover:bg-blue-700 rounded-lg"
+                    >
+                        {importing ? (
+                            <>
+                                <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
+                                Importing...
+                            </>
+                        ) : (
+                            <>
+                                <MapPinned className="h-4 w-4 mr-2" />
+                                Save Region
+                            </>
+                        )}
+                    </Button>
+                </div>
+            </div>
+        </div>
+    );
+};
+
 const SettingsPage = ({ onSaveSuccess }) => {
     const { user } = useAuth();
+    const [activeTab, setActiveTab] = useState("thresholds");
     const [thresholds, setThresholds] = useState(null);
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
@@ -762,144 +1002,183 @@ const SettingsPage = ({ onSaveSuccess }) => {
             <div className="max-w-6xl mx-auto">
                 <Card className="bg-slate-900/80 border-slate-700/80 rounded-2xl shadow-xl overflow-hidden">
                     <CardHeader className="border-b border-slate-700/70 bg-slate-900/90">
-                        <CardTitle className="text-white text-xl tracking-tight">Threshold Configuration</CardTitle>
+                        <CardTitle className="text-white text-xl tracking-tight">Settings</CardTitle>
                         <CardDescription className="text-slate-400">
-                            Configure min/max value ranges and colors for map visualization
+                            Configure map thresholds and imported polygon regions
                         </CardDescription>
+                        <div className="flex flex-wrap gap-2 pt-3">
+                            <Button
+                                type="button"
+                                variant={activeTab === "thresholds" ? "default" : "outline"}
+                                onClick={() => setActiveTab("thresholds")}
+                                className={activeTab === "thresholds"
+                                    ? "bg-blue-600 hover:bg-blue-700 text-white rounded-lg"
+                                    : "border-slate-600 !bg-slate-800 hover:!bg-slate-700 text-slate-100 rounded-lg"
+                                }
+                            >
+                                Thresholds
+                            </Button>
+                            <Button
+                                type="button"
+                                variant={activeTab === "polygon-import" ? "default" : "outline"}
+                                onClick={() => setActiveTab("polygon-import")}
+                                className={activeTab === "polygon-import"
+                                    ? "bg-blue-600 hover:bg-blue-700 text-white rounded-lg"
+                                    : "border-slate-600 !bg-slate-800 hover:!bg-slate-700 text-slate-100 rounded-lg"
+                                }
+                            >
+                                <MapPinned className="h-4 w-4 mr-2" />
+                                Polygon Import
+                            </Button>
+                        </div>
                     </CardHeader>
 
                     <CardContent className="pt-5">
-                        <div className="flex flex-wrap gap-2.5">
-                            {Object.entries(allParameters).map(([key, name]) => {
-                                const count = getParamCount(key);
-                                const isActive = activeParam === key;
-                                
-                                return (
-                                    <Button
-                                        key={key}
-                                        variant={isActive ? "default" : "outline"}
-                                        onClick={() => toggleParam(key)}
-                                        className={isActive 
-                                            ? "bg-blue-600 hover:bg-blue-700 text-white ring-2 ring-blue-400/50 rounded-full px-4"
-                                            : "border-slate-500 !bg-slate-600 hover:!bg-slate-700 text-gray-100 rounded-full px-4"
-                                        }
-                                    >
-                                        {name}
-                                        {count !== null && count > 0 && (
-                                            <span className="ml-2 px-1.5 py-0.5 text-[10px] bg-slate-900/50 border border-slate-300/20 rounded-full">
-                                                {count}
-                                            </span>
-                                        )}
-                                    </Button>
-                                );
-                            })}
-                        </div>
-
-                        {activeParam === "coveragehole" && (
-                            <CoverageHoleForm
-                                value={thresholds.coveragehole}
-                                setValue={val => updateParam("coveragehole", val)}
-                                onClose={handleClose}
-                            />
-                        )}
-
-                        {activeParam === "volte_call" && (
-                            <VoLTECallForm
-                                value={thresholds.volte_call}
-                                setValue={val => updateParam("volte_call", val)}
-                                onClose={handleClose}
-                            />
-                        )}
-
-                        {activeParam && activeParam !== "coveragehole" && activeParam !== "volte_call" && (
-                            <ThresholdForm
-                                key={activeParam}
-                                paramKey={activeParam}
-                                paramName={allParameters[activeParam]}
-                                initialData={thresholds[activeParam] || []}
-                                onUpdate={data => updateParam(activeParam, data)}
-                                onClose={handleClose}
-                            />
-                        )}
-
-                        {!activeParam && (
-                            <div className="mt-6 p-5 bg-slate-900/70 rounded-2xl border border-slate-700/70">
-                                <h4 className="text-sm font-semibold text-slate-200 mb-3 uppercase tracking-wide">
-                                    Current Configuration Summary
-                                </h4>
-                                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
+                        {activeTab === "thresholds" ? (
+                            <>
+                                <div className="flex flex-wrap gap-2.5">
                                     {Object.entries(allParameters).map(([key, name]) => {
-                                        if (key === "coveragehole") {
-                                            return (
-                                                <div 
-                                                    key={key} 
-                                                    className="p-3.5 bg-gradient-to-br from-slate-800 to-slate-900 border border-slate-700 rounded-xl cursor-pointer hover:border-blue-500/40 transition-all"
-                                                    onClick={() => toggleParam(key)}
-                                                >
-                                                    <div className="text-xs text-slate-400">{name}</div>
-                                                    <div className="text-lg font-bold text-white">
-                                                        {thresholds.coveragehole} dBm
-                                                    </div>
-                                                </div>
-                                            );
-                                        }
+                                        const count = getParamCount(key);
+                                        const isActive = activeParam === key;
                                         
-                                        const data = thresholds[key] || [];
                                         return (
-                                            <div 
-                                                key={key} 
-                                                className="p-3.5 bg-gradient-to-br from-slate-800 to-slate-900 border border-slate-700 rounded-xl cursor-pointer hover:border-blue-500/40 transition-all"
+                                            <Button
+                                                key={key}
+                                                variant={isActive ? "default" : "outline"}
                                                 onClick={() => toggleParam(key)}
+                                                className={isActive 
+                                                    ? "bg-blue-600 hover:bg-blue-700 text-white ring-2 ring-blue-400/50 rounded-full px-4"
+                                                    : "border-slate-500 !bg-slate-600 hover:!bg-slate-700 text-gray-100 rounded-full px-4"
+                                                }
                                             >
-                                                <div className="text-xs text-slate-400">{name}</div>
-                                                <div className="text-lg font-bold text-white">
-                                                    {data.length} range{data.length !== 1 ? 's' : ''}
-                                                </div>
-                                                {data.length > 0 && (
-                                                    <div className="flex gap-1 mt-2">
-                                                        {data.slice(0, 4).map((row, i) => (
-                                                            <div
-                                                                key={row.id || i}
-                                                                className="w-4 h-4 rounded"
-                                                                style={{ backgroundColor: row.color }}
-                                                            />
-                                                        ))}
-                                                        {data.length > 4 && (
-                                                            <span className="text-xs text-slate-400">+{data.length - 4}</span>
-                                                        )}
-                                                    </div>
+                                                {name}
+                                                {count !== null && count > 0 && (
+                                                    <span className="ml-2 px-1.5 py-0.5 text-[10px] bg-slate-900/50 border border-slate-300/20 rounded-full">
+                                                        {count}
+                                                    </span>
                                                 )}
-                                            </div>
+                                            </Button>
                                         );
                                     })}
                                 </div>
-                            </div>
+
+                                {activeParam === "coveragehole" && (
+                                    <CoverageHoleForm
+                                        value={thresholds.coveragehole}
+                                        setValue={val => updateParam("coveragehole", val)}
+                                        onClose={handleClose}
+                                    />
+                                )}
+
+                                {activeParam === "volte_call" && (
+                                    <VoLTECallForm
+                                        value={thresholds.volte_call}
+                                        setValue={val => updateParam("volte_call", val)}
+                                        onClose={handleClose}
+                                    />
+                                )}
+
+                                {activeParam && activeParam !== "coveragehole" && activeParam !== "volte_call" && (
+                                    <ThresholdForm
+                                        key={activeParam}
+                                        paramKey={activeParam}
+                                        paramName={allParameters[activeParam]}
+                                        initialData={thresholds[activeParam] || []}
+                                        onUpdate={data => updateParam(activeParam, data)}
+                                        onClose={handleClose}
+                                    />
+                                )}
+
+                                {!activeParam && (
+                                    <div className="mt-6 p-5 bg-slate-900/70 rounded-2xl border border-slate-700/70">
+                                        <h4 className="text-sm font-semibold text-slate-200 mb-3 uppercase tracking-wide">
+                                            Current Configuration Summary
+                                        </h4>
+                                        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
+                                            {Object.entries(allParameters).map(([key, name]) => {
+                                                if (key === "coveragehole") {
+                                                    return (
+                                                        <div 
+                                                            key={key} 
+                                                            className="p-3.5 bg-gradient-to-br from-slate-800 to-slate-900 border border-slate-700 rounded-xl cursor-pointer hover:border-blue-500/40 transition-all"
+                                                            onClick={() => toggleParam(key)}
+                                                        >
+                                                            <div className="text-xs text-slate-400">{name}</div>
+                                                            <div className="text-lg font-bold text-white">
+                                                                {thresholds.coveragehole} dBm
+                                                            </div>
+                                                        </div>
+                                                    );
+                                                }
+                                                
+                                                const data = thresholds[key] || [];
+                                                return (
+                                                    <div 
+                                                        key={key} 
+                                                        className="p-3.5 bg-gradient-to-br from-slate-800 to-slate-900 border border-slate-700 rounded-xl cursor-pointer hover:border-blue-500/40 transition-all"
+                                                        onClick={() => toggleParam(key)}
+                                                    >
+                                                        <div className="text-xs text-slate-400">{name}</div>
+                                                        <div className="text-lg font-bold text-white">
+                                                            {data.length} range{data.length !== 1 ? 's' : ''}
+                                                        </div>
+                                                        {data.length > 0 && (
+                                                            <div className="flex gap-1 mt-2">
+                                                                {data.slice(0, 4).map((row, i) => (
+                                                                    <div
+                                                                        key={row.id || i}
+                                                                        className="w-4 h-4 rounded"
+                                                                        style={{ backgroundColor: row.color }}
+                                                                    />
+                                                                ))}
+                                                                {data.length > 4 && (
+                                                                    <span className="text-xs text-slate-400">+{data.length - 4}</span>
+                                                                )}
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                );
+                                            })}
+                                        </div>
+                                    </div>
+                                )}
+                            </>
+                        ) : (
+                            <PolygonImportPanel user={user} />
                         )}
                     </CardContent>
 
                     <CardFooter className="justify-between border-t border-slate-700/70 pt-4 bg-slate-900/90">
                         <div className="text-xs text-slate-400">
                             User: {user?.name || 'Unknown'} (ID: {user?.id || 'N/A'}) | 
-                            Threshold ID: {thresholds?.id || 'New'}
-                            {thresholds?.isDefault === 1 ? ' (Default)' : ' (Custom)'}
-                        </div>
-                        <Button 
-                            onClick={handleSave} 
-                            disabled={saving}
-                            className="bg-blue-600 hover:bg-blue-700 rounded-lg shadow-md"
-                        >
-                            {saving ? (
+                            {activeTab === "thresholds" ? (
                                 <>
-                                    <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
-                                    Saving...
+                                    Threshold ID: {thresholds?.id || 'New'}
+                                    {thresholds?.isDefault === 1 ? ' (Default)' : ' (Custom)'}
                                 </>
                             ) : (
-                                <>
-                                    <Save className="h-4 w-4 mr-2" />
-                                    Save Settings
-                                </>
+                                <>Company ID: {resolveCompanyId(user) || 'N/A'}</>
                             )}
-                        </Button>
+                        </div>
+                        {activeTab === "thresholds" && (
+                            <Button 
+                                onClick={handleSave} 
+                                disabled={saving}
+                                className="bg-blue-600 hover:bg-blue-700 rounded-lg shadow-md"
+                            >
+                                {saving ? (
+                                    <>
+                                        <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
+                                        Saving...
+                                    </>
+                                ) : (
+                                    <>
+                                        <Save className="h-4 w-4 mr-2" />
+                                        Save Settings
+                                    </>
+                                )}
+                            </Button>
+                        )}
                     </CardFooter>
                 </Card>
             </div>

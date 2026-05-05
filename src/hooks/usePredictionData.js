@@ -24,10 +24,20 @@ export const usePredictionData = (projectId, selectedMetric, enabled = true) => 
   const [colorSettings, setColorSettings] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+  const [hasFetched, setHasFetched] = useState(false);
+  const [hasData, setHasData] = useState(false);
   const abortControllerRef = useRef(null);
 
   const fetchData = useCallback(async (forceRefresh = false) => {
-    if (!projectId || !enabled) {
+    if (!projectId) {
+      setLocations([]);
+      setColorSettings([]);
+      setHasFetched(false);
+      setHasData(false);
+      return;
+    }
+
+    if (!enabled) {
       setLocations([]);
       setColorSettings([]);
       return;
@@ -44,6 +54,8 @@ export const usePredictionData = (projectId, selectedMetric, enabled = true) => 
       if (cached && Array.isArray(cached?.locations)) {
         setLocations(cached.locations);
         setColorSettings(Array.isArray(cached?.colorSettings) ? cached.colorSettings : []);
+        setHasFetched(true);
+        setHasData(cached.locations.length > 0);
         return;
       }
     }
@@ -131,6 +143,8 @@ export const usePredictionData = (projectId, selectedMetric, enabled = true) => 
 
         setLocations(formatted);
         setColorSettings(colorSetting);
+        setHasFetched(true);
+        setHasData(formatted.length > 0);
         writeProjectSessionCache(cacheKey, {
           locations: formatted,
           colorSettings: colorSetting,
@@ -142,6 +156,8 @@ export const usePredictionData = (projectId, selectedMetric, enabled = true) => 
       } else {
         toast.error(res?.Message || "No prediction data");
         setLocations([]);
+        setHasFetched(true);
+        setHasData(false);
       }
     } catch (err) {
       if (err.name === "AbortError") return;
@@ -153,11 +169,24 @@ export const usePredictionData = (projectId, selectedMetric, enabled = true) => 
   }, [projectId, selectedMetric, enabled]);
 
   useEffect(() => {
+    setHasFetched(false);
+    setHasData(false);
+  }, [projectId, selectedMetric]);
+
+  useEffect(() => {
     fetchData(false);
     return () => {
       if (abortControllerRef.current) abortControllerRef.current.abort();
     };
   }, [fetchData]);
 
-  return { locations, colorSettings, loading, error, refetch: () => fetchData(true) };
+  return {
+    locations,
+    colorSettings,
+    loading,
+    error,
+    hasFetched,
+    hasData,
+    refetch: () => fetchData(true),
+  };
 };

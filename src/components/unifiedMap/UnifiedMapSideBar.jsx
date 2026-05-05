@@ -190,19 +190,23 @@ const SegmentedControl = memo(
       className={`flex rounded-md overflow-hidden border border-slate-600 ${disabled ? "opacity-50" : ""
         }`}
     >
-      {options.map((option) => (
-        <button
-          key={option.value}
-          onClick={() => !disabled && onChange(option.value)}
-          disabled={disabled}
-          className={`flex-1 px-2 py-1.5 text-xs font-medium transition-all ${value === option.value
-            ? "bg-blue-600 text-white"
-            : "bg-slate-800 text-slate-400 hover:bg-slate-700 hover:text-slate-200"
-            } ${disabled ? "cursor-not-allowed" : "cursor-pointer"}`}
-        >
-          {option.label}
-        </button>
-      ))}
+      {options.map((option) => {
+        const optionDisabled = disabled || Boolean(option.disabled);
+        return (
+          <button
+            key={option.value}
+            onClick={() => !optionDisabled && onChange(option.value)}
+            disabled={optionDisabled}
+            title={option.title}
+            className={`flex-1 px-2 py-1.5 text-xs font-medium transition-all ${value === option.value
+              ? "bg-blue-600 text-white"
+              : "bg-slate-800 text-slate-400 hover:bg-slate-700 hover:text-slate-200"
+              } ${optionDisabled ? "cursor-not-allowed opacity-50" : "cursor-pointer"}`}
+          >
+            {option.label}
+          </button>
+        );
+      })}
     </div>
   ),
 );
@@ -336,6 +340,8 @@ const UnifiedMapSidebar = ({
   setEnableDataToggle,
   dataToggle,
   setDataToggle,
+  predictionLoading = false,
+  predictionDataUnavailable = false,
   enableSiteToggle,
   setEnableSiteToggle,
   setTechHandover,
@@ -1622,6 +1628,21 @@ const UnifiedMapSidebar = ({
                             color="green"
                           />
                         </div>
+                        <div className="rounded-lg bg-slate-900/40 p-2">
+                          <div className="flex items-center justify-between text-xs mb-2">
+                            <span className="text-slate-400">Log Grid Size</span>
+                          </div>
+                          <ThresholdInput
+                            value={Number(gridSizeMeters) || 20}
+                            onChange={(next) =>
+                              setGridSizeMeters?.(Math.round(next))
+                            }
+                            min={5}
+                            max={1000}
+                            step={5}
+                            unit="m"
+                          />
+                        </div>
                       </div>
                     )}
 
@@ -1630,9 +1651,18 @@ const UnifiedMapSidebar = ({
                   onChange={setDataToggle}
                   options={[
                     { value: "sample", label: "Sample" },
-                    { value: "prediction", label: "Prediction" },
+                    {
+                      value: "prediction",
+                      label: predictionLoading ? "Checking..." : "Prediction",
+                      disabled: predictionDataUnavailable,
+                      title: predictionDataUnavailable
+                        ? "No prediction points available"
+                        : undefined,
+                    },
                   ]}
                 />
+
+                
 
 
 

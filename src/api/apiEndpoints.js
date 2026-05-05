@@ -935,6 +935,13 @@ export const mapViewApi = {
 
   savePolygon: (payload) => api.post("/api/MapView/SavePolygon", payload),
 
+  importPolygon: (payload) =>
+    resolveProjectApiCall({
+      csharpCall: () => api.post("/api/MapView/ImportPolygon", payload),
+      localPythonCall: () =>
+        pythonApi.post("/api/local-mapview/polygons/import", payload),
+    }),
+
   savePolygonWithLogs: (payload) =>
     api.post("/api/MapView/SavePolygonWithLogs", payload),
 
