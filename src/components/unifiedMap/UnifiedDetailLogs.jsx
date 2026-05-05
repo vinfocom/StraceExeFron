@@ -784,7 +784,11 @@ function UnifiedDetailLogs({
   indoor,
   outdoor,
   technologyTransitions,
+  bandTransitions = [],
+  pciTransitions = [],
   techHandOver = false,
+  bandHandover = false,
+  pciHandover = false,
   durationTime,
   showN78Neighbors = false,
   n78NeighborData = [],
@@ -981,7 +985,7 @@ function UnifiedDetailLogs({
     if (!isSiteLayerVisible) {
       tabs = tabs.filter((tab) => tab.id !== "conditionLogs");
     }
-    if (!techHandOver) {
+    if (!techHandOver && !bandHandover && !pciHandover) {
       tabs = tabs.filter(tab => tab.id !== 'handover');
     }
     if (!canUseBenchmarkTab) {
@@ -999,6 +1003,8 @@ function UnifiedDetailLogs({
     showSiteMarkers,
     showSiteSectors,
     techHandOver,
+    bandHandover,
+    pciHandover,
     canUseBenchmarkTab,
     showN78Neighbors,
     n78NeighborData,
@@ -1444,7 +1450,11 @@ function UnifiedDetailLogs({
           )}
 
           {activeTab === "handover" && (
-            <HandoverAnalysisTab transitions={technologyTransitions} />
+            <HandoverAnalysisTab
+              transitions={technologyTransitions}
+              bandTransitions={bandTransitions}
+              pciTransitions={pciTransitions}
+            />
           )}
 
           {activeTab === "n78" && (

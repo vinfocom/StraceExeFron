@@ -3,6 +3,7 @@ import React, { useMemo, useState } from "react";
 import { ChevronDown, Layers, Settings2, X } from "lucide-react";
 import {
   PCI_COLOR_PALETTE,
+  getPciColor as getMetricPciColor,
   getMetricConfig,
   getMetricValueFromLog,
 } from "@/utils/metrics";
@@ -18,7 +19,10 @@ import {
 const METRIC_RANGE_EPSILON = 1e-9;
 
 const matchesMetricRange = (value, min, max, includeMax = false) => {
-  if (![value, min, max].every(Number.isFinite)) return false;
+  if (!Number.isFinite(value)) return false;
+  if (min === null && Number.isFinite(max)) return value < max;
+  if (Number.isFinite(min) && max === null) return value >= min;
+  if (![min, max].every(Number.isFinite)) return false;
   const lowerMatch = value >= min - METRIC_RANGE_EPSILON;
   const upperMatch = includeMax
     ? value <= max + METRIC_RANGE_EPSILON
@@ -76,6 +80,10 @@ const getNormalizedKey = (log, colorBy, scheme) => {
           ? normalizedBand
           : "Unknown";
     }
+    case "pci": {
+      const pci = Number.parseInt(log.pci ?? log.PCI ?? log.best_pci, 10);
+      return Number.isFinite(pci) ? String(pci) : "Unknown";
+    }
     default:
       return "Unknown";
   }
@@ -97,7 +105,12 @@ const ColorSchemeLegend = ({ colorBy, logs, activeFilter, onFilterChange }) => {
     const used = Object.entries(tempCounts)
       .filter(([key, count]) => count > 0 && !isUnknownLegendKey(key))
       .sort((a, b) => b[1] - a[1])
-      .map(([key]) => [key, scheme[key] || getLogColor(colorBy, key)]);
+      .map(([key]) => [
+        key,
+        colorBy === "pci"
+          ? getMetricPciColor(key)
+          : scheme[key] || getLogColor(colorBy, key),
+      ]);
 
     return { counts: tempCounts, total: logs?.length || 0, usedEntries: used };
   }, [logs, colorBy, scheme]);
@@ -324,7 +337,12 @@ const MetricThresholdLegend = ({
 
   const { validCount, invalidCount, unmatchedCount, usedThresholds } = useMemo(() => {
     if (!logs?.length || !normalizedThresholds.length) {
-      return { validCount: 0, invalidCount: 0, unmatchedCount: 0, usedThresholds: [] };
+      return {
+        validCount: 0,
+        invalidCount: 0,
+        unmatchedCount: 0,
+        usedThresholds: [],
+      };
     }
 
     const tempCounts = new Array(normalizedThresholds.length).fill(0);
@@ -348,25 +366,7 @@ const MetricThresholdLegend = ({
       if (idx !== -1) {
         tempCounts[idx]++;
       } else {
-        const mins = normalizedThresholds.map((t) => t.minNum);
-        const maxs = normalizedThresholds.map((t) => t.maxNum);
-
-        if (mins.length && maxs.length) {
-          const globalMin = Math.min(...mins);
-          const globalMax = Math.max(...maxs);
-
-          if (val < globalMin) {
-            const i = normalizedThresholds.findIndex((t) => t.minNum === globalMin);
-            if (i !== -1) tempCounts[i]++;
-          } else if (val >= globalMax) {
-            const i = normalizedThresholds.findIndex((t) => t.maxNum === globalMax);
-            if (i !== -1) tempCounts[i]++;
-          } else {
-            unmatched++;
-          }
-        } else {
-          unmatched++;
-        }
+        unmatched++;
       }
     });
 
@@ -404,7 +404,7 @@ const MetricThresholdLegend = ({
     );
   }
 
-  if (!usedThresholds.length) {
+  if (!usedThresholds.length && unmatchedCount === 0) {
     return (
       <div className="text-xs text-gray-500 text-center py-3">
         No data available

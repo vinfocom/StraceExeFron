@@ -25,6 +25,7 @@ const CATEGORY_GRID_METRICS = new Set([
   "best_technology",
   "best_pci",
 ]);
+const CATEGORY_COLOR_MODES = new Set(["provider", "operator", "band", "technology", "pci"]);
 
 const toFiniteNumber = (value) => {
   const parsed = Number.parseFloat(value);
@@ -82,6 +83,31 @@ const incrementCounter = (counter, rawValue, normalizer = (value) => value) => {
   counter.set(key, (counter.get(key) || 0) + 1);
 };
 
+const pushCategoryMetricValue = (counter, rawCategory, metricValue) => {
+  const key = String(rawCategory || "").trim();
+  if (!key || key === "Unknown" || !Number.isFinite(metricValue)) return;
+  const bucket = counter.get(key) || [];
+  bucket.push(metricValue);
+  counter.set(key, bucket);
+};
+
+const pickBestCategoryByMetric = (counter, method, lowerIsBetter) => {
+  if (!(counter instanceof Map) || counter.size === 0) return null;
+
+  let best = null;
+  counter.forEach((values, name) => {
+    const value = getAggregateValue(values, method);
+    if (!Number.isFinite(value)) return;
+    if (
+      !best ||
+      (lowerIsBetter ? value < best.value : value > best.value)
+    ) {
+      best = { name, value, count: values.length };
+    }
+  });
+  return best;
+};
+
 const getTopCount = (counter) => {
   if (!(counter instanceof Map) || counter.size === 0) return 0;
   let best = 0;
@@ -126,6 +152,7 @@ export const useUnifiedGridViewData = ({
   enabled = false,
   locations = EMPTY_ARRAY,
   selectedMetric = "rsrp",
+  colorBy = null,
   gridSizeMeters = 20,
   aggregationMethod = "median",
 }) => {
@@ -181,6 +208,15 @@ export const useUnifiedGridViewData = ({
     const normalizedAggregationMethod = String(aggregationMethod || "median")
       .trim()
       .toLowerCase();
+    const normalizedColorBy = String(colorBy || "metric").trim().toLowerCase();
+    const useCategoryColor = CATEGORY_COLOR_MODES.has(normalizedColorBy);
+    const lowerIsBetterMetrics = new Set([
+      "latency",
+      "jitter",
+      "packet_loss",
+      "num_cells",
+    ]);
+    const isLowerBetterMetric = lowerIsBetterMetrics.has(selectedMetricKey);
 
     const buckets = new Map();
 
@@ -205,6 +241,10 @@ export const useUnifiedGridViewData = ({
           bands: new Map(),
           technologies: new Map(),
           pcis: new Map(),
+          providerMetrics: new Map(),
+          bandMetrics: new Map(),
+          technologyMetrics: new Map(),
+          pciMetrics: new Map(),
           sessions: new Set(),
         });
       }
@@ -247,6 +287,32 @@ export const useUnifiedGridViewData = ({
           return Number.isFinite(parsed) ? String(parsed) : "Unknown";
         },
       );
+
+      const selectedMetricValue = toFiniteNumber(
+        getMetricValueFromLog(loc, selectedMetricKey),
+      );
+      if (selectedMetricValue !== null) {
+        const providerName =
+          normalizeProviderName(
+            loc?.provider ?? loc?.operator ?? loc?.m_alpha_long ?? loc?.network,
+          ) || "Unknown";
+        const technologyName =
+          normalizeTechName(
+            loc?.technology ?? loc?.networkType ?? loc?.network,
+            loc?.band ?? loc?.primaryBand,
+          ) || "Unknown";
+        const bandName = normalizeBandName(loc?.band ?? loc?.primaryBand);
+        const pciValue = Number.parseInt(loc?.pci, 10);
+
+        pushCategoryMetricValue(bucket.providerMetrics, providerName, selectedMetricValue);
+        pushCategoryMetricValue(bucket.bandMetrics, bandName, selectedMetricValue);
+        pushCategoryMetricValue(bucket.technologyMetrics, technologyName, selectedMetricValue);
+        pushCategoryMetricValue(
+          bucket.pciMetrics,
+          Number.isFinite(pciValue) ? String(pciValue) : "Unknown",
+          selectedMetricValue,
+        );
+      }
     }
 
     const gridLocations = Array.from(buckets.values())
@@ -276,6 +342,46 @@ export const useUnifiedGridViewData = ({
         const dominantProvider = pickTopCategory(bucket.providers);
         const dominantBand = pickTopCategory(bucket.bands);
         const dominantTechnology = pickTopCategory(bucket.technologies);
+        const bestProviderByMetric = pickBestCategoryByMetric(
+          bucket.providerMetrics,
+          normalizedAggregationMethod,
+          isLowerBetterMetric,
+        );
+        const bestTechnologyByMetric = pickBestCategoryByMetric(
+          bucket.technologyMetrics,
+          normalizedAggregationMethod,
+          isLowerBetterMetric,
+        );
+        const bestBandByMetric = pickBestCategoryByMetric(
+          bucket.bandMetrics,
+          normalizedAggregationMethod,
+          isLowerBetterMetric,
+        );
+        const bestPciByMetric = pickBestCategoryByMetric(
+          bucket.pciMetrics,
+          normalizedAggregationMethod,
+          isLowerBetterMetric,
+        );
+        const colorProvider =
+          useCategoryColor && ["provider", "operator"].includes(normalizedColorBy)
+            ? bestProviderByMetric?.name || dominantProvider
+            : dominantProvider;
+        const colorTechnology =
+          useCategoryColor && normalizedColorBy === "technology"
+            ? bestTechnologyByMetric?.name || dominantTechnology
+            : dominantTechnology;
+        const colorBand =
+          useCategoryColor && normalizedColorBy === "band"
+            ? bestBandByMetric?.name || dominantBand
+            : dominantBand;
+        const colorPciRaw =
+          useCategoryColor && normalizedColorBy === "pci"
+            ? bestPciByMetric?.name ?? dominantPciRaw
+            : dominantPciRaw;
+        const colorPci =
+          colorPciRaw !== "Unknown" && Number.isFinite(Number(colorPciRaw))
+            ? Number(colorPciRaw)
+            : null;
         const selectedMetricValue = CATEGORY_GRID_METRICS.has(selectedMetricKey)
           ? selectedMetricKey === "best_pci"
             ? dominantPci
@@ -292,15 +398,23 @@ export const useUnifiedGridViewData = ({
           sample_count: bucket.sampleCount,
           total_logs: bucket.sampleCount,
           session_count: bucket.sessions.size,
-          provider: dominantProvider,
-          operator: dominantProvider,
-          best_operator: dominantProvider,
-          band: dominantBand,
-          technology: dominantTechnology,
-          best_technology: dominantTechnology,
-          networkType: dominantTechnology,
-          pci: dominantPci,
-          best_pci: dominantPci,
+          provider: colorProvider,
+          operator: colorProvider,
+          best_operator: colorProvider,
+          band: colorBand,
+          best_band: colorBand,
+          technology: colorTechnology,
+          best_technology: colorTechnology,
+          networkType: colorTechnology,
+          pci: colorPci,
+          best_pci: colorPci,
+          dominant_provider: dominantProvider,
+          dominant_technology: dominantTechnology,
+          dominant_pci: dominantPci,
+          best_provider_value: bestProviderByMetric?.value ?? null,
+          best_band_value: bestBandByMetric?.value ?? null,
+          best_technology_value: bestTechnologyByMetric?.value ?? null,
+          best_pci_value: bestPciByMetric?.value ?? null,
           provider_count: getTopCount(bucket.providers),
           technology_count: getTopCount(bucket.technologies),
           pci_count: getTopCount(bucket.pcis),
@@ -365,7 +479,7 @@ export const useUnifiedGridViewData = ({
         aggregationMethod: normalizedAggregationMethod,
       },
     };
-  }, [enabled, locations, selectedMetric, gridSizeMeters, aggregationMethod]);
+  }, [enabled, locations, selectedMetric, colorBy, gridSizeMeters, aggregationMethod]);
 };
 
 export default useUnifiedGridViewData;

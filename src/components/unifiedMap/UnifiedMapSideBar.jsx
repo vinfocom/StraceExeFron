@@ -296,9 +296,6 @@ const GRID_VIEW_ALLOWED_METRICS = Object.freeze([
   "mos",
   "latency",
   "jitter",
-  "best_operator",
-  "best_technology",
-  "best_pci",
 ]);
 const GRID_ONLY_METRICS = Object.freeze([
   "best_operator",
@@ -353,6 +350,7 @@ const UnifiedMapSidebar = ({
   pciTransitions,
   siteToggle,
   setSiteToggle,
+  siteRowCount = 0,
   sitePredictionVersion = "original",
   setSitePredictionVersion,
   modeMethod,
@@ -499,14 +497,9 @@ const UnifiedMapSidebar = ({
       ];
 
       if (!enableGrid) return allOptions;
-      return [
-        ...allOptions.filter((option) =>
-          GRID_VIEW_ALLOWED_METRICS.includes(option.value),
-        ),
-        { value: "best_operator", label: "Best Operator" },
-        { value: "best_technology", label: "Best Technology" },
-        { value: "best_pci", label: "Best PCI" },
-      ];
+      return allOptions.filter((option) =>
+        GRID_VIEW_ALLOWED_METRICS.includes(option.value),
+      );
     },
     [enableGrid],
   );
@@ -514,7 +507,13 @@ const UnifiedMapSidebar = ({
   const colorOptions = useMemo(
     () => {
       if (enableGrid) {
-        return [{ value: "metric", label: "By Metric Value" }];
+        return [
+          { value: "metric", label: "By Metric Value" },
+          { value: "provider", label: "Best Operator" },
+          { value: "band", label: "Best Band" },
+          { value: "technology", label: "Best Technology" },
+          { value: "pci", label: "Best Server" },
+        ];
       }
       return [
         { value: "metric", label: "By Metric Value" },
@@ -541,6 +540,17 @@ const UnifiedMapSidebar = ({
     setDataFilters?.({ providers: [], bands: [], technologies: [], indoorOutdoor: [] });
     setPciThreshold(0);
   }, [setDataFilters, setPciThreshold]);
+
+  const handleSiteToggleChange = useCallback(
+    (checked) => {
+      setEnableSiteToggle?.(checked);
+      if (!checked) return;
+
+      const count = Number(siteRowCount) || 0;
+      toast.info(`${count} ${count === 1 ? "" : "s"} in site`);
+    },
+    [setEnableSiteToggle, siteRowCount],
+  );
 
   const activeDataFiltersCount = useMemo(() => {
     if (!dataFilters) return 0;
@@ -759,6 +769,18 @@ const UnifiedMapSidebar = ({
     if (normalizedMode === "min" || normalizedMode === "operator_min") return "min";
     return "max";
   }, [storedGridMetricMode]);
+  const storedGridVersion = useMemo(() => {
+    const normalizedVersion = String(sitePredictionVersion || "original").trim().toLowerCase();
+    if (
+      normalizedVersion === "updated" ||
+      normalizedVersion === "optimized" ||
+      normalizedVersion === "optimised"
+    ) {
+      return "updated";
+    }
+    if (normalizedVersion === "delta") return "delta";
+    return "original";
+  }, [sitePredictionVersion]);
   const handleStoredGridLayerModeChange = useCallback(
     (nextLayerMode) => {
       const aggregateMode = storedGridAggregateMode || "max";
@@ -798,6 +820,12 @@ const UnifiedMapSidebar = ({
       );
     },
     [setStoredGridMetricMode, storedGridLayerMode],
+  );
+  const handleStoredGridVersionChange = useCallback(
+    (nextVersion) => {
+      setSitePredictionVersion?.(nextVersion);
+    },
+    [setSitePredictionVersion],
   );
   const stopLtePredictionMonitoring = useCallback((dismissToast = false) => {
     if (ltePredictionPollingRef.current) {
@@ -1004,7 +1032,6 @@ const UnifiedMapSidebar = ({
 
         const scenario = statusResponse?.scenario;
         const outputFile = statusResponse?.output;
-        const downloadUrl = predictionApi.getLteTiltRecommendationDownloadUrl(outputFile);
 
         toast.update(toastId, {
           render: scenario
@@ -1017,8 +1044,10 @@ const UnifiedMapSidebar = ({
           draggable: true,
         });
 
-        if (downloadUrl) {
-          window.open(downloadUrl, "_blank", "noopener,noreferrer");
+        if (outputFile) {
+          predictionApi.downloadLteTiltRecommendation(outputFile).catch((error) => {
+            toast.error(error?.message || "LTE recommendation file download failed.");
+          });
         }
 
         lteTiltRecommendationToastIdRef.current = null;
@@ -1535,46 +1564,11 @@ const UnifiedMapSidebar = ({
                       useSwitch={true}
                     />
 
-                    {!canEnableGridView && (
-                      <div className="rounded-lg border border-amber-700/40 bg-amber-950/20 px-2 py-1.5 text-xs text-amber-200">
-                        Grid view requires at least one raw filter polygon.
-                      </div>
-                    )}
+                    
 
                     {enableGrid && (
                       <div className="rounded-lg border border-cyan-700/40 bg-cyan-950/20 p-2 text-xs space-y-2">
-                        <div className="grid grid-cols-2 gap-2">
-                          <InfoBadge
-                            label="Cells"
-                            value={gridAggregationSummary?.populatedCells ?? 0}
-                            color="cyan"
-                          />
-                          <InfoBadge
-                            label="Samples"
-                            value={gridAggregationSummary?.totalSamples ?? 0}
-                            color="blue"
-                          />
-                        </div>
-                        <div className="grid grid-cols-2 gap-2">
-                          <InfoBadge
-                            label="Avg/Cell"
-                            value={
-                              Number.isFinite(Number(gridAggregationSummary?.averageSamplesPerCell))
-                                ? Number(gridAggregationSummary.averageSamplesPerCell).toFixed(1)
-                                : "0.0"
-                            }
-                            color="teal"
-                          />
-                          <InfoBadge
-                            label="Metric Avg"
-                            value={
-                              Number.isFinite(Number(gridAggregationSummary?.selectedMetricAverage))
-                                ? Number(gridAggregationSummary.selectedMetricAverage).toFixed(1)
-                                : "N/A"
-                            }
-                            color="green"
-                          />
-                        </div>
+                        
                         <SelectRow
                           label="Grid Aggregate"
                           value={lteGridAggregationMethod || "median"}
@@ -1588,46 +1582,7 @@ const UnifiedMapSidebar = ({
                           ]}
                           placeholder="Select grid aggregate"
                         />
-                        <div className="grid grid-cols-2 gap-2">
-                          <InfoBadge
-                            label="Average"
-                            value={
-                              Number.isFinite(Number(gridAggregationSummary?.selectedMetricStats?.avg))
-                                ? Number(gridAggregationSummary.selectedMetricStats.avg).toFixed(1)
-                                : "N/A"
-                            }
-                            color="cyan"
-                          />
-                          <InfoBadge
-                            label="Median"
-                            value={
-                              Number.isFinite(Number(gridAggregationSummary?.selectedMetricStats?.median))
-                                ? Number(gridAggregationSummary.selectedMetricStats.median).toFixed(1)
-                                : "N/A"
-                            }
-                            color="teal"
-                          />
-                        </div>
-                        <div className="grid grid-cols-2 gap-2">
-                          <InfoBadge
-                            label="Minimum"
-                            value={
-                              Number.isFinite(Number(gridAggregationSummary?.selectedMetricStats?.min))
-                                ? Number(gridAggregationSummary.selectedMetricStats.min).toFixed(1)
-                                : "N/A"
-                            }
-                            color="blue"
-                          />
-                          <InfoBadge
-                            label="Maximum"
-                            value={
-                              Number.isFinite(Number(gridAggregationSummary?.selectedMetricStats?.max))
-                                ? Number(gridAggregationSummary.selectedMetricStats.max).toFixed(1)
-                                : "N/A"
-                            }
-                            color="green"
-                          />
-                        </div>
+                        
                         <div className="rounded-lg bg-slate-900/40 p-2">
                           <div className="flex items-center justify-between text-xs mb-2">
                             <span className="text-slate-400">Log Grid Size</span>
@@ -1887,7 +1842,7 @@ const UnifiedMapSidebar = ({
             <ToggleRow
               label="Sites"
               checked={enableSiteToggle}
-              onChange={setEnableSiteToggle}
+              onChange={handleSiteToggleChange}
               useSwitch={true}
             />
 
@@ -2151,8 +2106,34 @@ const UnifiedMapSidebar = ({
 
           {canUseGridApi && (
             <div className="pt-2 border-t border-slate-700/50 space-y-2">
+              <div className="pt-1 bg-slate-900/40 rounded-lg p-2 space-y-2">
+                <Label className="text-xs font-semibold text-blue-400 flex items-center gap-1">
+                  <Grid3X3 className="w-3 h-3" /> Stored Grid Version
+                </Label>
+                <SegmentedControl
+                  value={storedGridVersion}
+                  onChange={handleStoredGridVersionChange}
+                  options={[
+                    { value: "original", label: "Baseline" },
+                    { value: "updated", label: "Optimized" },
+                    { value: "delta", label: "Delta" },
+                  ]}
+                  disabled={
+                    deltaGridButtonsDisabled ||
+                    Boolean(deltaGridApiState?.computing) ||
+                    Boolean(deltaGridApiState?.fetching)
+                  }
+                />
+              </div>
+
               <ToggleRow
-                label="Show Stored Grid"
+                label={`Show Stored ${
+                  storedGridVersion === "updated"
+                    ? "Optimized"
+                    : storedGridVersion === "delta"
+                      ? "Delta"
+                      : "Baseline"
+                } Grid`}
                 description={
                   deltaGridApiState?.computing
                     ? "Computing grid..."

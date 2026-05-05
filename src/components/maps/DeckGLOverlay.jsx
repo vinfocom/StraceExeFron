@@ -108,7 +108,7 @@ const DeckGLOverlay = ({
   showPrimaryLogs = true,
   neighbors = [],
   getNeighborColor,
-  neighborSquareSize = 5,
+  neighborSquareSize = 12,
   neighborOpacity = 0.7,
   onNeighborClick,
   onImageLogClick,

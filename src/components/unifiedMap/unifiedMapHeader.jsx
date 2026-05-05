@@ -324,7 +324,7 @@ function UnifiedHeader({
   logRadius = 12,
   setLogRadius,
   neighborLogsAvailable = false,
-  neighborSquareSize = 8,
+  neighborSquareSize = 12,
   setNeighborSquareSize,
   triangleSizeAvailable = false,
   triangleScaleMultiplier = 1,
@@ -546,7 +546,7 @@ function UnifiedHeader({
     : 12;
   const currentNeighborSquareSize = Number.isFinite(Number(neighborSquareSize))
     ? Number(neighborSquareSize)
-    : 8;
+    : 12;
   const currentTriangleScaleMultiplier = Number.isFinite(
     Number(triangleScaleMultiplier),
   )
@@ -852,7 +852,7 @@ function UnifiedHeader({
                         <ChevronDown className="h-3.5 w-3.5" />
                       </Button>
                     </DropdownMenuTrigger>
-                    <DropdownMenuContent align="start" className="bg-white text-slate-800">
+                    <DropdownMenuContent align="end" className="bg-white text-slate-800">
                       <DropdownMenuItem onClick={() => navigate("/dashboard")}>
                         Dashboard
                       </DropdownMenuItem>
@@ -880,7 +880,7 @@ function UnifiedHeader({
                       <ChevronDown className="h-3.5 w-3.5" />
                     </Button>
                   </DropdownMenuTrigger>
-                  <DropdownMenuContent align="start" className="bg-white text-slate-800">
+                  <DropdownMenuContent align="end" className="bg-white text-slate-800">
                     <DropdownMenuLabel>Utility</DropdownMenuLabel>
                     <DropdownMenuSeparator />
                     {utilityMenuItems.map((item) => (

@@ -45,7 +45,8 @@ const DYNAMIC_COLOR_PALETTE = [
 const dynamicColorCache = {
   provider: {},
   technology: {},
-  band: {}
+  band: {},
+  pci: {},
 };
 
 const hashString = (str) => {
@@ -276,6 +277,9 @@ export const COLOR_SCHEMES = {
     n78: "#F472B6",
     Unknown: "#a8a6a2",
   },
+  pci: {
+    Unknown: "#a8a6a2",
+  },
 };
 
 export const getLogColor = (colorBy, value, defaultColor = "#a8a6a2") => {
@@ -300,6 +304,9 @@ export const getLogColor = (colorBy, value, defaultColor = "#a8a6a2") => {
     } else {
       normalizedValue = normalizeBandName(value);
     }
+  } else if (colorBy === "pci") {
+    const pci = Number.parseInt(normalizedValue, 10);
+    normalizedValue = Number.isFinite(pci) ? String(pci) : "Unknown";
   }
 
   if (!normalizedValue || normalizedValue === "Unknown") {
@@ -346,6 +353,7 @@ export const clearDynamicColorCache = () => {
   dynamicColorCache.provider = {};
   dynamicColorCache.technology = {};
   dynamicColorCache.band = {};
+  dynamicColorCache.pci = {};
 };
 
 export const registerColor = (colorBy, value, color) => {

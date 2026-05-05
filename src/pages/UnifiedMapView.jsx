@@ -70,8 +70,15 @@ import {
 
 const DEFAULT_CENTER = { lat: 28.64453086, lng: 77.37324242 };
 const DEFAULT_MAP_ZOOM = 13;
+const MAP_ZOOM_LOCK_STORAGE_KEY = "stracer:map-zoom-lock";
+const MAP_ZOOM_LOCK_EVENT = "stracer:map-zoom-lock-change";
 const EMPTY_POLYGONS = Object.freeze([]);
 const EMPTY_LIST = Object.freeze([]);
+
+const readInitialMapZoomLock = () => {
+  if (typeof window === "undefined") return false;
+  return window.localStorage.getItem(MAP_ZOOM_LOCK_STORAGE_KEY) === "1";
+};
 const UnifiedMapSidebar = lazy(
   () => import("@/components/unifiedMap/UnifiedMapSideBar.jsx"),
 );
@@ -105,9 +112,6 @@ const GRID_VIEW_SUPPORTED_METRICS = Object.freeze([
   "mos",
   "latency",
   "jitter",
-  "best_operator",
-  "best_technology",
-  "best_pci",
 ]);
 const GRID_ONLY_METRICS = Object.freeze([
   "best_operator",
@@ -667,6 +671,25 @@ const buildOrderedDriveLogs = (logs = []) =>
       return a.originalIndex - b.originalIndex;
     });
 
+const readHandoverMetric = (loc, keys = []) => {
+  for (const key of keys) {
+    const value = loc?.[key];
+    if (value !== null && value !== undefined && value !== "") {
+      const parsed = Number.parseFloat(value);
+      if (Number.isFinite(parsed)) return parsed;
+    }
+  }
+  return null;
+};
+
+const readHandoverValue = (loc, keys = []) => {
+  for (const key of keys) {
+    const value = loc?.[key];
+    if (value !== null && value !== undefined && value !== "") return value;
+  }
+  return null;
+};
+
 const buildHandoverTransitions = (logs = []) => {
   const orderedLogs = buildOrderedDriveLogs(logs);
   if (orderedLogs.length < 2) {
@@ -681,9 +704,12 @@ const buildHandoverTransitions = (logs = []) => {
   const bandTransitions = [];
   const pciTransitions = [];
 
-  let prevTech = normalizeTechName(orderedLogs[0].loc?.technology);
-  let prevBand = orderedLogs[0].loc?.band;
-  let prevPci = orderedLogs[0].loc?.pci;
+  let prevTech = normalizeTechName(
+    readHandoverValue(orderedLogs[0].loc, ["technology", "Technology", "networkType", "network"]),
+    readHandoverValue(orderedLogs[0].loc, ["band", "Band", "primaryBand"]),
+  );
+  let prevBand = readHandoverValue(orderedLogs[0].loc, ["band", "Band", "primaryBand"]);
+  let prevPci = readHandoverValue(orderedLogs[0].loc, ["pci", "PCI", "Pci", "physical_cell_id", "cell_id"]);
   let prevSessionKey = orderedLogs[0].sessionKey;
   let prevEntry = orderedLogs[0];
 
@@ -693,9 +719,12 @@ const buildHandoverTransitions = (logs = []) => {
     if (!loc) continue;
 
     if (currentEntry.sessionKey !== prevSessionKey) {
-      prevTech = normalizeTechName(loc.technology);
-      prevBand = loc.band;
-      prevPci = loc.pci;
+      prevTech = normalizeTechName(
+        readHandoverValue(loc, ["technology", "Technology", "networkType", "network"]),
+        readHandoverValue(loc, ["band", "Band", "primaryBand"]),
+      );
+      prevBand = readHandoverValue(loc, ["band", "Band", "primaryBand"]);
+      prevPci = readHandoverValue(loc, ["pci", "PCI", "Pci", "physical_cell_id", "cell_id"]);
       prevSessionKey = currentEntry.sessionKey;
       prevEntry = currentEntry;
       continue;
@@ -706,6 +735,15 @@ const buildHandoverTransitions = (logs = []) => {
     const hasCoordinates = Number.isFinite(lat) && Number.isFinite(lng);
     const displaySessionId =
       loc?.session_id ?? loc?.sessionId ?? loc?.SessionId ?? null;
+    const previousLog = prevEntry?.loc || {};
+    const signalMeta = {
+      rsrp: readHandoverMetric(previousLog, ["rsrp", "RSRP", "Rsrp", "lte_rsrp", "nr_rsrp"]),
+      nextRsrp: readHandoverMetric(loc, ["rsrp", "RSRP", "Rsrp", "lte_rsrp", "nr_rsrp"]),
+      rsrq: readHandoverMetric(previousLog, ["rsrq", "RSRQ", "Rsrq", "lte_rsrq", "nr_rsrq"]),
+      nextRsrq: readHandoverMetric(loc, ["rsrq", "RSRQ", "Rsrq", "lte_rsrq", "nr_rsrq"]),
+      pci: readHandoverValue(previousLog, ["pci", "PCI", "Pci", "physical_cell_id", "cell_id"]),
+      nextPci: readHandoverValue(loc, ["pci", "PCI", "Pci", "physical_cell_id", "cell_id"]),
+    };
     const transitionMeta = {
       atIndex: currentEntry.originalIndex,
       orderIndex: i,
@@ -722,6 +760,7 @@ const buildHandoverTransitions = (logs = []) => {
       session_id: displaySessionId,
       previousSequenceLogId: prevEntry?.logIdRaw ?? null,
       previousSequenceTimestamp: prevEntry?.timestampMs ?? null,
+      ...signalMeta,
     };
     const prevLat = Number(prevEntry?.loc?.lat ?? prevEntry?.loc?.latitude);
     const prevLng = Number(prevEntry?.loc?.lng ?? prevEntry?.loc?.longitude);
@@ -732,7 +771,10 @@ const buildHandoverTransitions = (logs = []) => {
       transitionMeta.toLng = lng;
     }
 
-    const currTech = normalizeTechName(loc.technology);
+    const currTech = normalizeTechName(
+      readHandoverValue(loc, ["technology", "Technology", "networkType", "network"]),
+      readHandoverValue(loc, ["band", "Band", "primaryBand"]),
+    );
     if (hasCoordinates && currTech && prevTech && currTech !== prevTech) {
       technologyTransitions.push({
         from: prevTech,
@@ -745,7 +787,7 @@ const buildHandoverTransitions = (logs = []) => {
     }
     prevTech = currTech;
 
-    const currBand = loc.band;
+    const currBand = readHandoverValue(loc, ["band", "Band", "primaryBand"]);
     if (
       hasCoordinates &&
       currBand &&
@@ -763,7 +805,7 @@ const buildHandoverTransitions = (logs = []) => {
     }
     prevBand = currBand;
 
-    const currPci = loc.pci;
+    const currPci = readHandoverValue(loc, ["pci", "PCI", "Pci", "physical_cell_id", "cell_id"]);
     if (
       hasCoordinates &&
       currPci !== "" &&
@@ -1112,7 +1154,7 @@ const UnifiedMapView = () => {
   const [viewport, setViewport] = useState(null);
   const [mapZoom, setMapZoom] = useState(DEFAULT_MAP_ZOOM);
   const [mapCenterFallback, setMapCenterFallback] = useState(DEFAULT_CENTER);
-  const [isZoomLocked, setIsZoomLocked] = useState(false);
+  const [isZoomLocked, setIsZoomLocked] = useState(readInitialMapZoomLock);
   const [colorBy, setColorBy] = useState(null);
   const [highlightedLogs, setHighlightedLogs] = useState(null);
 
@@ -1168,7 +1210,7 @@ const UnifiedMapView = () => {
   const [siteLegendFilter, setSiteLegendFilter] = useState(null);
   const [opacity, setOpacity] = useState(0.8);
   const [logRadius, setLogRadius] = useState(10);
-  const [neighborSquareSize, setNeighborSquareSize] = useState(4);
+  const [neighborSquareSize, setNeighborSquareSize] = useState(12);
   const [triangleScaleMultiplier, setTriangleScaleMultiplier] = useState(1);
   const [defaultSiteBeamwidth, setDefaultSiteBeamwidth] = useState(30);
   const [showSessionNeighbors, setShowSessionNeighbors] = useState(false);
@@ -1192,6 +1234,7 @@ const UnifiedMapView = () => {
   const [enableGrid, setEnableGrid] = useState(false);
   const [gridSizeMeters, setGridSizeMeters] = useState(20);
   const [gridCellStats, setGridCellStats] = useState({ total: 0, populated: 0 });
+  const [renderedGridLegendLogs, setRenderedGridLegendLogs] = useState(EMPTY_LIST);
   const [lteGridEnabled, setLteGridEnabled] = useState(false);
   const [lteGridSizeMeters, setLteGridSizeMeters] = useState(50);
   const [lteGridAggregationMethod, setLteGridAggregationMethod] =
@@ -1262,9 +1305,6 @@ const UnifiedMapView = () => {
       setSelectedMetric("rsrp");
     }
 
-    if (colorBy && String(colorBy).trim().toLowerCase() !== "metric") {
-      setColorBy(null);
-    }
   }, [enableGrid, selectedMetric, colorBy, setSelectedMetric]);
 
   useEffect(() => {
@@ -1364,6 +1404,14 @@ const UnifiedMapView = () => {
 
   useEffect(() => {
     zoomLockEnabledRef.current = Boolean(isZoomLocked);
+    if (typeof window !== "undefined") {
+      window.localStorage.setItem(MAP_ZOOM_LOCK_STORAGE_KEY, isZoomLocked ? "1" : "0");
+      window.dispatchEvent(
+        new CustomEvent(MAP_ZOOM_LOCK_EVENT, {
+          detail: { locked: Boolean(isZoomLocked) },
+        }),
+      );
+    }
     if (!isZoomLocked) {
       lockedZoomRef.current = null;
       return;
@@ -1376,6 +1424,18 @@ const UnifiedMapView = () => {
       setMapZoom((prev) => (prev === lockZoom ? prev : lockZoom));
     }
   }, [isZoomLocked, mapZoom]);
+
+  useEffect(() => {
+    const handleMapZoomLockChange = (event) => {
+      if (!event?.detail || typeof event.detail.locked !== "boolean") return;
+      setIsZoomLocked(event.detail.locked);
+    };
+
+    window.addEventListener(MAP_ZOOM_LOCK_EVENT, handleMapZoomLockChange);
+    return () => {
+      window.removeEventListener(MAP_ZOOM_LOCK_EVENT, handleMapZoomLockChange);
+    };
+  }, []);
 
   // --- Add Site Mode ---
   const [addSiteMode, setAddSiteMode] = useState(false);
@@ -2832,11 +2892,13 @@ const UnifiedMapView = () => {
     hasFilteringPolygons,
     filteringPolygonChecker,
   ]);
+  const effectiveGridColorBy = useMemo(() => colorBy, [colorBy]);
 
   const gridDisplayData = useUnifiedGridViewData({
     enabled: enableGrid,
     locations: finalDisplayLocations,
     selectedMetric,
+    colorBy: effectiveGridColorBy,
     gridSizeMeters,
     aggregationMethod: lteGridAggregationMethod,
   });
@@ -2845,6 +2907,7 @@ const UnifiedMapView = () => {
     enabled: enableGrid,
     locations: filteredLocations,
     selectedMetric,
+    colorBy: effectiveGridColorBy,
     gridSizeMeters,
     aggregationMethod: lteGridAggregationMethod,
   });
@@ -2853,6 +2916,8 @@ const UnifiedMapView = () => {
     () => Boolean(enableGrid) && !isStoredGridOverlayVisible,
     [enableGrid, isStoredGridOverlayVisible],
   );
+
+  
 
   const lteLayerLocations = useMemo(() => {
     const baseLocations = Array.isArray(ltePredictionLocations)
@@ -2968,7 +3033,9 @@ const UnifiedMapView = () => {
     }
 
     if (isUnifiedGridView) {
-      return gridDisplayData.gridLocations || EMPTY_LIST;
+      return renderedGridLegendLogs.length > 0
+        ? renderedGridLegendLogs
+        : gridDisplayData.gridLocations || EMPTY_LIST;
     }
 
     // Keep the normal logs legend while sample logs are still drawn, even if
@@ -2999,6 +3066,7 @@ const UnifiedMapView = () => {
     finalDisplayLocations,
     isUnifiedGridView,
     gridDisplayData.gridLocations,
+    renderedGridLegendLogs,
     isStoredGridOverlayVisible,
     storedDeltaGridCells,
     sitePredictionVersion,
@@ -3039,27 +3107,14 @@ const UnifiedMapView = () => {
     },
     [isStoredGridOverlayVisible, selectedMetric, sitePredictionVersion],
   );
-  const effectiveGridColorBy = useMemo(() => {
-    if (!isUnifiedGridView) return colorBy;
-    const normalizedMetric = String(selectedMetric || "").trim().toLowerCase();
-    if (normalizedMetric === "best_operator") return "provider";
-    if (normalizedMetric === "best_technology") return "technology";
-    return colorBy;
-  }, [isUnifiedGridView, selectedMetric, colorBy]);
   const legendColorBy = useMemo(() => {
     const isBestOperatorGridMode =
       ["best_operator", "operator_min", "operator_max"].includes(
         String(storedGridMetricMode || "").trim().toLowerCase(),
       );
     if (isStoredGridOverlayVisible && isBestOperatorGridMode) return "provider";
-    if (isUnifiedGridView && String(selectedMetric || "").trim().toLowerCase() === "best_operator") {
-      return "provider";
-    }
-    if (isUnifiedGridView && String(selectedMetric || "").trim().toLowerCase() === "best_technology") {
-      return "technology";
-    }
     return effectiveGridColorBy;
-  }, [isStoredGridOverlayVisible, storedGridMetricMode, isUnifiedGridView, selectedMetric, effectiveGridColorBy]);
+  }, [isStoredGridOverlayVisible, storedGridMetricMode, effectiveGridColorBy]);
 
   const siteLegendColorMode = useMemo(() => {
     const labelField = String(siteLabelField || "").trim().toLowerCase();
@@ -3338,6 +3393,11 @@ const UnifiedMapView = () => {
   const displayPolygons = useMemo(
     () => polygonsWithColors,
     [polygonsWithColors],
+  );
+
+  const mapBoundaryPolygons = useMemo(
+    () => (showPolygons && displayPolygons?.length ? displayPolygons : rawFilteringPolygons),
+    [displayPolygons, rawFilteringPolygons, showPolygons],
   );
 
   const editableBoundaryPolygonIds = useMemo(() => {
@@ -4397,7 +4457,11 @@ const UnifiedMapView = () => {
             indoor={indoor}
             outdoor={outdoor}
             technologyTransitions={technologyTransitions}
+            bandTransitions={bandTransitions}
+            pciTransitions={pciTransitions}
             techHandOver={techHandOver}
+            bandHandover={bandHandover}
+            pciHandover={pciHandover}
             dataFilters={dataFilters}
             bestNetworkEnabled={bestNetworkEnabled}
             bestNetworkStats={bestNetworkStats}
@@ -4467,6 +4531,7 @@ const UnifiedMapView = () => {
         setPciHandover={setPciHandover}
         pciTransitions={pciTransitions}
         siteToggle={siteToggle}
+        siteRowCount={siteData?.length || 0}
         sitePredictionVersion={sitePredictionVersion}
         setSitePredictionVersion={setSitePredictionVersion}
         showSessionNeighbors={showSessionNeighbors}
@@ -4671,7 +4736,7 @@ const UnifiedMapView = () => {
               projectId={projectId}
               polygonSource={polygonSource}
               enablePolygonFilter={true}
-              filterPolygons={rawFilteringPolygons}
+              filterPolygons={mapBoundaryPolygons}
               externalPolygonsLoading={polygonLoading || areaLoading}
               showPolygonBoundary={true}
               projectPolygonEditEnabled={
@@ -4692,6 +4757,7 @@ const UnifiedMapView = () => {
               neighborOpacity={0.45}
               onNeighborClick={(neighbor) => { }}
               onGridCellsStatsChange={setGridCellStats}
+              onGridLegendLocationsChange={setRenderedGridLegendLogs}
               debugNeighbors={false}
               legendFilter={legendFilter}
               drawingEnabled={ui.drawEnabled}
@@ -4749,9 +4815,7 @@ const UnifiedMapView = () => {
                     options={{
                       fillColor: poly.fillColor || "#4285F4",
                       fillOpacity: poly.fillOpacity ?? polygonOpacity,
-                      strokeColor: onlyInsidePolygons
-                        ? poly.fillColor
-                        : "#2563eb",
+                      strokeColor: poly.fillColor || "#2563eb",
                       strokeWeight: 1,
                       strokeOpacity: polygonOpacity,
                       clickable: true,

@@ -125,6 +125,7 @@ const CreateProjectPage = () => {
           polygons={polygons}
           loading={loading}
           onProjectCreated={() => fetchPolygons({ silent: true })}
+          onPolygonDeleted={() => fetchPolygons({ silent: true })}
         />
       )}
     </div>

@@ -37,6 +37,30 @@ const debugUnifiedMapApi = (event, payload = {}) => {
   console.log(`[UnifiedMapApi] ${event}`, payload);
 };
 
+const triggerBrowserDownload = (blob, filename) => {
+  const blobUrl = window.URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = blobUrl;
+  link.download = filename || "download";
+  link.style.display = "none";
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.URL.revokeObjectURL(blobUrl);
+};
+
+const downloadUrlAsBlob = async (url, filename) => {
+  const response = await axios.get(url, {
+    responseType: "blob",
+    withCredentials: true,
+  });
+  const blob = response?.data instanceof Blob
+    ? response.data
+    : new Blob([response?.data ?? ""]);
+  triggerBrowserDownload(blob, filename);
+  return { success: true };
+};
+
 export const generalApi = {
   healthCheck: async () => {
     try {
@@ -374,13 +398,13 @@ export const cellSiteApi = {
   },
 
   /**
-   * Download file (opens in new tab)
+   * Download file without opening a new Electron window.
    */
   downloadFile: (outputDir, filename) => {
     const baseUrl =
       import.meta.env.VITE_PYTHON_API_URL || "http://localhost:8080";
     const url = `${baseUrl}/api/cell-site/download/${outputDir}/${filename}`;
-    window.open(url, "_blank");
+    return downloadUrlAsBlob(url, filename);
   },
 
   /**
@@ -396,16 +420,8 @@ export const cellSiteApi = {
         }
       );
 
-      // Create download link
       const blob = new Blob([response]);
-      const blobUrl = window.URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.href = blobUrl;
-      link.setAttribute("download", filename);
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-      window.URL.revokeObjectURL(blobUrl);
+      triggerBrowserDownload(blob, filename);
 
       return blob;
     } catch (error) {
@@ -614,6 +630,13 @@ export const predictionApi = {
   getLteTiltRecommendationDownloadUrl: (filePath) => {
     if (!filePath) return "";
     return `${PYTHON_BASE_URL_EXPORT}/api/lte-tilt-recommendation/download?file=${encodeURIComponent(filePath)}`;
+  },
+
+  downloadLteTiltRecommendation: (filePath) => {
+    if (!filePath) return Promise.resolve({ success: false });
+    const url = `${PYTHON_BASE_URL_EXPORT}/api/lte-tilt-recommendation/download?file=${encodeURIComponent(filePath)}`;
+    const filename = String(filePath).split(/[\\/]/).pop() || "lte_tilt_recommendation.csv";
+    return downloadUrlAsBlob(url, filename);
   },
 
   getLtePredictionStatus: async (jobId) => {
@@ -964,6 +987,15 @@ export const mapViewApi = {
     api.get("/api/MapView/GetPolygonLogCount", {
       params: { polygonId, from, to },
     }),
+
+  deleteAvailablePolygon: (polygonId, companyId) => {
+    const params = { polygonId };
+    if (companyId) {
+      params.company_id = companyId;
+    }
+
+    return api.delete("/api/MapView/DeleteAvailablePolygon", { params });
+  },
 
   listSavedPolygons: (projectId, limit = 200, offset = 0) =>
     api.get("/api/MapView/ListSavedPolygons", {
@@ -1377,8 +1409,8 @@ export const excelApi = {
 
   downloadTemplate: (fileType) => {
     const url = `https://s-traccceer.vinfocom.co.in/ExcelUpload/DownloadExcel?fileType=${fileType}`;
-    window.open(url, "_blank");
-    return Promise.resolve({ success: true });
+    const filename = fileType === 3 ? "project_template.xlsx" : "upload_template.xlsx";
+    return downloadUrlAsBlob(url, filename);
   },
 
   getUploadedFiles: (type) =>

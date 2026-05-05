@@ -6,7 +6,10 @@ const menuButtonClass =
   "px-2 py-0.5 text-xs text-slate-700 hover:bg-slate-200 rounded transition-colors";
 
 const menuPanelClass =
-  "absolute top-full left-0 mt-1 bg-white border border-slate-200 rounded shadow-lg min-w-[130px] z-[100] p-1";
+  "absolute top-full left-0 mt-1 bg-white border border-slate-200 rounded shadow-lg min-w-[150px] z-[100] p-1";
+
+const MAP_ZOOM_LOCK_STORAGE_KEY = "stracer:map-zoom-lock";
+const MAP_ZOOM_LOCK_EVENT = "stracer:map-zoom-lock-change";
 
 const MenuGroup = ({
   label,
@@ -39,7 +42,14 @@ const MenuGroup = ({
             }}
             className="w-full text-left px-2 py-1 text-xs text-slate-700 hover:bg-slate-100 rounded"
           >
-            {item.label}
+            {item.checked !== undefined ? (
+              <span className="flex w-full items-center justify-between gap-3">
+                <span>{item.label}</span>
+                <span className="w-3 text-center">{item.checked ? "✓" : ""}</span>
+              </span>
+            ) : (
+              item.label
+            )}
           </button>
         ))}
       </div>
@@ -58,6 +68,22 @@ const emitUtilityAction = (action) => {
   window.dispatchEvent(
     new CustomEvent("stracer:utility-action", {
       detail: { action },
+    }),
+  );
+};
+
+const readMapZoomLock = () => {
+  if (typeof window === "undefined") return false;
+  return window.localStorage.getItem(MAP_ZOOM_LOCK_STORAGE_KEY) === "1";
+};
+
+const setMapZoomLock = (locked) => {
+  if (typeof window === "undefined") return;
+  const nextLocked = Boolean(locked);
+  window.localStorage.setItem(MAP_ZOOM_LOCK_STORAGE_KEY, nextLocked ? "1" : "0");
+  window.dispatchEvent(
+    new CustomEvent(MAP_ZOOM_LOCK_EVENT, {
+      detail: { locked: nextLocked },
     }),
   );
 };
@@ -89,6 +115,7 @@ const ElectronWindowBar = () => {
   );
   const [maximized, setMaximized] = useState(false);
   const [activeMenu, setActiveMenu] = useState(null);
+  const [mapZoomLocked, setMapZoomLocked] = useState(readMapZoomLock);
   const menuBarRef = useRef(null);
 
   useEffect(() => {
@@ -124,6 +151,17 @@ const ElectronWindowBar = () => {
     return () => {
       document.removeEventListener("mousedown", handleOutsideClick);
       document.removeEventListener("keydown", handleEscape);
+    };
+  }, []);
+
+  useEffect(() => {
+    const handleMapZoomLockChange = (event) => {
+      setMapZoomLocked(Boolean(event?.detail?.locked));
+    };
+    window.addEventListener(MAP_ZOOM_LOCK_EVENT, handleMapZoomLockChange);
+    setMapZoomLocked(readMapZoomLock());
+    return () => {
+      window.removeEventListener(MAP_ZOOM_LOCK_EVENT, handleMapZoomLockChange);
     };
   }, []);
 
@@ -176,6 +214,7 @@ const ElectronWindowBar = () => {
           actions={[
             { label: "Dashboard", onClick: () => navigateRoute("/dashboard") },
             { label: "Map View", onClick: () => navigateRoute("/mapview") },
+           
             { label: "Reload", onClick: () => callWindowApi("reload") },
             { label: "Toggle DevTools", onClick: () => callWindowApi("toggleDevTools") },
           ]}
@@ -203,6 +242,11 @@ const ElectronWindowBar = () => {
             { label: "Secondary Radius", onClick: () => emitUtilityAction("neighbor-radius") },
             { label: "Site Size", onClick: () => emitUtilityAction("triangle-size") },
             { label: "Beamwidth", onClick: () => emitUtilityAction("beamwidth") },
+             {
+              label: "Map Lock",
+              checked: mapZoomLocked,
+              onClick: () => setMapZoomLock(!mapZoomLocked),
+            },
             { label: "Settings", onClick: () => emitUtilityAction("settings") },
           ]}
         />

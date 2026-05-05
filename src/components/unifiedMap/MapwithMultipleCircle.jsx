@@ -7,7 +7,7 @@ import { Zap, Layers, Radio, Square, Circle } from "lucide-react";
 // import TechHandoverMarkers from "../unifiedMap/TechHandoverMarkers";
 import useColorForLog from "@/hooks/useColorForLog";
 import { getMetricValueFromLog, COLOR_SCHEMES, getPciColor } from "@/utils/metrics";
-import { normalizeProviderName, normalizeTechName, getLogColor, generateColorFromHash } from "@/utils/colorUtils";
+import { normalizeProviderName, normalizeTechName, normalizeBandName, getLogColor, generateColorFromHash } from "@/utils/colorUtils";
 
 const DEFAULT_CENTER = { lat: 28.64453086, lng: 77.37324242 };
 const CSHARP_API_BASE_URL = (
@@ -21,7 +21,10 @@ const matchesLegendMetricRange = (value, legendFilter) => {
   const min = Number(legendFilter?.min);
   const max = Number(legendFilter?.max);
   const includeMax = Boolean(legendFilter?.includeMax);
-  if (![value, min, max].every(Number.isFinite)) return false;
+  if (!Number.isFinite(value)) return false;
+  if (legendFilter?.min === null && Number.isFinite(max)) return value < max;
+  if (Number.isFinite(min) && legendFilter?.max === null) return value >= min;
+  if (![min, max].every(Number.isFinite)) return false;
 
   const lowerMatch = value >= min - METRIC_RANGE_EPSILON;
   const upperMatch = includeMax
@@ -360,6 +363,7 @@ const normalizeExternalPolygonData = (polygons = []) => {
         id: poly?.id ?? poly?.uid ?? `external-${idx}`,
         uid: poly?.uid ?? poly?.id ?? `external-${idx}`,
         path,
+        fillColor: poly?.fillColor,
         bbox: poly?.bbox || getPolygonBounds(path),
       };
     })
@@ -443,6 +447,7 @@ const generateGridCellsOptimized = (
     if (key === "provider" || key === "operator") return "Provider";
     if (key === "technology") return "Technology";
     if (key === "band") return "Band";
+    if (key === "pci") return "PCI";
     return "Category";
   };
   const resolveProviderName = (log) => {
@@ -470,7 +475,28 @@ const generateGridCellsOptimized = (
     }
     if (normalizedColorBy === "technology") return resolveTechnologyName(log);
     if (normalizedColorBy === "band") return resolveBandName(log);
+    if (normalizedColorBy === "pci") {
+      const pci = resolvePciValue(log);
+      return Number.isFinite(pci) ? String(pci) : null;
+    }
     return null;
+  };
+
+  const resolveCategoryColor = (categoryName) => {
+    if (normalizedColorBy === "provider" || normalizedColorBy === "operator") {
+      return getLogColor("provider", categoryName);
+    }
+    if (normalizedColorBy === "technology") {
+      return getLogColor("technology", categoryName);
+    }
+    if (normalizedColorBy === "band") {
+      return getLogColor("band", categoryName);
+    }
+    if (normalizedColorBy === "pci") {
+      const pci = Number.parseInt(categoryName, 10);
+      return Number.isFinite(pci) ? getPciColor(pci) : getLogColor("pci", categoryName);
+    }
+    return "#E5E7EB";
   };
 
   const cells = [];
@@ -641,6 +667,7 @@ const generateGridCellsOptimized = (
               label: getCategoryLabel(normalizedColorBy),
               ...rankedCategories[0],
             };
+            fillColor = resolveCategoryColor(rankedCategories[0].name);
           }
         }
       }
@@ -813,13 +840,14 @@ const MapWithMultipleCircles = ({
   thresholds = {},
   neighborData = [],
   showNeighbors = false,
-  neighborSquareSize = 4,
+  neighborSquareSize = 12,
   neighborMinSquareSize = 3,
   neighborOpacity = 0.45,
   disableDeckInteractions = false,
   onNeighborClick,
   onFilteredNeighborsChange,
   onGridCellsStatsChange,
+  onGridLegendLocationsChange,
   debugMode = false,
   legendFilter = null,
   drawingEnabled = false,
@@ -855,11 +883,13 @@ const MapWithMultipleCircles = ({
   const mapContainerRef = useRef(null);
   const onMarkerClickRef = useRef(onMarkerClick);
   const onNeighborClickRef = useRef(onNeighborClick);
+  const onGridLegendLocationsChangeRef = useRef(onGridLegendLocationsChange);
 
   useEffect(() => { onMarkerClickRef.current = onMarkerClick; }, [onMarkerClick]);
   useEffect(() => { onNeighborClickRef.current = onNeighborClick; }, [onNeighborClick]);
   useEffect(() => { onFilteredLocationsChangeRef.current = onFilteredLocationsChange; }, [onFilteredLocationsChange]);
   useEffect(() => { onFilteredNeighborsChangeRef.current = onFilteredNeighborsChange; }, [onFilteredNeighborsChange]);
+  useEffect(() => { onGridLegendLocationsChangeRef.current = onGridLegendLocationsChange; }, [onGridLegendLocationsChange]);
 
   // ✅ Unified Color Resolver - UPDATED TO SUPPORT TAC
   const resolvedPolygonOpacity = Math.max(
@@ -1081,8 +1111,9 @@ const MapWithMultipleCircles = ({
     // NOTE: When filterInsidePolygons is false, we must NEVER block on activePolygonsReady.
     //       Polygons may still be loading (for boundary drawing) but that doesn't affect point visibility.
 
-    // B. Apply Legend Filter (Highlight)
-    if (legendFilter) {
+    // B. Apply Legend Filter. In grid mode, keep raw logs stable and filter
+    // the rendered grid cells instead so aggregation values do not change.
+    if (legendFilter && !enableGrid) {
       filtered = filtered.filter(log => {
         if (legendFilter.type === 'metric') {
           const val = getMetricValueFromLog(log, legendFilter.metric);
@@ -1110,7 +1141,11 @@ const MapWithMultipleCircles = ({
              key = normalizeTechName(tech, band);
            } else if (legendFilter.key === 'band') {
              const b = String(log.neighbourBand || log.neighborBand || log.neighbour_band || log.band || log.Band || "").trim();
-             key = (b === "-1" || b === "") ? "Unknown" : (scheme?.[b] ? b : "Unknown");
+             const normalizedBand = normalizeBandName(b);
+             key = (normalizedBand === "-1" || normalizedBand === "") ? "Unknown" : (scheme?.[normalizedBand] ? normalizedBand : "Unknown");
+           } else if (legendFilter.key === 'pci') {
+             const pci = Number.parseInt(log.pci ?? log.PCI ?? log.best_pci, 10);
+             key = Number.isFinite(pci) ? String(pci) : "Unknown";
            }
            
            return key === legendFilter.value;
@@ -1127,6 +1162,7 @@ const MapWithMultipleCircles = ({
     filterInsidePolygons,
     legendFilter,
     selectedMetric,
+    enableGrid,
     activePolygonChecker,
     activePolygonsReady,
     hasActivePolygons,
@@ -1240,7 +1276,11 @@ const MapWithMultipleCircles = ({
              key = normalizeTechName(n.technology || n.networkType, n.band);
            } else if (legendFilter.key === 'band') {
              const b = String(n.neighbourBand || n.neighborBand || n.band || "").trim();
-             key = (b === "-1" || b === "") ? "Unknown" : (scheme?.[b] ? b : "Unknown");
+             const normalizedBand = normalizeBandName(b);
+             key = (normalizedBand === "-1" || normalizedBand === "") ? "Unknown" : (scheme?.[normalizedBand] ? normalizedBand : "Unknown");
+           } else if (legendFilter.key === 'pci') {
+             const pci = Number.parseInt(n.neighbourPci || n.pci, 10);
+             key = Number.isFinite(pci) ? String(pci) : "Unknown";
            }
            return key === legendFilter.value;
         }
@@ -1297,18 +1337,116 @@ const MapWithMultipleCircles = ({
     );
   }, [enableGrid, gridSizeMeters, gridPolygonData, locationsToRender, selectedMetric, gridAggregationMethod, resolveColor, colorBy]);
 
+  const visibleGridCells = useMemo(() => {
+    if (!legendFilter) return gridCells;
+
+    return gridCells.filter((cell) => {
+      if (cell.count <= 0) return false;
+
+      if (legendFilter.type === "metric") {
+        const value = Number(cell.aggregatedValue);
+        return Number.isFinite(value) && matchesLegendMetricRange(value, legendFilter);
+      }
+
+      if (legendFilter.type === "category") {
+        const key = String(legendFilter.key || "").trim().toLowerCase();
+        let value = "Unknown";
+        if (key === "provider" || key === "operator") {
+          value = cell.bestByColor?.name || cell.bestOperator?.name || "Unknown";
+        } else if (key === "band" || key === "technology") {
+          value = cell.bestByColor?.name || "Unknown";
+        } else if (key === "pci") {
+          const pci = Number.parseInt(cell.bestByColor?.name, 10);
+          value = Number.isFinite(pci) ? String(pci) : "Unknown";
+        }
+        return String(value) === String(legendFilter.value);
+      }
+
+      if (legendFilter.type === "pci") {
+        const pci = Number.parseInt(cell.bestByColor?.name ?? cell.aggregatedValue, 10);
+        return Number.isFinite(pci) && pci === legendFilter.value;
+      }
+
+      return true;
+    });
+  }, [gridCells, legendFilter]);
+
   useEffect(() => {
     if (typeof onGridCellsStatsChange !== "function") return;
     if (!enableGrid) {
       onGridCellsStatsChange({ total: 0, populated: 0 });
       return;
     }
-    const populated = gridCells.reduce(
+    const populated = visibleGridCells.reduce(
       (acc, cell) => acc + (cell.count > 0 ? 1 : 0),
       0,
     );
-    onGridCellsStatsChange({ total: gridCells.length, populated });
-  }, [enableGrid, gridCells, onGridCellsStatsChange]);
+    onGridCellsStatsChange({ total: visibleGridCells.length, populated });
+  }, [enableGrid, visibleGridCells, onGridCellsStatsChange]);
+
+  useEffect(() => {
+    const callback = onGridLegendLocationsChangeRef.current;
+    if (typeof callback !== "function") return;
+    if (!enableGrid) {
+      callback(EMPTY_ARRAY);
+      return;
+    }
+
+    const metricKey = String(selectedMetric || "rsrp").trim().toLowerCase();
+    const categoryKey = String(colorBy || "").trim().toLowerCase();
+    const rows = visibleGridCells
+      .filter((cell) => cell.count > 0)
+      .map((cell) => {
+        const centerLat = (cell.bounds.north + cell.bounds.south) / 2;
+        const centerLng = (cell.bounds.east + cell.bounds.west) / 2;
+        const categoryName = cell.bestByColor?.name ?? null;
+        const metricValue = Number.isFinite(Number(cell.aggregatedValue))
+          ? Number(cell.aggregatedValue)
+          : cell.aggregatedValue;
+        const row = {
+          id: `rendered-grid-${cell.id}`,
+          lat: centerLat,
+          lng: centerLng,
+          latitude: centerLat,
+          longitude: centerLng,
+          sample_count: cell.count,
+          total_logs: cell.count,
+          value: metricValue,
+          metric_value: metricValue,
+          is_grid_cell: true,
+          [metricKey]: metricValue,
+        };
+
+        if (cell.bestOperator?.name) {
+          row.provider = cell.bestOperator.name;
+          row.operator = cell.bestOperator.name;
+          row.best_operator = cell.bestOperator.name;
+        }
+
+        if (categoryKey === "provider" || categoryKey === "operator") {
+          row.provider = categoryName || row.provider || "Unknown";
+          row.operator = row.provider;
+          row.best_operator = row.provider;
+        } else if (categoryKey === "band") {
+          row.band = categoryName || "Unknown";
+          row.best_band = row.band;
+        } else if (categoryKey === "technology") {
+          row.technology = categoryName || "Unknown";
+          row.best_technology = row.technology;
+          row.networkType = row.technology;
+        } else if (categoryKey === "pci" || metricKey === "best_pci") {
+          const pci = Number.parseInt(categoryName ?? metricValue, 10);
+          if (Number.isFinite(pci)) {
+            row.pci = pci;
+            row.best_pci = pci;
+          }
+        }
+
+        return row;
+      });
+
+    callback(rows);
+  }, [enableGrid, visibleGridCells, selectedMetric, colorBy]);
 
   const getPrimaryColor = useCallback((loc) => {
     if (colorBy && colorBy !== 'metric') {
@@ -1417,7 +1555,7 @@ const MapWithMultipleCircles = ({
   const resolvedNeighborSquareSize = useMemo(() => {
     const base = Number(neighborSquareSize);
     const minSize = Number(neighborMinSquareSize);
-    const safeBase = Number.isFinite(base) && base > 0 ? base : 8;
+    const safeBase = Number.isFinite(base) && base > 0 ? base : 12;
     const safeMin = Number.isFinite(minSize) && minSize > 0 ? minSize : 3;
     return Math.max(safeMin, Math.min(80, safeBase));
   }, [neighborSquareSize, neighborMinSquareSize]);
@@ -1529,10 +1667,11 @@ const MapWithMultipleCircles = ({
         defaultCenter={computedCenter}
         zoom={defaultZoom}
       >
-        {showPolygonBoundary && activePolygonData.map(({ path, uid, id }, idx) => {
+        {showPolygonBoundary && activePolygonData.map(({ path, uid, id, fillColor }, idx) => {
           const polygonKey = uid ?? id ?? `polygon-${idx}`;
           const isEditableBoundary =
             projectPolygonEditEnabled && editableBoundaryPolygonIdSet.has(polygonKey);
+          const boundaryStrokeColor = fillColor || "#2563eb";
           return (
             <PolygonF
               key={polygonKey}
@@ -1540,7 +1679,7 @@ const MapWithMultipleCircles = ({
               options={{
                 fillColor: "transparent",
                 fillOpacity: 0,
-                strokeColor: "#2563eb",
+                strokeColor: boundaryStrokeColor,
                 strokeWeight: 1,
                 strokeOpacity: resolvedPolygonOpacity,
                 zIndex: 2500,
@@ -1562,7 +1701,7 @@ const MapWithMultipleCircles = ({
          />
        ))}
        
-        {enableGrid && gridCells.map((cell) => (
+        {enableGrid && visibleGridCells.map((cell) => (
           <RectangleF
             key={`grid-${cell.id}`}
             bounds={cell.bounds}

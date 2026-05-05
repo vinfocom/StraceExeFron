@@ -15,6 +15,7 @@ import {
   Settings,
   ChevronDown,
   ChevronUp,
+  Trash2,
 } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import {
@@ -68,30 +69,107 @@ const PolygonDropdown = ({
   selectedPolygon,
   setSelectedPolygon,
   disabled,
+  deletingPolygonId,
+  onDeletePolygon,
 }) => {
+  const [open, setOpen] = useState(false);
+  const dropdownRef = useRef(null);
   const safePolygons = Array.isArray(polygons) ? polygons : [];
+  const selected = safePolygons.find((p) => p.value === selectedPolygon);
+
+  useEffect(() => {
+    if (!open) return;
+
+    const handlePointerDown = (event) => {
+      if (!dropdownRef.current?.contains(event.target)) {
+        setOpen(false);
+      }
+    };
+
+    document.addEventListener("mousedown", handlePointerDown);
+    return () => document.removeEventListener("mousedown", handlePointerDown);
+  }, [open]);
 
   return (
-    <select
-      className="w-full border border-gray-300 rounded-lg px-3 py-2.5 bg-white text-gray-900 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-100 disabled:cursor-not-allowed transition-colors"
-      value={selectedPolygon || ""}
-      onChange={(e) =>
-        setSelectedPolygon(e.target.value ? Number(e.target.value) : null)
-      }
-      disabled={disabled}
-    >
-      <option value="">
-        {safePolygons.length === 0
-          ? "No polygons available"
-          : "Select polygon..."}
-      </option>
-      {safePolygons.map((p) => (
-        <option key={p.value} value={p.value}>
-          {p.label}{" "}
-          {p.sessionIds?.length > 0 ? `(${p.sessionIds.length} sessions)` : ""}
-        </option>
-      ))}
-    </select>
+    <div ref={dropdownRef} className="relative">
+      <button
+        type="button"
+        className="flex w-full items-center justify-between gap-3 border border-gray-300 rounded-lg px-3 py-2.5 bg-white text-gray-900 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-100 disabled:cursor-not-allowed transition-colors"
+        onClick={() => setOpen((value) => !value)}
+        disabled={disabled}
+      >
+        <span className={selected ? "truncate" : "text-gray-500"}>
+          {selected
+            ? `${selected.label}${
+                selected.sessionIds?.length > 0
+                  ? ` (${selected.sessionIds.length} sessions)`
+                  : ""
+              }`
+            : safePolygons.length === 0
+              ? "No polygons available"
+              : "Select polygon..."}
+        </span>
+        <ChevronDown className="h-4 w-4 shrink-0 text-gray-500" />
+      </button>
+
+      {open && !disabled && (
+        <div className="absolute z-30 mt-1 max-h-72 w-full overflow-y-auto rounded-lg border border-gray-200 bg-white shadow-lg">
+          {safePolygons.length === 0 ? (
+            <div className="px-3 py-2.5 text-sm text-gray-500">
+              No polygons available
+            </div>
+          ) : (
+            safePolygons.map((p) => {
+              const isSelected = Number(p.value) === Number(selectedPolygon);
+              const isDeleting = Number(deletingPolygonId) === Number(p.value);
+
+              return (
+                <div
+                  key={p.value}
+                  className={`flex items-center gap-2 border-b border-gray-100 last:border-b-0 ${
+                    isSelected ? "bg-blue-50" : "bg-white"
+                  }`}
+                >
+                  <button
+                    type="button"
+                    className="min-w-0 flex-1 px-3 py-2.5 text-left hover:bg-blue-50"
+                    onClick={() => {
+                      setSelectedPolygon(Number(p.value));
+                      setOpen(false);
+                    }}
+                  >
+                    <span className="block truncate text-sm font-medium text-gray-800">
+                      {p.label}
+                    </span>
+                    <span className="block text-xs text-gray-500">
+                      {p.sessionIds?.length > 0
+                        ? `${p.sessionIds.length} sessions`
+                        : "No linked sessions"}
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    className="mr-2 inline-flex h-8 w-8 items-center justify-center rounded-md text-red-600 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50"
+                    title="Delete polygon"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      onDeletePolygon?.(p);
+                    }}
+                    disabled={isDeleting}
+                  >
+                    {isDeleting ? (
+                      <Spinner className="h-4 w-4" />
+                    ) : (
+                      <Trash2 className="h-4 w-4" />
+                    )}
+                  </button>
+                </div>
+              );
+            })
+          )}
+        </div>
+      )}
+    </div>
   );
 };
 
@@ -344,6 +422,7 @@ export const ProjectForm = ({
   polygons,
   loading: parentLoading,
   onProjectCreated,
+  onPolygonDeleted,
 }) => {
   const { user } = useAuth();
   const [projectName, setProjectName] = useState("");
@@ -359,6 +438,7 @@ export const ProjectForm = ({
   const [predictionGrid, setPredictionGrid] = useState("22");
 
   const [loading, setLoading] = useState(false);
+  const [deletingPolygonId, setDeletingPolygonId] = useState(null);
   const [currentStep, setCurrentStep] = useState("");
 
   const fileInputRef = useRef(null);
@@ -397,6 +477,45 @@ export const ProjectForm = ({
   const removeFile = () => {
     setSiteFile(null);
     if (fileInputRef.current) fileInputRef.current.value = null;
+  };
+
+  const handleDeletePolygon = async (polygon) => {
+    if (!polygon?.value || loading || deletingPolygonId) return;
+
+    const confirmed = window.confirm(
+      `Delete polygon "${polygon.label}" from the database? This cannot be undone.`
+    );
+    if (!confirmed) return;
+
+    try {
+      setDeletingPolygonId(polygon.value);
+      const response = await mapViewApi.deleteAvailablePolygon(
+        polygon.value,
+        Number.isFinite(scopedCompanyId) && scopedCompanyId > 0
+          ? scopedCompanyId
+          : undefined
+      );
+
+      if (response?.Status !== 1) {
+        throw new Error(response?.Message || "Polygon deletion failed");
+      }
+
+      if (Number(selectedPolygon) === Number(polygon.value)) {
+        setSelectedPolygon(null);
+      }
+
+      toast.success("Polygon deleted");
+      await onPolygonDeleted?.();
+    } catch (err) {
+      const message =
+        err.response?.data?.Message ||
+        err.response?.data?.message ||
+        err.message ||
+        "Failed to delete polygon";
+      toast.error(message);
+    } finally {
+      setDeletingPolygonId(null);
+    }
   };
 
   const validateForm = () => {
@@ -711,6 +830,8 @@ export const ProjectForm = ({
                 selectedPolygon={selectedPolygon}
                 setSelectedPolygon={setSelectedPolygon}
                 disabled={loading}
+                deletingPolygonId={deletingPolygonId}
+                onDeletePolygon={handleDeletePolygon}
               />
             )}
 
