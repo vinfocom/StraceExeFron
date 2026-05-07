@@ -375,6 +375,7 @@ const SessionMultiDropdown = ({ sessions, selectedSessions, setSelectedSessions 
               placeholder=" Remarks (Required)"
               value={remarks}
               onChange={(e) => setRemarks(e.target.value)}
+              className="bg-white text-black placeholder:text-gray-500"
             />
           </TabsContent>
 
@@ -446,6 +447,7 @@ const SessionMultiDropdown = ({ sessions, selectedSessions, setSelectedSessions 
               placeholder="Remarks (Optional)"
               value={remarks}
               onChange={(e) => setRemarks(e.target.value)}
+              className="bg-white text-black placeholder:text-gray-500"
             />
           </TabsContent>
         </Tabs>

@@ -36,7 +36,6 @@ import {
 } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
 
-// Custom Checkbox Component - Fully Visible
 const Checkbox = memo(
   ({ checked, onChange, disabled = false, className = "" }) => (
     <button
@@ -85,7 +84,6 @@ const ToggleSwitch = memo(({ checked, onChange, disabled = false }) => (
 ));
 ToggleSwitch.displayName = "ToggleSwitch";
 
-// Collapsible Section Component
 const CollapsibleSection = memo(
   ({ title, icon: Icon, children, defaultOpen = false, badge = null }) => {
     const [isOpen, setIsOpen] = useState(defaultOpen);
@@ -1881,7 +1879,6 @@ const UnifiedMapSidebar = ({
                     onChange={(nextValue) => setSiteLabelField?.(nextValue)}
                     options={[
                       { value: "none", label: "Label" },
-                      { value: "site", label: "Site" },
                       { value: "site_id", label: "Site ID" },
                       { value: "cell_id", label: "Cell ID" },
                       { value: "technology", label: "Technology" },

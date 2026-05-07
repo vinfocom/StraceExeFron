@@ -1,10 +1,7 @@
 import React, { useMemo, useState } from "react";
 import { 
   ArrowRightLeft, 
-  TrendingUp, 
-  TrendingDown, 
   Activity, 
-  Signal,
   ChevronUp,
   ChevronDown
 } from "lucide-react";
@@ -18,9 +15,9 @@ const TECH_ORDER = {
 };
 
 const TYPE_STYLES = {
-  upgrade: "text-green-400 bg-green-500/10",
-  downgrade: "text-red-400 bg-red-500/10",
-  lateral: "text-blue-400 bg-blue-500/10"
+  upgrade: "text-white bg-green-500/20",
+  downgrade: "text-white bg-red-500/20",
+  lateral: "text-white bg-blue-500/20"
 };
 
 const getHandoverType = (from, to) => {
@@ -32,10 +29,10 @@ const getHandoverType = (from, to) => {
 };
 
 const EmptyState = () => (
-  <div className="flex flex-col items-center justify-center py-16 text-slate-400">
-    <Activity className="w-12 h-12 mb-4 opacity-50" />
-    <p className="text-lg font-medium">No Handover Data</p>
-    <p className="text-sm mt-1">No technology transitions detected</p>
+  <div className="flex flex-col items-center justify-center rounded-lg border border-slate-700 bg-slate-900/40 py-10 text-white">
+    <Activity className="mb-3 h-9 w-9 opacity-50" />
+    <p className="text-base font-semibold text-white">No Handover Data</p>
+    <p className="mt-1 text-xs">No technology, band, or PCI transitions detected.</p>
   </div>
 );
 
@@ -112,35 +109,41 @@ const averageValues = (values) =>
   values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : null;
 
 const AverageBeforeAfter = ({ item }) => (
-  <div className="mt-2 grid grid-cols-1 gap-x-3 gap-y-1 text-[10px] font-mono text-slate-400 sm:grid-cols-2 xl:grid-cols-3">
-    <div className="truncate">
-      <span className="text-slate-500">Avg RSRP: </span>
-      {formatAverage(item.avgRsrpBefore, "dBm")} -&gt; {formatAverage(item.avgRsrpAfter, "dBm")}
+  <div className="mt-3 flex flex-col gap-1.5 text-[11px] text-white">
+    <div className="flex flex-col gap-0.5 rounded bg-slate-900/35 px-2 py-1.5">
+      <span className="font-semibold text-white">Avg RSRP</span>
+      <span className="font-mono text-white">
+        {formatAverage(item.avgRsrpBefore, "dBm")} -&gt; {formatAverage(item.avgRsrpAfter, "dBm")}
+      </span>
     </div>
-    <div className="truncate">
-      <span className="text-slate-500">Avg RSRQ: </span>
-      {formatAverage(item.avgRsrqBefore, "dB")} -&gt; {formatAverage(item.avgRsrqAfter, "dB")}
+    <div className="flex flex-col gap-0.5 rounded bg-slate-900/35 px-2 py-1.5">
+      <span className="font-semibold text-white">Avg RSRQ</span>
+      <span className="font-mono text-white">
+        {formatAverage(item.avgRsrqBefore, "dB")} -&gt; {formatAverage(item.avgRsrqAfter, "dB")}
+      </span>
     </div>
-    <div className="truncate">
-      <span className="text-slate-500">Avg SINR: </span>
-      {formatAverage(item.avgSinrBefore, "dB")} -&gt; {formatAverage(item.avgSinrAfter, "dB")}
+    <div className="flex flex-col gap-0.5 rounded bg-slate-900/35 px-2 py-1.5">
+      <span className="font-semibold text-white">Avg SINR</span>
+      <span className="font-mono text-white">
+        {formatAverage(item.avgSinrBefore, "dB")} -&gt; {formatAverage(item.avgSinrAfter, "dB")}
+      </span>
     </div>
   </div>
 );
 
 const PairSummaryCard = ({ item }) => (
-  <div className="min-w-0 rounded-lg border border-slate-700 bg-slate-800/50 p-3">
+  <div className="min-w-0 rounded-md border border-slate-700 bg-slate-800/50 p-3 text-white">
     <div className="flex items-center justify-between gap-2">
       <div className="min-w-0 flex items-center justify-center gap-2">
-        <span className="max-w-[7rem] truncate rounded bg-slate-700 px-2 py-1 text-xs font-medium text-slate-200">
+        <span className="max-w-[8rem] truncate rounded bg-slate-700 px-2 py-1 text-xs font-medium text-white">
           {item.from}
         </span>
-        <ArrowRightLeft className="h-3.5 w-3.5 shrink-0 text-slate-500" />
-        <span className="max-w-[7rem] truncate rounded bg-slate-700 px-2 py-1 text-xs font-medium text-slate-200">
+        <ArrowRightLeft className="h-3.5 w-3.5 shrink-0 text-white" />
+        <span className="max-w-[8rem] truncate rounded bg-slate-700 px-2 py-1 text-xs font-medium text-white">
           {item.to}
         </span>
       </div>
-      <span className="shrink-0 rounded bg-blue-500/10 px-2 py-0.5 text-xs font-semibold text-blue-300">
+      <span className="shrink-0 rounded bg-blue-500/20 px-2 py-0.5 text-xs font-semibold text-white">
         {item.count}
       </span>
     </div>
@@ -171,50 +174,51 @@ const HandoverDetailSection = ({ title, label, transitions = [], onRowClick }) =
   if (!transitions.length) return null;
 
   return (
-    <div className="rounded-lg border border-slate-700 bg-slate-900/40 p-3">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <h3 className="text-sm font-semibold text-slate-300">{title}</h3>
-        <div className="flex flex-wrap items-center gap-2">
+    <section className="rounded-lg border border-slate-700 bg-slate-900/40 p-4">
+      <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+        <div>
+          <h3 className="text-sm font-semibold text-white">{title}</h3>
+          <p className="mt-1 text-xs text-white">
+            Showing {filteredTransitions.length} of {transitions.length} events
+          </p>
+        </div>
+        <div className="flex w-full flex-col gap-2 md:w-auto md:flex-row md:items-center">
+          {pairOptions.length > 1 && (
+            <div className="flex w-full items-center gap-2 md:w-auto">
+              <div className="text-[11px] font-semibold uppercase text-white">Filter</div>
+              <select
+                value={pairFilter}
+                onChange={(event) => setPairFilter(event.target.value)}
+                className="h-8 w-full rounded border border-slate-700 bg-slate-800 px-2 text-xs text-white outline-none focus:border-blue-500 md:w-[190px]"
+              >
+                <option value="all">All {label} handovers</option>
+                {pairOptions.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
           <button 
             onClick={() => setSortOrder(prev => prev === "desc" ? "asc" : "desc")}
-            className="flex items-center gap-1 text-xs text-slate-400 transition-colors hover:text-slate-200"
+            className="flex h-8 w-fit items-center gap-1 rounded border border-slate-700 px-2 text-xs text-white transition-colors hover:border-slate-600 hover:text-white"
           >
             {sortOrder === "desc" ? "Newest first" : "Oldest first"}
             {sortOrder === "desc" ? <ChevronDown className="w-3 h-3" /> : <ChevronUp className="w-3 h-3" />}
           </button>
-          <span className="rounded bg-slate-800 px-2 py-0.5 text-xs font-semibold text-blue-300">
-            {filteredTransitions.length}
-          </span>
         </div>
       </div>
 
-      {pairOptions.length > 1 && (
-        <div className="mt-3">
-          <div className="mb-1 text-xs font-semibold text-slate-300">Filter</div>
-          <select
-            value={pairFilter}
-            onChange={(event) => setPairFilter(event.target.value)}
-            className="w-full rounded border border-slate-700 bg-slate-800 px-2 py-1.5 text-xs text-slate-200 outline-none focus:border-blue-500"
-          >
-            <option value="all">All {label} handovers</option>
-            {pairOptions.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </select>
-        </div>
-      )}
-
       {detailPairs.length > 0 && (
-        <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-3">
+        <div className="mt-3 grid grid-cols-1 gap-2 lg:grid-cols-2 2xl:grid-cols-3">
           {detailPairs.map((item) => (
             <PairSummaryCard key={item.pair} item={item} />
           ))}
         </div>
       )}
 
-      <div className="mt-3 flex max-h-[350px] flex-col gap-2 overflow-y-auto pr-1">
+      <div className="mt-3 flex flex-col gap-2">
         {sortedTransitions.map((t, idx) => (
           <TransitionCard 
             key={`${title}-${t.session_id ?? "handover"}-${idx}`}
@@ -226,7 +230,7 @@ const HandoverDetailSection = ({ title, label, transitions = [], onRowClick }) =
           />
         ))}
       </div>
-    </div>
+    </section>
   );
 };
 
@@ -244,76 +248,102 @@ const TransitionCard = ({ transition, index, label = "Technology", showType = tr
     Number.isFinite(transition.nextSinr) && Number.isFinite(transition.sinr)
       ? transition.nextSinr - transition.sinr
       : null;
-  const diffColor = rsrpDiff > 0 ? "text-green-400" : rsrpDiff < 0 ? "text-red-400" : "text-slate-400";
-  const rsrqDiffColor = rsrqDiff > 0 ? "text-green-400" : rsrqDiff < 0 ? "text-red-400" : "text-slate-400";
-  const sinrDiffColor = sinrDiff > 0 ? "text-green-400" : sinrDiff < 0 ? "text-red-400" : "text-slate-400";
+  const diffColor = "text-white";
+  const rsrqDiffColor = "text-white";
+  const sinrDiffColor = "text-white";
   
   return (
     <div 
-      onClick={() => onClick?.(transition)}
-      className="p-3 bg-slate-800/50 rounded-lg border border-slate-700 hover:border-slate-600 cursor-pointer transition-colors"
+      className="rounded-md border border-slate-700 bg-slate-800/45 p-3 text-white transition-colors hover:border-slate-600"
     >
-      <div className="flex items-center justify-between mb-2">
-        <div className="flex items-center gap-2">
-          <span className="text-xs text-slate-500">#{index + 1}</span>
-          <span className="text-xs font-mono text-slate-300">
+      <div className="mb-3 flex flex-col gap-3">
+        <div className="flex min-w-0 items-center justify-between gap-2">
+          <div className="flex min-w-0 items-center gap-2">
+          <span className="text-xs text-white">#{index + 1}</span>
+          <span className="text-xs font-mono text-white">
             {format(new Date(transition.timestamp), "HH:mm:ss")}
           </span>
+          </div>
+          <span className={`shrink-0 rounded px-2 py-0.5 text-xs capitalize ${showType ? TYPE_STYLES[type] : "text-white bg-blue-500/20"}`}>
+            {showType ? type : `${label} change`}
+          </span>
         </div>
-        <span className={`px-2 py-0.5 rounded text-xs capitalize ${showType ? TYPE_STYLES[type] : "text-blue-400 bg-blue-500/10"}`}>
-          {showType ? type : `${label} change`}
-        </span>
-      </div>
-      
-      <div className="flex items-center justify-center gap-3 py-2">
-        <span className="px-2 py-1 bg-slate-700 rounded text-sm font-medium text-slate-200">
+
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="max-w-full truncate rounded bg-slate-700 px-3 py-1.5 text-sm font-medium text-white">
           {transition.from}
         </span>
-        <ArrowRightLeft className="w-4 h-4 text-slate-500" />
-        <span className="px-2 py-1 bg-slate-700 rounded text-sm font-medium text-slate-200">
+        <ArrowRightLeft className="h-4 w-4 shrink-0 text-white" />
+        <span className="max-w-full truncate rounded bg-slate-700 px-3 py-1.5 text-sm font-medium text-white">
           {transition.to}
         </span>
       </div>
-
-      <div className="mt-2 grid grid-cols-1 gap-x-4 gap-y-1 border-t border-slate-700 pt-2 text-xs text-slate-400 sm:grid-cols-2 xl:grid-cols-4">
-        <div className="truncate">
-          <span className="text-slate-500">RSRP: </span>
-          <span className="font-mono">{Number.isFinite(transition.rsrp) ? `${transition.rsrp.toFixed(0)} dBm` : "-"}</span>
-          <span className="text-slate-600 mx-1">-&gt;</span>
-          <span className="font-mono">{Number.isFinite(transition.nextRsrp) ? `${transition.nextRsrp.toFixed(0)} dBm` : "-"}</span>
-          {rsrpDiff !== null && (
-            <span className={`ml-1 ${diffColor}`}>
-              ({rsrpDiff > 0 ? "+" : ""}{rsrpDiff.toFixed(0)})
-            </span>
-          )}
-        </div>
-        <div className="truncate">
-          <span className="text-slate-500">RSRQ: </span>
-          <span className="font-mono">{Number.isFinite(transition.rsrq) ? `${transition.rsrq.toFixed(0)} dB` : "-"}</span>
-          <span className="text-slate-600 mx-1">-&gt;</span>
-          <span className="font-mono">{Number.isFinite(transition.nextRsrq) ? `${transition.nextRsrq.toFixed(0)} dB` : "-"}</span>
-          {rsrqDiff !== null && (
-            <span className={`ml-1 ${rsrqDiffColor}`}>
-              ({rsrqDiff > 0 ? "+" : ""}{rsrqDiff.toFixed(0)})
-            </span>
-          )}
-        </div>
-        <div className="truncate">
-          <span className="text-slate-500">SINR: </span>
-          <span className="font-mono">{Number.isFinite(transition.sinr) ? `${transition.sinr.toFixed(0)} dB` : "-"}</span>
-          <span className="text-slate-600 mx-1">-&gt;</span>
-          <span className="font-mono">{Number.isFinite(transition.nextSinr) ? `${transition.nextSinr.toFixed(0)} dB` : "-"}</span>
-          {sinrDiff !== null && (
-            <span className={`ml-1 ${sinrDiffColor}`}>
-              ({sinrDiff > 0 ? "+" : ""}{sinrDiff.toFixed(0)})
-            </span>
-          )}
-        </div>
-        <div className="truncate">
-          <span className="text-slate-500">PCI: </span>
-          <span className="font-mono">{transition.pci ?? "-"} -&gt; {transition.nextPci ?? "-"}</span>
-        </div>
       </div>
+
+      <details className="mt-3 rounded border border-slate-700 bg-slate-900/40">
+        <summary className="cursor-pointer px-3 py-2 text-xs font-semibold text-white">
+          View event data
+        </summary>
+        <div className="flex max-h-48 flex-col gap-2 overflow-y-auto border-t border-slate-700 px-3 py-3 text-xs text-white">
+          <div className="flex flex-col gap-1 rounded bg-slate-800/70 px-3 py-2 sm:flex-row sm:items-center sm:justify-between">
+            <span className="font-semibold text-white">RSRP</span>
+            <div className="flex flex-wrap items-center gap-1 font-mono text-white">
+              <span>{Number.isFinite(transition.rsrp) ? `${transition.rsrp.toFixed(0)} dBm` : "-"}</span>
+              <span>-&gt;</span>
+              <span>{Number.isFinite(transition.nextRsrp) ? `${transition.nextRsrp.toFixed(0)} dBm` : "-"}</span>
+            {rsrpDiff !== null && (
+              <span className={`ml-1 ${diffColor}`}>
+                ({rsrpDiff > 0 ? "+" : ""}{rsrpDiff.toFixed(0)})
+              </span>
+            )}
+            </div>
+          </div>
+          <div className="flex flex-col gap-1 rounded bg-slate-800/70 px-3 py-2 sm:flex-row sm:items-center sm:justify-between">
+            <span className="font-semibold text-white">RSRQ</span>
+            <div className="flex flex-wrap items-center gap-1 font-mono text-white">
+              <span>{Number.isFinite(transition.rsrq) ? `${transition.rsrq.toFixed(0)} dB` : "-"}</span>
+              <span>-&gt;</span>
+              <span>{Number.isFinite(transition.nextRsrq) ? `${transition.nextRsrq.toFixed(0)} dB` : "-"}</span>
+            {rsrqDiff !== null && (
+              <span className={`ml-1 ${rsrqDiffColor}`}>
+                ({rsrqDiff > 0 ? "+" : ""}{rsrqDiff.toFixed(0)})
+              </span>
+            )}
+            </div>
+          </div>
+          <div className="flex flex-col gap-1 rounded bg-slate-800/70 px-3 py-2 sm:flex-row sm:items-center sm:justify-between">
+            <span className="font-semibold text-white">SINR</span>
+            <div className="flex flex-wrap items-center gap-1 font-mono text-white">
+              <span>{Number.isFinite(transition.sinr) ? `${transition.sinr.toFixed(0)} dB` : "-"}</span>
+              <span>-&gt;</span>
+              <span>{Number.isFinite(transition.nextSinr) ? `${transition.nextSinr.toFixed(0)} dB` : "-"}</span>
+            {sinrDiff !== null && (
+              <span className={`ml-1 ${sinrDiffColor}`}>
+                ({sinrDiff > 0 ? "+" : ""}{sinrDiff.toFixed(0)})
+              </span>
+            )}
+            </div>
+          </div>
+          <div className="flex flex-col gap-1 rounded bg-slate-800/70 px-3 py-2 sm:flex-row sm:items-center sm:justify-between">
+            <span className="font-semibold text-white">PCI</span>
+            <div className="flex flex-wrap items-center gap-1 font-mono text-white">
+              <span>{transition.pci ?? "-"}</span>
+              <span>-&gt;</span>
+              <span>{transition.nextPci ?? "-"}</span>
+            </div>
+          </div>
+        </div>
+      </details>
+
+      {onClick && (
+        <button
+          type="button"
+          onClick={() => onClick(transition)}
+          className="mt-2 rounded border border-slate-700 px-2 py-1 text-xs font-semibold text-white transition-colors hover:border-slate-500"
+        >
+          Locate
+        </button>
+      )}
 
       <div className="hidden">
         <div>
@@ -427,43 +457,40 @@ export const HandoverAnalysisTab = ({
   return (
     <div className="flex flex-col gap-4">
       {transitions.length > 0 && (
-      <>
-      
-      <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 xl:grid-cols-7">
-        <div className="p-3 bg-slate-800 rounded-lg text-center">
-          <p className="text-2xl font-bold text-slate-100">{stats.total}</p>
-          <p className="text-xs text-slate-400">Total</p>
+      <div className="grid grid-cols-2 gap-2 md:grid-cols-4 xl:grid-cols-7">
+        <div className="rounded-md border border-slate-700 bg-slate-800/60 p-3 text-center">
+          <p className="text-2xl font-bold text-white">{stats.total}</p>
+          <p className="text-xs text-white">Total</p>
         </div>
-        <div className="p-3 bg-slate-800 rounded-lg text-center">
-          <p className="text-2xl font-bold text-green-400">{stats.upgrade}</p>
-          <p className="text-xs text-slate-400">Upgrades</p>
+        <div className="rounded-md border border-slate-700 bg-slate-800/60 p-3 text-center">
+          <p className="text-2xl font-bold text-white">{stats.upgrade}</p>
+          <p className="text-xs text-white">Upgrades</p>
         </div>
-        <div className="p-3 bg-slate-800 rounded-lg text-center">
-          <p className="text-2xl font-bold text-red-400">{stats.downgrade}</p>
-          <p className="text-xs text-slate-400">Downgrades</p>
+        <div className="rounded-md border border-slate-700 bg-slate-800/60 p-3 text-center">
+          <p className="text-2xl font-bold text-white">{stats.downgrade}</p>
+          <p className="text-xs text-white">Downgrades</p>
         </div>
-        <div className="p-3 bg-slate-800 rounded-lg text-center">
-          <p className="text-lg font-bold text-blue-300">{formatAverage(stats.avgRsrpBefore, "dBm")}</p>
-          <p className="text-xs text-slate-400">RSRP Before</p>
+        <div className="rounded-md border border-slate-700 bg-slate-800/60 p-3 text-center">
+          <p className="text-lg font-bold text-white">{formatAverage(stats.avgRsrpBefore, "dBm")}</p>
+          <p className="text-xs text-white">RSRP Before</p>
         </div>
-        <div className="p-3 bg-slate-800 rounded-lg text-center">
-          <p className="text-lg font-bold text-blue-300">{formatAverage(stats.avgRsrpAfter, "dBm")}</p>
-          <p className="text-xs text-slate-400">RSRP After</p>
+        <div className="rounded-md border border-slate-700 bg-slate-800/60 p-3 text-center">
+          <p className="text-lg font-bold text-white">{formatAverage(stats.avgRsrpAfter, "dBm")}</p>
+          <p className="text-xs text-white">RSRP After</p>
         </div>
-        <div className="p-3 bg-slate-800 rounded-lg text-center">
-          <p className="text-lg font-bold text-blue-300">{formatAverage(stats.avgSinrBefore, "dB")}</p>
-          <p className="text-xs text-slate-400">SINR Before</p>
+        <div className="rounded-md border border-slate-700 bg-slate-800/60 p-3 text-center">
+          <p className="text-lg font-bold text-white">{formatAverage(stats.avgSinrBefore, "dB")}</p>
+          <p className="text-xs text-white">SINR Before</p>
         </div>
-        <div className="p-3 bg-slate-800 rounded-lg text-center">
-          <p className="text-lg font-bold text-blue-300">{formatAverage(stats.avgSinrAfter, "dB")}</p>
-          <p className="text-xs text-slate-400">SINR After</p>
+        <div className="rounded-md border border-slate-700 bg-slate-800/60 p-3 text-center">
+          <p className="text-lg font-bold text-white">{formatAverage(stats.avgSinrAfter, "dB")}</p>
+          <p className="text-xs text-white">SINR After</p>
         </div>
       </div>
-      </>
       )}
 
       {filteredTechnologyTransitions.length > 0 && stats.topPairs.length > 0 && (
-        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-3">
+        <div className="grid grid-cols-1 gap-2 lg:grid-cols-2 2xl:grid-cols-3">
           {stats.topPairs.map((item) => (
             <PairSummaryCard key={item.pair} item={item} />
           ))}
@@ -471,36 +498,43 @@ export const HandoverAnalysisTab = ({
       )}
 
       {filteredTechnologyTransitions.length > 0 && (
-        <>
-          <div className="flex items-center justify-between">
-            <h3 className="text-sm font-semibold text-slate-300">Technology Handover Events</h3>
+        <section className="rounded-lg border border-slate-700 bg-slate-900/40 p-4">
+          <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+            <div>
+              <h3 className="text-sm font-semibold text-white">Technology Handover Events</h3>
+              <p className="mt-1 text-xs text-white">
+                Showing {filteredTechnologyTransitions.length} of {transitions.length} events
+              </p>
+            </div>
+            <div className="flex w-full flex-col gap-2 md:w-auto md:flex-row md:items-center">
+            {technologyPairOptions.length > 1 && (
+              <div className="flex w-full items-center gap-2 md:w-auto">
+                <div className="text-[11px] font-semibold uppercase text-white">Filter</div>
+                <select
+                  value={technologyPairFilter}
+                  onChange={(event) => setTechnologyPairFilter(event.target.value)}
+                  className="h-8 w-full rounded border border-slate-700 bg-slate-800 px-2 text-xs text-white outline-none focus:border-blue-500 md:w-[190px]"
+                >
+                  <option value="all">All technology handovers</option>
+                  {technologyPairOptions.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
             <button 
               onClick={() => setSortOrder(prev => prev === "desc" ? "asc" : "desc")}
-              className="flex items-center gap-1 text-xs text-slate-400 transition-colors hover:text-slate-200"
+              className="flex h-8 w-fit items-center gap-1 rounded border border-slate-700 px-2 text-xs text-white transition-colors hover:border-slate-600 hover:text-white"
             >
               {sortOrder === "desc" ? "Newest first" : "Oldest first"}
               {sortOrder === "desc" ? <ChevronDown className="w-3 h-3" /> : <ChevronUp className="w-3 h-3" />}
             </button>
-            {technologyPairOptions.length > 1 && (
-        <div className=" bg-slate-900/40 ">
-          <div className=" text-sm font-semibold text-slate-300">Filter</div>
-          <select
-            value={technologyPairFilter}
-            onChange={(event) => setTechnologyPairFilter(event.target.value)}
-            className="w-full rounded border border-slate-700 bg-slate-800 px-2 py-1.5 text-xs text-slate-200 outline-none focus:border-blue-500"
-          >
-            <option value="all">All</option>
-            {technologyPairOptions.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </select>
-        </div>
-      )}
+            </div>
           </div>
 
-          <div className="flex flex-col gap-2 max-h-[350px] overflow-y-auto pr-1">
+          <div className="mt-3 flex flex-col gap-2">
             {sortedTransitions.map((t, idx) => (
               <TransitionCard 
                 key={`${t.session_id}-${idx}`}
@@ -510,7 +544,7 @@ export const HandoverAnalysisTab = ({
               />
             ))}
           </div>
-        </>
+        </section>
       )}
 
       <HandoverDetailSection
@@ -528,15 +562,15 @@ export const HandoverAnalysisTab = ({
       />
 
       <div className="flex items-center justify-center gap-6 py-2 border-t border-slate-700">
-        <div className="flex items-center gap-1.5 text-xs text-slate-400">
+        <div className="flex items-center gap-1.5 text-xs text-white">
           <div className="w-2 h-2 rounded-full bg-green-500" />
           Upgrade
         </div>
-        <div className="flex items-center gap-1.5 text-xs text-slate-400">
+        <div className="flex items-center gap-1.5 text-xs text-white">
           <div className="w-2 h-2 rounded-full bg-red-500" />
           Downgrade
         </div>
-        <div className="flex items-center gap-1.5 text-xs text-slate-400">
+        <div className="flex items-center gap-1.5 text-xs text-white">
           <div className="w-2 h-2 rounded-full bg-blue-500" />
           Lateral
         </div>

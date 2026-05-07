@@ -88,6 +88,7 @@ const DriveTestSessionsPage = () => {
   const [projectName, setProjectName] = useState("");
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const scopedCompanyId = resolveCompanyId(user);
+  const isSuperAdmin = Number(user?.m_user_type_id ?? user?.UserTypeId ?? user?.role_id ?? 0) === 3;
 
   const [visibleColumns, setVisibleColumns] = useState({
     sessionId: true,
