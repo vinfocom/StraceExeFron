@@ -913,9 +913,21 @@ const shouldFallbackToLocalProjectApi = (error) => {
 };
 
 const resolveProjectApiCall = async ({ csharpCall, localPythonCall }) => {
+  const hasLogicalFailure = (payload) => {
+    if (!payload || typeof payload !== "object") return false;
+    if (payload.Status === 0) return true;
+    if (payload.success === false) return true;
+    return false;
+  };
+
   if (preferLocalProjectApi) {
     try {
-      return await localPythonCall();
+      const localResult = await localPythonCall();
+      if (!hasLogicalFailure(localResult)) {
+        return localResult;
+      }
+      console.warn("[Project API] Local Python returned logical failure, trying C# fallback", localResult);
+      return csharpCall();
     } catch (localError) {
       console.warn("[Project API] Local Python call failed, trying C# fallback", localError);
       return csharpCall();
@@ -923,7 +935,12 @@ const resolveProjectApiCall = async ({ csharpCall, localPythonCall }) => {
   }
 
   try {
-    return await csharpCall();
+    const csharpResult = await csharpCall();
+    if (!hasLogicalFailure(csharpResult)) {
+      return csharpResult;
+    }
+    console.warn("[Project API] C# returned logical failure, trying local Python fallback", csharpResult);
+    return localPythonCall();
   } catch (csharpError) {
     if (!shouldFallbackToLocalProjectApi(csharpError)) {
       throw csharpError;
@@ -1040,10 +1057,7 @@ export const mapViewApi = {
 
   // ==================== Project Management ====================
   getProjects: () =>
-    resolveProjectApiCall({
-      csharpCall: () => api.get("/api/MapView/GetProjects"),
-      localPythonCall: () => pythonApi.get("/api/local-mapview/projects"),
-    }),
+    api.get("/api/MapView/GetProjects"),
 
   /**
    * Create project with polygons and sessions
