@@ -22,6 +22,51 @@ function computeOffset(center, distanceMeters, headingDegrees) {
   return { lat: (lat2 * 180) / Math.PI, lng: (lng2 * 180) / Math.PI };
 }
 
+function getSectorBandNumber(band) {
+  const raw = String(band ?? "").trim();
+  if (!raw || ["unknown", "n/a", "na", "null", "undefined"].includes(raw.toLowerCase())) {
+    return null;
+  }
+
+  const match = raw.match(/\d+/);
+  if (!match) return null;
+
+  const numeric = Number(match[0]);
+  return Number.isFinite(numeric) && numeric > 0 ? numeric : null;
+}
+
+function getSectorBandSizeMultiplier(band) {
+  const bandNumber = getSectorBandNumber(band);
+  if (!bandNumber) return 1;
+
+  if (bandNumber > 100) {
+    if (bandNumber <= 700) return 2.3;
+    if (bandNumber <= 900) return 2.1;
+    if (bandNumber <= 1200) return 1.8;
+    if (bandNumber <= 1800) return 1.45;
+    if (bandNumber <= 2100) return 1.15;
+    if (bandNumber <= 2300) return 0.95;
+    if (bandNumber <= 2600) return 0.75;
+    if (bandNumber <= 3500) return 0.55;
+    return 0.45;
+  }
+
+  if (bandNumber <= 5) return 1.7;
+  if (bandNumber <= 12) return 1.45;
+  if (bandNumber <= 20) return 1.2;
+  if (bandNumber <= 30) return 1;
+  if (bandNumber <= 50) return 0.75;
+  return 0.5;
+}
+
+function getSectorBandZIndex(band, baseZIndex = 50) {
+  const bandNumber = getSectorBandNumber(band);
+  if (!bandNumber) return baseZIndex;
+
+  const zOffset = Math.min(900, Math.max(0, Math.round(bandNumber / 5)));
+  return baseZIndex + zOffset;
+}
+
 // Color mapping by operator
 const OPERATOR_COLORS = {
   "Jio True5G": "#3B82F6",
@@ -46,7 +91,8 @@ const getOperatorColor = (operator) => {
 const SectorPolygon = memo(({ sector, onSectorClick, isSelected, onSelect }) => {
   const p0 = { lat: sector.lat, lng: sector.lng };
   const bw = sector.beamwidth;
-  const r = sector.range;
+  const r = sector.range * getSectorBandSizeMultiplier(sector.band);
+  const sectorZIndex = getSectorBandZIndex(sector.band, 50);
 
   const p1 = computeOffset(p0, r, sector.azimuth - bw / 2);
   const p2 = computeOffset(p0, r, sector.azimuth + bw / 2);
@@ -69,7 +115,7 @@ const SectorPolygon = memo(({ sector, onSectorClick, isSelected, onSelect }) => 
           strokeColor: sector.color,
           strokeWeight: 1.5,
           clickable: true,
-          zIndex: 50,
+          zIndex: isSelected ? sectorZIndex + 1000 : sectorZIndex,
         }}
         onClick={() => {
           onSelect(sector);
@@ -154,7 +200,13 @@ const NetworkSectors = ({
       color: sector.color || getOperatorColor(sector.operator),
       operator: sector.operator,
       tech: sector.tech || sector.technology,
-      band: sector.band || sector.frequency_band,
+      band:
+        sector.band ||
+        sector.Band ||
+        sector.frequency_band ||
+        sector.frequencyBand ||
+        sector.freq_band ||
+        sector.freqBand,
     }));
   }, [sectors, defaultRadius]);
 

@@ -11,6 +11,7 @@ import {
 const SITE_PREDICTION_PAGE_SIZE = 5000;
 const MAX_SITE_PREDICTION_PAGES = 200;
 const SITE_DATA_CACHE_MAX_AGE_MS = 2 * 60 * 1000;
+const CACHEABLE_SITE_TOGGLES = new Set(["NoML", "ML"]);
 
 const getFirstFiniteNumber = (values = [], fallback = 0) => {
   for (const value of values) {
@@ -351,7 +352,8 @@ export const useSiteData = ({
         : normalizedVersionRaw === "delta"
           ? "delta"
           : "original";
-    const shouldUseLocalCache = normalizedVersion !== "delta";
+    const shouldUseLocalCache =
+      normalizedVersion !== "delta" && CACHEABLE_SITE_TOGGLES.has(siteToggle);
 
     // Prevents duplicate calls
     const currentParams = JSON.stringify({
@@ -363,7 +365,12 @@ export const useSiteData = ({
       filterEnabled,
       polygons,
     });
-    if (!forceRefresh && lastFetchParams.current === currentParams && siteData.length > 0) {
+    if (
+      shouldUseLocalCache &&
+      !forceRefresh &&
+      lastFetchParams.current === currentParams &&
+      siteData.length > 0
+    ) {
       return;
     }
 

@@ -43,6 +43,14 @@ const readSectorId = (row = {}) =>
       "",
   ).trim();
 
+const formatBandLegendLabel = (band) => {
+  const normalized = normalizeBandName(band);
+  if (normalized === "Unknown") return normalized;
+
+  const match = String(normalized).match(/^B(\d+)$/i);
+  return match ? match[1] : normalized;
+};
+
 export default function SiteLegend({
   enabled,
   sites = [],
@@ -137,7 +145,7 @@ export default function SiteLegend({
       
       if (!itemMap.has(normalized)) {
         itemMap.set(normalized, {
-          label: normalized,
+          label: mode === "band" ? formatBandLegendLabel(rawName) : normalized,
           value: normalized,
           mode,
           color: color,

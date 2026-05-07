@@ -227,6 +227,17 @@ const ExportDropdown = ({
   }, []);
 
   const getTimestamp = () => new Date().toISOString().split("T")[0];
+  const hasNetworkSiteExportSource = Boolean(siteData?.length || locations?.length);
+
+  const getFirstTextValue = (source, aliases = []) => {
+    for (const alias of aliases) {
+      const value = source?.[alias];
+      if (value !== null && value !== undefined && String(value).trim() !== "") {
+        return String(value).trim();
+      }
+    }
+    return "";
+  };
 
   const exportAllDataCSV = async () => {
     setIsExporting(true);
@@ -382,13 +393,34 @@ const ExportDropdown = ({
       const timestamp = getTimestamp();
       const networkSiteHeaders = ["band", "operator", "nodeb_id", "cell_id"];
       const uniqueRows = new Map();
+      const sourceRows = siteData?.length ? siteData : locations || [];
 
-      ((rawLocations && rawLocations.length > 0) ? rawLocations : locations || []).forEach((loc) => {
+      sourceRows.forEach((loc) => {
         const row = {
-          band: String(loc?.band ?? loc?.primaryBand ?? "").trim(),
-          operator: String(loc?.operator ?? loc?.provider ?? "").trim(),
-          nodeb_id: String(loc?.nodeb_id ?? "").trim(),
-          cell_id: String(loc?.cell_id ?? loc?.cellId ?? "").trim(),
+          band: getFirstTextValue(loc, ["band", "primaryBand", "frequency_band", "frequency"]),
+          operator: getFirstTextValue(loc, ["operator", "provider", "network", "Network", "cluster"]),
+          nodeb_id: getFirstTextValue(loc, [
+            "nodeb_id",
+            "nodebId",
+            "node_b_id",
+            "nodeBId",
+            "nodeB",
+            "node_b",
+            "site",
+            "site_id",
+            "siteId",
+            "siteKeyInferred",
+            "site_key_inferred",
+          ]),
+          cell_id: getFirstTextValue(loc, [
+            "cell_id",
+            "cellId",
+            "cell_id_representative",
+            "cellIdRepresentative",
+            "pci",
+            "PCI",
+            "pci_or_psi",
+          ]),
         };
 
         const uniqueKey = networkSiteHeaders
@@ -658,11 +690,11 @@ Technologies: ${dataFilters.technologies?.join(", ") || "None"}
       <div className="flex items-center gap-2">
         <button
           onClick={exportNetworkSiteCSV}
-          disabled={!locations?.length || isExporting}
+          disabled={!hasNetworkSiteExportSource || isExporting}
           className={`
             flex items-center gap-2 px-3 py-1.5 rounded-lg font-medium text-sm
             transition-all duration-200
-            ${locations?.length && !isExporting
+            ${hasNetworkSiteExportSource && !isExporting
               ? "bg-gradient-to-r from-violet-600 to-fuchsia-600 hover:from-violet-500 hover:to-fuchsia-500 text-white shadow-lg hover:shadow-violet-500/25"
               : "bg-slate-700 text-slate-400 cursor-not-allowed"
             }
@@ -1099,8 +1131,9 @@ function UnifiedDetailLogs({
       return;
     }
 
-    const REPORT_POLL_INTERVAL_MS = 4000;
-    const REPORT_TIMEOUT_MS = 20 * 60 * 1000; // 20 minutes for heavy report generation
+    const REPORT_POLL_INTERVAL_MS = 5000;
+    const REPORT_TIMEOUT_MS = 60 * 60 * 1000; // 60 minutes for heavy report generation
+    const MAX_TRANSIENT_STATUS_ERRORS = 24; // keep polling for up to ~2 minutes of server misses
 
     isGeneratingReportRef.current = true;
     setIsGeneratingReport(true);
@@ -1121,9 +1154,30 @@ function UnifiedDetailLogs({
         toast.update(toastId, { render: "Report generating... this may take a moment", type: "info", isLoading: true });
         const deadline = Date.now() + REPORT_TIMEOUT_MS;
         let statusResponse = null;
+        let transientStatusErrors = 0;
 
         while (Date.now() < deadline) {
-          statusResponse = await reportApi.getReportStatus(reportId);
+          try {
+            statusResponse = await reportApi.getReportStatus(reportId);
+            transientStatusErrors = 0;
+          } catch (statusError) {
+            transientStatusErrors += 1;
+            const message = statusError?.message || "Waiting for Python report service...";
+
+            if (transientStatusErrors >= MAX_TRANSIENT_STATUS_ERRORS) {
+              throw new Error(
+                `${message} Report generation may still be running. Please try checking again after the Python service is back.`
+              );
+            }
+
+            toast.update(toastId, {
+              render: "Report is still processing. Waiting for Python service response...",
+              type: "info",
+              isLoading: true,
+            });
+            await new Promise((resolve) => setTimeout(resolve, REPORT_POLL_INTERVAL_MS));
+            continue;
+          }
           const reportStatus = statusResponse?.status;
 
           if (reportStatus === "ready") {

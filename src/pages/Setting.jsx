@@ -136,12 +136,80 @@ const geometryToWkt = (geometry) => {
     throw new Error("Only Polygon and MultiPolygon imports are supported.");
 };
 
+const parseMapInfoRegionToWkt = (raw) => {
+    const lines = String(raw || "")
+        .split(/\r?\n/)
+        .map((line) => line.trim())
+        .filter(Boolean);
+    const polygons = [];
+
+    for (let i = 0; i < lines.length; i++) {
+        const regionMatch = lines[i].match(/^Region\s+(\d+)/i);
+        if (!regionMatch) continue;
+
+        const ringCount = Number.parseInt(regionMatch[1], 10);
+        if (!Number.isInteger(ringCount) || ringCount <= 0) continue;
+
+        const rings = [];
+        i++;
+
+        for (let ringIndex = 0; ringIndex < ringCount && i < lines.length; ringIndex++) {
+            const pointCount = Number.parseInt(lines[i], 10);
+            if (!Number.isInteger(pointCount) || pointCount < 3) {
+                throw new Error("Invalid MapInfo MIF Region point count.");
+            }
+
+            const ring = [];
+            i++;
+
+            for (let pointIndex = 0; pointIndex < pointCount && i < lines.length; pointIndex++, i++) {
+                const parts = lines[i].split(/\s+/);
+                const lon = Number.parseFloat(parts[0]);
+                const lat = Number.parseFloat(parts[1]);
+
+                if (!Number.isFinite(lon) || !Number.isFinite(lat)) {
+                    throw new Error("Invalid MapInfo MIF coordinate pair.");
+                }
+
+                ring.push([lon, lat]);
+            }
+
+            rings.push(closeLinearRing(ring));
+        }
+
+        i--;
+        if (rings.length) polygons.push(rings);
+    }
+
+    if (!polygons.length) {
+        throw new Error(
+            "MapInfo file does not contain inline Region polygon coordinates. For TAB/MID imports, export the layer as MIF/MIFF first if the file only references .DAT/.MAP data."
+        );
+    }
+
+    if (polygons.length === 1) {
+        return `POLYGON(${polygons[0].map(ringToWkt).join(", ")})`;
+    }
+
+    return `MULTIPOLYGON(${polygons
+        .map((polygon) => `(${polygon.map(ringToWkt).join(", ")})`)
+        .join(", ")})`;
+};
+
 const normalizePolygonInput = (raw) => {
     const text = String(raw || "").trim();
-    if (!text) throw new Error("Paste a WKT polygon or upload a GeoJSON/WKT file.");
+    if (!text) throw new Error("Paste a WKT polygon or upload a GeoJSON/WKT/MIF/TAB file.");
 
     if (/^(POLYGON|MULTIPOLYGON)\s*\(/i.test(text)) {
         return text;
+    }
+
+    if (/^Region\s+\d+/im.test(text)) {
+        return parseMapInfoRegionToWkt(text);
+    }
+
+    if (/^(Version|Charset|Delimiter|CoordSys|Columns|Data|!table|Definition\s+Table|Type\s+NATIVE)\b/im.test(text)) {
+        return parseMapInfoRegionToWkt(text);
     }
 
     const parsed = JSON.parse(text);
@@ -731,7 +799,7 @@ const PolygonImportPanel = ({ user }) => {
         reader.onload = () => {
             setPolygonText(String(reader.result || ""));
             if (!name.trim()) {
-                setName(file.name.replace(/\.(geojson|json|wkt|txt)$/i, ""));
+                setName(file.name.replace(/\.(geojson|json|wkt|txt|mif|miff|mid|tab)$/i, ""));
             }
         };
         reader.onerror = () => toast.error("Failed to read polygon file");
@@ -821,7 +889,7 @@ const PolygonImportPanel = ({ user }) => {
                 <textarea
                     value={polygonText}
                     onChange={(event) => setPolygonText(event.target.value)}
-                    placeholder="Paste WKT POLYGON/MULTIPOLYGON or GeoJSON Polygon/MultiPolygon"
+                    placeholder="Paste WKT POLYGON/MULTIPOLYGON, GeoJSON Polygon/MultiPolygon, or MapInfo MIF Region data"
                     className="min-h-[220px] w-full rounded-lg border border-slate-700 bg-slate-950/70 px-3 py-2 text-sm text-white outline-none focus:border-blue-500"
                 />
             </div>
@@ -845,7 +913,7 @@ const PolygonImportPanel = ({ user }) => {
                         Import File
                         <input
                             type="file"
-                            accept=".geojson,.json,.wkt,.txt"
+                            accept=".geojson,.json,.wkt,.txt,.mif,.miff,.mid,.tab"
                             onChange={handleFileChange}
                             className="hidden"
                         />

@@ -763,11 +763,14 @@ export const predictionApi = {
 };
 
 export const reportApi = {
-  generateReport: (payload) => pythonApi.post("/api/report/generate", payload),
-  getReportStatus: (reportId) => pythonApi.get(`/api/report/status/${reportId}`),
+  generateReport: (payload) =>
+    pythonApi.post("/api/report/generate", payload, { timeout: 600000 }),
+  getReportStatus: (reportId) =>
+    pythonApi.get(`/api/report/status/${reportId}`, { timeout: 120000 }),
   downloadReport: (reportId) =>
     pythonApi.get(`/api/report/download/${reportId}`, {
       responseType: 'blob',
+      timeout: 600000,
     }),
 };
 
@@ -1294,16 +1297,35 @@ export const mapViewApi = {
     api.post("/api/MapView/UploadSitePredictionCsv", formData),
 
   getSitePrediction: (params) =>
-    api.get("/api/MapView/GetSitePrediction", { params }),
+    api.get("/api/MapView/GetSitePrediction", {
+      params: { ...params, _ts: Date.now() },
+      dedupe: false,
+    }),
   getSitePredictionBase: (params, config = {}) =>
-    api.get("/api/MapView/GetSitePredictionBase", { params, ...config }),
+    api.get("/api/MapView/GetSitePredictionBase", {
+      ...config,
+      params: { ...params, _ts: Date.now() },
+      dedupe: false,
+    }),
   getSitePredictionOptimised: (params, config = {}) =>
-    api.get("/api/MapView/GetSitePredictionOptimised", { params, ...config }),
+    api.get("/api/MapView/GetSitePredictionOptimised", {
+      ...config,
+      params: { ...params, _ts: Date.now() },
+      dedupe: false,
+    }),
   // Keep US spelling alias for callers while backend route remains "Optimised".
   getSitePredictionOptimized: (params, config = {}) =>
-    api.get("/api/MapView/GetSitePredictionOptimised", { params, ...config }),
+    api.get("/api/MapView/GetSitePredictionOptimised", {
+      ...config,
+      params: { ...params, _ts: Date.now() },
+      dedupe: false,
+    }),
   compareSitePrediction: (params, config = {}) =>
-    api.get("/api/MapView/CompareSitePrediction", { params, ...config }),
+    api.get("/api/MapView/CompareSitePrediction", {
+      ...config,
+      params: { ...params, _ts: Date.now() },
+      dedupe: false,
+    }),
   updateSitePrediction: (payload) =>
     api.post("/api/MapView/UpdateSitePrediction", payload),
   deleteSitePrediction: (payload) =>

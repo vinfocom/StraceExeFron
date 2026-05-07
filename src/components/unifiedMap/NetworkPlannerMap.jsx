@@ -57,9 +57,11 @@ function buildSectorInfoPosition(sector, radiusMeters = 120, sectorScale = 1) {
 
   const safeBeamwidth = normalizeBeamwidth(sector?.beamwidth, 30);
   const sectorRange = Number(sector?.range);
+  const bandSizeMultiplier = getSectorBandSizeMultiplier(resolveSiteBandValue(sector));
   const radius =
     (Number.isFinite(sectorRange) && sectorRange > 0 ? sectorRange : Number(radiusMeters) || 120) *
-    (Number.isFinite(Number(sectorScale)) && Number(sectorScale) > 0 ? Number(sectorScale) : 1);
+    (Number.isFinite(Number(sectorScale)) && Number(sectorScale) > 0 ? Number(sectorScale) : 1) *
+    bandSizeMultiplier;
   const azimuth = Number.isFinite(Number(sector?.azimuth)) ? Number(sector.azimuth) : 0;
   const p1 = computeOffset(p0, radius, azimuth - safeBeamwidth / 2);
   const p2 = computeOffset(p0, radius, azimuth + safeBeamwidth / 2);
@@ -133,18 +135,26 @@ function getSiteLabelText(site, labelField = "none") {
   if (!field || field === "none") return "";
 
   const valueByField = {
+    site: getSiteName(site),
     site_id: getDisplaySiteId(site),
     cell_id: getSiteCellId(site),
     technology: site?.technology ?? site?.rawSite?.technology ?? site?.rawSite?.Technology,
     nodeb_id: site?.nodebId ?? extractNodebId(site?.rawSite) ?? site?.rawSite?.nodeb_id,
     pci: site?.pci ?? site?.rawSite?.pci ?? site?.rawSite?.PCI,
-    band: site?.band ?? site?.rawSite?.band ?? site?.rawSite?.frequency_band,
+    band: resolveSiteBandValue(site),
   };
 
   const value = valueByField[field];
   if (value === null || value === undefined) return "";
   const text = String(value).trim();
   return text && text.toLowerCase() !== "unknown" ? text : "";
+}
+
+function getZoomSectorScale(zoom) {
+  const numericZoom = Number(zoom);
+  if (!Number.isFinite(numericZoom)) return 1;
+  if (numericZoom <= 13) return 1;
+  return Math.max(0.35, 1 - (numericZoom - 13) * 0.08);
 }
 
 function normalizeComparableSiteId(value) {
@@ -291,6 +301,67 @@ function normalizeSectorRange(value, fallback = 220) {
   const numeric = Number(value);
   if (!Number.isFinite(numeric) || numeric <= 0) return fallback;
   return Math.max(20, Math.min(5000, numeric));
+}
+
+function getSectorBandNumber(band) {
+  const normalized = normalizeBandName(band);
+  const match = String(normalized || "").match(/\d+/);
+  if (!match) return null;
+
+  const numeric = Number(match[0]);
+  return Number.isFinite(numeric) && numeric > 0 ? numeric : null;
+}
+
+function getSectorBandSizeMultiplier(band) {
+  const bandNumber = getSectorBandNumber(band);
+  if (!bandNumber) return 1;
+
+  if (bandNumber > 100) {
+    if (bandNumber <= 700) return 2.3;
+    if (bandNumber <= 900) return 2.1;
+    if (bandNumber <= 1200) return 1.8;
+    if (bandNumber <= 1800) return 1.45;
+    if (bandNumber <= 2100) return 1.15;
+    if (bandNumber <= 2300) return 0.95;
+    if (bandNumber <= 2600) return 0.75;
+    if (bandNumber <= 3500) return 0.55;
+    return 0.45;
+  }
+
+  if (bandNumber <= 5) return 1.7;
+  if (bandNumber <= 12) return 1.45;
+  if (bandNumber <= 20) return 1.2;
+  if (bandNumber <= 30) return 1;
+  if (bandNumber <= 50) return 0.75;
+  return 0.5;
+}
+
+function getSectorBandZIndex(band, baseZIndex = 5000) {
+  const bandNumber = getSectorBandNumber(band);
+  if (!bandNumber) return baseZIndex;
+
+  const zOffset = Math.min(900, Math.max(0, Math.round(bandNumber / 5)));
+  return baseZIndex + zOffset;
+}
+
+function resolveSiteBandValue(site) {
+  return (
+    site?.band ??
+    site?.Band ??
+    site?.frequency_band ??
+    site?.frequencyBand ??
+    site?.freq_band ??
+    site?.freqBand ??
+    site?.band_name ??
+    site?.rawSite?.band ??
+    site?.rawSite?.Band ??
+    site?.rawSite?.frequency_band ??
+    site?.rawSite?.frequencyBand ??
+    site?.rawSite?.freq_band ??
+    site?.rawSite?.freqBand ??
+    site?.rawSite?.band_name ??
+    null
+  );
 }
 
 function normalizeBaselineLteMetric(metric) {
@@ -591,6 +662,8 @@ const MAX_RENDERED_SITE_LABELS = 450;
 const MIN_SITE_LABEL_ZOOM = 14;
 const MAX_SITE_LABEL_CHARS = 14;
 const SITE_LABEL_COLOR_FIELDS = new Set(["pci", "band", "technology"]);
+const SITE_MARKER_LABEL_FIELDS = new Set(["site", "site_id"]);
+const TRIANGLE_LABEL_DISABLED_FIELDS = new Set(["site", "site_id", "band"]);
 
 function getSiteMarkerFillColor(site, isSelected) {
   if (isSelected) return "#dc2626";
@@ -991,7 +1064,7 @@ function normalizeSiteRows(rows = [], options = {}) {
         beamwidthSource: hasBeamwidthValue ? "data" : "default",
         range: normalizeSectorRange(getFirstFiniteNumber([item.range, item.radius], 220), 220),
         operator: item.cluster || item.network || item.Network || item.operator || "Unknown",
-        band: item.band || item.frequency_band || item.frequency || "Unknown",
+        band: resolveSiteBandValue(item) || item.frequency || "Unknown",
         technology: inferTechnologyFromCarrier(
           item.Technology || item.tech || item.technology,
           item.earfcn_or_narfcn ?? item.earfcn,
@@ -1078,7 +1151,7 @@ function generateSectorsFromSite(site, siteIndex, colorMode = "Operator", option
   const range = normalizeSectorRange(getFirstFiniteNumber([site.range, site.radius], 220), 220);
 
   const network = site.cluster || site.operator || site.network || "Unknown";
-  const band = site.band || site.frequency_band || site.frequency || "Unknown";
+  const band = resolveSiteBandValue(site) || site.frequency || "Unknown";
   const earfcnOrNarfcn = site.earfcn_or_narfcn ?? site.earfcnOrNarfcn ?? site.earfcn ?? null;
   const tech = inferTechnologyFromCarrier(
     site.tech || site.Technology || site.technology,
@@ -1189,7 +1262,6 @@ const NetworkPlannerMap = ({
   selectedMetric = "rsrp",
   onlyInsidePolygons = false,
   filterPolygons = [],
-  thresholds = {},
   getMetricColor = null,
   onSiteSelect = null,
   enableSiteLteOverlay = false,
@@ -1247,6 +1319,11 @@ const NetworkPlannerMap = ({
       : 1;
     return baseScale * multiplier;
   }, [options?.scale, triangleScaleMultiplier]);
+  const zoomSectorScale = useMemo(() => getZoomSectorScale(mapZoom), [mapZoom]);
+  const effectiveRenderedSectorScale = useMemo(
+    () => effectiveSectorScale * zoomSectorScale,
+    [effectiveSectorScale, zoomSectorScale],
+  );
   const siteSectorColorField = useMemo(
     () => getSiteSectorColorField(siteLabelField, colorMode),
     [siteLabelField, colorMode],
@@ -1539,7 +1616,7 @@ const NetworkPlannerMap = ({
           technology: item.Technology ?? item.tech ?? item.technology ?? null,
           nodebId: extractNodebId(item),
           pci: item.pci ?? item.PCI ?? item.pci_or_psi ?? null,
-          band: item.band ?? item.frequency_band ?? item.frequency ?? null,
+          band: resolveSiteBandValue(item) ?? item.frequency ?? null,
           rawSite: item,
           lat,
           lng,
@@ -2200,8 +2277,26 @@ const NetworkPlannerMap = ({
 
   const shouldRenderSectorLabels =
     String(siteLabelField || "none").toLowerCase() !== "none" &&
+    !TRIANGLE_LABEL_DISABLED_FIELDS.has(String(siteLabelField || "").trim().toLowerCase()) &&
     mapZoom >= MIN_SITE_LABEL_ZOOM &&
     renderedSectors.length <= MAX_RENDERED_SITE_LABELS;
+
+  const visibleSiteLabelKeys = useMemo(() => {
+    const labelField = String(siteLabelField || "none").trim().toLowerCase();
+    if (!SITE_MARKER_LABEL_FIELDS.has(labelField)) return new Set();
+    if (mapZoom < MIN_SITE_LABEL_ZOOM) return new Set();
+    if (visibleSiteMarkers.length > MAX_RENDERED_SITE_LABELS) return new Set();
+
+    const seenSites = new Set();
+    const labelKeys = new Set();
+    visibleSiteMarkers.forEach((site) => {
+      const siteId = getDisplaySiteId(site) || site.siteId || site.markerKey;
+      if (!siteId || seenSites.has(siteId)) return;
+      seenSites.add(siteId);
+      labelKeys.add(site.markerKey || site.siteId);
+    });
+    return labelKeys;
+  }, [mapZoom, siteLabelField, visibleSiteMarkers]);
 
   const logCoords = useMemo(() => {
     if (!hoveredLog) return null;
@@ -2492,7 +2587,7 @@ const NetworkPlannerMap = ({
         continue;
       }
 
-      const infoPos = buildSectorInfoPosition(sector, radius, effectiveSectorScale);
+      const infoPos = buildSectorInfoPosition(sector, radius, effectiveRenderedSectorScale);
       const loaded = await loadSectorPredictionForSector(
         { ...sector, renderKey: sectorRenderKey },
         infoPos,
@@ -2511,7 +2606,7 @@ const NetworkPlannerMap = ({
     }
     toast.info("No sector data could be loaded.");
   }, [
-    effectiveSectorScale,
+    effectiveRenderedSectorScale,
     loadSectorPredictionForSector,
     radius,
     sectorPredictionRowsByRenderKey,
@@ -3601,32 +3696,50 @@ const NetworkPlannerMap = ({
       )}
 
       {showSiteMarkers &&
-        visibleSiteMarkers.map((site) => (
-          <MarkerF
-            key={`site-${site.markerKey || site.siteId}`}
-            position={{ lat: site.lat, lng: site.lng }}
-            optimized={false}
-            icon={{
-              path: window.google.maps.SymbolPath.CIRCLE,
-              scale: 5,
-              fillColor: getSiteMarkerFillColor(site, selectedSiteIdSet.has(site.siteId)),
-              fillOpacity: 0.95,
-              strokeColor: "#ffffff",
-              strokeWeight: selectedSiteIdSet.has(site.siteId) ? 2 : 1.5,
-            }}
-            zIndex={selectedSiteIdSet.has(site.siteId) ? 4001 : 3001}
-            title={site.isUpdated ? `Updated site: ${site.siteId}` : `Baseline site: ${site.siteId}`}
-            onClick={() => {
-              void handleSiteMarkerClick(site);
-            }}
-            onLoad={(marker) => {
-              if (marker) markerRefs.current.add(marker);
-            }}
-            onUnmount={(marker) => {
-              if (marker) markerRefs.current.delete(marker);
-            }}
-          />
-        ))}
+        visibleSiteMarkers.map((site) => {
+          const isSelected = selectedSiteIdSet.has(site.siteId);
+          const siteMarkerKey = site.markerKey || site.siteId;
+          const siteLabelText = visibleSiteLabelKeys.has(siteMarkerKey)
+            ? truncateSiteLabelText(getSiteLabelText(site, siteLabelField))
+            : "";
+
+          return (
+            <MarkerF
+              key={`site-${siteMarkerKey}`}
+              position={{ lat: site.lat, lng: site.lng }}
+              optimized={false}
+              icon={{
+                path: window.google.maps.SymbolPath.CIRCLE,
+                scale: 5,
+                fillColor: getSiteMarkerFillColor(site, isSelected),
+                fillOpacity: 0.95,
+                strokeColor: "#ffffff",
+                strokeWeight: isSelected ? 2 : 1.5,
+              }}
+              label={
+                siteLabelText
+                  ? {
+                      text: siteLabelText,
+                      color: "#111827",
+                      fontSize: "11px",
+                      fontWeight: "700",
+                    }
+                  : undefined
+              }
+              zIndex={isSelected ? 4001 : 3001}
+              title={site.isUpdated ? `Updated site: ${site.siteId}` : `Baseline site: ${site.siteId}`}
+              onClick={() => {
+                void handleSiteMarkerClick(site);
+              }}
+              onLoad={(marker) => {
+                if (marker) markerRefs.current.add(marker);
+              }}
+              onUnmount={(marker) => {
+                if (marker) markerRefs.current.delete(marker);
+              }}
+            />
+          );
+        })}
 
       {loadingSitesQueue.size > 0 && (
         <div className="absolute top-4 left-1/2 -translate-x-1/2 z-[2100] rounded bg-blue-600 px-3 py-1 text-xs font-semibold text-white shadow-md">
@@ -3754,7 +3867,9 @@ const NetworkPlannerMap = ({
           ? { ...sector, ...sectorOverride, renderKey: sectorRenderKey }
           : { ...sector, renderKey: sectorRenderKey };
         const p0 = { lat: effectiveSector.lat, lng: effectiveSector.lng };
-        const r = (effectiveSector.range || radius) * effectiveSectorScale;
+        const sectorBandValue = resolveSiteBandValue(effectiveSector);
+        const bandSizeMultiplier = getSectorBandSizeMultiplier(sectorBandValue);
+        const r = (effectiveSector.range || radius) * effectiveRenderedSectorScale * bandSizeMultiplier;
         const safeBeamwidth = normalizeBeamwidth(effectiveSector.beamwidth, 30);
         const p1 = computeOffset(p0, r, effectiveSector.azimuth - safeBeamwidth / 2);
         const p2 = computeOffset(p0, r, effectiveSector.azimuth + safeBeamwidth / 2);
@@ -3774,6 +3889,7 @@ const NetworkPlannerMap = ({
         const isSectorDataActive =
           Array.isArray(sectorPredictionRowsByRenderKey?.[sectorRenderKey]) &&
           sectorPredictionRowsByRenderKey[sectorRenderKey].length > 0;
+        const bandZIndex = getSectorBandZIndex(sectorBandValue, 5000);
         const infoSector = isSelectedSector ? selectedSectorInfo || effectiveSector : effectiveSector;
         const infoSectorSiteId = getDisplaySiteId(infoSector);
         const canEditSitePrediction = String(siteToggle || "").toLowerCase() === "cell";
@@ -3797,7 +3913,13 @@ const NetworkPlannerMap = ({
                 strokeWeight: isSectorDataActive ? 2 : isSelectedSector ? 2 : 1,
                 strokeColor: isSelectedSector ? "#111827" : isHoveredMatch ? "#FF0000" : effectiveSector.color,
                 strokeOpacity: isSectorDataActive ? 0.95 : 1,
-                zIndex: isSectorDataActive ? 5200 : isSelectedSector ? 5100 : isHoveredMatch ? 5050 : 5000,
+                zIndex: isSectorDataActive
+                  ? 7000 + bandZIndex
+                  : isSelectedSector
+                    ? 6500 + bandZIndex
+                    : isHoveredMatch
+                      ? 6200 + bandZIndex
+                      : bandZIndex,
               }}
               onClick={() => {
                 void handleSectorLeftClick(effectiveSector, infoPos);

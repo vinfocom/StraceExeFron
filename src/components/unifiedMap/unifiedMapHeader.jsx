@@ -240,6 +240,103 @@ const toCsvFile = (csvContent, originalFile) => {
   });
 };
 
+const decodeXmlText = (value = "") =>
+  String(value)
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'");
+
+const getColumnIndexFromCellRef = (cellRef = "") => {
+  const letters = String(cellRef).match(/[A-Z]+/i)?.[0]?.toUpperCase();
+  if (!letters) return null;
+
+  let index = 0;
+  for (let i = 0; i < letters.length; i += 1) {
+    index = index * 26 + (letters.charCodeAt(i) - 64);
+  }
+  return index - 1;
+};
+
+const parseSimpleXlsxWorksheet = async (buffer) => {
+  const zipModule = await import("jszip");
+  const JSZip = zipModule?.default ?? zipModule;
+  const zip = await JSZip.loadAsync(buffer);
+
+  const sharedStringsFile = zip.file("xl/sharedStrings.xml");
+  const sharedStringsXml = sharedStringsFile
+    ? await sharedStringsFile.async("string")
+    : "";
+  const sharedStrings = Array.from(
+    sharedStringsXml.matchAll(/<(?:\w+:)?si[\s\S]*?<\/(?:\w+:)?si>/g),
+  ).map((match) =>
+    Array.from(
+      match[0].matchAll(/<(?:\w+:)?t[^>]*>([\s\S]*?)<\/(?:\w+:)?t>/g),
+    )
+      .map((textMatch) => decodeXmlText(textMatch[1]))
+      .join(""),
+  );
+
+  const worksheetFile =
+    zip.file("xl/worksheets/sheet1.xml") ||
+    zip.file(/xl\/worksheets\/sheet\d+\.xml$/i)?.[0];
+  if (!worksheetFile) return { headers: [], rows: [] };
+
+  const worksheetXml = await worksheetFile.async("string");
+  const parsedRows = [];
+  const rowMatches = worksheetXml.matchAll(
+    /<(?:\w+:)?row\b([^>]*)>([\s\S]*?)<\/(?:\w+:)?row>/g,
+  );
+
+  for (const rowMatch of rowMatches) {
+    const cells = [];
+    const cellMatches = rowMatch[2].matchAll(
+      /<(?:\w+:)?c\b([^>]*)>([\s\S]*?)<\/(?:\w+:)?c>/g,
+    );
+
+    for (const cellMatch of cellMatches) {
+      const attrs = cellMatch[1] || "";
+      const body = cellMatch[2] || "";
+      const cellRef = attrs.match(/\br="([^"]+)"/)?.[1] || "";
+      const columnIndex = getColumnIndexFromCellRef(cellRef);
+      if (columnIndex === null) continue;
+
+      const type = attrs.match(/\bt="([^"]+)"/)?.[1] || "";
+      const valueMatch = body.match(
+        /<(?:\w+:)?v[^>]*>([\s\S]*?)<\/(?:\w+:)?v>/,
+      );
+      const inlineMatch = body.match(
+        /<(?:\w+:)?is[^>]*>([\s\S]*?)<\/(?:\w+:)?is>/,
+      );
+      let value = "";
+
+      if (type === "s" && valueMatch) {
+        value = sharedStrings[Number(valueMatch[1])] || "";
+      } else if (type === "inlineStr" && inlineMatch) {
+        value = Array.from(
+          inlineMatch[1].matchAll(
+            /<(?:\w+:)?t[^>]*>([\s\S]*?)<\/(?:\w+:)?t>/g,
+          ),
+        )
+          .map((textMatch) => decodeXmlText(textMatch[1]))
+          .join("");
+      } else if (valueMatch) {
+        value = decodeXmlText(valueMatch[1]);
+      }
+
+      cells[columnIndex] = String(value).trim();
+    }
+
+    parsedRows.push(cells.map((cell) => cell ?? ""));
+  }
+
+  return {
+    headers: parsedRows[0] || [],
+    rows: parsedRows.slice(1),
+  };
+};
+
 const normalizeSiteUploadFile = async (file) => {
   const fileName = String(file?.name || "").toLowerCase();
   const fileType = String(file?.type || "").toLowerCase();
@@ -264,41 +361,51 @@ const normalizeSiteUploadFile = async (file) => {
   }
 
   if (isXlsx) {
-    const excelModule = await import("exceljs");
-    const ExcelJS = excelModule?.default ?? excelModule;
-    const workbook = new ExcelJS.Workbook();
     const buffer = await file.arrayBuffer();
-    await workbook.xlsx.load(buffer);
-    const worksheet = workbook.worksheets?.[0];
-    if (!worksheet) return { ok: false, missingColumns: ["sheet"] };
 
-    const cellToString = (cellValue) => {
-      if (cellValue == null) return "";
-      if (typeof cellValue === "object") {
-        if (Array.isArray(cellValue.richText)) {
-          return cellValue.richText.map((part) => part?.text || "").join("");
+    let headers = [];
+    let rows = [];
+
+    try {
+      const excelModule = await import("exceljs");
+      const ExcelJS = excelModule?.default ?? excelModule;
+      const workbook = new ExcelJS.Workbook();
+      await workbook.xlsx.load(buffer);
+      const worksheet = workbook.worksheets?.[0];
+      if (!worksheet) return { ok: false, missingColumns: ["sheet"] };
+
+      const cellToString = (cellValue) => {
+        if (cellValue == null) return "";
+        if (typeof cellValue === "object") {
+          if (Array.isArray(cellValue.richText)) {
+            return cellValue.richText.map((part) => part?.text || "").join("");
+          }
+          if (cellValue.text != null) return String(cellValue.text);
+          if (cellValue.result != null) return String(cellValue.result);
         }
-        if (cellValue.text != null) return String(cellValue.text);
-        if (cellValue.result != null) return String(cellValue.result);
-      }
-      return String(cellValue);
-    };
+        return String(cellValue);
+      };
 
-    const headerRow = worksheet.getRow(1);
-    const headers = [];
-    for (let col = 1; col <= headerRow.cellCount; col += 1) {
-      headers.push(cellToString(headerRow.getCell(col).value).trim());
+      const headerRow = worksheet.getRow(1);
+      for (let col = 1; col <= headerRow.cellCount; col += 1) {
+        headers.push(cellToString(headerRow.getCell(col).value).trim());
+      }
+
+      for (let rowNo = 2; rowNo <= worksheet.rowCount; rowNo += 1) {
+        const row = worksheet.getRow(rowNo);
+        const rowValues = [];
+        for (let col = 1; col <= headers.length; col += 1) {
+          rowValues.push(cellToString(row.getCell(col).value).trim());
+        }
+        rows.push(rowValues);
+      }
+    } catch {
+      const parsedWorksheet = await parseSimpleXlsxWorksheet(buffer);
+      headers = parsedWorksheet.headers;
+      rows = parsedWorksheet.rows;
     }
 
-    const rows = [];
-    for (let rowNo = 2; rowNo <= worksheet.rowCount; rowNo += 1) {
-      const row = worksheet.getRow(rowNo);
-      const rowValues = [];
-      for (let col = 1; col <= headers.length; col += 1) {
-        rowValues.push(cellToString(row.getCell(col).value).trim());
-      }
-      rows.push(rowValues);
-    }
+    if (!headers.length) return { ok: false, missingColumns: ["sheet"] };
 
     const normalized = buildNormalizedSiteCsv(headers, rows);
     if (!normalized.ok) return normalized;
@@ -404,7 +511,7 @@ function UnifiedHeader({
         return;
       }
       uploadFile = normalizedCsv.file;
-    } catch (e) {
+    } catch {
       toast.error("Unable to read file. Please verify CSV/XLSX format.");
       return;
     }

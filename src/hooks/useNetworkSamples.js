@@ -115,9 +115,9 @@ const parseLogEntry = (log, sessionId) => {
     lat, lng, latitude: lat, longitude: lng,
     radius: 18,
     timestamp: log.timestamp,
-    rsrp: parseNum(log.rsrp),
-    rsrq: parseNum(log.rsrq),
-    sinr: parseNum(log.sinr),
+    rsrp: parseNumFromKeys(["rsrp", "RSRP", "Rsrp", "lte_rsrp", "nr_rsrp"]),
+    rsrq: parseNumFromKeys(["rsrq", "RSRQ", "Rsrq", "lte_rsrq", "nr_rsrq"]),
+    sinr: parseNumFromKeys(["sinr", "SINR", "Sinr", "snr", "SNR", "lte_sinr", "nr_sinr"]),
     dl_tpt: dlThroughput,
     dl_thpt: dlThroughput,
     dl_rpt: dlThroughput,
@@ -417,6 +417,22 @@ export const useNetworkSamples = (
 
     for (let i = 1; i < locations.length; i++) {
       const loc = locations[i];
+      const prevLoc = locations[i - 1] || {};
+      const transitionMeta = {
+        atIndex: i,
+        lat: loc.lat,
+        lng: loc.lng,
+        timestamp: loc.timestamp,
+        session_id: loc.session_id,
+        rsrp: prevLoc.rsrp,
+        nextRsrp: loc.rsrp,
+        rsrq: prevLoc.rsrq,
+        nextRsrq: loc.rsrq,
+        sinr: prevLoc.sinr,
+        nextSinr: loc.sinr,
+        pci: prevLoc.pci,
+        nextPci: loc.pci,
+      };
 
       // Technology Transition
       const currTech = normalizeTechName(loc.technology);
@@ -424,11 +440,7 @@ export const useNetworkSamples = (
         techTrans.push({
           from: prevTech,
           to: currTech,
-          atIndex: i,
-          lat: loc.lat,
-          lng: loc.lng,
-          timestamp: loc.timestamp,
-          session_id: loc.session_id,
+          ...transitionMeta,
           type: 'technology'
         });
       }
@@ -440,11 +452,7 @@ export const useNetworkSamples = (
         bandTrans.push({
           from: String(prevBand),
           to: String(currBand),
-          atIndex: i,
-          lat: loc.lat,
-          lng: loc.lng,
-          timestamp: loc.timestamp,
-          session_id: loc.session_id,
+          ...transitionMeta,
           type: 'band'
         });
       }
@@ -457,11 +465,7 @@ export const useNetworkSamples = (
         pciTrans.push({
           from: String(prevPci),
           to: String(currPci),
-          atIndex: i,
-          lat: loc.lat,
-          lng: loc.lng,
-          timestamp: loc.timestamp,
-          session_id: loc.session_id,
+          ...transitionMeta,
           type: 'pci'
         });
       }

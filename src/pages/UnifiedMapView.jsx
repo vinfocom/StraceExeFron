@@ -741,6 +741,8 @@ const buildHandoverTransitions = (logs = []) => {
       nextRsrp: readHandoverMetric(loc, ["rsrp", "RSRP", "Rsrp", "lte_rsrp", "nr_rsrp"]),
       rsrq: readHandoverMetric(previousLog, ["rsrq", "RSRQ", "Rsrq", "lte_rsrq", "nr_rsrq"]),
       nextRsrq: readHandoverMetric(loc, ["rsrq", "RSRQ", "Rsrq", "lte_rsrq", "nr_rsrq"]),
+      sinr: readHandoverMetric(previousLog, ["sinr", "SINR", "Sinr", "snr", "SNR", "lte_sinr", "nr_sinr"]),
+      nextSinr: readHandoverMetric(loc, ["sinr", "SINR", "Sinr", "snr", "SNR", "lte_sinr", "nr_sinr"]),
       pci: readHandoverValue(previousLog, ["pci", "PCI", "Pci", "physical_cell_id", "cell_id"]),
       nextPci: readHandoverValue(loc, ["pci", "PCI", "Pci", "physical_cell_id", "cell_id"]),
     };
