@@ -28,6 +28,7 @@ import {
 import { Trash2, Map, ChevronLeft, ChevronRight, MapPin } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
+import { upsertProjectInProjectsCache } from "@/utils/projectsCache";
 
 const resolveCompanyId = (user) => {
   const directCompanyId = Number(
@@ -500,6 +501,17 @@ const DriveTestSessionsPage = () => {
     try {
       const res = await mapViewApi.createProject(payload);
       if (res.Status === 1) {
+        const projectId =
+          res?.Data?.projectId || res?.Data?.project_id || res?.Data?.id;
+        if (projectId) {
+          upsertProjectInProjectsCache({
+            id: projectId,
+            project_name: payload.ProjectName,
+            ref_session_id: normalizedSessionIds.join(","),
+            created_on: new Date().toISOString(),
+            status: 1,
+          });
+        }
         toast.success("Project created successfully");
         setSelectedSessions([]);
         setIsDialogOpen(false);

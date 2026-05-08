@@ -16,6 +16,11 @@ import Spinner from "@/components/common/Spinner";
 import { mapViewApi } from "@/api/apiEndpoints";
 import { parseWKTToPolygons } from "@/utils/wkt";
 import { GOOGLE_MAPS_LOADER_OPTIONS } from "@/lib/googleMapsLoader";
+import {
+  isProjectsListCacheFresh,
+  readProjectsListCacheEntry,
+  writeProjectsListCache,
+} from "@/utils/projectsCache";
 
 const normalizeLatLng = (input) => {
   if (!input) return null;
@@ -201,7 +206,10 @@ const ViewProjectsPage = () => {
     GOOGLE_MAPS_LOADER_OPTIONS,
   );
   const [projects, setProjects] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(() => {
+    const cacheEntry = readProjectsListCacheEntry();
+    return !(cacheEntry && isProjectsListCacheFresh(cacheEntry));
+  });
   const [searchQuery, setSearchQuery] = useState("");
 
   const formatDate = (value) => {
@@ -281,13 +289,22 @@ const ViewProjectsPage = () => {
   };
 
   const fetchProjects = async () => {
-    setLoading(true);
+    const cacheEntry = readProjectsListCacheEntry();
+    if (cacheEntry && isProjectsListCacheFresh(cacheEntry)) {
+      setProjects(cacheEntry.data);
+      setLoading(false);
+    } else {
+      setLoading(true);
+    }
+
     try {
       const res = await mapViewApi.getProjects();
       if (res?.Data && Array.isArray(res.Data)) {
         setProjects(res.Data);
+        writeProjectsListCache(res.Data);
       } else {
         setProjects([]);
+        writeProjectsListCache([]);
         toast.warn("No projects found.");
       }
     } catch (error) {

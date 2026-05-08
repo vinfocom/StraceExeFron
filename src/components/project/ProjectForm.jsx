@@ -35,6 +35,7 @@ import {
 } from "../../api/apiEndpoints";
 import { useAuth } from "../../context/AuthContext";
 import Spinner from "../common/Spinner";
+import { upsertProjectInProjectsCache } from "@/utils/projectsCache";
 
 const DEFAULT_MIN_SAMPLES = 10;
 
@@ -602,6 +603,18 @@ export const ProjectForm = ({
       if (!projectId) throw new Error("No project ID received");
 
       projectData = projectRes.Data?.project || projectRes.Data;
+      upsertProjectInProjectsCache({
+        ...(projectData || {}),
+        id: projectId,
+        project_name: projectData?.project_name || projectName.trim(),
+        ref_session_id: Array.isArray(selectedSessions)
+          ? selectedSessions.join(",")
+          : projectData?.ref_session_id,
+        grid_size: String(parseFloat(gridSize)),
+        log_grid: String(parseFloat(logGridSize)),
+        created_on: projectData?.created_on || new Date().toISOString(),
+        status: projectData?.status ?? 1,
+      });
       toast.success(`Project created! ID: ${projectId}`);
       completedSteps.push("project_created");
 
