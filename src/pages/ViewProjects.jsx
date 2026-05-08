@@ -305,11 +305,15 @@ const ViewProjectsPage = () => {
       } else {
         setProjects([]);
         writeProjectsListCache([]);
-        toast.warn("No projects found.");
+        if (res?.Status === 0 && res?.Message) {
+          toast.error(res.Message);
+        } else {
+          toast.warn("No projects found.");
+        }
       }
     } catch (error) {
       console.error("Failed to load projects.", error);
-      toast.error("Failed to load projects.");
+      toast.error(error?.message || "Failed to load projects.");
     } finally {
       setLoading(false);
     }
