@@ -210,7 +210,23 @@ const buildOperatorNetworkCombo = (logs, topN = 10) => {
 const exportCsv = ({ logs, field, filename = "logs_metric.csv" }) => {
   if (!Array.isArray(logs) || !logs.length) return;
 
-  const header = ["session_id", "lat", "lon", field, "provider", "network", "band", "timestamp"];
+  const header = ["session_id", "lat", "lon",  "rsrp",
+    "rsrq",
+    "sinr",
+    "bler",
+    "mos",
+
+    // Throughput
+    "dl_tpt",
+    "ul_tpt",
+
+    // Network Info
+    "provider",
+    "network",
+    "band",
+    
+    "timestamp"
+  ];
   const lines = [header.join(",")];
 
   logs.forEach((log) => {
@@ -218,7 +234,15 @@ const exportCsv = ({ logs, field, filename = "logs_metric.csv" }) => {
       log.session_id ?? log.id ?? "",
       log.lat ?? "",
       log.lon ?? log.lng ?? "",
-      log[field] ?? "",
+     log.rsrp ?? "",
+      log.rsrq ?? "",
+      log.sinr ?? "",
+      log.bler ?? "",
+      log.mos ?? "",
+
+      // Throughput
+      log.dl_tpt ?? "",
+      log.ul_tpt ?? "",
       normalizeOperator(log.provider ?? log.m_alpha_long) ?? "",
       log.network ?? log.technology ?? "",
       log.band ?? "",
@@ -400,8 +424,7 @@ const AllLogsDetailPanel = ({
   const handleExport = () => {
     exportCsv({
       logs: safeLogsList,
-      field: cfg.field,
-      filename: `logs_${cfg.field}.csv`,
+      filename: `logs_Details.csv`,
     });
   };
 

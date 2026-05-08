@@ -13,7 +13,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import Spinner from "@/components/common/Spinner";
-import { mapViewApi } from "@/api/apiEndpoints";
+import { mapViewApi, offlineApi } from "@/api/apiEndpoints";
 import { parseWKTToPolygons } from "@/utils/wkt";
 import { GOOGLE_MAPS_LOADER_OPTIONS } from "@/lib/googleMapsLoader";
 import {
@@ -21,6 +21,16 @@ import {
   readProjectsListCacheEntry,
   writeProjectsListCache,
 } from "@/utils/projectsCache";
+
+const mergeProjectsById = (primaryRows = [], localRows = []) => {
+  const seen = new Set();
+  return [...localRows, ...primaryRows].filter((project) => {
+    const key = String(project?.id ?? project?.project_id ?? "");
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+};
 
 const normalizeLatLng = (input) => {
   if (!input) return null;
@@ -298,18 +308,41 @@ const ViewProjectsPage = () => {
     }
 
     try {
-      const res = await mapViewApi.getProjects();
-      if (res?.Data && Array.isArray(res.Data)) {
-        setProjects(res.Data);
-        writeProjectsListCache(res.Data);
+      let cloudRows = [];
+      let cloudError = null;
+
+      try {
+        const res = await mapViewApi.getProjects();
+        if (res?.Data && Array.isArray(res.Data)) {
+          cloudRows = res.Data;
+        } else if (res?.Status === 0 && res?.Message) {
+          toast.error(res.Message);
+        }
+      } catch (error) {
+        cloudError = error;
+      }
+
+      let localRows = [];
+      try {
+        const localRes = await offlineApi.getProjects();
+        localRows = Array.isArray(localRes?.Data) ? localRes.Data : [];
+      } catch (error) {
+        if (cloudError) {
+          throw cloudError;
+        }
+      }
+
+      const mergedRows = mergeProjectsById(cloudRows, localRows);
+      if (mergedRows.length > 0) {
+        setProjects(mergedRows);
+        writeProjectsListCache(mergedRows);
+        if (cloudError && localRows.length > 0) {
+          toast.info("Cloud projects are unavailable. Showing local projects.");
+        }
       } else {
         setProjects([]);
         writeProjectsListCache([]);
-        if (res?.Status === 0 && res?.Message) {
-          toast.error(res.Message);
-        } else {
-          toast.warn("No projects found.");
-        }
+        toast.warn("No projects found.");
       }
     } catch (error) {
       console.error("Failed to load projects.", error);
@@ -342,9 +375,11 @@ const ViewProjectsPage = () => {
 
     const params = new URLSearchParams({ project_id: project.id });
     if (project.ref_session_id) params.set("session", project.ref_session_id);
+    if (project.is_local || Number(project.id) < 0) params.set("source", "local");
     navigate(`/unified-map?${params.toString()}`, {
       state: {
         project,
+        source: project.is_local || Number(project.id) < 0 ? "local" : "cloud",
         sessionIds: project.ref_session_id
           ? String(project.ref_session_id).split(",").map((id) => id.trim()).filter(Boolean)
           : [],
@@ -433,7 +468,14 @@ const ViewProjectsPage = () => {
                               <p className="font-semibold text-slate-900">
                                 {project.project_name || "Untitled Project"}
                               </p>
-                              <p className="text-xs text-slate-500 mt-1">Project ID: {project.id}</p>
+                              <div className="flex items-center gap-2 mt-1 flex-wrap">
+                                <p className="text-xs text-slate-500">Project ID: {project.id}</p>
+                                {(project.is_local || Number(project.id) < 0) && (
+                                  <span className="rounded border border-amber-200 bg-amber-50 px-1.5 py-0.5 text-[11px] font-medium text-amber-700">
+                                    Local
+                                  </span>
+                                )}
+                              </div>
                             </div>
                             <div className="text-xs text-slate-500 flex items-center gap-1">
                               <Calendar className="h-3.5 w-3.5" />
@@ -464,6 +506,12 @@ const ViewProjectsPage = () => {
                             variant="outline"
                             size="sm"
                             onClick={() => handleDeleteProject(project)}
+                            disabled={project.is_local || Number(project.id) < 0}
+                            title={
+                              project.is_local || Number(project.id) < 0
+                                ? "Local projects are synced or managed from Offline Workspace"
+                                : "Delete project"
+                            }
                           >
                             <Trash color="red" />
                           </Button>

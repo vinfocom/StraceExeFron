@@ -1154,7 +1154,7 @@ const UnifiedMapSidebar = ({
       await pollLtePredictionStatus();
       ltePredictionPollingRef.current = setInterval(() => {
         pollLtePredictionStatus();
-      }, 3000);
+      }, 6000);
     } catch (error) {
       setIsRunningLtePrediction(false);
       const failureMessage = error?.message || "Failed to start LTE prediction.";

@@ -1,6 +1,6 @@
 // src/pages/DriveTestSessionsPage.jsx
 import React, { useState, useEffect, useCallback } from "react";
-import { adminApi, mapViewApi } from "../api/apiEndpoints";
+import { adminApi, mapViewApi, offlineApi } from "../api/apiEndpoints";
 import { toast } from "react-toastify";
 import Spinner from "../components/common/Spinner";
 import { Button } from "@/components/ui/button";
@@ -55,6 +55,33 @@ const resolveCompanyId = (user) => {
     return 0;
   }
 };
+
+const mergeSessionsById = (primaryRows = [], localRows = []) => {
+  const seen = new Set();
+  return [...localRows, ...primaryRows].filter((session) => {
+    const key = String(session?.id ?? "");
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+};
+
+const sortSessionsNewestFirst = (rows = []) =>
+  [...rows].sort((a, b) => {
+    const aLocal = Boolean(a?.is_local || Number(a?.id) < 0);
+    const bLocal = Boolean(b?.is_local || Number(b?.id) < 0);
+    if (aLocal !== bLocal) return aLocal ? -1 : 1;
+
+    const aTime = new Date(a?.created_at || a?.start_time || 0).getTime();
+    const bTime = new Date(b?.created_at || b?.start_time || 0).getTime();
+    if (Number.isFinite(aTime) && Number.isFinite(bTime) && aTime !== bTime) {
+      return bTime - aTime;
+    }
+
+    const aId = Number(a?.id ?? 0);
+    const bId = Number(b?.id ?? 0);
+    return bId - aId;
+  });
 
 const DriveTestSessionsPage = () => {
   const { user } = useAuth();
@@ -166,14 +193,34 @@ const DriveTestSessionsPage = () => {
   const fetchSessions = useCallback(async () => {
     try {
       setLoading(true);
-      const data = await adminApi.getSessions();
-      const rows = Array.isArray(data?.Data) ? data.Data : [];
-      const sortedRows = [...rows].sort((a, b) => {
-        const aId = Number(a?.id ?? 0);
-        const bId = Number(b?.id ?? 0);
-        return bId - aId;
-      });
-      setSessions(sortedRows);
+      let cloudRows = [];
+      let cloudError = null;
+
+      try {
+        const data = await adminApi.getSessions();
+        cloudRows = Array.isArray(data?.Data) ? data.Data : [];
+      } catch (error) {
+        cloudError = error;
+      }
+
+      let localRows = [];
+      try {
+        const localData = await offlineApi.getSessions();
+        localRows = Array.isArray(localData?.Data) ? localData.Data : [];
+      } catch (error) {
+        if (cloudError) {
+          throw cloudError;
+        }
+      }
+
+      const mergedRows = mergeSessionsById(cloudRows, localRows);
+      setSessions(sortSessionsNewestFirst(mergedRows));
+
+      if (cloudError && localRows.length > 0) {
+        toast.info("Cloud sessions are unavailable. Showing local imported sessions.");
+      } else if (localRows.length > 0) {
+        toast.info(`${localRows.length} local imported session(s) loaded.`);
+      }
     } catch (error) {
       toast.error(`Failed to fetch sessions: ${error.message}`);
     } finally {
@@ -466,7 +513,7 @@ const DriveTestSessionsPage = () => {
 
     const normalizedSessionIds = selectedSessions
       .map((id) => Number(id))
-      .filter((id) => Number.isFinite(id) && id > 0);
+      .filter((id) => Number.isFinite(id) && id !== 0);
 
     const selectedCompanyIds = [
       ...new Set(
@@ -495,14 +542,30 @@ const DriveTestSessionsPage = () => {
 
     const payload = {
       ProjectName: projectName.trim(),
-      SessionIds: normalizedSessionIds,
+        SessionIds: normalizedSessionIds,
       ...(inferredCompanyId > 0 ? { company_id: inferredCompanyId } : {}),
     };
     try {
-      const res = await mapViewApi.createProject(payload);
+      const hasLocalSessions = normalizedSessionIds.some((id) => id < 0);
+      let res;
+
+      if (hasLocalSessions) {
+        res = await offlineApi.createProject(payload);
+      } else {
+        try {
+          res = await mapViewApi.createProject(payload);
+        } catch (cloudError) {
+          res = await offlineApi.createProject(payload);
+          toast.info("Cloud project creation failed. Saved the project locally for sync.");
+        }
+      }
+
       if (res.Status === 1) {
         const projectId =
-          res?.Data?.projectId || res?.Data?.project_id || res?.Data?.id;
+          res?.Data?.projectId ||
+          res?.Data?.project_id ||
+          res?.Data?.id ||
+          res?.Data?.project?.id;
         if (projectId) {
           upsertProjectInProjectsCache({
             id: projectId,
@@ -510,11 +573,16 @@ const DriveTestSessionsPage = () => {
             ref_session_id: normalizedSessionIds.join(","),
             created_on: new Date().toISOString(),
             status: 1,
+            is_local: hasLocalSessions || Number(projectId) < 0,
+            source: hasLocalSessions || Number(projectId) < 0 ? "local" : "cloud",
           });
         }
-        toast.success("Project created successfully");
+        toast.success(hasLocalSessions ? "Local project created successfully" : "Project created successfully");
         setSelectedSessions([]);
         setIsDialogOpen(false);
+        fetchSessions();
+      } else {
+        toast.error(res?.Message || "Failed to create project.");
       }
     } catch (error) {
       console.error("Project creation error:", error);
@@ -1064,6 +1132,11 @@ const DriveTestSessionsPage = () => {
                   {visibleColumns.sessionId && (
                     <TableCell className="whitespace-normal break-words max-w-[150px]">
                       <div className="font-medium">{session.id || "N/A"}</div>
+                      {session.is_local && (
+                        <div className="mt-1 text-[11px] font-medium text-amber-700">
+                          Local import
+                        </div>
+                      )}
                     </TableCell>
                   )}
 
@@ -1151,6 +1224,8 @@ const DriveTestSessionsPage = () => {
                           size="sm"
                           className="!bg-white hover:!bg-white focus:!bg-white active:!bg-white border-red-200 text-red-500 hover:text-red-600"
                           onClick={() => handleDelete(session.id)}
+                          disabled={session.is_local}
+                          title={session.is_local ? "Local imports are managed from Offline Workspace" : "Delete session"}
                         >
                           <Trash2 className="h-4 w-4 text-red-500" />
                         </Button>

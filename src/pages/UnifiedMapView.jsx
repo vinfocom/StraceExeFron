@@ -1144,6 +1144,7 @@ const UnifiedMapView = () => {
   const [isSideOpen, setIsSideOpen] = useState(false);
   const [shouldRenderSidebar, setShouldRenderSidebar] = useState(false);
   const [showAnalytics, setShowAnalytics] = useState(false);
+  const mapSnapshotContainerRef = useRef(null);
   const [analyticsActiveTab, setAnalyticsActiveTab] = useState("overview");
   const [selectedMetric, setSelectedMetricState] = useState("rsrp");
   const setSelectedMetric = useCallback((nextMetric) => {
@@ -4037,6 +4038,179 @@ const UnifiedMapView = () => {
     setDrawnShapeAnalytics(drawingAnalytics);
   }, []);
 
+  const handleMapSnapshot = useCallback(async () => {
+    if (!canEnableUnifiedGridView) {
+      toast.warn("Raw filter polygon is required before taking a snapshot.");
+      return;
+    }
+
+    const target = mapSnapshotContainerRef.current;
+    if (!target) {
+      toast.error("Map area not ready for snapshot.");
+      return;
+    }
+
+    try {
+      const map = mapRef.current;
+      if (!map) {
+        toast.error("Map is not ready yet.");
+        return;
+      }
+
+      const html2canvas = (await import("html2canvas")).default;
+      const canvas = await html2canvas(target, {
+        backgroundColor: null,
+        useCORS: true,
+        scale: Math.min(2, window.devicePixelRatio || 1),
+      });
+
+      const mapBounds = map.getBounds?.();
+      const zoom = Number(map.getZoom?.());
+      if (!mapBounds || !Number.isFinite(zoom)) {
+        toast.error("Map bounds not available for polygon snapshot.");
+        return;
+      }
+
+      const toMercatorY = (lat) => {
+        const clampedLat = Math.max(-85.05112878, Math.min(85.05112878, Number(lat)));
+        const rad = (clampedLat * Math.PI) / 180;
+        return Math.log(Math.tan(Math.PI / 4 + rad / 2));
+      };
+
+      const ne = mapBounds.getNorthEast();
+      const sw = mapBounds.getSouthWest();
+      const westLng = sw.lng();
+      const eastLng = ne.lng();
+      const northY = toMercatorY(ne.lat());
+      const southY = toMercatorY(sw.lat());
+      const viewWidth = Math.max(1, target.clientWidth);
+      const viewHeight = Math.max(1, target.clientHeight);
+
+      const normalizeLng = (lng) => {
+        let value = Number(lng);
+        while (value < westLng) value += 360;
+        return value;
+      };
+
+      const lngRange = (() => {
+        let range = eastLng - westLng;
+        if (range <= 0) range += 360;
+        return range;
+      })();
+
+      const latLngToPixel = (pt) => {
+        const lat = Number(pt?.lat);
+        const lng = Number(pt?.lng);
+        if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+
+        const xRatio = (normalizeLng(lng) - westLng) / lngRange;
+        const yMerc = toMercatorY(lat);
+        const yRatio = (northY - yMerc) / (northY - southY);
+
+        return {
+          x: xRatio * viewWidth,
+          y: yRatio * viewHeight,
+        };
+      };
+
+      const polygonRings = rawFilteringPolygons
+        .map((poly) => {
+          const ring = Array.isArray(poly?.paths?.[0])
+            ? poly.paths[0]
+            : Array.isArray(poly?.paths)
+              ? poly.paths
+              : [];
+          return ring
+            .map((pt) =>
+              latLngToPixel({
+                lat: pt?.lat ?? pt?.latitude,
+                lng: pt?.lng ?? pt?.longitude,
+              }),
+            )
+            .filter(Boolean);
+        })
+        .filter((ring) => ring.length >= 3);
+
+      if (polygonRings.length === 0) {
+        toast.error("No valid raw filter polygon found for snapshot.");
+        return;
+      }
+
+      let minX = Infinity;
+      let minY = Infinity;
+      let maxX = -Infinity;
+      let maxY = -Infinity;
+      polygonRings.forEach((ring) => {
+        ring.forEach((pt) => {
+          minX = Math.min(minX, pt.x);
+          minY = Math.min(minY, pt.y);
+          maxX = Math.max(maxX, pt.x);
+          maxY = Math.max(maxY, pt.y);
+        });
+      });
+
+      minX = Math.max(0, Math.floor(minX));
+      minY = Math.max(0, Math.floor(minY));
+      maxX = Math.min(viewWidth, Math.ceil(maxX));
+      maxY = Math.min(viewHeight, Math.ceil(maxY));
+
+      const cropWidth = Math.max(1, maxX - minX);
+      const cropHeight = Math.max(1, maxY - minY);
+      const scaleX = canvas.width / viewWidth;
+      const scaleY = canvas.height / viewHeight;
+
+      const outCanvas = document.createElement("canvas");
+      outCanvas.width = Math.max(1, Math.round(cropWidth * scaleX));
+      outCanvas.height = Math.max(1, Math.round(cropHeight * scaleY));
+      const outCtx = outCanvas.getContext("2d");
+      if (!outCtx) {
+        toast.error("Unable to create snapshot canvas.");
+        return;
+      }
+
+      outCtx.save();
+      outCtx.beginPath();
+      polygonRings.forEach((ring) => {
+        ring.forEach((pt, index) => {
+          const x = (pt.x - minX) * scaleX;
+          const y = (pt.y - minY) * scaleY;
+          if (index === 0) outCtx.moveTo(x, y);
+          else outCtx.lineTo(x, y);
+        });
+        outCtx.closePath();
+      });
+      outCtx.clip();
+
+      outCtx.drawImage(
+        canvas,
+        minX * scaleX,
+        minY * scaleY,
+        cropWidth * scaleX,
+        cropHeight * scaleY,
+        0,
+        0,
+        outCanvas.width,
+        outCanvas.height,
+      );
+      outCtx.restore();
+
+      const dataUrl = outCanvas.toDataURL("image/png");
+      const link = document.createElement("a");
+      const safeProjectName = String(project?.project_name || "unified-map")
+        .trim()
+        .replace(/[^a-z0-9_-]+/gi, "_")
+        .replace(/^_+|_+$/g, "")
+        .toLowerCase();
+      link.href = dataUrl;
+      link.download = `${safeProjectName || "unified-map"}_snapshot_${Date.now()}.png`;
+      link.click();
+      toast.success("Polygon-only map snapshot downloaded.");
+    } catch (error) {
+      console.error("Map snapshot failed:", error);
+      toast.error("Failed to capture map snapshot.");
+    }
+  }, [canEnableUnifiedGridView, project?.project_name, rawFilteringPolygons]);
+
   const reloadData = useCallback(() => {
     refetchColors();
     if (enableSiteToggle && typeof refetchSites === "function") refetchSites();
@@ -4412,6 +4586,7 @@ const UnifiedMapView = () => {
         gridViewEnabled={enableGrid}
         onGridViewToggle={setEnableGrid}
         canEnableGridView={canEnableUnifiedGridView}
+        onMapSnapshot={handleMapSnapshot}
       />
 
       {showAnalytics && (
@@ -4694,7 +4869,7 @@ const UnifiedMapView = () => {
           </div>
         )}
 
-        <div className="relative h-full w-full">
+        <div ref={mapSnapshotContainerRef} className="relative h-full w-full">
           {isLoading &&
             (locations?.length || 0) === 0 &&
             (siteData?.length || 0) === 0 ? (

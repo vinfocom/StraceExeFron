@@ -17,6 +17,7 @@ const PAGE_TITLES = {
   '/companylicenses': 'Company Licenses',
   '/superadmin': 'Company Management',
   '/uploaddata': 'Upload Data',
+  '/offline-workspace': 'Offline Workspace',
 };
 
 export default function Header() {

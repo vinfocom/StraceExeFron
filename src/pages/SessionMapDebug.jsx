@@ -763,7 +763,7 @@ function SessionMapDebug() {
     <div className="h-[calc(100vh-64px)] w-full relative rounded-lg overflow-hidden shadow-md">
       <LoadingProgress
         progress={fetchProgress}
-        loading={loading || thresholdsLoading}
+        loading={loading}
       />
 
       <MapWithMultipleCircles

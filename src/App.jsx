@@ -39,6 +39,7 @@ const SuperAdminCompanies = lazy(() => import("@/pages/SuperAdmin"));
 const CompanyForm = lazy(() => import("./pages/CompanyForm"));  
 const CompanyLicensesPage = lazy(() => import("./pages/CompanyLicenses"));
 const DataDeletionPage = lazy(() => import("./pages/DataDeletion"));
+const OfflineWorkspacePage = lazy(() => import("./pages/OfflineWorkspace"));
 
 // Loading Component for Suspense
 const PageLoader = () => (
@@ -111,6 +112,7 @@ function AppShell({ isElectronRuntime }) {
             <Route path="/multi-map" element={<MultiViewPage />} />
             <Route path="/manage-users" element={<PrivateRoute><ManageUsersPage /></PrivateRoute>} />
             <Route path="/upload-data" element={<PrivateRoute><UploadDataPage /></PrivateRoute>} />
+            <Route path="/offline-workspace" element={<PrivateRoute><OfflineWorkspacePage /></PrivateRoute>} />
             <Route path="/settings" element={<PrivateRoute><SettingsPage /></PrivateRoute>} />
             <Route path="/create-project" element={<PrivateRoute><ProjectsPage /></PrivateRoute>} />
             <Route path="/prediction-map" element={<PrivateRoute><PredictionMapPage /></PrivateRoute>} />

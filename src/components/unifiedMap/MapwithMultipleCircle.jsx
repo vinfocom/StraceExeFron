@@ -1817,9 +1817,9 @@ const MapWithMultipleCircles = ({
         {children}
       </GoogleMap>
 
-      {(isLoadingPolygons || thresholdsLoading) && (
+      {isLoadingPolygons && (
         <div className="absolute top-16 left-1/2 transform -translate-x-1/2 bg-blue-500 text-white px-4 py-2 rounded-lg shadow-lg z-20 text-sm">
-          <span className="animate-pulse">{thresholdsLoading ? 'Loading color thresholds...' : 'Loading polygon boundaries...'}</span>
+          <span className="animate-pulse">Loading polygon boundaries...</span>
         </div>
       )}
 

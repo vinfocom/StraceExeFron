@@ -4,17 +4,54 @@ import { useCallback, useEffect, useState } from "react";
 import { getLogColor } from "@/utils/colorUtils"; 
 import { getPciColor } from "@/utils/metrics";
 
+const EMPTY_THRESHOLD_STATE = {
+    id: null,
+    userId: null,
+    isDefault: false,
+    coverageHole: -110,
+    rsrp: [],
+    rsrq: [],
+    sinr: [],
+    dl_thpt: [],
+    ul_thpt: [],
+    delta: [],
+    volteCall: [],
+    lte_bler: [],
+    mos: [],
+    num_cells: [],
+    level: [],
+    jitter: [],
+    latency: [],
+    packet_loss: [],
+    tac: [],
+    dominance: [],
+    coverage_violation: [],
+};
+
+const withTimeout = (promise, timeoutMs = 8000) =>
+    Promise.race([
+        promise,
+        new Promise((_, reject) => {
+            const timer = setTimeout(
+                () => reject(new Error("Threshold settings request timed out")),
+                timeoutMs,
+            );
+            if (typeof timer?.unref === "function") timer.unref();
+        }),
+    ]);
+
 function useColorForLog() {
-    const [parsedData, setParsedData] = useState(null);
+    const [parsedData, setParsedData] = useState(EMPTY_THRESHOLD_STATE);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
 
     const fetchThreshold = useCallback(async () => {
         try {
             setLoading(true);
-            const res = await settingApi.getThresholdSettings();
+            setError(null);
+            const res = await withTimeout(settingApi.getThresholdSettings());
             
-            if (res.Status === 1) {
+            if (res?.Status === 1 && res?.Data) {
                 const data = res.Data;
                 
                 // ✅ Safe parsing with fallback to empty array
@@ -57,10 +94,13 @@ function useColorForLog() {
                 };
                 
                 setParsedData(parsed);
+            } else {
+                setParsedData(EMPTY_THRESHOLD_STATE);
             }
         } catch (err) {
             console.error("Error fetching thresholds:", err);
             setError(err);
+            setParsedData(EMPTY_THRESHOLD_STATE);
         } finally {
             setLoading(false);
         }
@@ -314,7 +354,7 @@ function useColorForLog() {
         thresholds: parsedData,
         loading,
         error,
-        isReady: !loading && parsedData !== null,
+        isReady: !loading,
         refetch: fetchThreshold
     };
 }

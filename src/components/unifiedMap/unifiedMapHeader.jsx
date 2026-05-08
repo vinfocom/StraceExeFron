@@ -7,6 +7,7 @@ import {
   Filter,
   ChartBar,
   LayoutGrid,
+  Camera,
   Plus,
   Minus,
   UploadCloud,
@@ -445,6 +446,7 @@ function UnifiedHeader({
   gridViewEnabled = false,
   onGridViewToggle,
   canEnableGridView = false,
+  onMapSnapshot,
 }) {
   const { user, logout } = useAuth();
   const location = useLocation();
@@ -896,6 +898,25 @@ function UnifiedHeader({
             >
               <LayoutGrid className="h-4 w-4" />
               <span className="hidden xl:inline">Multi Map</span>
+            </Button>
+
+            <Button
+              onClick={() => onMapSnapshot?.()}
+              size="sm"
+              title={
+                canEnableGridView
+                  ? "Capture map snapshot with current polygon boundary"
+                  : "Snapshot requires a raw filter polygon"
+              }
+              disabled={!canEnableGridView}
+              className={`h-9 shrink-0 flex gap-1 items-center text-white ${
+                canEnableGridView
+                  ? "bg-sky-600 hover:bg-sky-500"
+                  : "bg-slate-700 opacity-70 cursor-not-allowed"
+              }`}
+            >
+              <Camera className="h-4 w-4" />
+              <span className="hidden xl:inline">Snapshot</span>
             </Button>
 
             <button

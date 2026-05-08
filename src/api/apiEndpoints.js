@@ -553,8 +553,9 @@ export const predictionApi = {
       const payload = {
         user_id: params.user_id,
         project_id: params.project_id,
-        radius: params.radius ?? 5000.0,
-        grid_resolution: params.grid_resolution ?? 25.0,
+        radius: params.radius ?? 2000.0,
+        grid_resolution: params.grid_resolution ?? 50.0,
+        n_workers: params.n_workers ?? 2,
       };
 
       const response = await pythonApi.post("/api/lte-prediction-optimised/run", payload, {
@@ -889,6 +890,20 @@ export const adminApi = {
     api.get("/Admin/GetSessionsByDateRange", { params: filters }),
 };
 
+export const offlineApi = {
+  health: () => pythonApi.get("/api/offline/health"),
+  getImports: (params = {}) => pythonApi.get("/api/offline/imports", params),
+  importFiles: (formData, config = {}) =>
+    pythonApi.post("/api/offline/import", formData, config),
+  getSessions: (params = {}) => pythonApi.get("/api/offline/sessions", params),
+  getProjects: (params = {}) => pythonApi.get("/api/offline/projects", params),
+  getProject: (projectId) => pythonApi.get(`/api/offline/projects/${projectId}`),
+  createProject: (payload) => pythonApi.post("/api/offline/projects", payload),
+  getNetworkLog: (params = {}) => pythonApi.get("/api/offline/network-log", params),
+  prepareSync: (payload = {}) => pythonApi.post("/api/offline/sync", payload),
+  getSyncStatus: () => pythonApi.get("/api/offline/sync/status"),
+};
+
 const LOCAL_PROJECT_API_FLAG = String(
   import.meta.env.VITE_USE_LOCAL_PROJECT_API || ""
 ).toLowerCase();
@@ -1143,6 +1158,20 @@ export const mapViewApi = {
     const sid = Array.isArray(session_ids) ? session_ids.join(",") : session_ids;
 
     debugUnifiedMapApi("getNetworkLog:start", { sid, page, limit });
+
+    const hasLocalSession = String(sid || "")
+      .split(",")
+      .some((id) => Number(id) < 0);
+
+    if (hasLocalSession) {
+      return pythonApi.get("/api/offline/network-log", {
+        session_ids: sid,
+        session_Ids: sid,
+        sessionId: sid,
+        page,
+        limit,
+      }, { signal });
+    }
 
     const response = await api.get("/api/MapView/GetNetworkLog", {
       params: {

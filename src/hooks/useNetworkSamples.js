@@ -16,6 +16,18 @@ import {
 // --- Helper Functions (Moved from Component) ---
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
+const withTimeout = (promise, timeoutMs = 30000) =>
+  Promise.race([
+    promise,
+    new Promise((_, reject) => {
+      const timer = setTimeout(
+        () => reject(new Error("Network samples request timed out")),
+        timeoutMs,
+      );
+      if (typeof timer?.unref === "function") timer.unref();
+    }),
+  ]);
+
 const isRequestCancelled = (error) => {
   if (!error) return false;
 
@@ -236,23 +248,25 @@ export const useNetworkSamples = (
       let hasMoreData = true;
 
       while (hasMoreData) {
-        if (fetchIdRef.current !== currentFetchId || !mountedRef.current) return;
+        if (fetchIdRef.current !== currentFetchId || !mountedRef.current) break;
 
         let response;
         try {
-          response = await mapViewApi.getNetworkLog({
-            session_ids: sessionIds,
-            page: currentPage,
-            limit: PAGE_SIZE,
-            signal: abortControllerRef.current.signal,
-          });
+          response = await withTimeout(
+            mapViewApi.getNetworkLog({
+              session_ids: sessionIds,
+              page: currentPage,
+              limit: PAGE_SIZE,
+              signal: abortControllerRef.current.signal,
+            }),
+          );
 
         } catch (fetchErr) {
-          if (isRequestCancelled(fetchErr)) return;
+          if (isRequestCancelled(fetchErr)) break;
           throw fetchErr;
         }
 
-        if (fetchIdRef.current !== currentFetchId || !mountedRef.current) return;
+        if (fetchIdRef.current !== currentFetchId || !mountedRef.current) break;
 
         let apiBody;
         let logsArray;
