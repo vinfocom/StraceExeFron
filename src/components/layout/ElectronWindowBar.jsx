@@ -184,7 +184,6 @@ const ElectronWindowBar = () => {
           onHoverOpen={() => activeMenu && setActiveMenu("File")}
           onActionClick={() => setActiveMenu(null)}
           actions={[
-            { label: "Offline Workspace", onClick: () => navigateRoute("/offline-workspace") },
             { label: "Import Site", onClick: () => emitUtilityAction("import") },
             { label: "Reload", onClick: () => callWindowApi("reload") },
             

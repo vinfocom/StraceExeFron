@@ -162,6 +162,17 @@ const AuthProvider = ({ children }) => {
         return { success: false, message: errorMessage };
       }
     } catch (error) {
+      const cachedUserRaw = sessionStorage.getItem('user');
+      if (cachedUserRaw && cachedUserRaw !== 'undefined') {
+        try {
+          const cachedUser = JSON.parse(cachedUserRaw);
+          setUser(cachedUser);
+          setProjectSessionCacheUserScope(cachedUser);
+          return { success: true, user: cachedUser, fromCache: true };
+        } catch {
+          // Ignore JSON parse errors and continue with normal error flow.
+        }
+      }
       const errorMessage = error.response?.data?.message || error.message || 'Login failed';
       setAuthError(errorMessage);
       throw error;

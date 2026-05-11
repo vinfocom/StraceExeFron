@@ -927,6 +927,25 @@ const shouldFallbackToLocalProjectApi = (error) => {
   return !status || status >= 500 || status === 404 || status === 405;
 };
 
+const shouldFallbackToOfflineCache = (error) => {
+  if (!error) return true;
+  if (isCancelledError(error) || isRequestCancelled(error)) return false;
+  const status = error?.status || error?.response?.status;
+  const message = String(error?.message || "").toLowerCase();
+
+  // Fallback to local cache only when cloud is effectively unreachable.
+  // If server responds with an HTTP status, keep it as cloud-path behavior.
+  if (status) return false;
+
+  return (
+    message.includes("no response from server") ||
+    message.includes("network error") ||
+    message.includes("timed out") ||
+    message.includes("timeout") ||
+    error?.isNetworkError === true
+  );
+};
+
 const resolveProjectApiCall = async ({ csharpCall, localPythonCall }) => {
   const hasLogicalFailure = (payload) => {
     if (!payload || typeof payload !== "object") return false;
@@ -981,8 +1000,13 @@ export const mapViewApi = {
 
   // ==================== Polygon Management ====================
   getProjectPolygons: (projectId) =>
-    api.get("/api/MapView/GetProjectPolygons", {
-      params: { projectId },
+    resolveProjectApiCall({
+      csharpCall: () =>
+        api.get("/api/MapView/GetProjectPolygons", {
+          params: { projectId },
+        }),
+      localPythonCall: () =>
+        pythonApi.get("/api/local-mapview/project-polygons", { projectId }),
     }),
 
 
@@ -1033,8 +1057,13 @@ export const mapViewApi = {
   },
 
   listSavedPolygons: (projectId, limit = 200, offset = 0) =>
-    api.get("/api/MapView/ListSavedPolygons", {
-      params: { projectId, limit, offset },
+    resolveProjectApiCall({
+      csharpCall: () =>
+        api.get("/api/MapView/ListSavedPolygons", {
+          params: { projectId, limit, offset },
+        }),
+      localPythonCall: () =>
+        pythonApi.get("/api/local-mapview/project-polygons", { projectId }),
     }),
 
   assignPolygonToProject: (polygonId, projectId) =>
@@ -1071,8 +1100,12 @@ export const mapViewApi = {
   },
 
   // ==================== Project Management ====================
-  getProjects: () =>
-    api.get("/api/MapView/GetProjects"),
+  getProjects: (companyId) =>
+    resolveProjectApiCall({
+      csharpCall: () => api.get("/api/MapView/GetProjects"),
+      localPythonCall: () =>
+        pythonApi.get("/api/local-mapview/projects", companyId ? { company_id: companyId } : {}),
+    }),
 
   /**
    * Create project with polygons and sessions
@@ -1200,6 +1233,23 @@ export const mapViewApi = {
   getSessionNeighbour: async ({ sessionIds, signal }) => {
     try {
       const idsParam = Array.isArray(sessionIds) ? sessionIds.join(",") : sessionIds;
+      const hasLocalSession = String(idsParam || "")
+        .split(",")
+        .map((id) => Number(String(id).trim()))
+        .some((id) => Number.isFinite(id) && id < 0);
+
+      // Local cached sessions do not have cloud-side N78 neighbor rows.
+      // Return an empty, valid payload to keep UI stable.
+      if (hasLocalSession) {
+        return {
+          Status: 1,
+          success: true,
+          data: [],
+          total: 0,
+          count: 0,
+          message: "No neighbor data for local cached session(s).",
+        };
+      }
 
 
       const response = await api.get(
@@ -1229,6 +1279,18 @@ export const mapViewApi = {
       // Silently re-throw cancelled requests - the calling hook will handle this
       if (isCancelledError(error) || isRequestCancelled(error)) {
         throw error;
+      }
+
+      const status = error?.status || error?.response?.status;
+      if (status === 400) {
+        return {
+          Status: 1,
+          success: true,
+          data: [],
+          total: 0,
+          count: 0,
+          message: "No valid session IDs for neighbor API.",
+        };
       }
       
       if (error?.isNetworkError) {
@@ -1460,17 +1522,64 @@ export const settingApi = {
 };
 
 export const excelApi = {
-  uploadFile: (formData, onUploadProgress = null) =>
-    api.post("/ExcelUpload/UploadExcelFile", formData, {
-      timeout: 600000, // 10 minutes for upload + server-side processing
-      onUploadProgress:
-        onUploadProgress ||
-        ((progressEvent) => {
-          const percentCompleted = Math.round(
-            (progressEvent.loaded * 100) / progressEvent.total
-          );
+  uploadFile: async (formData, onUploadProgress = null) => {
+    try {
+      return await api.post("/ExcelUpload/UploadExcelFile", formData, {
+        timeout: 1800000, // 30 minutes for upload + server-side processing
+        onUploadProgress:
+          onUploadProgress ||
+          ((progressEvent) => {
+            const percentCompleted = Math.round(
+              (progressEvent.loaded * 100) / progressEvent.total
+            );
+          }),
+      });
+    } catch (error) {
+      const message = String(error?.message || "").toLowerCase();
+      // If cloud upload timed out, keep it in cloud path (likely still processing)
+      // and do not fallback to offline cache.
+      if (message.includes("timed out") || message.includes("timeout")) {
+        throw error;
+      }
+
+      // If cloud is reachable, do not fallback to local cache.
+      // This avoids accidental local imports when server is up but upload endpoint
+      // returns a fast failure/validation/auth issue.
+      try {
+        await authApi.checkStatus();
+        throw error;
+      } catch (statusError) {
+        const cloudReachable = !(
+          statusError?.isNetworkError === true ||
+          /no response from server|network error|request setup failed/i.test(
+            String(statusError?.message || ""),
+          )
+        );
+        if (cloudReachable) {
+          throw error;
+        }
+      }
+
+      if (!shouldFallbackToOfflineCache(error)) throw error;
+      const fallbackForm = new FormData();
+      const mainFile = formData.get("UploadFile");
+      const polygonFile = formData.get("UploadNoteFile");
+      if (mainFile) fallbackForm.append("files", mainFile);
+      if (polygonFile) fallbackForm.append("files", polygonFile);
+      fallbackForm.append("workspaceName", "Auto Cache");
+      fallbackForm.append(
+        "metadata",
+        JSON.stringify({
+          source: "upload-data",
+          upload_file_type: formData.get("UploadFileType") || "",
+          remarks: formData.get("remarks") || "",
+          project_name: formData.get("ProjectName") || "",
+          session_ids: formData.get("SessionIds") || "",
         }),
-    }),
+      );
+      return offlineApi.importFiles(fallbackForm);
+    }
+  },
 
   downloadTemplate: (fileType) => {
     const url = `https://s-traccceer.vinfocom.co.in/ExcelUpload/DownloadExcel?fileType=${fileType}`;
@@ -1478,18 +1587,78 @@ export const excelApi = {
     return downloadUrlAsBlob(url, filename);
   },
 
-  getUploadedFiles: (type) =>
-    api.get("/ExcelUpload/GetUploadedExcelFiles", {
-      params: { FileType: type },
-    }),
+  getUploadedFiles: async (type) => {
+    try {
+      return await api.get("/ExcelUpload/GetUploadedExcelFiles", {
+        params: { FileType: type },
+      });
+    } catch (error) {
+      if (!shouldFallbackToOfflineCache(error)) throw error;
+      const [local, localSessions] = await Promise.all([
+        offlineApi.getImports({ limit: 300, offset: 0 }),
+        offlineApi.getSessions({ limit: 1000, offset: 0 }),
+      ]);
+      const sessionsByImportId = new Map();
+      const sessionRows = Array.isArray(localSessions?.Data) ? localSessions.Data : [];
+      for (const row of sessionRows) {
+        const importId = String(row?.import_id || "").trim();
+        if (!importId) continue;
+        const sid = String(row?.id ?? row?.session_id ?? "").trim();
+        if (!sid) continue;
+        if (!sessionsByImportId.has(importId)) {
+          sessionsByImportId.set(importId, []);
+        }
+        sessionsByImportId.get(importId).push(sid);
+      }
+      const data = Array.isArray(local?.Data)
+        ? local.Data.map((item) => ({
+            id: item.id,
+            file_name: item.file_name,
+            uploaded_by: item.imported_by || "Local Cache",
+            status: item.status || "cached",
+            remarks: item.remarks || "",
+            uploaded_on: item.imported_at,
+            session_id:
+              sessionsByImportId.get(String(item?.id || "").trim())?.join(",") ||
+              item?.metadata?.session_ids ||
+              "",
+          }))
+        : [];
+      return { Status: 1, Data: data };
+    }
+  },
 
-  getSessions: (fromDate, toDate) =>
-    api.get("/ExcelUpload/GetSessions", {
-      params: {
-        fromDate: fromDate.toISOString(),
-        toDate: toDate.toISOString(),
-      },
-    }),
+  getSessions: async (fromDate, toDate) => {
+    const fromIso = fromDate.toISOString();
+    const toIso = toDate.toISOString();
+    try {
+      return await api.get("/ExcelUpload/GetSessions", {
+        params: {
+          fromDate: fromIso,
+          toDate: toIso,
+        },
+      });
+    } catch (error) {
+      if (!shouldFallbackToOfflineCache(error)) throw error;
+      const local = await offlineApi.getSessions({ limit: 1000, offset: 0 });
+      const rows = Array.isArray(local?.Data) ? local.Data : [];
+      const fromTs = new Date(fromIso).getTime();
+      const toTs = new Date(toIso).getTime();
+      const filtered = rows.filter((item) => {
+        const t = new Date(item?.start_time || item?.created_at || 0).getTime();
+        if (!Number.isFinite(t)) return true;
+        return t >= fromTs && t <= toTs;
+      });
+      return {
+        Status: 1,
+        Data: filtered.map((item) => ({
+          id: item?.id ?? item?.session_id,
+          session_id: item?.session_id ?? item?.id,
+          label: item?.label || `Session ${item?.session_id ?? item?.id ?? ""}`,
+        })),
+      };
+    }
+  },
 };
 
 
@@ -1524,6 +1693,29 @@ export const checkAllServices = async (options = {}) => {
       python: { enabled: includePython, healthy: !includePython, error: includePython ? error.message : undefined, skipped: !includePython },
       csharp: { enabled: true, healthy: false, error: error.message },
     };
+  }
+};
+
+let autoSyncInFlight = false;
+let lastAutoSyncAt = 0;
+export const tryAutoSyncOfflineQueue = async () => {
+  const now = Date.now();
+  if (autoSyncInFlight) return { skipped: true, reason: "in-flight" };
+  if (now - lastAutoSyncAt < 60_000) return { skipped: true, reason: "cooldown" };
+
+  autoSyncInFlight = true;
+  try {
+    const services = await checkAllServices({ includePython: false });
+    if (!services?.csharp?.healthy) {
+      return { skipped: true, reason: "cloud-unhealthy" };
+    }
+    const result = await offlineApi.prepareSync({ limit: 500 });
+    lastAutoSyncAt = Date.now();
+    return { success: true, result };
+  } catch (error) {
+    return { success: false, error: error?.message || String(error) };
+  } finally {
+    autoSyncInFlight = false;
   }
 };
 
@@ -1573,6 +1765,7 @@ export default {
   excelApi,
 
   checkAllServices,
+  tryAutoSyncOfflineQueue,
   validateProjectExists,
   companyApi,
 };

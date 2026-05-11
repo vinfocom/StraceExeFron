@@ -15,7 +15,6 @@ import {
   ChevronRight,
   FileText,
   Building,
-  HardDrive,
 } from 'lucide-react';
 import vinfocomvinfocom from '/favicon.png';
 
@@ -39,12 +38,6 @@ const SideBar = ({ compact = false }) => {
       icon: Upload,
       text: 'Upload Data',
       path: '/upload-data',
-      allowedRoles: [ROLES.SUPER_ADMIN, ROLES.ADMIN],
-    },
-    {
-      icon: HardDrive,
-      text: 'Offline Workspace',
-      path: '/offline-workspace',
       allowedRoles: [ROLES.SUPER_ADMIN, ROLES.ADMIN],
     },
     { icon: Map, text: 'Map View', path: '/mapview' },

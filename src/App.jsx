@@ -18,6 +18,7 @@ import { indexedDBProvider } from "./utils/indexedDBProvider";
 import Spinner from "./components/common/Spinner";
 import { MapProvider } from './context/MapContext';
 import ElectronWindowBar from "./components/layout/ElectronWindowBar";
+import { tryAutoSyncOfflineQueue } from "./api/apiEndpoints";
 
 // --- Lazy Load Pages for Optimization ---
 const LoginPage = lazy(() => import("./pages/Login"));
@@ -39,7 +40,6 @@ const SuperAdminCompanies = lazy(() => import("@/pages/SuperAdmin"));
 const CompanyForm = lazy(() => import("./pages/CompanyForm"));  
 const CompanyLicensesPage = lazy(() => import("./pages/CompanyLicenses"));
 const DataDeletionPage = lazy(() => import("./pages/DataDeletion"));
-const OfflineWorkspacePage = lazy(() => import("./pages/OfflineWorkspace"));
 
 // Loading Component for Suspense
 const PageLoader = () => (
@@ -112,7 +112,6 @@ function AppShell({ isElectronRuntime }) {
             <Route path="/multi-map" element={<MultiViewPage />} />
             <Route path="/manage-users" element={<PrivateRoute><ManageUsersPage /></PrivateRoute>} />
             <Route path="/upload-data" element={<PrivateRoute><UploadDataPage /></PrivateRoute>} />
-            <Route path="/offline-workspace" element={<PrivateRoute><OfflineWorkspacePage /></PrivateRoute>} />
             <Route path="/settings" element={<PrivateRoute><SettingsPage /></PrivateRoute>} />
             <Route path="/create-project" element={<PrivateRoute><ProjectsPage /></PrivateRoute>} />
             <Route path="/prediction-map" element={<PrivateRoute><PredictionMapPage /></PrivateRoute>} />
@@ -151,6 +150,25 @@ function App() {
       document.body.classList.remove(cls);
     };
   }, [isElectronRuntime]);
+
+  useEffect(() => {
+    let stopped = false;
+    const tick = async () => {
+      if (stopped) return;
+      try {
+        await tryAutoSyncOfflineQueue();
+      } catch {
+        // Intentionally silent: sync is best-effort.
+      }
+    };
+
+    tick();
+    const id = setInterval(tick, 60_000);
+    return () => {
+      stopped = true;
+      clearInterval(id);
+    };
+  }, []);
 
   return (
     <RouterComponent>

@@ -66,12 +66,16 @@ const mergeSessionsById = (primaryRows = [], localRows = []) => {
   });
 };
 
+const extractSessionRows = (payload) => {
+  if (Array.isArray(payload)) return payload;
+  if (Array.isArray(payload?.Data)) return payload.Data;
+  if (Array.isArray(payload?.data)) return payload.data;
+  if (Array.isArray(payload?.data?.Data)) return payload.data.Data;
+  return [];
+};
+
 const sortSessionsNewestFirst = (rows = []) =>
   [...rows].sort((a, b) => {
-    const aLocal = Boolean(a?.is_local || Number(a?.id) < 0);
-    const bLocal = Boolean(b?.is_local || Number(b?.id) < 0);
-    if (aLocal !== bLocal) return aLocal ? -1 : 1;
-
     const aTime = new Date(a?.created_at || a?.start_time || 0).getTime();
     const bTime = new Date(b?.created_at || b?.start_time || 0).getTime();
     if (Number.isFinite(aTime) && Number.isFinite(bTime) && aTime !== bTime) {
@@ -198,7 +202,7 @@ const DriveTestSessionsPage = () => {
 
       try {
         const data = await adminApi.getSessions();
-        cloudRows = Array.isArray(data?.Data) ? data.Data : [];
+        cloudRows = extractSessionRows(data);
       } catch (error) {
         cloudError = error;
       }
@@ -213,13 +217,25 @@ const DriveTestSessionsPage = () => {
         }
       }
 
-      const mergedRows = mergeSessionsById(cloudRows, localRows);
-      setSessions(sortSessionsNewestFirst(mergedRows));
+      // Always keep local pending/failed sessions visible so users can track
+      // cached uploads that are not synced to cloud yet.
+      const localPendingRows = localRows.filter((row) => {
+        const sync = String(row?.sync_status || "").toLowerCase();
+        return sync === "pending" || sync === "failed" || sync === "ready-to-sync";
+      });
+
+      // If cloud returned any rows, trust cloud as source of truth.
+      // Only show local cached sessions when cloud is unavailable/empty.
+      const useLocalFallback = cloudError || cloudRows.length === 0;
+      const rowsToShow = useLocalFallback
+        ? mergeSessionsById(cloudRows, localPendingRows)
+        : cloudRows;
+      setSessions(sortSessionsNewestFirst(rowsToShow));
 
       if (cloudError && localRows.length > 0) {
-        toast.info("Cloud sessions are unavailable. Showing local imported sessions.");
-      } else if (localRows.length > 0) {
-        toast.info(`${localRows.length} local imported session(s) loaded.`);
+        toast.info("Cloud sessions are unavailable. Showing local cached sessions.");
+      } else if (useLocalFallback && !cloudError && localPendingRows.length > 0) {
+        toast.info(`${localPendingRows.length} local session(s) are pending cloud sync.`);
       }
     } catch (error) {
       toast.error(`Failed to fetch sessions: ${error.message}`);
@@ -1225,7 +1241,7 @@ const DriveTestSessionsPage = () => {
                           className="!bg-white hover:!bg-white focus:!bg-white active:!bg-white border-red-200 text-red-500 hover:text-red-600"
                           onClick={() => handleDelete(session.id)}
                           disabled={session.is_local}
-                          title={session.is_local ? "Local imports are managed from Offline Workspace" : "Delete session"}
+                          title={session.is_local ? "Local imported session" : "Delete session"}
                         >
                           <Trash2 className="h-4 w-4 text-red-500" />
                         </Button>

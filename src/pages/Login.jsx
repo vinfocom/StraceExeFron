@@ -32,7 +32,7 @@ const LoginPage = () => {
   useEffect(() => {
     const fetchIp = async () => {
       try {
-        const response = await axios.get("https://api.ipify.org?format=json");
+        const response = await axios.get("https://api.ipify.org?  format=json");
         if (response.data && response.data.ip) {
           setIpAddress(response.data.ip);
         }
@@ -175,7 +175,7 @@ const LoginPage = () => {
       className="relative flex min-h-screen items-center justify-center overflow-hidden bg-gradient-to-br from-slate-100 via-white to-blue-100 px-4"
     >
       <div className="absolute left-4 top-4 sm:left-8 sm:top-6">
-        <img src={comlog} alt="Vinfocom" className="h-24 w-auto sm:h-22" />
+        <img src={comlog} alt="Vinfocom" className="h-[120px] w-auto sm:h-[140px]" />
         
       </div>
       <div className="relative w-full max-w-md space-y-6 rounded-2xl border border-slate-200 bg-white/85 p-8 shadow-xl backdrop-blur-md">

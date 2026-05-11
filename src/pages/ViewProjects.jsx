@@ -509,7 +509,7 @@ const ViewProjectsPage = () => {
                             disabled={project.is_local || Number(project.id) < 0}
                             title={
                               project.is_local || Number(project.id) < 0
-                                ? "Local projects are synced or managed from Offline Workspace"
+                                ? "Local project from cache"
                                 : "Delete project"
                             }
                           >

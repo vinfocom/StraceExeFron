@@ -423,6 +423,7 @@ const AllLogsDetailPanel = ({
 
   const handleExport = () => {
     exportCsv({
+    
       logs: safeLogsList,
       filename: `logs_Details.csv`,
     });
