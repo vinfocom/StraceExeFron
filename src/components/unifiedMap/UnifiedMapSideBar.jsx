@@ -163,14 +163,14 @@ const SelectRow = memo(
     className = "",
   }) => (
     <div className={`min-w-0 flex-1 space-y-1.5 ${className}`}>
-      {label && <Label className="text-xs text-slate-400">{label}</Label>}
+      {label && <Label className="text-sm font-semibold text-white">{label}</Label>}
       <Select value={value} onValueChange={onChange} disabled={disabled}>
-        <SelectTrigger className="h-8 w-full min-w-0 bg-slate-800 border-slate-600 text-sm text-white [&>span]:truncate">
+        <SelectTrigger className="h-8 w-full min-w-0 bg-slate-800 border-slate-600 text-xs text-white [&>span]:truncate">
           <SelectValue placeholder={placeholder} />
         </SelectTrigger>
-        <SelectContent className="max-w-[340px] min-w-[240px]">
+        <SelectContent className="max-w-[340px] min-w-[240px] bg-slate-900 border-slate-700 text-white">
           {options.map((opt) => (
-            <SelectItem key={opt.value} value={opt.value} className="pr-8">
+            <SelectItem key={opt.value} value={opt.value} className="pr-8 text-xs text-white focus:text-white">
               {opt.label}
             </SelectItem>
           ))}
@@ -625,6 +625,12 @@ const UnifiedMapSidebar = ({
       onlyInsidePolygons,
     ],
   );
+
+  useEffect(() => {
+    if (dataToggle !== "sample") {
+      setDataToggle?.("sample");
+    }
+  }, [dataToggle, setDataToggle]);
 
   useEffect(() => {
     const normalizedMetric = String(metric || "").trim().toLowerCase();
@@ -1422,11 +1428,8 @@ const UnifiedMapSidebar = ({
             }}
           >
             <div className="h-full min-h-0 flex flex-col">
-              {/* Header */}
-              <div className="flex items-center justify-between p-3 border-b border-slate-700 bg-slate-900 shrink-0">
-                <div className="flex items-center gap-3">
-                  <h2 className="text-base font-semibold">Map Controls</h2>
-                </div>
+              
+              <div className="flex items-center justify-end  bg-slate-950 shrink-0">
                 <button
                   className="p-1.5 rounded-md hover:bg-slate-800 transition-colors"
                   onClick={() => onOpenChange?.(false)}
@@ -1599,20 +1602,11 @@ const UnifiedMapSidebar = ({
                       </div>
                     )}
 
-                <SegmentedControl
-                  value={dataToggle}
-                  onChange={setDataToggle}
-                  options={[
-                    { value: "sample", label: "Sample" },
-                    {
-                      value: "prediction",
-                      label: predictionLoading ? "Checking..." : "Prediction",
-                      disabled: predictionDataUnavailable,
-                      title: predictionDataUnavailable
-                        ? "No prediction points available"
-                        : undefined,
-                    },
-                  ]}
+                <ToggleRow
+                  label="Sites"
+                  checked={enableSiteToggle}
+                  onChange={handleSiteToggleChange}
+                  useSwitch={true}
                 />
 
                 
@@ -1620,7 +1614,7 @@ const UnifiedMapSidebar = ({
 
 
                 <ToggleRow
-                  label="Show Num cell "
+                  label="Secondary Cell Count"
                   checked={showNumCells}
                   onChange={setShowNumCells}
                 />
@@ -1636,10 +1630,9 @@ const UnifiedMapSidebar = ({
           >
             {shouldShowMetricSelector ? (
               <div className="space-y-3">
-
+                 <span className="text-xs text-slate-400">KPI Filters</span>
 
                 <SelectRow
-                  label="KPI"
                   value={metric}
                   onChange={setMetric}
                   options={metricOptions}
@@ -1748,7 +1741,7 @@ const UnifiedMapSidebar = ({
 
                 <div className="border-t border-slate-700/50 pt-3">
                   <div className="flex items-center justify-between mb-2">
-                    <span className="text-xs text-slate-400">KPI Filters</span>
+                   
                     {activeDataFiltersCount > 0 && (
                       <button
                         onClick={clearAllDataFilters}
@@ -1837,26 +1830,18 @@ const UnifiedMapSidebar = ({
           </CollapsibleSection>
 
           <CollapsibleSection title="Site & Prediction" icon={Radio}>
-            <ToggleRow
-              label="Sites"
-              checked={enableSiteToggle}
-              onChange={handleSiteToggleChange}
-              useSwitch={true}
-            />
-
             {enableSiteToggle && (
               <>
                 <div className="grid grid-cols-3 gap-2">
                   <SelectRow
-                  className="pt-2"
-                  value={siteToggle}
-                  onChange={setSiteToggle}
-                  options={[
-                    { value: "Cell", label: "Cell" },
-                    { value: "NoML", label: "ML" },
-                  ]}
-                />
-
+                    className="pt-2"
+                    value={siteToggle}
+                    onChange={setSiteToggle}
+                    options={[
+                      { value: "Cell", label: "Cell" },
+                      { value: "NoML", label: "ML" },
+                    ]}
+                  />
                   {siteToggle === "Cell" && (
                     <SelectRow
                       

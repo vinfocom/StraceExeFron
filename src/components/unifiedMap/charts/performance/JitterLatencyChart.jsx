@@ -65,7 +65,7 @@ const MultiOperatorTooltip = ({ active, payload, label, unit = "ms" }) => {
           className="text-xs px-2 py-0.5 rounded"
           style={{
             backgroundColor: rangeInfo?.rangeColor + "30",
-            color: rangeInfo?.rangeColor,
+            color: "#ffffff",
           }}
         >
           {rangeInfo?.quality}
@@ -100,7 +100,7 @@ const MultiOperatorTooltip = ({ active, payload, label, unit = "ms" }) => {
           ))}
       </div>
       <div className="mt-2 pt-2 border-t border-slate-700 flex justify-between text-sm">
-        <span className="text-slate-400">Total</span>
+        <span className="text-white">Total</span>
         <span className="font-bold text-white">{totalSamples} samples</span>
       </div>
     </div>
@@ -201,7 +201,7 @@ const MultiOperatorDistributionChart = ({
         <table className="w-full text-xs">
           <thead>
             <tr className="border-b border-slate-700">
-              <th className="text-left py-2 px-2 text-slate-400">Range</th>
+              <th className="text-left py-2 px-2 text-white">Range</th>
               {operators.map((op) => (
                 <th
                   key={op}
@@ -230,7 +230,7 @@ const MultiOperatorDistributionChart = ({
                     <span className="text-white">
                       {row.range} {unit}
                     </span>
-                    <span className="text-slate-500">({row.quality})</span>
+                    <span className="text-white">({row.quality})</span>
                   </div>
                 </td>
                 {operators.map((op) => (
@@ -257,27 +257,31 @@ const OperatorQualityComparison = ({ data, operators, title, unit = "ms" }) => {
         const operatorData = data.filter((d) => d.operator === operator);
         if (operatorData.length === 0) return null;
 
-        const values = operatorData.map((d) => d.value);
+        const values = operatorData
+          .map((d) => Number(d.value))
+          .filter((v) => Number.isFinite(v) && v >= 0);
+        if (values.length === 0) return null;
+
         const avg = values.reduce((a, b) => a + b, 0) / values.length;
         const min = Math.min(...values);
         const max = Math.max(...values);
 
         return {
           operator,
-          count: operatorData.length,
-          avg: avg.toFixed(2),
-          min: min.toFixed(2),
-          max: max.toFixed(2),
+          count: values.length,
+          avg,
+          min,
+          max,
           color: getOperatorColor(operator),
         };
       })
       .filter(Boolean)
-      .sort((a, b) => parseFloat(a.avg) - parseFloat(b.avg));
+      .sort((a, b) => a.avg - b.avg);
   }, [data, operators]);
 
   if (operatorStats.length === 0) return null;
 
-  const maxAvg = Math.max(...operatorStats.map((s) => parseFloat(s.avg)));
+  const maxAvg = Math.max(...operatorStats.map((s) => s.avg), 1);
 
   return (
     <div className="bg-slate-800/50 rounded-lg p-4 flex-1 min-w-[280px] max-w-md">
@@ -285,29 +289,30 @@ const OperatorQualityComparison = ({ data, operators, title, unit = "ms" }) => {
       <div className="space-y-2">
         {operatorStats.map((stat, idx) => (
           <div key={idx} className="flex items-center gap-3">
-            <div
-              className="w-16 text-xs font-medium truncate flex-shrink-0"
-              style={{ color: "#fcfcfc" }}
-            >
+            <div className="w-16 text-xs font-medium truncate flex-shrink-0 text-white">
               {stat.operator}
             </div>
-            <div className="flex-1 h-5 bg-slate-700 rounded-full overflow-hidden relative min-w-0">
+            <div className="flex-1 h-5 bg-slate-700 rounded-full relative min-w-0 overflow-visible">
               <div
                 className="h-full rounded-full transition-all duration-500 flex items-center justify-end pr-2"
                 style={{
-                  width: `${Math.max(
-                    (parseFloat(stat.avg) / maxAvg) * 100,
-                    15
-                  )}%`,
+                  width: `${Math.max((stat.avg / maxAvg) * 100, 15)}%`,
                   backgroundColor: stat.color,
                 }}
               >
-                <span className="text-[10px] font-bold text-white whitespace-nowrap">
-                  {stat.avg} {unit}
-                </span>
+                {((stat.avg / maxAvg) * 100) >= 35 && (
+                  <span className="text-[10px] font-bold text-white whitespace-nowrap">
+                    {stat.avg.toFixed(2)} {unit}
+                  </span>
+                )}
               </div>
+              {((stat.avg / maxAvg) * 100) < 35 && (
+                <span className="absolute left-2 top-1/2 -translate-y-1/2 text-[10px] font-bold text-white whitespace-nowrap">
+                  {stat.avg.toFixed(2)} {unit}
+                </span>
+              )}
             </div>
-            <div className="w-14 text-[10px] text-slate-400 text-right flex-shrink-0">
+            <div className="w-16 text-[10px] text-white text-right whitespace-nowrap leading-tight flex-shrink-0">
               {stat.count} samples
             </div>
           </div>
@@ -402,7 +407,7 @@ const QualitySummaryByOperator = ({
                 >
                   {opSummary.dominantQuality.quality}
                 </span>
-                <span className="text-xs text-slate-400">
+                <span className="text-xs text-white">
                   {opSummary.total} samples
                 </span>
               </div>
@@ -432,12 +437,12 @@ const QualitySummaryByOperator = ({
 
 const StatCard = ({ label, value, subValue, color }) => (
   <div className="bg-slate-800 rounded-lg p-3 text-center hover:bg-slate-750 transition-colors flex-1 min-w-[120px] max-w-[180px]">
-    <div className="text-xs text-slate-400">{label}</div>
-    <div className="text-lg font-bold" style={{ color }}>
+    <div className="text-xs text-white">{label}</div>
+    <div className="text-lg font-bold text-white">
       {value}
     </div>
     {subValue && (
-      <div className="text-[10px] text-slate-500 mt-1">{subValue}</div>
+      <div className="text-[10px] text-white mt-1">{subValue}</div>
     )}
   </div>
 );
@@ -445,6 +450,17 @@ const StatCard = ({ label, value, subValue, color }) => (
 export const JitterLatencyChart = React.forwardRef(({ locations }, ref) => {
   const { data, operators } = useMemo(() => {
     if (!locations?.length) return { data: [], operators: [] };
+
+    const isInvalidOperator = (value) => {
+      const normalized = String(value ?? "").trim().toLowerCase();
+      return (
+        !normalized ||
+        normalized === "unknown" ||
+        normalized === "null" ||
+        normalized === "undefined" ||
+        normalized === "nan"
+      );
+    };
 
     const processedData = locations
       .filter(
@@ -465,7 +481,7 @@ export const JitterLatencyChart = React.forwardRef(({ locations }, ref) => {
           speed: parseFloat(loc.speed) || 0,
         };
       })
-      .filter((d) => d.operator !== "Unknown");
+      .filter((d) => !isInvalidOperator(d.operator));
 
     const operatorCounts = processedData.reduce((acc, d) => {
       acc[d.operator] = (acc[d.operator] || 0) + 1;
@@ -473,7 +489,7 @@ export const JitterLatencyChart = React.forwardRef(({ locations }, ref) => {
     }, {});
 
     const uniqueOperators = Object.entries(operatorCounts)
-      .filter(([op]) => op !== "Unknown")
+      .filter(([op]) => !isInvalidOperator(op))
       .sort((a, b) => b[1] - a[1])
       .map(([op]) => op);
 
@@ -600,19 +616,19 @@ export const JitterLatencyChart = React.forwardRef(({ locations }, ref) => {
               <table className="w-full text-xs bg-slate-800/50 rounded-lg overflow-hidden">
                 <thead>
                   <tr className="bg-slate-700">
-                    <th className="text-left py-2 px-3 text-slate-300">
+                    <th className="text-left py-2 px-3 text-white">
                       Operator
                     </th>
-                    <th className="text-center py-2 px-3 text-slate-300">
+                    <th className="text-center py-2 px-3 text-white">
                       Samples
                     </th>
-                    <th className="text-center py-2 px-3 text-pink-400">
+                    <th className="text-center py-2 px-3 text-white">
                       Latency (ms)
                     </th>
-                    <th className="text-center py-2 px-3 text-indigo-400">
+                    <th className="text-center py-2 px-3 text-white">
                       Jitter (ms)
                     </th>
-                    <th className="text-center py-2 px-3 text-orange-400">
+                    <th className="text-center py-2 px-3 text-white">
                       Packet Loss (%)
                     </th>
                   </tr>
