@@ -1466,6 +1466,7 @@ function UnifiedDetailLogs({
               locations={filteredRawLocations}
               chartRefs={chartRefs}
               expanded={expanded}
+              enableSiteToggle={enableSiteToggle}
             />
           )}
 

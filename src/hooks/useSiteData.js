@@ -8,7 +8,7 @@ import {
   writeProjectSessionCache,
 } from '@/utils/projectSessionCache';
 
-const SITE_PREDICTION_PAGE_SIZE = 5000;
+const SITE_PREDICTION_PAGE_SIZE = 2000;
 const MAX_SITE_PREDICTION_PAGES = 200;
 const SITE_DATA_CACHE_MAX_AGE_MS = 2 * 60 * 1000;
 const CACHEABLE_SITE_TOGGLES = new Set(["NoML", "ML"]);
@@ -142,10 +142,12 @@ const fetchAllSitePredictionRows = async (params = {}) => {
   let totalCountHint = null;
 
   while (page <= MAX_SITE_PREDICTION_PAGES) {
+    const offset = (page - 1) * SITE_PREDICTION_PAGE_SIZE;
     const response = await mapViewApi.getSitePrediction({
       ...params,
-      page,
+      offset,
       limit: SITE_PREDICTION_PAGE_SIZE,
+      simple: 1,
     });
 
     const pageRows = extractRowsFromResponse(response);
@@ -223,9 +225,9 @@ const normalizeSitePredictionRows = (rows = [], options = {}) => {
         hasBeamwidthValue,
         beamwidthSource: hasBeamwidthValue ? "data" : "default",
         range: normalizeSectorRange(getFirstFiniteNumber([item.range, item.radius], 220), 220),
-        operator: item.cluster || item.network || item.Network || item.operator_name || "Unknown",
+        operator: item.provider || item.cluster || item.network || item.Network || item.operator_name || "Unknown",
         band: item.band || item.frequency_band || item.frequency || "Unknown",
-        technology: item.Technology || item.tech || item.technology || inferredTechnology,
+        technology: item.technology || item.Technology || item.tech || inferredTechnology,
         pci:
           item.pci ??
           item.PCI ??
@@ -234,8 +236,8 @@ const normalizeSitePredictionRows = (rows = [], options = {}) => {
           item.cell_id_representative,
         deltaVariant: deltaVariant || String(item.deltaVariant || item.delta_variant || "").trim().toLowerCase() || null,
         id:
-          item.original_id ??
           item.id ??
+          item.original_id ??
           item.cell_id ??
           item.cell_id_representative ??
           item.site ??
@@ -348,7 +350,7 @@ export const useSiteData = ({
     const normalizedVersionRaw = String(sitePredictionVersion || "original").trim().toLowerCase();
     const normalizedVersion =
       normalizedVersionRaw === "updated"
-        ? "updated"
+        ? "combined"
         : normalizedVersionRaw === "delta"
           ? "delta"
           : "original";

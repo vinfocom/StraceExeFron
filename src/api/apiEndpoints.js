@@ -402,7 +402,7 @@ export const cellSiteApi = {
    */
   downloadFile: (outputDir, filename) => {
     const baseUrl =
-      import.meta.env.VITE_PYTHON_API_URL || "http://localhost:8080";
+      import.meta.env.VITE_PYTHON_API_URL || "http://localhost:8081";
     const url = `${baseUrl}/api/cell-site/download/${outputDir}/${filename}`;
     return downloadUrlAsBlob(url, filename);
   },
@@ -550,12 +550,25 @@ export const predictionApi = {
       if (!params.project_id) throw new Error("project_id is required");
       if (!params.user_id) throw new Error("user_id is required");
 
+      const selectedOperators = Array.isArray(params.operators)
+        ? params.operators
+            .map((value) => String(value || "").trim())
+            .filter(Boolean)
+        : [];
+      const uniqueOperators = Array.from(new Set(selectedOperators));
+      const operatorValue =
+        uniqueOperators.length > 0
+          ? uniqueOperators.join(",")
+          : String(params.operator || "all").trim() || "all";
+
       const payload = {
         user_id: params.user_id,
         project_id: params.project_id,
         radius: params.radius ?? 2000.0,
         grid_resolution: params.grid_resolution ?? 50.0,
         n_workers: params.n_workers ?? 2,
+        operator: operatorValue,
+        operators: uniqueOperators.length > 0 ? uniqueOperators : ["all"],
       };
 
       const response = await pythonApi.post("/api/lte-prediction-optimised/run", payload, {
@@ -1187,7 +1200,7 @@ export const mapViewApi = {
 
   // ==================== Network Logs ====================
   // In apiEndpoints.js
-  getNetworkLog: async ({ session_ids, page = 1, limit = 20000, signal }) => {
+  getNetworkLog: async ({ session_ids, page = 1, limit = 20000, signal, project_id }) => {
     const sid = Array.isArray(session_ids) ? session_ids.join(",") : session_ids;
 
     debugUnifiedMapApi("getNetworkLog:start", { sid, page, limit });
@@ -1211,6 +1224,7 @@ export const mapViewApi = {
         session_Ids: sid,
         session_ids: sid,
         sessionId: sid,
+        project_id: project_id ?? undefined,
         page: page,
         limit: limit,
       },
@@ -1230,7 +1244,7 @@ export const mapViewApi = {
   // apiEndpoints.js
 
   // apiEndpoints.js
-  getSessionNeighbour: async ({ sessionIds, signal }) => {
+  getSessionNeighbour: async ({ sessionIds, signal, project_id }) => {
     try {
       const idsParam = Array.isArray(sessionIds) ? sessionIds.join(",") : sessionIds;
       const hasLocalSession = String(idsParam || "")
@@ -1256,7 +1270,8 @@ export const mapViewApi = {
         '/api/MapView/GetN78Neighbours',
         {
           params: {
-            session_ids: idsParam
+            session_ids: idsParam,
+            project_id: project_id ?? undefined,
           },
           signal,
           dedupe: false
@@ -1461,6 +1476,8 @@ export const gridAnalyticsApi = {
       params,
       ...config,
     }),
+  getOptimizationScenarios: (params, config = {}) =>
+    api.get("/api/GridAnalytics/GetOptimizationScenarios", { params, ...config }),
   setProjectGridSize: (params, config = {}) =>
     api.post("/api/GridAnalytics/SetProjectGridSize", null, {
       params,

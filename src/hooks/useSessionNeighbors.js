@@ -28,30 +28,13 @@ const isRequestCancelled = (error) => {
   
   return false;
 };
-  const isPointInPolygon = (point, polygon) => {
-  const path = polygon?.paths?.[0];
-  if (!path?.length) return false;
-  const lat = point.lat ?? point.latitude;
-  const lng = point.lng ?? point.longitude;
-  if (lat == null || lng == null) return false;
-
-  let inside = false;
-  for (let i = 0, j = path.length - 1; i < path.length; j = i++) {
-    const { lng: xi, lat: yi } = path[i];
-    const { lng: xj, lat: yj } = path[j];
-    if (yi > lat !== yj > lat && lng < ((xj - xi) * (lat - yi)) / (yj - yi) + xi) {
-      inside = !inside;
-    }
-  }
-  return inside;
-};
-
 export const useSessionNeighbors = (
   sessionIds,
   enabled = true,
   filterEnabled = false,
   polygons = [],
   maxRows = 300000,
+  projectId = null,
 ) => {
   const [neighborData, setNeighborData] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -87,7 +70,7 @@ export const useSessionNeighbors = (
     const cacheKey = makeProjectCacheKey({
       resource: 'unified-session-neighbors',
       sessionIds: sessionIds || [],
-      variant: `${safeMaxRows || 'all'}_${filterEnabled ? 'filtered' : 'all'}`,
+      variant: `${safeMaxRows || 'all'}_${filterEnabled ? 'filtered' : 'all'}_project-${projectId || 'none'}`,
     });
 
     if (!force && (!filterEnabled || polygons?.length === 0)) {
@@ -118,6 +101,7 @@ export const useSessionNeighbors = (
     try {
       const res = await mapViewApi.getSessionNeighbour({
         sessionIds: sessionIds,
+        project_id: projectId,
         signal: abortControllerRef.current.signal,
       });
 
@@ -150,14 +134,8 @@ export const useSessionNeighbors = (
             };
         }).filter(Boolean);
 
+        // Polygon filtering is handled by backend GetN78Neighbours using project raw filter.
         let finalNeighbors = formattedData;
-      
-      
-      if (filterEnabled && polygons?.length > 0) {
-          finalNeighbors = formattedData.filter(log => 
-            polygons.some(poly => isPointInPolygon(log, poly))
-          );
-        }
 
         if (safeMaxRows && finalNeighbors.length > safeMaxRows) {
           const step = Math.ceil(finalNeighbors.length / safeMaxRows);
@@ -202,7 +180,7 @@ export const useSessionNeighbors = (
         if (mountedRef.current) setLoading(false);
       }
     }
-  }, [sessionIds, enabled, maxRows]);
+  }, [sessionIds, enabled, maxRows, projectId, filterEnabled, polygons, neighborData.length]);
 
   // ... (rest of useEffects remain the same)
   useEffect(() => {

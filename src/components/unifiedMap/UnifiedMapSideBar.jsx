@@ -364,6 +364,7 @@ const UnifiedMapSidebar = ({
   dataFilters,
   setDataFilters,
   availableFilterOptions,
+  siteOperatorOptions = [],
   colorBy,
   setColorBy,
   ui,
@@ -418,6 +419,11 @@ const UnifiedMapSidebar = ({
   setLteGridSizeMeters,
   lteGridAggregationMethod,
   setLteGridAggregationMethod,
+  storedGridVersion = "original",
+  setStoredGridVersion,
+  storedGridScenarioId = null,
+  setStoredGridScenarioId,
+  storedGridScenarioOptions = [],
   storedGridMetricMode = "max",
   setStoredGridMetricMode,
   deltaGridScope = "selected",
@@ -545,7 +551,11 @@ const UnifiedMapSidebar = ({
       if (!checked) return;
 
       const count = Number(siteRowCount) || 0;
-      toast.info(`${count} ${count === 1 ? "" : "s"} in site`);
+      if (count > 0) {
+        toast.info(`${count} site${count === 1 ? "" : "s"} loaded`);
+      } else {
+        toast.info("Fetching site data...");
+      }
     },
     [setEnableSiteToggle, siteRowCount],
   );
@@ -704,6 +714,7 @@ const UnifiedMapSidebar = ({
   const lteTiltRecommendationToastIdRef = useRef(null);
   const lteTiltRecommendationJobIdRef = useRef(null);
   const [isRunningLteOptimisedPrediction, setIsRunningLteOptimisedPrediction] = useState(false);
+  const [lteOptimisedSelectedOperators, setLteOptimisedSelectedOperators] = useState([]);
   const lteOptimisedPredictionPollingRef = useRef(null);
   const lteOptimisedPredictionToastIdRef = useRef(null);
   const lteOptimisedPredictionJobIdRef = useRef(null);
@@ -748,6 +759,31 @@ const UnifiedMapSidebar = ({
       numericProjectId <= 0
     );
   }, [canRunPrediction, isRunningLteTiltRecommendation, projectId]);
+
+  const lteOptimisedOperatorOptions = useMemo(() => {
+    const preferredProviders = Array.isArray(siteOperatorOptions) && siteOperatorOptions.length > 0
+      ? siteOperatorOptions
+      : Array.isArray(availableFilterOptions?.providers)
+        ? availableFilterOptions.providers
+        : [];
+    const rawProviders = preferredProviders;
+    const normalized = rawProviders
+      .map((value) => String(value || "").trim())
+      .filter(Boolean);
+    const unique = Array.from(new Set(normalized));
+    return unique.map((name) => ({
+      value: name.toLowerCase(),
+      label: name,
+    }));
+  }, [availableFilterOptions?.providers, siteOperatorOptions]);
+
+  useEffect(() => {
+    setLteOptimisedSelectedOperators((prev) =>
+      prev.filter((value) =>
+        lteOptimisedOperatorOptions.some((opt) => opt.value === value),
+      ),
+    );
+  }, [lteOptimisedOperatorOptions]);
   const showDeltaGridAdvancedControls = useMemo(
     () =>
       Boolean(deltaGridApiState?.gridVisible) ||
@@ -773,8 +809,8 @@ const UnifiedMapSidebar = ({
     if (normalizedMode === "min" || normalizedMode === "operator_min") return "min";
     return "max";
   }, [storedGridMetricMode]);
-  const storedGridVersion = useMemo(() => {
-    const normalizedVersion = String(sitePredictionVersion || "original").trim().toLowerCase();
+  const normalizedStoredGridVersion = useMemo(() => {
+    const normalizedVersion = String(storedGridVersion || "original").trim().toLowerCase();
     if (
       normalizedVersion === "updated" ||
       normalizedVersion === "optimized" ||
@@ -784,7 +820,7 @@ const UnifiedMapSidebar = ({
     }
     if (normalizedVersion === "delta") return "delta";
     return "original";
-  }, [sitePredictionVersion]);
+  }, [storedGridVersion]);
   const handleStoredGridLayerModeChange = useCallback(
     (nextLayerMode) => {
       const aggregateMode = storedGridAggregateMode || "max";
@@ -827,9 +863,34 @@ const UnifiedMapSidebar = ({
   );
   const handleStoredGridVersionChange = useCallback(
     (nextVersion) => {
-      setSitePredictionVersion?.(nextVersion);
+      setStoredGridVersion?.(nextVersion);
+      if (Boolean(deltaGridApiState?.gridVisible)) {
+        onDeltaGridFetchStored?.({
+          version: nextVersion,
+          forceFetch: true,
+        });
+      }
     },
-    [setSitePredictionVersion],
+    [setStoredGridVersion, deltaGridApiState?.gridVisible, onDeltaGridFetchStored],
+  );
+  const handleStoredGridScenarioChange = useCallback(
+    (nextScenarioId) => {
+      const parsedScenarioId = Number(nextScenarioId);
+      setStoredGridScenarioId?.(Number.isFinite(parsedScenarioId) && parsedScenarioId > 0 ? parsedScenarioId : null);
+      if (Boolean(deltaGridApiState?.gridVisible)) {
+        onDeltaGridFetchStored?.({
+          version: normalizedStoredGridVersion,
+          scenarioId: Number.isFinite(parsedScenarioId) && parsedScenarioId > 0 ? parsedScenarioId : undefined,
+          forceFetch: true,
+        });
+      }
+    },
+    [
+      setStoredGridScenarioId,
+      deltaGridApiState?.gridVisible,
+      onDeltaGridFetchStored,
+      normalizedStoredGridVersion,
+    ],
   );
   const stopLtePredictionMonitoring = useCallback((dismissToast = false) => {
     if (ltePredictionPollingRef.current) {
@@ -1213,11 +1274,16 @@ const UnifiedMapSidebar = ({
     lteOptimisedPredictionToastIdRef.current = loadingToastId;
 
     try {
+      const selectedOperators = Array.isArray(lteOptimisedSelectedOperators)
+        ? lteOptimisedSelectedOperators
+        : [];
       const response = await predictionApi.runLteOptimisedPrediction({
         user_id: Number(user?.id) || 0,
         project_id: numericProjectId,
         grid_resolution: Number(lteGridSizeMeters) || 25,
         radius: Number(ltePredictionRadiusMeters) || 5000,
+        operator: selectedOperators.length > 0 ? selectedOperators.join(",") : "all",
+        operators: selectedOperators,
       });
 
       const jobId = response?.job_id || response?.jobId;
@@ -1271,6 +1337,7 @@ const UnifiedMapSidebar = ({
     projectId,
     lteGridSizeMeters,
     ltePredictionRadiusMeters,
+    lteOptimisedSelectedOperators,
     stopLteOptimisedPredictionMonitoring,
     pollLteOptimisedPredictionStatus,
   ]);
@@ -1565,11 +1632,8 @@ const UnifiedMapSidebar = ({
                       useSwitch={true}
                     />
 
-                    
-
                     {enableGrid && (
                       <div className="rounded-lg border border-cyan-700/40 bg-cyan-950/20 p-2 text-xs space-y-2">
-                        
                         <SelectRow
                           label="Grid Aggregate"
                           value={lteGridAggregationMethod || "median"}
@@ -1583,7 +1647,7 @@ const UnifiedMapSidebar = ({
                           ]}
                           placeholder="Select grid aggregate"
                         />
-                        
+
                         <div className="rounded-lg bg-slate-900/40 p-2">
                           <div className="flex items-center justify-between text-xs mb-2">
                             <span className="text-slate-400">Log Grid Size</span>
@@ -1601,6 +1665,8 @@ const UnifiedMapSidebar = ({
                         </div>
                       </div>
                     )}
+                  </>
+                )}
 
                 <ToggleRow
                   label="Sites"
@@ -1609,17 +1675,11 @@ const UnifiedMapSidebar = ({
                   useSwitch={true}
                 />
 
-                
-
-
-
                 <ToggleRow
                   label="Secondary Cell Count"
                   checked={showNumCells}
                   onChange={setShowNumCells}
                 />
-              </>
-            )}
           </CollapsibleSection>
 
           <CollapsibleSection
@@ -2017,7 +2077,7 @@ const UnifiedMapSidebar = ({
                               <span className="text-slate-400">Radius</span>
                             </div>
                             <ThresholdInput
-                              value={Number(ltePredictionRadiusMeters) || 5000}
+                              value={Number(ltePredictionRadiusMeters) || 500}
                               onChange={(next) =>
                                 setLtePredictionRadiusMeters(Math.round(next))
                               }
@@ -2026,6 +2086,49 @@ const UnifiedMapSidebar = ({
                               step={100}
                               unit="m"
                             />
+                          </div>
+                          <div className="pt-1 bg-slate-800/60 rounded-lg p-2 space-y-2">
+                            <div className="flex items-center justify-between text-xs">
+                              <span className="text-slate-400">Operators</span>
+                              <button
+                                type="button"
+                                onClick={() => setLteOptimisedSelectedOperators([])}
+                                className="text-[10px] text-cyan-400 hover:text-cyan-300"
+                              >
+                                All
+                              </button>
+                            </div>
+                            <div className="grid grid-cols-2 gap-1.5">
+                              {(lteOptimisedOperatorOptions.length > 0
+                                ? lteOptimisedOperatorOptions
+                                : [{ value: "all", label: "All" }]
+                              ).map((opt) => {
+                                const checked = lteOptimisedSelectedOperators.includes(opt.value);
+                                return (
+                                  <button
+                                    key={opt.value}
+                                    type="button"
+                                    onClick={() =>
+                                      setLteOptimisedSelectedOperators((prev) =>
+                                        prev.includes(opt.value)
+                                          ? prev.filter((v) => v !== opt.value)
+                                          : [...prev, opt.value],
+                                      )
+                                    }
+                                    className={`h-7 rounded border text-[11px] transition-colors ${
+                                      checked
+                                        ? "bg-emerald-600/30 border-emerald-400 text-emerald-200"
+                                        : "bg-slate-900 border-slate-600 text-slate-300 hover:border-slate-500"
+                                    }`}
+                                  >
+                                    {opt.label}
+                                  </button>
+                                );
+                              })}
+                            </div>
+                            <p className="text-[10px] text-slate-500">
+                              No selection means all operators.
+                            </p>
                           </div>
                           <Button
                             type="button"
@@ -2089,31 +2192,11 @@ const UnifiedMapSidebar = ({
 
           {canUseGridApi && (
             <div className="pt-2 border-t border-slate-700/50 space-y-2">
-              <div className="pt-1 bg-slate-900/40 rounded-lg p-2 space-y-2">
-                <Label className="text-xs font-semibold text-blue-400 flex items-center gap-1">
-                  <Grid3X3 className="w-3 h-3" /> Stored Grid Version
-                </Label>
-                <SegmentedControl
-                  value={storedGridVersion}
-                  onChange={handleStoredGridVersionChange}
-                  options={[
-                    { value: "original", label: "Baseline" },
-                    { value: "updated", label: "Optimized" },
-                    { value: "delta", label: "Delta" },
-                  ]}
-                  disabled={
-                    deltaGridButtonsDisabled ||
-                    Boolean(deltaGridApiState?.computing) ||
-                    Boolean(deltaGridApiState?.fetching)
-                  }
-                />
-              </div>
-
               <ToggleRow
                 label={`Show Stored ${
-                  storedGridVersion === "updated"
+                  normalizedStoredGridVersion === "updated"
                     ? "Optimized"
-                    : storedGridVersion === "delta"
+                    : normalizedStoredGridVersion === "delta"
                       ? "Delta"
                       : "Baseline"
                 } Grid`}
@@ -2125,7 +2208,9 @@ const UnifiedMapSidebar = ({
                       : ""
                 }
                 checked={Boolean(deltaGridApiState?.gridVisible)}
-                onChange={() => onDeltaGridFetchStored?.()}
+                onChange={() =>
+                  onDeltaGridFetchStored?.({ version: normalizedStoredGridVersion })
+                }
                 disabled={
                   deltaGridButtonsDisabled ||
                   Boolean(deltaGridApiState?.computing) ||
@@ -2133,6 +2218,55 @@ const UnifiedMapSidebar = ({
                 }
                 useSwitch={true}
               />
+              {Boolean(deltaGridApiState?.gridVisible) && (
+                <div className="pt-1 bg-slate-900/40 rounded-lg p-2 space-y-2">
+                  <Label className="text-xs font-semibold text-blue-400 flex items-center gap-1">
+                    <Grid3X3 className="w-3 h-3" /> Stored Grid Version
+                  </Label>
+                  <SegmentedControl
+                    value={normalizedStoredGridVersion}
+                    onChange={handleStoredGridVersionChange}
+                    options={[
+                      { value: "original", label: "Baseline" },
+                      { value: "updated", label: "Optimized" },
+                      { value: "delta", label: "Delta" },
+                    ]}
+                    disabled={
+                      deltaGridButtonsDisabled ||
+                      Boolean(deltaGridApiState?.computing) ||
+                      Boolean(deltaGridApiState?.fetching)
+                    }
+                  />
+                  {(normalizedStoredGridVersion === "updated" ||
+                    normalizedStoredGridVersion === "delta") && (
+                    <SelectRow
+                      label="Scenario"
+                      value={
+                        Number.isFinite(Number(storedGridScenarioId)) && Number(storedGridScenarioId) > 0
+                          ? String(storedGridScenarioId)
+                          : "__none"
+                      }
+                      onChange={handleStoredGridScenarioChange}
+                      options={
+                        Array.isArray(storedGridScenarioOptions) && storedGridScenarioOptions.length > 0
+                          ? storedGridScenarioOptions.map((item) => ({
+                              value: String(item.scenario_id),
+                              label: `Scenario ${item.scenario_id}${item.status ? ` (${item.status})` : ""}`,
+                            }))
+                          : [{ value: "__none", label: "No scenarios" }]
+                      }
+                      placeholder="Select scenario"
+                      disabled={
+                        deltaGridButtonsDisabled ||
+                        Boolean(deltaGridApiState?.computing) ||
+                        Boolean(deltaGridApiState?.fetching) ||
+                        !Array.isArray(storedGridScenarioOptions) ||
+                        storedGridScenarioOptions.length === 0
+                      }
+                    />
+                  )}
+                </div>
+              )}
               {(deltaGridApiState?.computing || deltaGridApiState?.fetching) && (
                 <p className="pt-1 text-[10px] text-blue-300">
                   {deltaGridApiState?.computing
@@ -2148,7 +2282,17 @@ const UnifiedMapSidebar = ({
                       <span className="text-slate-400">Manual Grid Size</span>
                       <button
                         type="button"
-                        onClick={() => onDeltaGridComputeStore?.()}
+                        onClick={() =>
+                          onDeltaGridComputeStore?.({
+                            scenarioId:
+                              normalizedStoredGridVersion === "updated" ||
+                              normalizedStoredGridVersion === "optimized" ||
+                              normalizedStoredGridVersion === "optimised" ||
+                              normalizedStoredGridVersion === "delta"
+                                ? storedGridScenarioId
+                                : undefined,
+                          })
+                        }
                         disabled={
                           deltaGridButtonsDisabled ||
                           Boolean(deltaGridApiState?.computing) ||

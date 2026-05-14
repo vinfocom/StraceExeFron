@@ -163,6 +163,7 @@ export const useNetworkSamples = (
   filterEnabled = false,
   polygons = [],
   maxRows = 2000000,
+  projectId = null,
 ) => {
   const [locations, setLocations] = useState([]);
   const [appSummary, setAppSummary] = useState({});
@@ -192,7 +193,7 @@ export const useNetworkSamples = (
     const cacheKey = makeProjectCacheKey({
       resource: 'unified-network-samples',
       sessionIds: sessionIds || [],
-      variant: safeMaxRows ? `max-${safeMaxRows}` : 'all',
+      variant: `${safeMaxRows ? `max-${safeMaxRows}` : 'all'}:project-${projectId || 'none'}`,
     });
 
 
@@ -255,6 +256,7 @@ export const useNetworkSamples = (
           response = await withTimeout(
             mapViewApi.getNetworkLog({
               session_ids: sessionIds,
+              project_id: projectId,
               page: currentPage,
               limit: PAGE_SIZE,
               signal: abortControllerRef.current.signal,
@@ -410,7 +412,7 @@ export const useNetworkSamples = (
         if (mountedRef.current) setLoading(false);
       }
     }
-  }, [sessionIds, enabled, filterEnabled, polygons, maxRows]);
+  }, [sessionIds, enabled, filterEnabled, polygons, maxRows, projectId]);
 
   // Handle Technology Transitions Logic
   useEffect(() => {

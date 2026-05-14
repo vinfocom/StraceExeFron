@@ -1243,6 +1243,9 @@ const UnifiedMapView = () => {
   const [lteGridAggregationMethod, setLteGridAggregationMethod] =
     useState("median");
   const [storedGridMetricMode, setStoredGridMetricMode] = useState("max");
+  const [storedGridVersion, setStoredGridVersion] = useState("original");
+  const [storedGridScenarioId, setStoredGridScenarioId] = useState(null);
+  const [storedGridScenarioOptions, setStoredGridScenarioOptions] = useState([]);
   const [deltaGridScope, setDeltaGridScope] = useState("selected");
   const [deltaGridApiState, setDeltaGridApiState] = useState({
     computing: false,
@@ -1719,7 +1722,7 @@ const UnifiedMapView = () => {
   }, [enableGrid, canEnableUnifiedGridView]);
 
   const shouldFetchSamples =
-    isSampleMode && sessionIds.length > 0 && !hasPassedLocations;
+    isSampleMode && sessionIds.length > 0;
 
   const {
     locations: fetchedSamples,
@@ -1735,11 +1738,13 @@ const UnifiedMapView = () => {
     shouldFetchSamples,
     false,
     EMPTY_POLYGONS,
+    2000000,
+    projectId,
   );
 
   // Prefer live fetched data whenever sample fetch is enabled.
-  const sampleLocations = shouldFetchSamples
-    ? (fetchedSamples || EMPTY_LIST)
+  const sampleLocations = Array.isArray(fetchedSamples) && fetchedSamples.length > 0
+    ? fetchedSamples
     : (hasPassedLocations ? passedLocations : fetchedSamples);
 
   const isDataPredictionMode = enableDataToggle && dataToggle === "prediction";
@@ -1786,13 +1791,17 @@ const UnifiedMapView = () => {
     window.dispatchEvent(new CustomEvent("map:selectAllSectors"));
   }, [isDeltaGridCompleteMode, lteGridEnabled]);
 
-  const handleDeltaGridFetchStored = useCallback(async () => {
+  const handleDeltaGridFetchStored = useCallback(async ({ version, scenarioId } = {}) => {
     const numericProjectId = Number(projectId);
     if (!Number.isFinite(numericProjectId) || numericProjectId <= 0) {
       toast.error("Select a valid project before fetching grid analytics.");
       return false;
     }
 
+    const normalizedVersion = String(version || storedGridVersion || "original")
+      .trim()
+      .toLowerCase();
+    const effectiveScenarioId = Number(scenarioId ?? storedGridScenarioId) || undefined;
     const requestedGridSize = Math.max(5, Number(lteGridSizeMeters) || 50);
     setDeltaGridApiState((prev) => ({
       ...prev,
@@ -1806,6 +1815,11 @@ const UnifiedMapView = () => {
     try {
       const response = await gridAnalyticsApi.getGridAnalytics({
         projectId: numericProjectId,
+        version: normalizedVersion,
+        scenario_id:
+          normalizedVersion === "updated" || normalizedVersion === "optimized" || normalizedVersion === "optimised" || normalizedVersion === "delta"
+            ? effectiveScenarioId
+            : undefined,
       });
       const root =
         response?.data && typeof response.data === "object" ? response.data : response || {};
@@ -1832,6 +1846,7 @@ const UnifiedMapView = () => {
         lastError: "",
         gridsCount,
         grids,
+        storedGridVersion: normalizedVersion,
         gridVisible: true,
         gridSizeMeters: fetchedGridSize,
         requestedGridSize,
@@ -1854,6 +1869,7 @@ const UnifiedMapView = () => {
         lastError: message,
         lastMessage: "",
         grids: [],
+        storedGridVersion: normalizedVersion,
         gridVisible: false,
         requestedGridSize,
         lastUpdatedAt: new Date().toISOString(),
@@ -1861,10 +1877,72 @@ const UnifiedMapView = () => {
       toast.error(message);
       return false;
     }
-  }, [projectId, lteGridSizeMeters, setLteGridSizeMeters]);
+  }, [projectId, lteGridSizeMeters, setLteGridSizeMeters, storedGridVersion, storedGridScenarioId]);
+
+  useEffect(() => {
+    const normalizedVersion = String(storedGridVersion || "original").trim().toLowerCase();
+    const shouldLoadScenarios =
+      normalizedVersion === "updated" ||
+      normalizedVersion === "optimized" ||
+      normalizedVersion === "optimised" ||
+      normalizedVersion === "delta";
+    if (!shouldLoadScenarios) {
+      setStoredGridScenarioOptions([]);
+      setStoredGridScenarioId(null);
+      return;
+    }
+
+    const numericProjectId = Number(projectId);
+    if (!Number.isFinite(numericProjectId) || numericProjectId <= 0) {
+      setStoredGridScenarioOptions([]);
+      setStoredGridScenarioId(null);
+      return;
+    }
+
+    let cancelled = false;
+    (async () => {
+      try {
+        const response = await gridAnalyticsApi.getOptimizationScenarios({ projectId: numericProjectId });
+        const root =
+          response?.data && typeof response.data === "object" ? response.data : response || {};
+        const rows = Array.isArray(root?.Data)
+          ? root.Data
+          : Array.isArray(root?.data?.Data)
+            ? root.data.Data
+            : Array.isArray(root?.data)
+              ? root.data
+              : [];
+        const options = rows
+          .map((row) => ({
+            scenario_id: Number(row?.scenario_id ?? row?.id ?? 0),
+            scenario_name: String(row?.scenario_name ?? row?.name ?? "").trim(),
+            status: String(row?.status || "").trim(),
+            created_at: row?.created_at || null,
+          }))
+          .filter((row) => Number.isFinite(row.scenario_id) && row.scenario_id > 0);
+
+        if (cancelled) return;
+        setStoredGridScenarioOptions(options);
+        setStoredGridScenarioId((prev) => {
+          if (Number.isFinite(Number(prev)) && options.some((o) => o.scenario_id === Number(prev))) {
+            return Number(prev);
+          }
+          return options.length > 0 ? options[0].scenario_id : null;
+        });
+      } catch {
+        if (cancelled) return;
+        setStoredGridScenarioOptions([]);
+        setStoredGridScenarioId(null);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId, storedGridVersion]);
 
   const handleDeltaGridComputeStore = useCallback(
-    async ({ showGridAfterCompute = false } = {}) => {
+    async ({ showGridAfterCompute = false, scenarioId } = {}) => {
     const numericProjectId = Number(projectId);
     if (!Number.isFinite(numericProjectId) || numericProjectId <= 0) {
       toast.error("Select a valid project before computing grid analytics.");
@@ -1872,6 +1950,7 @@ const UnifiedMapView = () => {
     }
 
     const requestedGridSize = Math.max(5, Number(lteGridSizeMeters) || 50);
+    const effectiveScenarioId = Number(scenarioId ?? storedGridScenarioId);
     const computeToastId = toast.loading(`Computing grid (${requestedGridSize}m)...`);
     setDeltaGridApiState((prev) => ({
       ...prev,
@@ -1887,6 +1966,10 @@ const UnifiedMapView = () => {
       const response = await gridAnalyticsApi.computeAndStoreGridAnalytics({
         projectId: numericProjectId,
         gridSize: requestedGridSize,
+        scenario_id:
+          Number.isFinite(effectiveScenarioId) && effectiveScenarioId > 0
+            ? effectiveScenarioId
+            : undefined,
       });
       const root =
         response?.data && typeof response.data === "object" ? response.data : response || {};
@@ -1963,10 +2046,24 @@ const UnifiedMapView = () => {
       });
       return false;
     }
-  }, [projectId, lteGridSizeMeters, setProject]);
+  }, [projectId, lteGridSizeMeters, setProject, storedGridScenarioId]);
 
-  const handleDeltaGridManualFetch = useCallback(async () => {
+  const handleDeltaGridManualFetch = useCallback(async ({ version, scenarioId, forceFetch = false } = {}) => {
     if (deltaGridApiState?.computing || deltaGridApiState?.fetching) return false;
+
+    const requestedVersion = String(version || "").trim().toLowerCase();
+    const currentVersion = String(
+      deltaGridApiState?.storedGridVersion || storedGridVersion || "original",
+    )
+      .trim()
+      .toLowerCase();
+    const shouldRefreshVisibleGrid =
+      Boolean(deltaGridApiState?.gridVisible) &&
+      (forceFetch || (requestedVersion && requestedVersion !== currentVersion));
+
+    if (shouldRefreshVisibleGrid) {
+      return handleDeltaGridFetchStored({ version: requestedVersion || currentVersion, scenarioId });
+    }
 
     if (Boolean(deltaGridApiState?.gridVisible)) {
       setDeltaGridApiState((prev) => ({
@@ -1982,11 +2079,13 @@ const UnifiedMapView = () => {
       toast.info("Stored grid hidden.");
       return true;
     }
-    return handleDeltaGridFetchStored();
+    return handleDeltaGridFetchStored({ version, scenarioId });
   }, [
     deltaGridApiState?.computing,
     deltaGridApiState?.fetching,
     deltaGridApiState?.gridVisible,
+    deltaGridApiState?.storedGridVersion,
+    storedGridVersion,
     handleDeltaGridFetchStored,
   ]);
 
@@ -2018,7 +2117,11 @@ const UnifiedMapView = () => {
               : "max";
     const metricMode = aggregateMode === "median" ? "avg" : aggregateMode;
     const bestOperatorMode = metricMode;
-    const normalizedVersion = String(sitePredictionVersion || "").trim().toLowerCase();
+    const normalizedVersion = String(
+      deltaGridApiState?.storedGridVersion || storedGridVersion || sitePredictionVersion || "",
+    )
+      .trim()
+      .toLowerCase();
     const isDeltaView = normalizedVersion === "delta";
     const isOptimizedView =
       normalizedVersion === "updated" ||
@@ -2158,8 +2261,10 @@ const UnifiedMapView = () => {
   }, [
     deltaGridApiState?.gridVisible,
     deltaGridApiState?.grids,
+    deltaGridApiState?.storedGridVersion,
     selectedMetric,
     storedGridMetricMode,
+    storedGridVersion,
     sitePredictionVersion,
     baseThresholds,
     getMetricColorForLog,
@@ -2232,6 +2337,8 @@ const UnifiedMapView = () => {
     shouldFetchNeighbors,
     false,
     EMPTY_POLYGONS,
+    300000,
+    projectId,
   );
 
   const sessionNeighborData = hasPassedNeighbors
@@ -2995,7 +3102,11 @@ const UnifiedMapView = () => {
 
     if (isStoredGridOverlayVisible) {
       const selectedMetricKey = String(selectedMetric || "rsrp").trim().toLowerCase();
-      const normalizedVersion = String(sitePredictionVersion || "").trim().toLowerCase();
+      const normalizedVersion = String(
+        deltaGridApiState?.storedGridVersion || storedGridVersion || sitePredictionVersion || "",
+      )
+        .trim()
+        .toLowerCase();
       const isDeltaView = normalizedVersion === "delta";
       const isOptimizedView =
         normalizedVersion === "updated" ||
@@ -3072,6 +3183,8 @@ const UnifiedMapView = () => {
     renderedGridLegendLogs,
     isStoredGridOverlayVisible,
     storedDeltaGridCells,
+    deltaGridApiState?.storedGridVersion,
+    storedGridVersion,
     sitePredictionVersion,
     selectedMetric,
   ]);
@@ -3105,10 +3218,20 @@ const UnifiedMapView = () => {
   const legendSelectedMetric = useMemo(
     () => {
       if (!isStoredGridOverlayVisible) return selectedMetric;
-      const normalizedVersion = String(sitePredictionVersion || "").trim().toLowerCase();
+      const normalizedVersion = String(
+        deltaGridApiState?.storedGridVersion || storedGridVersion || sitePredictionVersion || "",
+      )
+        .trim()
+        .toLowerCase();
       return normalizedVersion === "delta" ? "delta" : selectedMetric;
     },
-    [isStoredGridOverlayVisible, selectedMetric, sitePredictionVersion],
+    [
+      isStoredGridOverlayVisible,
+      selectedMetric,
+      sitePredictionVersion,
+      storedGridVersion,
+      deltaGridApiState?.storedGridVersion,
+    ],
   );
   const legendColorBy = useMemo(() => {
     const isBestOperatorGridMode =
@@ -4542,6 +4665,28 @@ const UnifiedMapView = () => {
     return Array.from(set).sort((a, b) => a - b);
   }, [uniquePcisFromLogs, uniquePcis]);
 
+  const siteOperatorOptions = useMemo(() => {
+    if (!Array.isArray(siteData) || siteData.length === 0) return [];
+    const set = new Set();
+    siteData.forEach((s) => {
+      const providerName = normalizeProviderName(
+        s?.provider ??
+          s?.Provider ??
+          s?.cluster ??
+          s?.Cluster ??
+          s?.operator ??
+          s?.Operator ??
+          s?.network ??
+          s?.Network ??
+          "",
+      );
+      if (providerName && !isUnknownOption(providerName)) {
+        set.add(providerName);
+      }
+    });
+    return Array.from(set).sort();
+  }, [siteData]);
+
   if (!isLoaded)
     return (
       <div className="flex items-center justify-center h-screen">
@@ -4728,6 +4873,7 @@ const UnifiedMapView = () => {
         dataFilters={dataFilters}
         setDataFilters={setDataFilters}
         availableFilterOptions={availableFilterOptions}
+        siteOperatorOptions={siteOperatorOptions}
         colorBy={colorBy}
         setColorBy={setColorBy}
         ui={ui}
@@ -4779,6 +4925,11 @@ const UnifiedMapView = () => {
         setLteGridSizeMeters={setLteGridSizeMeters}
         lteGridAggregationMethod={lteGridAggregationMethod}
         setLteGridAggregationMethod={setLteGridAggregationMethod}
+        storedGridVersion={storedGridVersion}
+        setStoredGridVersion={setStoredGridVersion}
+        storedGridScenarioId={storedGridScenarioId}
+        setStoredGridScenarioId={setStoredGridScenarioId}
+        storedGridScenarioOptions={storedGridScenarioOptions}
         storedGridMetricMode={storedGridMetricMode}
         setStoredGridMetricMode={setStoredGridMetricMode}
         deltaGridScope={deltaGridScope}

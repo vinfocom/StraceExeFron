@@ -875,15 +875,13 @@ function getSitePredictionSourceRowId(source) {
     source?.originalId ??
     source?.site_prediction_id ??
     source?.sitePredictionId ??
-    source?.id ??
     raw.sourceRowId ??
     raw.source_id ??
     raw.sourceId ??
     raw.original_id ??
     raw.originalId ??
     raw.site_prediction_id ??
-    raw.sitePredictionId ??
-    raw.id;
+    raw.sitePredictionId;
   const numeric = Number(value);
   return Number.isFinite(numeric) && numeric > 0 ? numeric : null;
 }
@@ -1634,7 +1632,7 @@ const NetworkPlannerMap = ({
       const rawVersion = String(sitePredictionVersion || "original").trim().toLowerCase();
       const normalizedVersion =
         rawVersion === "updated"
-          ? "updated"
+          ? "combined"
           : rawVersion === "delta"
             ? "delta"
             : "original";
@@ -2925,13 +2923,21 @@ const NetworkPlannerMap = ({
 
   const handleSectorEditSave = useCallback(async () => {
     if (!selectedSectorInfo) return;
-    const rowId = getSitePredictionSourceRowId({
+    const explicitSourceId = Number(
+      selectedSectorInfo?.rawSite?.original_id ??
+        selectedSectorInfo?.rawSite?.site_prediction_id ??
+        selectedSectorInfo?.rawSite?.sitePredictionId ??
+        NaN,
+    );
+    const derivedRowId = getSitePredictionSourceRowId({
       ...selectedSectorInfo,
       rawSite: {
         ...(selectedSectorInfo.rawSite || {}),
         ...(sectorEditOriginalData || {}),
       },
     });
+    const rowId =
+      Number.isFinite(explicitSourceId) && explicitSourceId > 0 ? explicitSourceId : derivedRowId;
     const siteSelector = String(
       getDisplaySiteId(selectedSectorInfo) ||
         selectedSectorInfo.siteId ||
@@ -3593,32 +3599,6 @@ const NetworkPlannerMap = ({
 
   return (
     <>
-      <div className="absolute right-3 top-3 z-[2100] flex items-center gap-2">
-        {showBulkSiteActions && !singleSiteSelection && (
-          <button
-            type="button"
-            onClick={() => {
-              void handleSelectAllSites();
-            }}
-            disabled={!siteMarkers.length}
-            className="rounded bg-slate-900/90 px-2.5 py-1 text-[11px] font-semibold text-white shadow disabled:cursor-not-allowed disabled:opacity-40"
-          >
-            Select All Sites
-          </button>
-        )}
-        <button
-          type="button"
-          onClick={handleClearSelectedSites}
-          disabled={selectedSiteIds.length === 0}
-          className="rounded bg-slate-700/90 px-2.5 py-1 text-[11px] font-semibold text-white shadow disabled:cursor-not-allowed disabled:opacity-40"
-        >
-          Clear
-        </button>
-        <div className="rounded bg-blue-600/90 px-2 py-1 text-[11px] font-semibold text-white shadow">
-          {selectedSiteIds.length} selected
-        </div>
-      </div>
-
       {selectedSectorInfo && (
         <div className="absolute right-3 top-12 z-[2100] w-[290px] rounded border border-slate-300 bg-white p-2 text-xs shadow-lg">
           <div className="mb-2 flex items-center justify-between border-b border-slate-200 pb-1">
