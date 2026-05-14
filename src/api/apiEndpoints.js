@@ -61,6 +61,30 @@ const downloadUrlAsBlob = async (url, filename) => {
   return { success: true };
 };
 
+const postWithRouteFallback = async (paths, payload, config = {}) => {
+  let lastError = null;
+  for (const path of paths) {
+    try {
+      return await pythonApi.post(path, payload, config);
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  throw lastError;
+};
+
+const getWithRouteFallback = async (paths, config = {}) => {
+  let lastError = null;
+  for (const path of paths) {
+    try {
+      return await pythonApi.get(path, config);
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  throw lastError;
+};
+
 export const generalApi = {
   healthCheck: async () => {
     try {
@@ -568,12 +592,19 @@ export const predictionApi = {
         grid_resolution: params.grid_resolution ?? 50.0,
         n_workers: params.n_workers ?? 2,
         operator: operatorValue,
-        operators: uniqueOperators.length > 0 ? uniqueOperators : ["all"],
+        operators: uniqueOperators,
       };
 
-      const response = await pythonApi.post("/api/lte-prediction-optimised/run", payload, {
-        timeout: 600000,
-      });
+      const response = await postWithRouteFallback(
+        [
+          "/api/lte-prediction-optimised/run",
+          "/api/lte-prediction-optimized/run",
+          "/api/lte-prediction-optimised/optimized",
+          "/api/lte-prediction-optimized/optimized",
+        ],
+        payload,
+        { timeout: 600000 },
+      );
       return response;
     } catch (error) {
       console.error("LTE Optimised Prediction run error:", error);
@@ -594,21 +625,54 @@ export const predictionApi = {
     try {
       if (!params.project_id) throw new Error("project_id is required");
 
-      const payload = {
-        project_id: params.project_id,
-      };
-
       const operator = String(params.operator || "").trim();
+      const parsedSessionIds = Array.isArray(params.session_ids) && params.session_ids.length > 0
+        ? params.session_ids
+            .map((value) => Number(value))
+            .filter((value) => Number.isFinite(value) && value > 0)
+        : [];
+      const hasFile = params.threshold_file instanceof File;
+
+      if (hasFile) {
+        const formData = new FormData();
+        formData.append("project_id", String(params.project_id));
+        if (operator && operator.toLowerCase() !== "all") {
+          formData.append("operator", operator);
+        }
+        if (parsedSessionIds.length > 0) {
+          formData.append("session_ids", JSON.stringify(parsedSessionIds));
+        }
+        if (params.rsrp !== undefined && params.rsrp !== null && params.rsrp !== "") {
+          formData.append("rsrp", String(Number(params.rsrp)));
+        }
+        if (params.rsrq !== undefined && params.rsrq !== null && params.rsrq !== "") {
+          formData.append("rsrq", String(Number(params.rsrq)));
+        }
+        if (params.sinr !== undefined && params.sinr !== null && params.sinr !== "") {
+          formData.append("sinr", String(Number(params.sinr)));
+        }
+        formData.append("threshold_file", params.threshold_file);
+
+        return await postWithRouteFallback(
+          [
+            "/api/lte-tilt-recommandation/optimize",
+            "/api/lte-tilt-recommendation/optimize",
+          ],
+          formData,
+          {
+            timeout: 600000,
+            headers: { "Content-Type": "multipart/form-data" },
+          },
+        );
+      }
+
+      const payload = { project_id: params.project_id };
       if (operator && operator.toLowerCase() !== "all") {
         payload.operator = operator;
       }
-
-      if (Array.isArray(params.session_ids) && params.session_ids.length > 0) {
-        payload.session_ids = params.session_ids
-          .map((value) => Number(value))
-          .filter((value) => Number.isFinite(value) && value > 0);
+      if (parsedSessionIds.length > 0) {
+        payload.session_ids = parsedSessionIds;
       }
-
       if (params.rsrp !== undefined && params.rsrp !== null && params.rsrp !== "") {
         payload.rsrp = Number(params.rsrp);
       }
@@ -619,9 +683,14 @@ export const predictionApi = {
         payload.sinr = Number(params.sinr);
       }
 
-      return await pythonApi.post("/api/lte-tilt-recommendation/optimize", payload, {
-        timeout: 600000,
-      });
+      return await postWithRouteFallback(
+        [
+          "/api/lte-tilt-recommandation/optimize",
+          "/api/lte-tilt-recommendation/optimize",
+        ],
+        payload,
+        { timeout: 600000 },
+      );
     } catch (error) {
       console.error("LTE tilt recommendation run error:", error);
       if (error.code === "ECONNABORTED") {
@@ -634,7 +703,10 @@ export const predictionApi = {
   getLteTiltRecommendationStatus: async (jobId) => {
     try {
       if (!jobId) throw new Error("jobId is required");
-      return await pythonApi.get(`/api/lte-tilt-recommendation/status/${jobId}`);
+      return await getWithRouteFallback([
+        `/api/lte-tilt-recommandation/status/${jobId}`,
+        `/api/lte-tilt-recommendation/status/${jobId}`,
+      ]);
     } catch (error) {
       console.error("LTE tilt recommendation status error:", error);
       throw error;
@@ -643,12 +715,12 @@ export const predictionApi = {
 
   getLteTiltRecommendationDownloadUrl: (filePath) => {
     if (!filePath) return "";
-    return `${PYTHON_BASE_URL_EXPORT}/api/lte-tilt-recommendation/download?file=${encodeURIComponent(filePath)}`;
+    return `${PYTHON_BASE_URL_EXPORT}/api/lte-tilt-recommandation/download?file=${encodeURIComponent(filePath)}`;
   },
 
   downloadLteTiltRecommendation: (filePath) => {
     if (!filePath) return Promise.resolve({ success: false });
-    const url = `${PYTHON_BASE_URL_EXPORT}/api/lte-tilt-recommendation/download?file=${encodeURIComponent(filePath)}`;
+    const url = `${PYTHON_BASE_URL_EXPORT}/api/lte-tilt-recommandation/download?file=${encodeURIComponent(filePath)}`;
     const filename = String(filePath).split(/[\\/]/).pop() || "lte_tilt_recommendation.csv";
     return downloadUrlAsBlob(url, filename);
   },
@@ -666,7 +738,10 @@ export const predictionApi = {
   getLteOptimisedPredictionStatus: async (jobId) => {
     try {
       if (!jobId) throw new Error("jobId is required");
-      return await pythonApi.get(`/api/lte-prediction-optimised/status/${jobId}`);
+      return await getWithRouteFallback([
+        `/api/lte-prediction-optimised/status/${jobId}`,
+        `/api/lte-prediction-optimized/status/${jobId}`,
+      ]);
     } catch (error) {
       console.error("LTE Optimised Prediction status error:", error);
       throw error;
@@ -903,18 +978,78 @@ export const adminApi = {
     api.get("/Admin/GetSessionsByDateRange", { params: filters }),
 };
 
+const emptyOfflineResponse = (extra = {}) => ({
+  Status: 1,
+  Data: [],
+  localOnly: true,
+  ...extra,
+});
+
+const offlineStorageAvailable = () =>
+  typeof window !== "undefined" && typeof window.localStorage !== "undefined";
+
+const readOfflineJson = (key, fallback) => {
+  if (!offlineStorageAvailable()) return fallback;
+  try {
+    const raw = window.localStorage.getItem(key);
+    return raw ? JSON.parse(raw) : fallback;
+  } catch {
+    return fallback;
+  }
+};
+
+const writeOfflineJson = (key, value) => {
+  if (!offlineStorageAvailable()) return;
+  try {
+    window.localStorage.setItem(key, JSON.stringify(value));
+  } catch {
+    // Local offline cache is best-effort only.
+  }
+};
+
 export const offlineApi = {
-  health: () => pythonApi.get("/api/offline/health"),
-  getImports: (params = {}) => pythonApi.get("/api/offline/imports", params),
-  importFiles: (formData, config = {}) =>
-    pythonApi.post("/api/offline/import", formData, config),
-  getSessions: (params = {}) => pythonApi.get("/api/offline/sessions", params),
-  getProjects: (params = {}) => pythonApi.get("/api/offline/projects", params),
-  getProject: (projectId) => pythonApi.get(`/api/offline/projects/${projectId}`),
-  createProject: (payload) => pythonApi.post("/api/offline/projects", payload),
-  getNetworkLog: (params = {}) => pythonApi.get("/api/offline/network-log", params),
-  prepareSync: (payload = {}) => pythonApi.post("/api/offline/sync", payload),
-  getSyncStatus: () => pythonApi.get("/api/offline/sync/status"),
+  health: async () => ({ Status: 1, localOnly: true }),
+  getImports: async () =>
+    emptyOfflineResponse({ Data: readOfflineJson("stracer.offline.imports", []) }),
+  importFiles: async () =>
+    emptyOfflineResponse({
+      Message: "Offline file import is disabled in the frontend-only offline adapter.",
+    }),
+  getSessions: async () =>
+    emptyOfflineResponse({ Data: readOfflineJson("stracer.offline.sessions", []) }),
+  getProjects: async () =>
+    emptyOfflineResponse({ Data: readOfflineJson("stracer.offline.projects", []) }),
+  getProject: async (projectId) => {
+    const projects = readOfflineJson("stracer.offline.projects", []);
+    const project = projects.find((row) => String(row?.id) === String(projectId));
+    return { Status: project ? 1 : 0, Data: project || null, localOnly: true };
+  },
+  createProject: async (payload) => {
+    const projects = readOfflineJson("stracer.offline.projects", []);
+    const project = {
+      ...payload,
+      id: payload?.id || `local-${Date.now()}`,
+      sync_status: "pending",
+      created_at: payload?.created_at || new Date().toISOString(),
+    };
+    writeOfflineJson("stracer.offline.projects", [project, ...projects]);
+    return { Status: 1, Data: project, localOnly: true };
+  },
+  getNetworkLog: async () =>
+    emptyOfflineResponse({ Data: readOfflineJson("stracer.offline.networkLog", []) }),
+  prepareSync: async () => ({
+    Status: 1,
+    synced: 0,
+    skipped: true,
+    reason: "frontend-offline-adapter",
+    localOnly: true,
+  }),
+  getSyncStatus: async () => ({
+    Status: 1,
+    syncing: false,
+    pending: 0,
+    localOnly: true,
+  }),
 };
 
 const LOCAL_PROJECT_API_FLAG = String(

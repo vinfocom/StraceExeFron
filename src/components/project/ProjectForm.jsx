@@ -321,8 +321,7 @@ const PredictionOptions = ({
             htmlFor="run-prediction"
             className="text-sm font-semibold text-purple-900 cursor-pointer"
           >
-            Run LTE Prediction Pipeline
-          </Label>
+          Predict estimated sites location          </Label>
         </div>
 
         {enabled && (

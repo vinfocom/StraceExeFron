@@ -18,7 +18,6 @@ import { toast } from "react-toastify";
 import { useMapContext } from "../context/MapContext";
 import MapLegend from "@/components/map/MapLegend";
 import DrawingToolsLayer from "@/components/map/tools/DrawingToolsLayer";
-import DrawingControlsPanel from "@/components/map/layout/DrawingControlsPanel";
 
 import AllLogsPanelToggle from "@/components/map/layout/AllLogsPanelToggle";
 import {
@@ -734,7 +733,7 @@ function SessionMapDebug() {
   // Loading State - This is the conditional return that was causing issues
   if (!isLoaded) {
     return (
-      <div className="flex items-center justify-center h-[calc(100vh-64px)] w-full bg-gray-900 rounded-lg overflow-hidden relative">
+      <div className="flex items-center justify-center h-[calc(100vh-52px)] w-full bg-gray-900 rounded-lg overflow-hidden relative">
         <div className="text-center">
           <Spinner />
           <p className="mt-4 text-white">Loading map...</p>
@@ -745,7 +744,7 @@ function SessionMapDebug() {
 
   if (loadError || error) {
     return (
-      <div className="flex items-center justify-center h-[calc(100vh-64px)] w-full bg-gray-900 text-white rounded-lg overflow-hidden relative">
+      <div className="flex items-center justify-center h-[calc(100vh-52px)] w-full bg-gray-900 text-white rounded-lg overflow-hidden relative">
         <div className="text-center max-w-md px-4">
           <h2 className="text-2xl font-bold mb-4">Error</h2>
           <p className="text-red-400 mb-4">{loadError?.message || error}</p>
@@ -760,7 +759,7 @@ function SessionMapDebug() {
   const selectedMetric = normalizeMetric(filters.metric);
 
   return (
-    <div className="h-[calc(100vh-64px)] w-full relative rounded-lg overflow-hidden shadow-md">
+    <div className="h-[calc(100vh-52px)] w-full relative rounded-lg overflow-hidden shadow-md">
       <LoadingProgress
         progress={fetchProgress}
         loading={loading}
@@ -780,12 +779,12 @@ function SessionMapDebug() {
         center={mapCenter}
         fitToLocations={true}
         showPoints={true}
-        pointRadius={12}
+        pointRadius={6}
         showStats={false}
         activeMarkerIndex={null}
         onMarkerClick={() => {}}
         debugNeighbors={true}
-        neighborSquareSize={15}
+        neighborSquareSize={6}
         neighborOpacity={0.5}
       >
         {map && (

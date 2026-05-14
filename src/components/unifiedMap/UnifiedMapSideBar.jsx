@@ -710,6 +710,8 @@ const UnifiedMapSidebar = ({
   const [lteTiltRecommendationRsrp, setLteTiltRecommendationRsrp] = useState(-105);
   const [lteTiltRecommendationRsrq, setLteTiltRecommendationRsrq] = useState(-15);
   const [lteTiltRecommendationSinr, setLteTiltRecommendationSinr] = useState(0);
+  const [lteTiltRecommendationFile, setLteTiltRecommendationFile] = useState(null);
+  const lteTiltFileInputRef = useRef(null);
   const lteTiltRecommendationPollingRef = useRef(null);
   const lteTiltRecommendationToastIdRef = useRef(null);
   const lteTiltRecommendationJobIdRef = useRef(null);
@@ -1277,13 +1279,21 @@ const UnifiedMapSidebar = ({
       const selectedOperators = Array.isArray(lteOptimisedSelectedOperators)
         ? lteOptimisedSelectedOperators
         : [];
+      const fallbackOperators = (Array.isArray(lteOptimisedOperatorOptions)
+        ? lteOptimisedOperatorOptions
+        : []
+      )
+        .map((opt) => String(opt?.value || "").trim().toLowerCase())
+        .filter((value) => value && value !== "all");
+      const effectiveOperators =
+        selectedOperators.length > 0 ? selectedOperators : fallbackOperators;
       const response = await predictionApi.runLteOptimisedPrediction({
         user_id: Number(user?.id) || 0,
         project_id: numericProjectId,
         grid_resolution: Number(lteGridSizeMeters) || 25,
         radius: Number(ltePredictionRadiusMeters) || 5000,
-        operator: selectedOperators.length > 0 ? selectedOperators.join(",") : "all",
-        operators: selectedOperators,
+        operator: effectiveOperators.length > 0 ? effectiveOperators.join(",") : "all",
+        operators: effectiveOperators,
       });
 
       const jobId = response?.job_id || response?.jobId;
@@ -1338,6 +1348,7 @@ const UnifiedMapSidebar = ({
     lteGridSizeMeters,
     ltePredictionRadiusMeters,
     lteOptimisedSelectedOperators,
+    lteOptimisedOperatorOptions,
     stopLteOptimisedPredictionMonitoring,
     pollLteOptimisedPredictionStatus,
   ]);
@@ -1375,6 +1386,7 @@ const UnifiedMapSidebar = ({
         rsrp: lteTiltRecommendationRsrp,
         rsrq: lteTiltRecommendationRsrq,
         sinr: lteTiltRecommendationSinr,
+        threshold_file: lteTiltRecommendationFile || undefined,
       });
 
       const jobId = response?.job_id || response?.jobId;
@@ -1431,6 +1443,7 @@ const UnifiedMapSidebar = ({
     lteTiltRecommendationRsrp,
     lteTiltRecommendationRsrq,
     lteTiltRecommendationSinr,
+    lteTiltRecommendationFile,
     stopLteTiltRecommendationMonitoring,
     pollLteTiltRecommendationStatus,
   ]);
@@ -2568,6 +2581,50 @@ const UnifiedMapSidebar = ({
                             unit="dB"
                             showButtons={false}
                           />
+                        </div>
+                      </div>
+                      <div className="rounded-lg bg-slate-800/60 p-2 space-y-1.5">
+                        <Label className="mb-1 block text-[11px] text-slate-400">
+                          Threshold File (optional)
+                        </Label>
+                        <input
+                          ref={lteTiltFileInputRef}
+                          type="file"
+                          accept=".csv,.xlsx,.xls"
+                          onChange={(e) =>
+                            setLteTiltRecommendationFile(e.target.files?.[0] || null)
+                          }
+                          className="hidden"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => lteTiltFileInputRef.current?.click()}
+                          className="h-8 w-full rounded border border-slate-600 bg-slate-800 px-2 text-left text-xs text-slate-200 hover:border-slate-500"
+                        >
+                          {lteTiltRecommendationFile
+                            ? lteTiltRecommendationFile.name
+                            : "Choose .csv/.xlsx file"}
+                        </button>
+                        <div className="flex items-center justify-between gap-2">
+                          <p className="text-[10px] text-slate-500 truncate">
+                            {lteTiltRecommendationFile
+                              ? `Selected: ${lteTiltRecommendationFile.name}`
+                              : "No file selected"}
+                          </p>
+                          {lteTiltRecommendationFile && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setLteTiltRecommendationFile(null);
+                                if (lteTiltFileInputRef.current) {
+                                  lteTiltFileInputRef.current.value = "";
+                                }
+                              }}
+                              className="text-[10px] text-cyan-400 hover:text-cyan-300"
+                            >
+                              Clear
+                            </button>
+                          )}
                         </div>
                       </div>
                       <Button

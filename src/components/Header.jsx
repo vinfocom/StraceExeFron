@@ -57,10 +57,10 @@ export default function Header() {
   );
 
   return (
-    <header className="h-16 bg-slate-900/95 border border-slate-700/40 backdrop-blur-md rounded-none shadow-sm flex items-center justify-between px-4 sm:px-6 flex-shrink-0 relative z-30 text-slate-100">
-      <div className="flex items-center space-x-3 min-w-[200px]">
+    <header className="h-14 bg-slate-900/95 border border-slate-700/40 backdrop-blur-md rounded-none shadow-sm flex items-center justify-between px-3 sm:px-4 flex-shrink-0 relative z-30 text-slate-100">
+      <div className="flex items-center space-x-2 min-w-[180px]">
         {!isMapPage && (
-          <p className="text-lg sm:text-xl font-bold tracking-tight text-white truncate">
+          <p className="text-base sm:text-lg font-bold tracking-tight text-white truncate">
             {routeLabel}
           </p>
         )}
@@ -71,9 +71,9 @@ export default function Header() {
         {isMapPage && <DrawingControlsPanel position="relative" />}
       </div>
 
-      <div className="flex items-center space-x-4 min-w-[200px] justify-end">
+      <div className="flex items-center space-x-3 min-w-[180px] justify-end">
         <span
-          className={`inline-block h-2.5 w-2.5 rounded-full ${statusDotClass}`}
+          className={`inline-block h-2 w-2 rounded-full ${statusDotClass}`}
           title={serverOnline ? "Server connected" : "Working offline"}
         />
       </div>
