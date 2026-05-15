@@ -68,6 +68,10 @@ const postWithRouteFallback = async (paths, payload, config = {}) => {
       return await pythonApi.post(path, payload, config);
     } catch (error) {
       lastError = error;
+      const status = error?.response?.status;
+      if (status !== 404 && status !== 405) {
+        throw error;
+      }
     }
   }
   throw lastError;
@@ -80,6 +84,10 @@ const getWithRouteFallback = async (paths, config = {}) => {
       return await pythonApi.get(path, config);
     } catch (error) {
       lastError = error;
+      const status = error?.response?.status;
+      if (status !== 404 && status !== 405) {
+        throw error;
+      }
     }
   }
   throw lastError;
@@ -577,13 +585,14 @@ export const predictionApi = {
       const selectedOperators = Array.isArray(params.operators)
         ? params.operators
             .map((value) => String(value || "").trim())
+            .filter((value) => value.toLowerCase() !== "all")
             .filter(Boolean)
         : [];
       const uniqueOperators = Array.from(new Set(selectedOperators));
       const operatorValue =
         uniqueOperators.length > 0
-          ? uniqueOperators.join(",")
-          : String(params.operator || "all").trim() || "all";
+          ? uniqueOperators[0]
+          : String(params.operator || "").trim() || "Airtel";
 
       const payload = {
         user_id: params.user_id,
@@ -592,7 +601,7 @@ export const predictionApi = {
         grid_resolution: params.grid_resolution ?? 50.0,
         n_workers: params.n_workers ?? 2,
         operator: operatorValue,
-        operators: uniqueOperators,
+        operators: operatorValue ? [operatorValue] : [],
       };
 
       const response = await postWithRouteFallback(

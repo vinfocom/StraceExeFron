@@ -30,6 +30,9 @@ const PYTHON_BASE_URL = String(
   .trim()
   .replace(/\/+$/, "");
 
+let activePythonBaseUrl = PYTHON_BASE_URL;
+let discoveryPromise = null;
+
 const AXIOS_CONFIG_KEYS = new Set([
   'headers',
   'timeout',
@@ -64,12 +67,58 @@ const looksLikeAxiosConfig = (value) => {
  * Create axios instance for Python backend
  */
 const pythonAxios = axios.create({
-  baseURL: PYTHON_BASE_URL,
+  baseURL: activePythonBaseUrl,
   timeout: 300000, // 5 minutes default
   headers: {
     'Content-Type': 'application/json',
   },
 });
+
+const setPythonBaseUrl = (nextBaseUrl) => {
+  const normalized = String(nextBaseUrl || "").trim().replace(/\/+$/, "");
+  if (!normalized) return;
+  activePythonBaseUrl = normalized;
+  pythonAxios.defaults.baseURL = normalized;
+};
+
+const discoverPythonBaseUrl = async () => {
+  if (discoveryPromise) return discoveryPromise;
+
+  discoveryPromise = (async () => {
+    const candidates = [];
+    const explicitHost = (import.meta.env.VITE_ELECTRON_PYTHON_API_HOST || "127.0.0.1").trim();
+    const explicitPort = Number(
+      String(import.meta.env.VITE_ELECTRON_PYTHON_API_PORT || "").trim()
+    );
+
+    if (Number.isFinite(explicitPort) && explicitPort > 0) {
+      candidates.push(`http://${explicitHost}:${explicitPort}`);
+    }
+
+    for (let port = 8081; port <= 8105; port += 1) {
+      candidates.push(`http://127.0.0.1:${port}`);
+    }
+
+    const uniqueCandidates = [...new Set(candidates)];
+    for (const baseUrl of uniqueCandidates) {
+      try {
+        await axios.get(`${baseUrl}/health`, { timeout: 1200 });
+        return baseUrl;
+      } catch {
+        // continue probing
+      }
+    }
+
+    return "";
+  })();
+
+  try {
+    const found = await discoveryPromise;
+    return found;
+  } finally {
+    discoveryPromise = null;
+  }
+};
 
 /**
  * Request Interceptor
@@ -99,7 +148,7 @@ pythonAxios.interceptors.response.use(
     console.log(`✅ Python API Response: ${response.config.url}`, response.data);
     return response;
   },
-  (error) => {
+  async (error) => {
     if (error.response) {
       const { status, data } = error.response;
       console.error(`❌ Python API Error [${status}]:`, data);
@@ -114,7 +163,20 @@ pythonAxios.interceptors.response.use(
       error.message = `Python API error! Status: ${status} - ${errorMessage}`;
     } else if (error.request) {
       console.error('❌ Python API No Response:', error.request);
-      error.message = 'No response from Python backend. Server may be down.';
+      const originalConfig = error.config || {};
+      if (!originalConfig.__portAutoRetried) {
+        const discoveredBaseUrl = await discoverPythonBaseUrl();
+        if (discoveredBaseUrl) {
+          setPythonBaseUrl(discoveredBaseUrl);
+          console.log(`✅ Auto-detected Python backend at ${discoveredBaseUrl}`);
+          return pythonAxios({
+            ...originalConfig,
+            __portAutoRetried: true,
+          });
+        }
+      }
+
+      error.message = `No response from Python backend. Tried base URL: ${activePythonBaseUrl}`;
     } else {
       console.error('❌ Python API Request Setup Error:', error.message);
     }
