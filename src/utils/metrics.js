@@ -189,9 +189,15 @@ export const getPciColor = (pciValue) => {
 export const METRIC_CONFIG = {
   rsrp: {
     thresholdKey: 'rsrp',
-    label: 'RSRP',
+    label: 'RSRP/RSSI',
     unit: 'dBm',
-    fields: ['rsrp', 'RSRP', 'Rsrp', 'lte_rsrp', 'LTE_RSRP', 'nr_rsrp'],
+    fields: [
+      'rsrp', 'RSRP', 'Rsrp', 'lte_rsrp', 'LTE_RSRP', 'nr_rsrp',
+      'rssi', 'RSSI', 'Rssi', 'lte_rssi', 'nr_rssi', 'rssi_dbm',
+      'rssiDbm', 'RSSI_DBM', 'gsm_rssi', 'GSM_RSSI',
+      'level', 'Level', 'signal_strength', 'signalStrength', 'SignalStrength',
+      'rxlev', 'RxLev', 'RXLEV'
+    ],
   },
   rsrq: {
     thresholdKey: 'rsrq',
@@ -310,6 +316,7 @@ export const METRIC_CONFIG = {
 };
 
 const METRIC_ALIASES = {
+  'rsrp/rssi': 'rsrp',
   'dl_tpt': 'dl_thpt',
   'dl_rpt': 'dl_thpt',
   'ul_tpt': 'ul_thpt',

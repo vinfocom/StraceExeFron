@@ -22,7 +22,7 @@ import { useMapContext } from '@/context/MapContext';
 // Default filters
 const DEFAULT_FILTERS = {
   technology: 'ALL',
-  metric: 'RSRP',
+  metric: 'RSRP/RSSI',
   band: 'all',        // ✅ Changed from '' to 'all'
   provider: 'all',
   startDate: null,
@@ -50,7 +50,18 @@ const HeaderFilters = () => {
 
   const { providers, bands, technologies } = availableFilters;
 
-  const metricOptions = ['RSRP', 'RSRQ', 'SINR', 'DL_THPT', 'UL_THPT', 'MOS', 'LTE_BLER', 'PCI', 'NUM_CELLS', 'LEVEL'];
+  const metricOptions = [
+    { value: 'RSRP/RSSI', label: 'RSRP/RSSI' },
+    { value: 'RSRQ', label: 'RSRQ' },
+    { value: 'SINR', label: 'SINR' },
+    { value: 'DL_THPT', label: 'DL_THPT' },
+    { value: 'UL_THPT', label: 'UL_THPT' },
+    { value: 'MOS', label: 'MOS' },
+    { value: 'LTE_BLER', label: 'LTE_BLER' },
+    { value: 'PCI', label: 'PCI' },
+    { value: 'NUM_CELLS', label: 'NUM_CELLS' },
+    { value: 'LEVEL', label: 'LEVEL' },
+  ];
   
   // ✅ FIX: Use 'all' instead of empty string ''
   const bandOptions = React.useMemo(() => {
@@ -170,7 +181,7 @@ const HeaderFilters = () => {
           <div className="space-y-1.5">
             <Label className="text-xs text-slate-400 font-medium">Display Metric</Label>
             <Select 
-              value={filters.metric || 'RSRP'} 
+              value={filters.metric || 'RSRP/RSSI'} 
               onValueChange={(value) => updateFilter('metric', value)}
             >
               <SelectTrigger className="bg-slate-800 border-slate-600 text-white h-9 focus:ring-blue-500">
@@ -179,11 +190,11 @@ const HeaderFilters = () => {
               <SelectContent className="bg-slate-800 border-slate-600">
                 {metricOptions.map(metric => (
                   <SelectItem 
-                    key={metric} 
-                    value={metric}
+                    key={metric.value}
+                    value={metric.value}
                     className="text-white hover:bg-slate-700 focus:bg-slate-700"
                   >
-                    {metric}
+                    {metric.label}
                   </SelectItem>
                 ))}
               </SelectContent>

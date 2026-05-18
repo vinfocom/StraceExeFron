@@ -1174,12 +1174,8 @@ export const mapViewApi = {
 
   savePolygon: (payload) => api.post("/api/MapView/SavePolygon", payload),
 
-  importPolygon: (payload) =>
-    resolveProjectApiCall({
-      csharpCall: () => api.post("/api/MapView/ImportPolygon", payload),
-      localPythonCall: () =>
-        pythonApi.post("/api/local-mapview/polygons/import", payload),
-    }),
+  // Polygon import should always go through C# backend (no local Python fallback).
+  importPolygon: (payload) => api.post("/api/MapView/ImportPolygon", payload),
 
   savePolygonWithLogs: (payload) =>
     api.post("/api/MapView/SavePolygonWithLogs", payload),

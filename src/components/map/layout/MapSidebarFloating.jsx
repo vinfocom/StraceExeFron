@@ -388,7 +388,7 @@ export default function MapSidebarFloating({
                     <SelectValue placeholder="Select metric..." />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="rsrp">RSRP (dBm)</SelectItem>
+                    <SelectItem value="rsrp">RSRP/RSSI (dBm)</SelectItem>
                     <SelectItem value="rsrq">RSRQ (dB)</SelectItem>
                     <SelectItem value="sinr">SINR (dB)</SelectItem>
                     <SelectItem value="ul_tpt">UL Throughput (Mbps)</SelectItem>

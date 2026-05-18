@@ -483,19 +483,19 @@ const UnifiedMapSidebar = ({
   const metricOptions = useMemo(
     () => {
       const allOptions = [
-        { value: "rsrp", label: "RSRP" },
+        { value: "rsrp", label: "RSRP/RSSI/RXLevel" },
         { value: "rsrq", label: "RSRQ" },
-        { value: "sinr", label: "SINR" },
+        { value: "sinr", label: "SINR/RXQual" },
         { value: "dl_thpt", label: "DL Throughput" },
         { value: "ul_thpt", label: "UL Throughput" },
         { value: "mos", label: "MOS" },
-        { value: "pci", label: "PCI" },
+        { value: "pci", label: "PCI/BCCH" },
         { value: "num_cells", label: "Pilot pollution" },
         { value: "level", label: "Ping pong" },
         { value: "jitter", label: "Jitter" },
         { value: "latency", label: "Latency" },
         { value: "packet_loss", label: "Packet Loss" },
-        { value: "tac", label: "TAC" },
+        { value: "tac", label: "TAC/LAC" },
         { value: "dominance", label: "Dominance Analysis" },
         { value: "coverage_violation", label: "Coverage Violation" },
       ];

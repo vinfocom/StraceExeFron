@@ -59,7 +59,8 @@ const MAP_OPTIONS = {
 
 const normalizeMetric = (metric) => {
   if (!metric) return "rsrp";
-  const lower = metric.toLowerCase();
+  const lower = String(metric).toLowerCase().trim();
+  if (lower === "rsrp/rssi") return "rsrp";
   if (lower === "dl_tpt" || lower === "dl_throughput") return "dl_thpt";
   if (lower === "ul_tpt" || lower === "ul_throughput") return "ul_thpt";
   return lower;
@@ -88,7 +89,16 @@ const getMetricValue = (log, metric) => {
   const key = normalizeMetric(metric);
   if (key === "dl_thpt") return log.dl_thpt ?? log.dl_tpt ?? log.DL_TPT ?? -120;
   if (key === "ul_thpt") return log.ul_thpt ?? log.ul_tpt ?? log.UL_TPT ?? -120;
-  return log[key] ?? log.rsrp ?? -120;
+  if (key === "rsrp") {
+    const rsrpOrRssi =
+      log.rsrp ??
+      log.RSRP ??
+      log.rssi ??
+      log.RSSI ??
+      log.Rssi;
+    return rsrpOrRssi ?? -120;
+  }
+  return log[key] ?? log.rsrp ?? log.rssi ?? -120;
 };
 
 
@@ -373,9 +383,14 @@ function SessionMapDebug() {
   }, [logs, updateAvailableFilters]);
 
   // Current thresholds
+  const activeMetric = useMemo(
+    () => filters.metric || filters.measureIn || "RSRP",
+    [filters.metric, filters.measureIn],
+  );
+
   const currentThresholds = useMemo(() => {
-    return getThresholdsForMetric(filters.metric || "RSRP");
-  }, [getThresholdsForMetric, filters.metric]);
+    return getThresholdsForMetric(activeMetric);
+  }, [getThresholdsForMetric, activeMetric]);
 
   // Filter logs logic
   const filteredLogs = useMemo(() => {
@@ -383,7 +398,7 @@ function SessionMapDebug() {
 
     return logs
       .filter((log) => {
-        const metricValue = getMetricValue(log, filters.metric);
+        const metricValue = getMetricValue(log, activeMetric);
 
         if (filters.minSignal !== "" && !isNaN(parseFloat(filters.minSignal))) {
           if (metricValue < parseFloat(filters.minSignal)) return false;
@@ -504,7 +519,7 @@ function SessionMapDebug() {
     }
 
     const values = filteredLogs
-      .map((log) => getMetricValue(log, filters.metric))
+      .map((log) => getMetricValue(log, activeMetric))
       .filter((v) => v !== null && !isNaN(v));
     const sortedValues = [...values].sort((a, b) => a - b);
 
@@ -531,21 +546,21 @@ function SessionMapDebug() {
       ["Active Filters", activeFiltersStr],
       ["Polygon WKT", polygonWkt],
       [
-        `${filters.metric || "RSRP"} Mean`,
+        `${activeMetric || "RSRP/RSSI"} Mean`,
         values.length > 0
           ? (values.reduce((a, b) => a + b, 0) / values.length).toFixed(2)
           : "N/A",
       ],
       [
-        `${filters.metric || "RSRP"} Min`,
+        `${activeMetric || "RSRP/RSSI"} Min`,
         values.length > 0 ? Math.min(...values).toFixed(2) : "N/A",
       ],
       [
-        `${filters.metric || "RSRP"} Max`,
+        `${activeMetric || "RSRP/RSSI"} Max`,
         values.length > 0 ? Math.max(...values).toFixed(2) : "N/A",
       ],
       [
-        `${filters.metric || "RSRP"} Median`,
+        `${activeMetric || "RSRP/RSSI"} Median`,
         sortedValues[Math.floor(sortedValues.length / 2)]?.toFixed(2) || "N/A",
       ],
       ["Generated At", new Date().toISOString()],
@@ -558,7 +573,7 @@ function SessionMapDebug() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `stats_${filters.metric || "RSRP"}_${new Date()
+    a.download = `stats_${activeMetric || "RSRP_RSSI"}_${new Date()
       .toISOString()
       .slice(0, 10)}.csv`;
     a.click();
@@ -638,7 +653,7 @@ function SessionMapDebug() {
 
       if (filteredLogs.length > 0) {
         const values = filteredLogs
-          .map((l) => getMetricValue(l, filters.metric))
+          .map((l) => getMetricValue(l, activeMetric))
           .filter((v) => v !== null && !isNaN(v));
         const sorted = [...values].sort((a, b) => a - b);
 
@@ -658,7 +673,7 @@ function SessionMapDebug() {
           },
           intersectingSessions: sessionIds.map((id) => ({ id })),
           activeFilters: filters,
-          selectedMetric: filters.metric || "RSRP",
+          selectedMetric: activeMetric || "RSRP",
         });
         setHasLogs(true);
       } else {
@@ -756,7 +771,7 @@ function SessionMapDebug() {
     );
   }
 
-  const selectedMetric = normalizeMetric(filters.metric);
+  const selectedMetric = normalizeMetric(activeMetric);
 
   return (
     <div className="h-[calc(100vh-52px)] w-full relative rounded-lg overflow-hidden shadow-md">
@@ -895,7 +910,7 @@ function SessionMapDebug() {
                   </div>
                   <div className="font-bold text-blue-700">
                     {analysis.stats.mean?.toFixed(1) ?? "-"}{" "}
-                    {getMetricUnit(filters.metric)}
+                    {getMetricUnit(activeMetric)}
                   </div>
                 </div>
                 <div className="bg-green-50 rounded px-2 py-1.5 border border-green-100">
@@ -904,7 +919,7 @@ function SessionMapDebug() {
                   </div>
                   <div className="font-bold text-green-700">
                     {analysis.stats.median?.toFixed(1) ?? "-"}{" "}
-                    {getMetricUnit(filters.metric)}
+                    {getMetricUnit(activeMetric)}
                   </div>
                 </div>
                 <div className="bg-orange-50 rounded px-2 py-1.5 border border-orange-100">
@@ -913,7 +928,7 @@ function SessionMapDebug() {
                   </div>
                   <div className="font-bold text-orange-700">
                     {analysis.stats.min?.toFixed(1) ?? "-"}{" "}
-                    {getMetricUnit(filters.metric)}
+                    {getMetricUnit(activeMetric)}
                   </div>
                 </div>
                 <div className="bg-red-50 rounded px-2 py-1.5 border border-red-100">
@@ -922,7 +937,7 @@ function SessionMapDebug() {
                   </div>
                   <div className="font-bold text-red-700">
                     {analysis.stats.max?.toFixed(1) ?? "-"}{" "}
-                    {getMetricUnit(filters.metric)}
+                    {getMetricUnit(activeMetric)}
                   </div>
                 </div>
               </div>
@@ -1005,10 +1020,10 @@ function SessionMapDebug() {
                 </div>
                 {analysis.stats?.mean != null && (
                   <div>
-                    Avg {filters.metric || "RSRP"}:{" "}
+                    Avg {activeMetric || "RSRP/RSSI"}:{" "}
                     <span className="font-medium">
                       {analysis.stats.mean?.toFixed(1)}{" "}
-                      {getMetricUnit(filters.metric)}
+                      {getMetricUnit(activeMetric)}
                     </span>
                   </div>
                 )}

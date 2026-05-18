@@ -6,7 +6,7 @@ const MapContext = createContext(null);
 // Default filters
 const DEFAULT_FILTERS = {
   technology: 'ALL',
-  metric: 'RSRP',
+  metric: 'RSRP/RSSI',
   band: '',
   provider: 'all',
   startDate: null,

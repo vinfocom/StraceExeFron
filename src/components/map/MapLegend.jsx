@@ -42,7 +42,6 @@ const isUnknownLegendKey = (value) => {
   );
 };
 
-// Helper to get normalized key for counting
 const getNormalizedKey = (log, colorBy, scheme) => {
   switch (colorBy) {
     case "provider":
@@ -89,7 +88,6 @@ const getNormalizedKey = (log, colorBy, scheme) => {
   }
 };
 
-// ✅ Color Scheme Legend
 const ColorSchemeLegend = ({ colorBy, logs, activeFilter, onFilterChange }) => {
   const scheme = COLOR_SCHEMES[colorBy];
   if (!scheme) return null;
@@ -117,7 +115,6 @@ const ColorSchemeLegend = ({ colorBy, logs, activeFilter, onFilterChange }) => {
 
   
   const handleRowClick = (key) => {
-    // Toggle: if already active, clear it.
     if (activeFilter?.type === "category" && activeFilter?.value === key) {
       onFilterChange(null);
     } else {
@@ -166,7 +163,6 @@ const TacLegend = ({ logs, activeFilter, onFilterChange }) => {
       let validCount = 0;
 
       logs?.forEach((log) => {
-        // Handle both uppercase and lowercase
         const val = log.tac || log.TAC;
         if (val !== undefined && val !== null && val !== "") {
           counts[val] = (counts[val] || 0) + 1;
@@ -178,7 +174,7 @@ const TacLegend = ({ logs, activeFilter, onFilterChange }) => {
         .map(([label, count]) => ({
           label,
           count,
-          color: generateColorFromHash(String(label)), // Dynamic color from palette
+          color: generateColorFromHash(String(label)), 
         }))
         .sort((a, b) => b.count - a.count);
 

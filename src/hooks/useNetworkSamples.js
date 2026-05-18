@@ -13,7 +13,6 @@ import {
   writeIndexedDbCache,
 } from '@/utils/indexedDbCache';
 
-// --- Helper Functions (Moved from Component) ---
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 const withTimeout = (promise, timeoutMs = 30000) =>
@@ -31,15 +30,13 @@ const withTimeout = (promise, timeoutMs = 30000) =>
 const isRequestCancelled = (error) => {
   if (!error) return false;
 
-  // 1. Check custom property from apiService.js
   if (error.isCancelled === true) return true;
 
-  // 2. Check standard Axios/Browser cancellation names
   if (
     error.name === 'AbortError' ||
     error.name === 'CanceledError' ||
     error.code === 'ERR_CANCELED' ||
-    error.message === 'Request cancelled' // Matches apiService.js message
+    error.message === 'Request cancelled' 
   ) {
     return true;
   }
@@ -96,6 +93,14 @@ const parseLogEntry = (log, sessionId) => {
     return null;
   };
 
+  
+  const normalizeSignalToDbm = (value) => {
+    if (value === null || value === undefined || !Number.isFinite(value)) return null;
+    if (value === 99) return null;
+    if (value >= 0 && value <= 31) return -113 + (2 * value);
+    return value;
+  };
+
   const dlThroughput = parseNumFromKeys([
     "dl_thpt",
     "DL_THPT",
@@ -121,13 +126,47 @@ const parseLogEntry = (log, sessionId) => {
     "upload",
   ]);
 
+  const parsedRsrpRaw = parseNumFromKeys([
+    "rsrp",
+    "RSRP",
+    "Rsrp",
+    "lte_rsrp",
+    "LTE_RSRP",
+    "nr_rsrp",
+  ]);
+
+  const parsedRssiRaw = parseNumFromKeys([
+    "rssi",
+    "RSSI",
+    "Rssi",
+    "lte_rssi",
+    "nr_rssi",
+    "rssi_dbm",
+    "rssiDbm",
+    "RSSI_DBM",
+    "gsm_rssi",
+    "GSM_RSSI",
+    "level",
+    "Level",
+    "signal_strength",
+    "signalStrength",
+    "SignalStrength",
+    "rxlev",
+    "RxLev",
+    "RXLEV",
+  ]);
+
+  const parsedRsrp = normalizeSignalToDbm(parsedRsrpRaw);
+  const parsedRssi = normalizeSignalToDbm(parsedRssiRaw);
+
   return {
     id: log.id ?? log.Id ?? log.log_id ?? log.LogId ?? null,
     session_id: sessionId ?? log.session_id,
     lat, lng, latitude: lat, longitude: lng,
     radius: 18,
     timestamp: log.timestamp,
-    rsrp: parseNumFromKeys(["rsrp", "RSRP", "Rsrp", "lte_rsrp", "nr_rsrp"]),
+    rsrp: parsedRsrp ?? parsedRssi,
+    rssi: parsedRssi,
     rsrq: parseNumFromKeys(["rsrq", "RSRQ", "Rsrq", "lte_rsrq", "nr_rsrq"]),
     sinr: parseNumFromKeys(["sinr", "SINR", "Sinr", "snr", "SNR", "lte_sinr", "nr_sinr"]),
     dl_tpt: dlThroughput,
@@ -273,7 +312,7 @@ export const useNetworkSamples = (
         let apiBody;
         let logsArray;
 
-        // Handle various API response structures (apiService returns response.data directly)
+
         if (
           response?.data &&
           typeof response.data === 'object' &&
@@ -401,7 +440,6 @@ export const useNetworkSamples = (
         setError(err.message);
         toast.error(`Error: ${err.message}`);
         if (allParsedLogs.length > 0) {
-          // Fallback to what we have
           setLocations(allParsedLogs);
         }
       }
@@ -414,7 +452,6 @@ export const useNetworkSamples = (
     }
   }, [sessionIds, enabled, filterEnabled, polygons, maxRows, projectId]);
 
-  // Handle Technology Transitions Logic
   useEffect(() => {
     if (!locations || locations.length < 2) {
       setTechnologyTransitions([]);
@@ -450,7 +487,6 @@ export const useNetworkSamples = (
         nextPci: loc.pci,
       };
 
-      // Technology Transition
       const currTech = normalizeTechName(loc.technology);
       if (currTech && prevTech && currTech !== prevTech) {
         techTrans.push({
@@ -462,7 +498,6 @@ export const useNetworkSamples = (
       }
       prevTech = currTech;
 
-      // Band Transition
       const currBand = loc.band;
       if (currBand && prevBand && String(currBand) !== String(prevBand)) {
         bandTrans.push({
@@ -474,9 +509,7 @@ export const useNetworkSamples = (
       }
       prevBand = currBand;
 
-      // PCI Transition
       const currPci = loc.pci;
-      // Ensure we treat 0 as a valid PCI value, but skip null/undefined/empty string
       if (currPci !== '' && currPci !== null && prevPci !== '' && prevPci !== null && String(currPci) !== String(prevPci)) {
         pciTrans.push({
           from: String(prevPci),
@@ -492,7 +525,6 @@ export const useNetworkSamples = (
     setBandTransitions(bandTrans);
     setPciTransitions(pciTrans);
   }, [locations]);
-  // Lifecycle & Polling
   useEffect(() => {
     mountedRef.current = true;
     return () => {

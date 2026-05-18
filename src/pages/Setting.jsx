@@ -816,6 +816,8 @@ const PolygonImportPanel = ({ user }) => {
         try {
             const wkt = normalizePolygonInput(polygonText);
             const sessionIds = parseSessionIds(sessionIdsText);
+            const primarySessionId =
+                sessionIds.length > 0 ? String(sessionIds[0]).trim() : undefined;
             const scopedCompanyId = resolveCompanyId(user);
             const numericArea = area === "" ? null : Number(area);
 
@@ -828,7 +830,9 @@ const PolygonImportPanel = ({ user }) => {
                 WKT: wkt,
                 Wkt: wkt,
                 SessionIds: sessionIds,
-                session_id: sessionIds.join(","),
+                session_ids: sessionIds,
+                // Backward-compatible single-value field for legacy backends using a varchar `session_id` column.
+                session_id: primarySessionId,
                 Area: numericArea,
                 company_id: scopedCompanyId || undefined,
                 CompanyId: scopedCompanyId || undefined,

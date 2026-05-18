@@ -205,7 +205,7 @@ const MapSidebar = ({
               <SelectValue placeholder="Select metric..." />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="rsrp">RSRP</SelectItem>
+              <SelectItem value="rsrp">RSRP/RSSI</SelectItem>
               <SelectItem value="rsrq">RSRQ</SelectItem>
               <SelectItem value="sinr">SINR</SelectItem>
               <SelectItem value="ul-throughput">UL-Throughput</SelectItem>
