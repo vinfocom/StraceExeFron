@@ -12,7 +12,6 @@ export default defineConfig({
     // Pre-bundle heavy map deps used inside lazy-loaded UnifiedMapView to avoid
     // mid-session re-optimization ("Outdated Optimize Dep" 504).
     include: [
-      "deck.gl",
       "@deck.gl/core",
       "@deck.gl/layers",
       "@deck.gl/google-maps",

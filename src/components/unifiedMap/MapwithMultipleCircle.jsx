@@ -6,7 +6,7 @@ import DeckGLOverlay from "@/components/maps/DeckGLOverlay";
 import { Zap, Layers, Radio, Square, Circle } from "lucide-react";
 // import TechHandoverMarkers from "../unifiedMap/TechHandoverMarkers";
 import useColorForLog from "@/hooks/useColorForLog";
-import { getMetricValueFromLog, COLOR_SCHEMES, getPciColor } from "@/utils/metrics";
+import { getMetricValueFromLog, getPciColor } from "@/utils/metrics";
 import { normalizeProviderName, normalizeTechName, normalizeBandName, getLogColor, generateColorFromHash } from "@/utils/colorUtils";
 
 const DEFAULT_CENTER = { lat: 28.64453086, lng: 77.37324242 };
@@ -447,6 +447,7 @@ const generateGridCellsOptimized = (
     if (key === "provider" || key === "operator") return "Provider";
     if (key === "technology") return "Technology";
     if (key === "band") return "Band";
+    if (key === "nodebid") return "NodeB ID";
     if (key === "pci") return "PCI";
     return "Category";
   };
@@ -469,12 +470,18 @@ const generateGridCellsOptimized = (
     const pciValue = getMetricValueFromLog(log, "pci");
     return Number.isFinite(pciValue) ? Math.round(pciValue) : null;
   };
+  const resolveNodebId = (log) => {
+    const raw = log?.nodebid ?? log?.nodeb_id ?? log?.nodebId ?? "";
+    const value = String(raw ?? "").trim();
+    return value || "Unknown";
+  };
   const resolveCategoryValue = (log) => {
     if (normalizedColorBy === "provider" || normalizedColorBy === "operator") {
       return resolveProviderName(log);
     }
     if (normalizedColorBy === "technology") return resolveTechnologyName(log);
     if (normalizedColorBy === "band") return resolveBandName(log);
+    if (normalizedColorBy === "nodebid") return resolveNodebId(log);
     if (normalizedColorBy === "pci") {
       const pci = resolvePciValue(log);
       return Number.isFinite(pci) ? String(pci) : null;
@@ -491,6 +498,9 @@ const generateGridCellsOptimized = (
     }
     if (normalizedColorBy === "band") {
       return getLogColor("band", categoryName);
+    }
+    if (normalizedColorBy === "nodebid") {
+      return getLogColor("nodebid", categoryName);
     }
     if (normalizedColorBy === "pci") {
       const pci = Number.parseInt(categoryName, 10);
@@ -1131,7 +1141,6 @@ const MapWithMultipleCircles = ({
         }
 
         if (legendFilter.type === 'category') {
-           const scheme = COLOR_SCHEMES[legendFilter.key];
            let key = "Unknown";
            if (legendFilter.key === 'provider') {
              key = normalizeProviderName(log.provider || log.Provider || log.carrier) || "Unknown";
@@ -1142,7 +1151,9 @@ const MapWithMultipleCircles = ({
            } else if (legendFilter.key === 'band') {
              const b = String(log.neighbourBand || log.neighborBand || log.neighbour_band || log.band || log.Band || "").trim();
              const normalizedBand = normalizeBandName(b);
-             key = (normalizedBand === "-1" || normalizedBand === "") ? "Unknown" : (scheme?.[normalizedBand] ? normalizedBand : "Unknown");
+             key = (normalizedBand === "-1" || normalizedBand === "") ? "Unknown" : normalizedBand;
+           } else if (legendFilter.key === 'nodebid') {
+             key = String(log?.nodebid ?? log?.nodeb_id ?? log?.nodebId ?? "").trim() || "Unknown";
            } else if (legendFilter.key === 'pci') {
              const pci = Number.parseInt(log.pci ?? log.PCI ?? log.best_pci, 10);
              key = Number.isFinite(pci) ? String(pci) : "Unknown";
@@ -1268,7 +1279,6 @@ const MapWithMultipleCircles = ({
           return Math.floor(val) === legendFilter.value;
         }
         if (legendFilter.type === 'category') {
-           const scheme = COLOR_SCHEMES[legendFilter.key];
            let key = "Unknown";
            if (legendFilter.key === 'provider') {
              key = normalizeProviderName(n.provider) || "Unknown";
@@ -1277,7 +1287,9 @@ const MapWithMultipleCircles = ({
            } else if (legendFilter.key === 'band') {
              const b = String(n.neighbourBand || n.neighborBand || n.band || "").trim();
              const normalizedBand = normalizeBandName(b);
-             key = (normalizedBand === "-1" || normalizedBand === "") ? "Unknown" : (scheme?.[normalizedBand] ? normalizedBand : "Unknown");
+             key = (normalizedBand === "-1" || normalizedBand === "") ? "Unknown" : normalizedBand;
+           } else if (legendFilter.key === 'nodebid') {
+             key = String(n?.nodebid ?? n?.nodeb_id ?? n?.nodebId ?? "").trim() || "Unknown";
            } else if (legendFilter.key === 'pci') {
              const pci = Number.parseInt(n.neighbourPci || n.pci, 10);
              key = Number.isFinite(pci) ? String(pci) : "Unknown";
@@ -1353,7 +1365,7 @@ const MapWithMultipleCircles = ({
         let value = "Unknown";
         if (key === "provider" || key === "operator") {
           value = cell.bestByColor?.name || cell.bestOperator?.name || "Unknown";
-        } else if (key === "band" || key === "technology") {
+        } else if (key === "band" || key === "technology" || key === "nodebid") {
           value = cell.bestByColor?.name || "Unknown";
         } else if (key === "pci") {
           const pci = Number.parseInt(cell.bestByColor?.name, 10);
@@ -1434,6 +1446,9 @@ const MapWithMultipleCircles = ({
           row.technology = categoryName || "Unknown";
           row.best_technology = row.technology;
           row.networkType = row.technology;
+        } else if (categoryKey === "nodebid") {
+          row.nodebid = categoryName || "Unknown";
+          row.nodeb_id = row.nodebid;
         } else if (categoryKey === "pci" || metricKey === "best_pci") {
           const pci = Number.parseInt(categoryName ?? metricValue, 10);
           if (Number.isFinite(pci)) {
@@ -1453,6 +1468,10 @@ const MapWithMultipleCircles = ({
         const key = colorBy.toLowerCase();
         const value = loc?.[key];
         return resolveColor(value, colorBy);
+    }
+    if (String(selectedMetric || "").trim().toLowerCase() === "nodebid") {
+      const nodeb = String(loc?.nodebid ?? loc?.nodeb_id ?? loc?.nodebId ?? "").trim() || "Unknown";
+      return resolveColor(nodeb, "nodebid");
     }
     const value = getMetricValueFromLog(loc, selectedMetric);
     return resolveColor(value, selectedMetric);

@@ -172,6 +172,12 @@ const getLegendCategoryValue = (point, key) => {
     );
   }
 
+  if (key === "nodebid") {
+    return String(
+      point?.nodebid ?? point?.nodeb_id ?? point?.nodebId ?? "",
+    ).trim() || "Unknown";
+  }
+
   return "Unknown";
 };
 

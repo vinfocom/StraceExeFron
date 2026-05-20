@@ -75,13 +75,22 @@ const getNormalizedKey = (log, colorBy, scheme) => {
 
       return normalizedBand === "-1" || normalizedBand === ""
         ? "Unknown"
-        : scheme[normalizedBand]
-          ? normalizedBand
-          : "Unknown";
+        : normalizedBand;
     }
     case "pci": {
       const pci = Number.parseInt(log.pci ?? log.PCI ?? log.best_pci, 10);
       return Number.isFinite(pci) ? String(pci) : "Unknown";
+    }
+    case "nodebid": {
+      const raw =
+        log.nodebid ??
+        log.nodeb_id ??
+        log.nodebId ??
+        log.NodeBID ??
+        log.NodeBId ??
+        log.NodebId;
+      const nodeb = String(raw ?? "").trim();
+      return nodeb || "Unknown";
     }
     default:
       return "Unknown";
@@ -89,8 +98,7 @@ const getNormalizedKey = (log, colorBy, scheme) => {
 };
 
 const ColorSchemeLegend = ({ colorBy, logs, activeFilter, onFilterChange }) => {
-  const scheme = COLOR_SCHEMES[colorBy];
-  if (!scheme) return null;
+  const scheme = COLOR_SCHEMES[colorBy] || {};
 
   const { counts, total, usedEntries } = useMemo(() => {
     const tempCounts = {};

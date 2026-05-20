@@ -1381,9 +1381,7 @@ export const mapViewApi = {
     return response;
   },
 
-  // apiEndpoints.js
 
-  // apiEndpoints.js
   getSessionNeighbour: async ({ sessionIds, signal, project_id }) => {
     try {
       const idsParam = Array.isArray(sessionIds) ? sessionIds.join(",") : sessionIds;
@@ -1392,8 +1390,7 @@ export const mapViewApi = {
         .map((id) => Number(String(id).trim()))
         .some((id) => Number.isFinite(id) && id < 0);
 
-      // Local cached sessions do not have cloud-side N78 neighbor rows.
-      // Return an empty, valid payload to keep UI stable.
+     
       if (hasLocalSession) {
         return {
           Status: 1,
@@ -1641,7 +1638,6 @@ export const homeApi = {
   getLoggedUser: (ip) => api.post("/Home/GetLoggedUser", { ip }),
   getMasterUserTypes: () => api.get("/Home/GetMasterUserTypes"),
 
-  // ✅ ADD THIS METHOD
   getAuthStatus: () => api.get("/api/auth/status"),
 };
 
@@ -1682,7 +1678,7 @@ export const excelApi = {
   uploadFile: async (formData, onUploadProgress = null) => {
     try {
       return await api.post("/ExcelUpload/UploadExcelFile", formData, {
-        timeout: 1800000, // 30 minutes for upload + server-side processing
+        timeout: 1800000,
         onUploadProgress:
           onUploadProgress ||
           ((progressEvent) => {
@@ -1693,15 +1689,12 @@ export const excelApi = {
       });
     } catch (error) {
       const message = String(error?.message || "").toLowerCase();
-      // If cloud upload timed out, keep it in cloud path (likely still processing)
-      // and do not fallback to offline cache.
+      
       if (message.includes("timed out") || message.includes("timeout")) {
         throw error;
       }
 
-      // If cloud is reachable, do not fallback to local cache.
-      // This avoids accidental local imports when server is up but upload endpoint
-      // returns a fast failure/validation/auth issue.
+     
       try {
         await authApi.checkStatus();
         throw error;

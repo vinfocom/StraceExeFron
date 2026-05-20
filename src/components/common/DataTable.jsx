@@ -10,7 +10,7 @@ const DataTable = ({ columns, data }) => {
                     <TableHeader>
                         <TableRow>
                             {columns.map((column) => (
-                                <TableHead key={column.header}>{column.header}</TableHead>
+                                <TableHead key={column.header} className="text-lg">{column.header}</TableHead>
                             ))}
                         </TableRow>
                     </TableHeader>
@@ -19,15 +19,15 @@ const DataTable = ({ columns, data }) => {
                             data.map((row, rowIndex) => (
                                 <TableRow key={row.id || rowIndex}>
                                     {columns.map((column) => (
-                                        <TableCell key={column.accessor || column.header}>
+                                        <TableCell key={column.accessor || column.header} className = "text-lg">
                                             {column.render ? column.render(row, rowIndex) : row[column.accessor]}
-                                        </TableCell>
+                                        </TableCell >
                                     ))}
                                 </TableRow>
                             ))
                         ) : (
                             <TableRow>
-                                <TableCell colSpan={columns.length} className="h-24 text-center">
+                                <TableCell colSpan={columns.length} className="h-24 text-center ">
                                     No results.
                                 </TableCell>
                             </TableRow>

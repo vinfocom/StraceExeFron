@@ -495,6 +495,7 @@ const UnifiedMapSidebar = ({
         { value: "jitter", label: "Jitter" },
         { value: "latency", label: "Latency" },
         { value: "packet_loss", label: "Packet Loss" },
+        { value: "nodebid", label: "NodeB ID" },
         { value: "tac", label: "TAC/LAC" },
         { value: "dominance", label: "Dominance Analysis" },
         { value: "coverage_violation", label: "Coverage Violation" },
@@ -516,6 +517,7 @@ const UnifiedMapSidebar = ({
           { value: "provider", label: "Best Operator" },
           { value: "band", label: "Best Band" },
           { value: "technology", label: "Best Technology" },
+          { value: "nodebid", label: "Best NodeB ID" },
           { value: "pci", label: "Best Server" },
         ];
       }
@@ -524,6 +526,7 @@ const UnifiedMapSidebar = ({
         { value: "provider", label: "By Provider" },
         { value: "band", label: "By Band" },
         { value: "technology", label: "By Technology" },
+        { value: "nodebid", label: "By NodeB ID" },
       ];
     },
     [enableGrid],
@@ -1866,6 +1869,7 @@ const UnifiedMapSidebar = ({
                       ]}
                       disabled={!enableDataToggle}
                     />
+
                   </div>
                 </div>
                 

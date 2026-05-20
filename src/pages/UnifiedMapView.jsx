@@ -2129,6 +2129,13 @@ const UnifiedMapView = () => {
       normalizedVersion === "optimised";
     const hasDeltaThresholds =
       Array.isArray(baseThresholds?.delta) && baseThresholds.delta.length > 0;
+    const expectedStoredGridSizeMeters = Math.max(
+      5,
+      Number(deltaGridApiState?.gridSizeMeters) ||
+        Number(deltaGridApiState?.requestedGridSize) ||
+        Number(lteGridSizeMeters) ||
+        50,
+    );
 
     const pickDiffValue = (row = {}) => {
       const diff = row?.difference || {};
@@ -2177,7 +2184,7 @@ const UnifiedMapView = () => {
       return [107, 114, 128, 190];
     };
 
-    return rows
+    const renderedCells = rows
       .map((row, idx) => {
         const minLat = Number(row?.min_lat);
         const minLon = Number(row?.min_lon);
@@ -2187,6 +2194,21 @@ const UnifiedMapView = () => {
         const centerLon = Number(row?.center_lon);
         if (
           ![minLat, minLon, maxLat, maxLon, centerLat, centerLon].every(Number.isFinite)
+        ) {
+          return null;
+        }
+
+        const metersPerDegreeLat = 111320;
+        const cellHeightMeters = Math.abs(maxLat - minLat) * metersPerDegreeLat;
+        const centerLatRadians = (centerLat * Math.PI) / 180;
+        const cellWidthMeters =
+          Math.abs(maxLon - minLon) *
+          metersPerDegreeLat *
+          Math.max(Math.abs(Math.cos(centerLatRadians)), 1e-6);
+        const maxExpectedCellSize = expectedStoredGridSizeMeters * 1.75;
+        if (
+          cellHeightMeters > maxExpectedCellSize ||
+          cellWidthMeters > maxExpectedCellSize
         ) {
           return null;
         }
@@ -2258,14 +2280,43 @@ const UnifiedMapView = () => {
         };
       })
       .filter(Boolean);
+
+    const cellsByBounds = new Map();
+    renderedCells.forEach((cell) => {
+      const boundsKey = cell.polygon
+        .flat()
+        .map((value) => Number(value).toFixed(7))
+        .join("|");
+      const existing = cellsByBounds.get(boundsKey);
+      if (!existing) {
+        cellsByBounds.set(boundsKey, cell);
+        return;
+      }
+
+      const existingHasValue = Number.isFinite(existing.value);
+      const nextHasValue = Number.isFinite(cell.value);
+      const existingSamples = Number(existing.sampleCount || existing.pointCount || 0);
+      const nextSamples = Number(cell.sampleCount || cell.pointCount || 0);
+      if (
+        (!existingHasValue && nextHasValue) ||
+        (existingHasValue === nextHasValue && nextSamples > existingSamples)
+      ) {
+        cellsByBounds.set(boundsKey, cell);
+      }
+    });
+
+    return Array.from(cellsByBounds.values());
   }, [
     deltaGridApiState?.gridVisible,
     deltaGridApiState?.grids,
     deltaGridApiState?.storedGridVersion,
+    deltaGridApiState?.gridSizeMeters,
+    deltaGridApiState?.requestedGridSize,
     selectedMetric,
     storedGridMetricMode,
     storedGridVersion,
     sitePredictionVersion,
+    lteGridSizeMeters,
     baseThresholds,
     getMetricColorForLog,
   ]);
@@ -2277,8 +2328,12 @@ const UnifiedMapView = () => {
     [deltaGridApiState?.gridVisible, storedDeltaGridCells.length],
   );
   const isStoredGridOverlayVisible = useMemo(
-    () => Boolean(isFetchedStoredGridVisible) && !enableGrid,
-    [isFetchedStoredGridVisible, enableGrid],
+    () => Boolean(isFetchedStoredGridVisible),
+    [isFetchedStoredGridVisible],
+  );
+  const mapGridEnabled = useMemo(
+    () => Boolean(enableGrid) && !isStoredGridOverlayVisible,
+    [enableGrid, isStoredGridOverlayVisible],
   );
 
   // ✅ 2. Use Prediction Data Hook
@@ -3023,8 +3078,8 @@ const UnifiedMapView = () => {
   });
 
   const isUnifiedGridView = useMemo(
-    () => Boolean(enableGrid) && !isStoredGridOverlayVisible,
-    [enableGrid, isStoredGridOverlayVisible],
+    () => Boolean(mapGridEnabled),
+    [mapGridEnabled],
   );
 
   
@@ -3239,8 +3294,11 @@ const UnifiedMapView = () => {
         String(storedGridMetricMode || "").trim().toLowerCase(),
       );
     if (isStoredGridOverlayVisible && isBestOperatorGridMode) return "provider";
+    if (!effectiveGridColorBy && String(selectedMetric || "").trim().toLowerCase() === "nodebid") {
+      return "nodebid";
+    }
     return effectiveGridColorBy;
-  }, [isStoredGridOverlayVisible, storedGridMetricMode, effectiveGridColorBy]);
+  }, [isStoredGridOverlayVisible, storedGridMetricMode, effectiveGridColorBy, selectedMetric]);
 
   const siteLegendColorMode = useMemo(() => {
     const labelField = String(siteLabelField || "").trim().toLowerCase();
@@ -5072,7 +5130,7 @@ const UnifiedMapView = () => {
               }
               editableBoundaryPolygonIds={editableBoundaryPolygonIds}
               onProjectPolygonBoundaryChange={handleProjectPolygonPathChange}
-              enableGrid={enableGrid}
+              enableGrid={mapGridEnabled}
               gridSizeMeters={gridSizeMeters}
               gridAggregationMethod={lteGridAggregationMethod || "median"}
               areaEnabled={areaEnabled}

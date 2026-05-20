@@ -108,28 +108,41 @@ const formatAverage = (value, unit) =>
 const averageValues = (values) =>
   values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : null;
 
-const AverageBeforeAfter = ({ item }) => (
-  <div className="mt-3 flex flex-col gap-1.5 text-[11px] text-white">
-    <div className="flex flex-col gap-0.5 rounded bg-slate-900/35 px-2 py-1.5">
-      <span className="font-semibold text-white">Avg RSRP</span>
-      <span className="font-mono text-white">
-        {formatAverage(item.avgRsrpBefore, "dBm")} -&gt; {formatAverage(item.avgRsrpAfter, "dBm")}
-      </span>
+const is2GTech = (value = "") => {
+  const tech = String(value).toUpperCase();
+  return tech.includes("2G") || tech.includes("GSM") || tech.includes("EDGE");
+};
+
+const transitionIncludes2G = (transition = {}) =>
+  is2GTech(transition.from) || is2GTech(transition.to);
+
+const AverageBeforeAfter = ({ item }) => {
+  const has2G = transitionIncludes2G(item);
+  return (
+    <div className="mt-3 flex flex-col gap-1.5 text-[11px] text-white">
+      <div className="flex flex-col gap-0.5 rounded bg-slate-900/35 px-2 py-1.5">
+        <span className="font-semibold text-white">{has2G ? "Avg RXLEVEL" : "Avg RSRP"}</span>
+        <span className="font-mono text-white">
+          {formatAverage(item.avgRsrpBefore, "dBm")} -&gt; {formatAverage(item.avgRsrpAfter, "dBm")}
+        </span>
+      </div>
+      {!has2G && (
+        <div className="flex flex-col gap-0.5 rounded bg-slate-900/35 px-2 py-1.5">
+          <span className="font-semibold text-white">Avg RSRQ</span>
+          <span className="font-mono text-white">
+            {formatAverage(item.avgRsrqBefore, "dB")} -&gt; {formatAverage(item.avgRsrqAfter, "dB")}
+          </span>
+        </div>
+      )}
+      <div className="flex flex-col gap-0.5 rounded bg-slate-900/35 px-2 py-1.5">
+        <span className="font-semibold text-white">{has2G ? "Avg RXQUAL" : "Avg SINR"}</span>
+        <span className="font-mono text-white">
+          {formatAverage(item.avgSinrBefore, "dB")} -&gt; {formatAverage(item.avgSinrAfter, "dB")}
+        </span>
+      </div>
     </div>
-    <div className="flex flex-col gap-0.5 rounded bg-slate-900/35 px-2 py-1.5">
-      <span className="font-semibold text-white">Avg RSRQ</span>
-      <span className="font-mono text-white">
-        {formatAverage(item.avgRsrqBefore, "dB")} -&gt; {formatAverage(item.avgRsrqAfter, "dB")}
-      </span>
-    </div>
-    <div className="flex flex-col gap-0.5 rounded bg-slate-900/35 px-2 py-1.5">
-      <span className="font-semibold text-white">Avg SINR</span>
-      <span className="font-mono text-white">
-        {formatAverage(item.avgSinrBefore, "dB")} -&gt; {formatAverage(item.avgSinrAfter, "dB")}
-      </span>
-    </div>
-  </div>
-);
+  );
+};
 
 const PairSummaryCard = ({ item }) => (
   <div className="min-w-0 rounded-md border border-slate-700 bg-slate-800/50 p-3 text-white">
@@ -235,6 +248,7 @@ const HandoverDetailSection = ({ title, label, transitions = [], onRowClick }) =
 };
 
 const TransitionCard = ({ transition, index, label = "Technology", showType = true, onClick }) => {
+  const has2G = transitionIncludes2G(transition);
   const type = getHandoverType(transition.from, transition.to);
   const rsrpDiff =
     Number.isFinite(transition.nextRsrp) && Number.isFinite(transition.rsrp)
@@ -286,7 +300,7 @@ const TransitionCard = ({ transition, index, label = "Technology", showType = tr
         </summary>
         <div className="flex max-h-48 flex-col gap-2 overflow-y-auto border-t border-slate-700 px-3 py-3 text-xs text-white">
           <div className="flex flex-col gap-1 rounded bg-slate-800/70 px-3 py-2 sm:flex-row sm:items-center sm:justify-between">
-            <span className="font-semibold text-white">RSRP</span>
+            <span className="font-semibold text-white">{has2G ? "RXLEVEL" : "RSRP"}</span>
             <div className="flex flex-wrap items-center gap-1 font-mono text-white">
               <span>{Number.isFinite(transition.rsrp) ? `${transition.rsrp.toFixed(0)} dBm` : "-"}</span>
               <span>-&gt;</span>
@@ -298,21 +312,23 @@ const TransitionCard = ({ transition, index, label = "Technology", showType = tr
             )}
             </div>
           </div>
-          <div className="flex flex-col gap-1 rounded bg-slate-800/70 px-3 py-2 sm:flex-row sm:items-center sm:justify-between">
-            <span className="font-semibold text-white">RSRQ</span>
-            <div className="flex flex-wrap items-center gap-1 font-mono text-white">
-              <span>{Number.isFinite(transition.rsrq) ? `${transition.rsrq.toFixed(0)} dB` : "-"}</span>
-              <span>-&gt;</span>
-              <span>{Number.isFinite(transition.nextRsrq) ? `${transition.nextRsrq.toFixed(0)} dB` : "-"}</span>
-            {rsrqDiff !== null && (
-              <span className={`ml-1 ${rsrqDiffColor}`}>
-                ({rsrqDiff > 0 ? "+" : ""}{rsrqDiff.toFixed(0)})
-              </span>
-            )}
+          {!has2G && (
+            <div className="flex flex-col gap-1 rounded bg-slate-800/70 px-3 py-2 sm:flex-row sm:items-center sm:justify-between">
+              <span className="font-semibold text-white">RSRQ</span>
+              <div className="flex flex-wrap items-center gap-1 font-mono text-white">
+                <span>{Number.isFinite(transition.rsrq) ? `${transition.rsrq.toFixed(0)} dB` : "-"}</span>
+                <span>-&gt;</span>
+                <span>{Number.isFinite(transition.nextRsrq) ? `${transition.nextRsrq.toFixed(0)} dB` : "-"}</span>
+              {rsrqDiff !== null && (
+                <span className={`ml-1 ${rsrqDiffColor}`}>
+                  ({rsrqDiff > 0 ? "+" : ""}{rsrqDiff.toFixed(0)})
+                </span>
+              )}
+              </div>
             </div>
-          </div>
+          )}
           <div className="flex flex-col gap-1 rounded bg-slate-800/70 px-3 py-2 sm:flex-row sm:items-center sm:justify-between">
-            <span className="font-semibold text-white">SINR</span>
+            <span className="font-semibold text-white">{has2G ? "RXQUAL" : "SINR"}</span>
             <div className="flex flex-wrap items-center gap-1 font-mono text-white">
               <span>{Number.isFinite(transition.sinr) ? `${transition.sinr.toFixed(0)} dB` : "-"}</span>
               <span>-&gt;</span>
@@ -347,7 +363,7 @@ const TransitionCard = ({ transition, index, label = "Technology", showType = tr
 
       <div className="hidden">
         <div>
-          <span className="text-slate-500">RSRP: </span>
+          <span className="text-slate-500">{has2G ? "RXLEVEL: " : "RSRP: "}</span>
           <span className="font-mono">{Number.isFinite(transition.rsrp) ? `${transition.rsrp.toFixed(0)} dBm` : "-"}</span>
           <span className="text-slate-600 mx-1">→</span>
           <span className="font-mono">{Number.isFinite(transition.nextRsrp) ? `${transition.nextRsrp.toFixed(0)} dBm` : "-"}</span>
@@ -369,7 +385,7 @@ const TransitionCard = ({ transition, index, label = "Technology", showType = tr
           )}
         </div>
         <div>
-          <span className="text-slate-500">SINR: </span>
+          <span className="text-slate-500">{has2G ? "RXQUAL: " : "SINR: "}</span>
           <span className="font-mono">{Number.isFinite(transition.sinr) ? `${transition.sinr.toFixed(0)} dB` : "-"}</span>
           <span className="text-slate-600 mx-1">â†’</span>
           <span className="font-mono">{Number.isFinite(transition.nextSinr) ? `${transition.nextSinr.toFixed(0)} dB` : "-"}</span>
@@ -402,6 +418,10 @@ export const HandoverAnalysisTab = ({
     if (technologyPairFilter === "all") return transitions;
     return transitions.filter((t) => getTransitionPair(t) === technologyPairFilter);
   }, [transitions, technologyPairFilter]);
+  const has2GInFilteredTechnologyTransitions = useMemo(
+    () => filteredTechnologyTransitions.some((t) => transitionIncludes2G(t)),
+    [filteredTechnologyTransitions]
+  );
 
   const stats = useMemo(() => {
     const result = {
@@ -472,19 +492,19 @@ export const HandoverAnalysisTab = ({
         </div>
         <div className="rounded-md border border-slate-700 bg-slate-800/60 p-3 text-center">
           <p className="text-lg font-bold text-white">{formatAverage(stats.avgRsrpBefore, "dBm")}</p>
-          <p className="text-xs text-white">RSRP Before</p>
+          <p className="text-xs text-white">{has2GInFilteredTechnologyTransitions ? "RXLEVEL Before" : "RSRP Before"}</p>
         </div>
         <div className="rounded-md border border-slate-700 bg-slate-800/60 p-3 text-center">
           <p className="text-lg font-bold text-white">{formatAverage(stats.avgRsrpAfter, "dBm")}</p>
-          <p className="text-xs text-white">RSRP After</p>
+          <p className="text-xs text-white">{has2GInFilteredTechnologyTransitions ? "RXLEVEL After" : "RSRP After"}</p>
         </div>
         <div className="rounded-md border border-slate-700 bg-slate-800/60 p-3 text-center">
           <p className="text-lg font-bold text-white">{formatAverage(stats.avgSinrBefore, "dB")}</p>
-          <p className="text-xs text-white">SINR Before</p>
+          <p className="text-xs text-white">{has2GInFilteredTechnologyTransitions ? "RXQUAL Before" : "SINR Before"}</p>
         </div>
         <div className="rounded-md border border-slate-700 bg-slate-800/60 p-3 text-center">
           <p className="text-lg font-bold text-white">{formatAverage(stats.avgSinrAfter, "dB")}</p>
-          <p className="text-xs text-white">SINR After</p>
+          <p className="text-xs text-white">{has2GInFilteredTechnologyTransitions ? "RXQUAL After" : "SINR After"}</p>
         </div>
       </div>
       )}
@@ -580,3 +600,4 @@ export const HandoverAnalysisTab = ({
 };
 
 export default HandoverAnalysisTab;
+

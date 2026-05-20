@@ -1,4 +1,3 @@
-// src/pages/DriveTestSessionsPage.jsx
 import React, { useState, useEffect, useCallback } from "react";
 import { adminApi, mapViewApi, offlineApi } from "../api/apiEndpoints";
 import { toast } from "react-toastify";
@@ -74,14 +73,8 @@ const extractSessionRows = (payload) => {
   return [];
 };
 
-const sortSessionsNewestFirst = (rows = []) =>
+const sortSessionsByIdDescending = (rows = []) =>
   [...rows].sort((a, b) => {
-    const aTime = new Date(a?.created_at || a?.start_time || 0).getTime();
-    const bTime = new Date(b?.created_at || b?.start_time || 0).getTime();
-    if (Number.isFinite(aTime) && Number.isFinite(bTime) && aTime !== bTime) {
-      return bTime - aTime;
-    }
-
     const aId = Number(a?.id ?? 0);
     const bId = Number(b?.id ?? 0);
     return bId - aId;
@@ -95,7 +88,6 @@ const DriveTestSessionsPage = () => {
   const navigate = useNavigate();
   const [searchTerm, setSearchTerm] = useState("");
 
-  // Column-specific search states
   const [columnFilters, setColumnFilters] = useState({
     sessionId: "",
     userDetails: "",
@@ -110,12 +102,11 @@ const DriveTestSessionsPage = () => {
     sessionRemarks: "",
   });
 
-  // Date filter states
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
 
   const [currentPage, setCurrentPage] = useState(1);
-  const [sessionsPerPage, setSessionsPerPage] = useState(10); // ✅ fixed: added setter
+  const [sessionsPerPage, setSessionsPerPage] = useState(10); 
 
   const [projectName, setProjectName] = useState("");
   const [isDialogOpen, setIsDialogOpen] = useState(false);
@@ -137,7 +128,6 @@ const DriveTestSessionsPage = () => {
     sessionRemarks: false,
   });
 
-  // Define all available columns with their properties
   const allColumns = {
     sessionId: { label: "Session ID", defaultVisible: true },
     userDetails: { label: "User Details", defaultVisible: true },
@@ -153,7 +143,6 @@ const DriveTestSessionsPage = () => {
     actions: { label: "Actions", defaultVisible: true },
   };
 
-  // Toggle column visibility
   const toggleColumn = (columnKey) => {
     setVisibleColumns((prev) => ({
       ...prev,
@@ -161,7 +150,6 @@ const DriveTestSessionsPage = () => {
     }));
   };
 
-  // Update column filter
   const updateColumnFilter = (column, value) => {
     setColumnFilters((prev) => ({
       ...prev,
@@ -169,7 +157,6 @@ const DriveTestSessionsPage = () => {
     }));
   };
 
-  // Clear specific column filter
   const clearColumnFilter = (column) => {
     setColumnFilters((prev) => ({
       ...prev,
@@ -177,7 +164,6 @@ const DriveTestSessionsPage = () => {
     }));
   };
 
-  // Clear all column filters
   const clearAllColumnFilters = () => {
     setColumnFilters({
       sessionId: "",
@@ -217,20 +203,16 @@ const DriveTestSessionsPage = () => {
         }
       }
 
-      // Always keep local pending/failed sessions visible so users can track
-      // cached uploads that are not synced to cloud yet.
       const localPendingRows = localRows.filter((row) => {
         const sync = String(row?.sync_status || "").toLowerCase();
         return sync === "pending" || sync === "failed" || sync === "ready-to-sync";
       });
 
-      // If cloud returned any rows, trust cloud as source of truth.
-      // Only show local cached sessions when cloud is unavailable/empty.
       const useLocalFallback = cloudError || cloudRows.length === 0;
       const rowsToShow = useLocalFallback
         ? mergeSessionsById(cloudRows, localPendingRows)
         : cloudRows;
-      setSessions(sortSessionsNewestFirst(rowsToShow));
+      setSessions(sortSessionsByIdDescending(rowsToShow));
 
       if (cloudError && localRows.length > 0) {
         toast.info("Cloud sessions are unavailable. Showing local cached sessions.");
@@ -260,14 +242,6 @@ const DriveTestSessionsPage = () => {
     );
   };
 
-  const clearDateFilters = () => {
-    setStartDate("");
-    setEndDate("");
-  };
-
-  const clearSearch = () => {
-    setSearchTerm("");
-  };
 
   const formatDateOnly = (dateString) => {
     if (!dateString) return "N/A";
@@ -281,10 +255,7 @@ const DriveTestSessionsPage = () => {
     return date.toLocaleTimeString();
   };
 
-  const formatDate = (dateString) => {
-    if (!dateString) return "N/A";
-    return new Date(dateString).toLocaleString();
-  };
+ 
 
   const filteredSessions = sessions.filter((session) => {
     const lowerCaseSearchTerm = searchTerm.toLowerCase();
@@ -442,7 +413,6 @@ const DriveTestSessionsPage = () => {
     );
   });
 
-  // Pagination logic (must come before toggleSelectAll uses currentSessions)
   const indexOfLastSession = currentPage * sessionsPerPage;
   const indexOfFirstSession = indexOfLastSession - sessionsPerPage;
   const currentSessions = filteredSessions.slice(
@@ -635,7 +605,6 @@ const DriveTestSessionsPage = () => {
     <div className="p-6 h-full flex flex-col bg-white">
       <div className="flex items-center justify-between mb-4 gap-4">
         <div className="flex items-center gap-3 w-full justify-end flex-wrap">
-          {/* Column Selector */}
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button variant="outline" size="sm" className="h-9">
@@ -667,7 +636,6 @@ const DriveTestSessionsPage = () => {
             </DropdownMenuContent>
           </DropdownMenu>
 
-          {/* Clear All Filters Button */}
           {hasActiveColumnFilters && (
             <Button
               variant="outline"
@@ -680,7 +648,6 @@ const DriveTestSessionsPage = () => {
             </Button>
           )}
 
-          {/* Multi-select actions */}
           {selectedSessions.length > 0 && (
             <>
               <span className="text-sm text-muted-foreground whitespace-nowrap">
@@ -752,7 +719,6 @@ const DriveTestSessionsPage = () => {
         </div>
       </div>
 
-      {/* Active Filters Display */}
       {(searchTerm || startDate || endDate || hasActiveColumnFilters) && (
         <div className="mb-3 flex items-center gap-2 text-sm text-muted-foreground flex-wrap">
           <span>Active filters:</span>
@@ -789,7 +755,6 @@ const DriveTestSessionsPage = () => {
       <div className="rounded-lg border shadow-sm flex-grow overflow-auto">
         <Table>
           <TableHeader>
-            {/* Column Headers Row */}
             <TableRow>
               <TableHead className="w-[50px]">
                 <Checkbox
@@ -842,7 +807,6 @@ const DriveTestSessionsPage = () => {
               )}
             </TableRow>
 
-            {/* Column Filter Inputs Row */}
             <TableRow className="bg-muted/50">
               <TableHead className="w-[50px] p-2"></TableHead>
 
@@ -1255,7 +1219,6 @@ const DriveTestSessionsPage = () => {
         </Table>
       </div>
 
-      {/* ✅ Fixed pagination footer: uses DropdownMenu instead of undefined Dropdown */}
       <div className="flex items-center justify-between p-4 border-t">
         <div className="flex items-center gap-2 text-sm text-muted-foreground">
           <DropdownMenu>

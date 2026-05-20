@@ -25,7 +25,7 @@ const CATEGORY_GRID_METRICS = new Set([
   "best_technology",
   "best_pci",
 ]);
-const CATEGORY_COLOR_MODES = new Set(["provider", "operator", "band", "technology", "pci"]);
+const CATEGORY_COLOR_MODES = new Set(["provider", "operator", "band", "technology", "nodebid", "pci"]);
 
 const toFiniteNumber = (value) => {
   const parsed = Number.parseFloat(value);
@@ -240,10 +240,12 @@ export const useUnifiedGridViewData = ({
           providers: new Map(),
           bands: new Map(),
           technologies: new Map(),
+          nodebids: new Map(),
           pcis: new Map(),
           providerMetrics: new Map(),
           bandMetrics: new Map(),
           technologyMetrics: new Map(),
+          nodebidMetrics: new Map(),
           pciMetrics: new Map(),
           sessions: new Set(),
         });
@@ -280,6 +282,11 @@ export const useUnifiedGridViewData = ({
         (value) => normalizeTechName(value, loc?.band ?? loc?.primaryBand),
       );
       incrementCounter(
+        bucket.nodebids,
+        loc?.nodebid ?? loc?.nodeb_id ?? loc?.nodebId,
+        (value) => String(value ?? "").trim() || "Unknown",
+      );
+      incrementCounter(
         bucket.pcis,
         loc?.pci,
         (value) => {
@@ -302,11 +309,15 @@ export const useUnifiedGridViewData = ({
             loc?.band ?? loc?.primaryBand,
           ) || "Unknown";
         const bandName = normalizeBandName(loc?.band ?? loc?.primaryBand);
+        const nodebidName = String(
+          loc?.nodebid ?? loc?.nodeb_id ?? loc?.nodebId ?? "",
+        ).trim() || "Unknown";
         const pciValue = Number.parseInt(loc?.pci, 10);
 
         pushCategoryMetricValue(bucket.providerMetrics, providerName, selectedMetricValue);
         pushCategoryMetricValue(bucket.bandMetrics, bandName, selectedMetricValue);
         pushCategoryMetricValue(bucket.technologyMetrics, technologyName, selectedMetricValue);
+        pushCategoryMetricValue(bucket.nodebidMetrics, nodebidName, selectedMetricValue);
         pushCategoryMetricValue(
           bucket.pciMetrics,
           Number.isFinite(pciValue) ? String(pciValue) : "Unknown",
@@ -342,6 +353,7 @@ export const useUnifiedGridViewData = ({
         const dominantProvider = pickTopCategory(bucket.providers);
         const dominantBand = pickTopCategory(bucket.bands);
         const dominantTechnology = pickTopCategory(bucket.technologies);
+        const dominantNodebid = pickTopCategory(bucket.nodebids);
         const bestProviderByMetric = pickBestCategoryByMetric(
           bucket.providerMetrics,
           normalizedAggregationMethod,
@@ -354,6 +366,11 @@ export const useUnifiedGridViewData = ({
         );
         const bestBandByMetric = pickBestCategoryByMetric(
           bucket.bandMetrics,
+          normalizedAggregationMethod,
+          isLowerBetterMetric,
+        );
+        const bestNodebidByMetric = pickBestCategoryByMetric(
+          bucket.nodebidMetrics,
           normalizedAggregationMethod,
           isLowerBetterMetric,
         );
@@ -374,6 +391,10 @@ export const useUnifiedGridViewData = ({
           useCategoryColor && normalizedColorBy === "band"
             ? bestBandByMetric?.name || dominantBand
             : dominantBand;
+        const colorNodebid =
+          useCategoryColor && normalizedColorBy === "nodebid"
+            ? bestNodebidByMetric?.name || dominantNodebid
+            : dominantNodebid;
         const colorPciRaw =
           useCategoryColor && normalizedColorBy === "pci"
             ? bestPciByMetric?.name ?? dominantPciRaw
@@ -406,17 +427,23 @@ export const useUnifiedGridViewData = ({
           technology: colorTechnology,
           best_technology: colorTechnology,
           networkType: colorTechnology,
+          nodebid: colorNodebid,
+          nodeb_id: colorNodebid,
+          best_nodebid: colorNodebid,
           pci: colorPci,
           best_pci: colorPci,
           dominant_provider: dominantProvider,
           dominant_technology: dominantTechnology,
+          dominant_nodebid: dominantNodebid,
           dominant_pci: dominantPci,
           best_provider_value: bestProviderByMetric?.value ?? null,
           best_band_value: bestBandByMetric?.value ?? null,
           best_technology_value: bestTechnologyByMetric?.value ?? null,
+          best_nodebid_value: bestNodebidByMetric?.value ?? null,
           best_pci_value: bestPciByMetric?.value ?? null,
           provider_count: getTopCount(bucket.providers),
           technology_count: getTopCount(bucket.technologies),
+          nodebid_count: getTopCount(bucket.nodebids),
           pci_count: getTopCount(bucket.pcis),
           value: selectedMetricValue,
           metric_value: selectedMetricValue,

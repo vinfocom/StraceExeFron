@@ -46,6 +46,7 @@ const dynamicColorCache = {
   provider: {},
   technology: {},
   band: {},
+  nodebid: {},
   pci: {},
 };
 
@@ -277,6 +278,9 @@ export const COLOR_SCHEMES = {
     n78: "#F472B6",
     Unknown: "#a8a6a2",
   },
+  nodebid: {
+    Unknown: "#a8a6a2",
+  },
   pci: {
     Unknown: "#a8a6a2",
   },
@@ -353,6 +357,7 @@ export const clearDynamicColorCache = () => {
   dynamicColorCache.provider = {};
   dynamicColorCache.technology = {};
   dynamicColorCache.band = {};
+  dynamicColorCache.nodebid = {};
   dynamicColorCache.pci = {};
 };
 

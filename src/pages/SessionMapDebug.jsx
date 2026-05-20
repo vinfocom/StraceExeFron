@@ -1,4 +1,3 @@
-// src/pages/SessionMapDebug.jsx
 import React, {
   useEffect,
   useState,
@@ -36,9 +35,7 @@ import { useSessionNeighbors } from "@/hooks/useSessionNeighbors";
 import MapWithMultipleCircles from "@/components/unifiedMap/MapwithMultipleCircle";
 import LoadingProgress from "@/components/LoadingProgress";
 
-// ============================================
-// CONSTANTS & HELPERS
-// ============================================
+
 const containerStyle = {
   width: "100%",
   height: "100%",
@@ -106,22 +103,18 @@ const getMetricValue = (log, metric) => {
 const geometryToWktPolygon = (geometry) => {
   if (!geometry) return null;
 
-  // Helper to read coordinates (handles both objects and functions)
   const read = (p) => ({
     lat: typeof p.lat === "function" ? p.lat() : p.lat,
     lng: typeof p.lng === "function" ? p.lng() : p.lng,
   });
 
-  // ---------- POLYGON ----------
   if (geometry.type === "polygon" && geometry.polygon?.length >= 3) {
     const points = geometry.polygon.map(read);
-    // ✅ SWAP: Send 'LATITUDE LONGITUDE' for SQL Server/C# backend
     const wktCoords = points.map((p) => `${p.lat} ${p.lng}`).join(", ");
     const first = `${points[0].lat} ${points[0].lng}`;
     return `POLYGON((${wktCoords}, ${first}))`;
   }
 
-  // ---------- RECTANGLE ----------
   if (geometry.type === "rectangle" && geometry.rectangle) {
     const ne = read(geometry.rectangle.ne);
     const sw = read(geometry.rectangle.sw);
@@ -135,7 +128,6 @@ const geometryToWktPolygon = (geometry) => {
     return `POLYGON((${coords.map((p) => `${p.lat} ${p.lng}`).join(", ")}))`;
   }
 
-  // ---------- CIRCLE ----------
   if (geometry.type === "circle" && geometry.circle) {
     const center = read(geometry.circle.center);
     const radius = geometry.circle.radius;
@@ -147,7 +139,6 @@ const geometryToWktPolygon = (geometry) => {
         (radius / (111111 * Math.cos((center.lat * Math.PI) / 180))) *
         Math.sin(angle);
 
-      // Clamp latitude to physical bounds
       const lat = Math.max(-90, Math.min(90, center.lat + latOffset));
       const lng = center.lng + lngOffset;
       points.push(`${lat} ${lng}`);
@@ -156,9 +147,8 @@ const geometryToWktPolygon = (geometry) => {
   }
   return null;
 };
-// ============================================
-// ACTIVE FILTERS BAR COMPONENT
-// ============================================
+
+
 function ActiveFiltersBar({
   filters,
   onClearFilter,
