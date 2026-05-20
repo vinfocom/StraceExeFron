@@ -13,39 +13,7 @@ const getNormalizedStatus = (statusRaw) => {
   return "FAILED";
 };
 
-const getMarkerStyle = (statusRaw, isActive = false) => {
-  const status = getNormalizedStatus(statusRaw);
 
-  if (isActive) {
-    return {
-      fillColor: "#38BDF8",
-      strokeColor: "#FFFFFF",
-      scale: 10,
-    };
-  }
-
-  if (status === "SUCCESS") {
-    return {
-      fillColor: "#22C55E",
-      strokeColor: "#DCFCE7",
-      scale: 7,
-    };
-  }
-
-  if (status === "FAILED") {
-    return {
-      fillColor: "#EF4444",
-      strokeColor: "#FEE2E2",
-      scale: 7,
-    };
-  }
-
-  return {
-    fillColor: "#EF4444",
-    strokeColor: "#FEE2E2",
-    scale: 7,
-  };
-};
 
 const formatStatus = (statusRaw) => {
   const status = getNormalizedStatus(statusRaw);
@@ -95,19 +63,16 @@ const SubSessionMarkers = ({
         <MarkerF
           key={marker.id}
           position={marker.position}
-          icon={
-            typeof window !== "undefined" && window.google?.maps
-              ? {
-                path: window.google.maps.SymbolPath.CIRCLE,
-                fillOpacity: 1,
-                strokeWeight: 2,
-                ...getMarkerStyle(marker.resultStatus, marker.id === activeMarkerId),
-              }
-              : undefined
-          }
-          title={`Session ${marker.sessionId}${
-            marker.subSessionId != null ? ` / Sub ${marker.subSessionId}` : ""
-          }`}
+          icon={{
+            path: "M 0,-10 10,0 0,10 -10,0 z",    // yeh  maine daimond bana rakkha hai 
+            fillColor: "#5219af",
+            fillOpacity: 1,
+            strokeColor: "#f7f8f8",
+            strokeWeight: 2,
+            scale: 1,
+          }}
+          title={`Session ${marker.sessionId}${marker.subSessionId != null ? ` / Sub ${marker.subSessionId}` : ""
+            }`}
           onClick={() => {
             if (selectedMarkerId == null) {
               setInternalSelectedMarkerId(marker.id);

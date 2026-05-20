@@ -1246,6 +1246,7 @@ const NetworkPlannerMap = ({
   projectId,
   siteToggle = "NoML",
   sitePredictionVersion = "original",
+  sitePredictionScenarioId = null,
   defaultBeamwidth = 30,
   enableSiteToggle = true,
   showSiteMarkers = true,
@@ -1274,6 +1275,7 @@ const NetworkPlannerMap = ({
     enableSiteToggle,
     siteToggle,
     sitePredictionVersion,
+    sitePredictionScenarioId,
     defaultBeamwidth,
     projectId,
     autoFetch: true,
@@ -1300,6 +1302,8 @@ const NetworkPlannerMap = ({
   const [dragMode, setDragMode] = useState(null); // "sector" | "site" | null
   const [pendingMovePosition, setPendingMovePosition] = useState(null);
   const [isApplyingDraggedMove, setIsApplyingDraggedMove] = useState(false);
+  const [pendingScenarioUpdatesByKey, setPendingScenarioUpdatesByKey] = useState({});
+  const [isSavingScenarioUpdates, setIsSavingScenarioUpdates] = useState(false);
   const [mapZoom, setMapZoom] = useState(() => {
     const zoom = map?.getZoom?.();
     return Number.isFinite(zoom) ? zoom : 13;
@@ -1332,6 +1336,75 @@ const NetworkPlannerMap = ({
       resource: "unified-site-data",
     });
   }, [projectId]);
+
+  const pendingScenarioUpdates = useMemo(
+    () => Object.values(pendingScenarioUpdatesByKey || {}),
+    [pendingScenarioUpdatesByKey],
+  );
+
+  const pendingScenarioUpdateCount = pendingScenarioUpdates.length;
+
+  const buildScenarioUpdateKey = useCallback((item = {}) => {
+    const sourceId = Number(item.source_id ?? item.id ?? NaN);
+    if (Number.isFinite(sourceId) && sourceId > 0) {
+      return `row-${sourceId}`;
+    }
+
+    const siteSelector = String(item.site_selector ?? item.site_id_selector ?? "").trim();
+    const sectorSelector = String(item.sector_selector ?? "").trim();
+    if (siteSelector && sectorSelector) {
+      return `selector-${siteSelector}-${sectorSelector}`;
+    }
+    if (siteSelector && item.move_entire_site) {
+      return `site-${siteSelector}`;
+    }
+
+    return `adhoc-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  }, []);
+
+  const queueScenarioUpdateItem = useCallback((item) => {
+    if (!item || typeof item !== "object") return;
+    const key = buildScenarioUpdateKey(item);
+    setPendingScenarioUpdatesByKey((prev) => {
+      const existing = prev?.[key] || {};
+      return {
+        ...(prev || {}),
+        [key]: {
+          ...existing,
+          ...item,
+        },
+      };
+    });
+  }, [buildScenarioUpdateKey]);
+
+  const savePendingScenarioUpdates = useCallback(async () => {
+    if (pendingScenarioUpdates.length === 0) {
+      toast.info("No pending changes to save.");
+      return;
+    }
+
+    setIsSavingScenarioUpdates(true);
+    try {
+      const response = await mapViewApi.updateSitePrediction(pendingScenarioUpdates);
+      const rowsAffected = extractRowsAffected(response);
+      const scenario = Number(response?.Scenario ?? response?.scenario ?? NaN);
+      const scenarioLabel = Number.isFinite(scenario) && scenario > 0 ? `Scenario ${scenario}` : "new scenario";
+
+      toast.success(
+        rowsAffected > 0
+          ? `${scenarioLabel} saved with ${rowsAffected} updated row${rowsAffected > 1 ? "s" : ""}.`
+          : `${scenarioLabel} saved.`,
+      );
+
+      setPendingScenarioUpdatesByKey({});
+      clearUnifiedSiteDataCache();
+      await fetchSiteData(true);
+    } catch (error) {
+      toast.error(extractApiErrorDetails(error) || "Failed to save scenario updates.");
+    } finally {
+      setIsSavingScenarioUpdates(false);
+    }
+  }, [pendingScenarioUpdates, clearUnifiedSiteDataCache, fetchSiteData]);
 
   const normalizedPolygonPaths = useMemo(() => {
     if (!Array.isArray(filterPolygons) || filterPolygons.length === 0) return [];
@@ -2751,6 +2824,7 @@ const NetworkPlannerMap = ({
         const rowId = getSitePredictionSourceRowId(sector);
         if (rowId) {
           uniquePayloadByKey.set(`row-${rowId}`, {
+            project_id: Number(projectId) || undefined,
             id: rowId,
             source_id: rowId,
             latitude: lat,
@@ -2769,6 +2843,7 @@ const NetworkPlannerMap = ({
         ).trim();
         if (siteSelector && sectorSelector) {
           uniquePayloadByKey.set(`selector-${siteSelector}-${sectorSelector}`, {
+            project_id: Number(projectId) || undefined,
             site_selector: siteSelector,
             sector_selector: sectorSelector,
             latitude: lat,
@@ -2789,14 +2864,10 @@ const NetworkPlannerMap = ({
 
     setIsApplyingDraggedMove(true);
     try {
-      const response = await mapViewApi.updateSitePrediction(payload);
-      const rowsAffected = extractRowsAffected(response);
-
-      if (rowsAffected <= 0) {
-        toast.warning("No rows were updated. Check site toggle and row ids.");
-      } else {
-        toast.success(`Location updated for ${rowsAffected} row${rowsAffected > 1 ? "s" : ""}.`);
-      }
+      payload.forEach((item) => queueScenarioUpdateItem(item));
+      toast.success(
+        `Location change staged for scenario (${payload.length} item${payload.length > 1 ? "s" : ""}).`,
+      );
 
       setSelectedSiteDataById((prev) => {
         const next = { ...prev };
@@ -2849,9 +2920,6 @@ const NetworkPlannerMap = ({
 
       setDragMode(null);
       setPendingMovePosition(null);
-
-      clearUnifiedSiteDataCache();
-      await fetchSiteData(true);
       if (map?.panTo) map.panTo({ lat, lng });
     } catch (error) {
       toast.error(extractApiErrorDetails(error) || "Failed to update moved location.");
@@ -2864,9 +2932,9 @@ const NetworkPlannerMap = ({
     pendingMovePosition,
     allSectors,
     selectedSiteDataById,
-    clearUnifiedSiteDataCache,
-    fetchSiteData,
+    queueScenarioUpdateItem,
     map,
+    projectId,
   ]);
 
   const openSiteEditDialog = useCallback((sector) => {
@@ -2988,6 +3056,7 @@ const NetworkPlannerMap = ({
     }
 
     const payloadItem = {
+      project_id: Number(projectId) || undefined,
       ...(rowId ? { id: rowId, source_id: rowId } : {}),
       ...(siteSelector ? { site_id_selector: siteSelector, site_selector: siteSelector } : {}),
       ...(sectorSelector ? { sector_selector: sectorSelector } : {}),
@@ -3001,7 +3070,14 @@ const NetworkPlannerMap = ({
       }
     });
 
-    const payloadControlKeys = new Set(["id", "source_id", "site_id_selector", "site_selector", "sector_selector"]);
+    const payloadControlKeys = new Set([
+      "id",
+      "source_id",
+      "site_id_selector",
+      "site_selector",
+      "sector_selector",
+      "project_id",
+    ]);
     const hasAnyChangedField = Object.keys(payloadItem).some((key) => !payloadControlKeys.has(key));
     if (!hasAnyChangedField) {
       toast.info("No changes to save.");
@@ -3018,8 +3094,7 @@ const NetworkPlannerMap = ({
 
     setIsSavingSectorEdit(true);
     try {
-      const response = await mapViewApi.updateSitePrediction([payloadItem]);
-      const rowsAffected = extractRowsAffected(response);
+      queueScenarioUpdateItem(payloadItem);
 
       const nextRaw = {
         ...(selectedSectorInfo.rawSite || {}),
@@ -3154,23 +3229,9 @@ const NetworkPlannerMap = ({
         ),
       );
       setIsEditDialogOpen(false);
-      toast.success(
-        rowsAffected > 0
-          ? `Sector updated (${rowsAffected} row${rowsAffected > 1 ? "s" : ""}).`
-          : "Sector updated.",
-      );
+      toast.success("Sector change staged for scenario.");
 
-      // Always refetch after edit so non-location fields (azimuth/bw/tilts) are refreshed
-      // across baseline/updated/delta modes.
-      clearUnifiedSiteDataCache();
-      await fetchSiteData(true);
-
-      const marker = siteMarkers.find((item) => item.siteId === selectedSectorInfo.siteId);
-      if (marker) {
-        void loadSiteData(marker, true);
-      }
       if ("latitude" in payloadItem || "longitude" in payloadItem) {
-        await fetchSiteData(true);
         if (Number.isFinite(nextLat) && Number.isFinite(nextLng)) {
           const movedPoint = { lat: nextLat, lng: nextLng };
           const outsidePolygonFilter =
@@ -3202,10 +3263,8 @@ const NetworkPlannerMap = ({
     selectedSectorInfo,
     sectorEditFormData,
     sectorEditOriginalData,
-    siteMarkers,
-    clearUnifiedSiteDataCache,
-    loadSiteData,
-    fetchSiteData,
+    projectId,
+    queueScenarioUpdateItem,
     map,
     onlyInsidePolygons,
     normalizedPolygonPaths,
@@ -3621,6 +3680,34 @@ const NetworkPlannerMap = ({
             )}
           </div>
 
+          {pendingScenarioUpdateCount > 0 && (
+            <div className="mb-2 rounded border border-cyan-300 bg-cyan-50 p-2">
+              <div className="mb-1 text-[11px] font-semibold text-cyan-800">
+                Pending scenario changes: {pendingScenarioUpdateCount}
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    void savePendingScenarioUpdates();
+                  }}
+                  disabled={isSavingScenarioUpdates}
+                  className="rounded bg-cyan-700 px-2 py-1 text-[11px] font-semibold text-white disabled:opacity-60"
+                >
+                  {isSavingScenarioUpdates ? "Saving..." : "Save Scenario"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPendingScenarioUpdatesByKey({})}
+                  disabled={isSavingScenarioUpdates}
+                  className="rounded bg-slate-100 px-2 py-1 text-[11px] font-semibold text-slate-700 disabled:opacity-60"
+                >
+                  Discard
+                </button>
+              </div>
+            </div>
+          )}
+
           {String(siteToggle || "").toLowerCase() !== "cell" ? (
             <div className="rounded bg-amber-50 px-2 py-1 text-[11px] text-amber-800">
               Move is available on <b>Cell</b> toggle only.
@@ -3724,6 +3811,33 @@ const NetworkPlannerMap = ({
       {loadingSitesQueue.size > 0 && (
         <div className="absolute top-4 left-1/2 -translate-x-1/2 z-[2100] rounded bg-blue-600 px-3 py-1 text-xs font-semibold text-white shadow-md">
           Loading {loadingSitesQueue.size} site(s)...
+        </div>
+      )}
+      {pendingScenarioUpdateCount > 0 && (
+        <div className="absolute top-4 right-3 z-[2100] rounded border border-cyan-300 bg-white px-3 py-2 text-xs shadow-md">
+          <div className="font-semibold text-cyan-800">
+            Pending Scenario Changes: {pendingScenarioUpdateCount}
+          </div>
+          <div className="mt-1 flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => {
+                void savePendingScenarioUpdates();
+              }}
+              disabled={isSavingScenarioUpdates}
+              className="rounded bg-cyan-700 px-2 py-1 text-[11px] font-semibold text-white disabled:opacity-60"
+            >
+              {isSavingScenarioUpdates ? "Saving..." : "Save Scenario"}
+            </button>
+            <button
+              type="button"
+              onClick={() => setPendingScenarioUpdatesByKey({})}
+              disabled={isSavingScenarioUpdates}
+              className="rounded bg-slate-100 px-2 py-1 text-[11px] font-semibold text-slate-700 disabled:opacity-60"
+            >
+              Discard
+            </button>
+          </div>
         </div>
       )}
       {enableSiteLteOverlay && selectedSiteIds.length > 0 && (
@@ -3994,6 +4108,19 @@ const NetworkPlannerMap = ({
                     <div className="mt-2 border-t border-slate-200 pt-2">
                       <div className="mb-1 text-[11px] font-semibold text-slate-700">Quick Actions</div>
                       <div className="flex flex-wrap items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            void savePendingScenarioUpdates();
+                          }}
+                          disabled={isSavingScenarioUpdates || pendingScenarioUpdateCount === 0}
+                          className="rounded bg-cyan-700 px-2 py-1 text-[11px] font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
+                          title="Save staged site edits as a new scenario"
+                        >
+                          {isSavingScenarioUpdates
+                            ? "Saving..."
+                            : `Save Scenario${pendingScenarioUpdateCount > 0 ? ` (${pendingScenarioUpdateCount})` : ""}`}
+                        </button>
                         <button
                           type="button"
                           onClick={() => {

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { mapViewApi } from "@/api/apiEndpoints";
+import { isCancelledError } from "@/api/apiService";
 import {
   makeProjectCacheKey,
   readProjectSessionCache,
@@ -13,17 +14,6 @@ const EMPTY_ANALYTICS = Object.freeze({
   markers: [],
   rawResponse: null,
 });
-
-const isRequestCancelled = (error) => {
-  if (!error) return false;
-  return (
-    error.isCancelled === true ||
-    error.name === "AbortError" ||
-    error.name === "CanceledError" ||
-    error.code === "ERR_CANCELED" ||
-    error.message === "Request cancelled"
-  );
-};
 
 const toFiniteNumber = (value) => {
   const parsed = Number(value);
@@ -373,7 +363,7 @@ export const useSubSessionAnalytics = (sessionIds, enabled = false) => {
         writeProjectSessionCache(cacheKey, normalized);
         lastFetchKeyRef.current = fetchKey;
       } catch (err) {
-        if (isRequestCancelled(err)) return;
+        if (isCancelledError(err)) return;
 
         if (mountedRef.current) {
           setError(err?.message || "Failed to fetch sub-session analytics");

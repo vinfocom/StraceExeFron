@@ -1167,6 +1167,8 @@ const UnifiedMapView = () => {
   const [enableSiteToggle, setEnableSiteToggle] = useState(false);
   const [siteToggle, setSiteToggle] = useState("Cell");
   const [sitePredictionVersion, setSitePredictionVersion] = useState("original");
+  const [sitePredictionScenarioId, setSitePredictionScenarioId] = useState(null);
+  const [sitePredictionScenarioOptions, setSitePredictionScenarioOptions] = useState([]);
   const [modeMethod, setModeMethod] = useState("Operator");
   const [siteLabelField, setSiteLabelField] = useState("none");
   const [showSiteMarkers, setShowSiteMarkers] = useState(true);
@@ -1941,6 +1943,147 @@ const UnifiedMapView = () => {
     };
   }, [projectId, storedGridVersion]);
 
+  const handleDeleteStoredGridScenario = useCallback(async (scenarioIdFromRow = null) => {
+    const numericProjectId = Number(projectId);
+    const numericScenarioId = Number(scenarioIdFromRow ?? storedGridScenarioId);
+    if (!Number.isFinite(numericProjectId) || numericProjectId <= 0) {
+      toast.error("Select a valid project before deleting scenario.");
+      return;
+    }
+    if (!Number.isFinite(numericScenarioId) || numericScenarioId <= 0) {
+      toast.error("Select a valid scenario to delete.");
+      return;
+    }
+
+    const confirmed = window.confirm(
+      `Delete stored grid Scenario ${numericScenarioId} for project ${numericProjectId}?`,
+    );
+    if (!confirmed) return;
+
+    try {
+      await mapViewApi.deleteLtePredictionOptimisedScenario({
+        ProjectId: numericProjectId,
+        ScenarioId: numericScenarioId,
+      });
+      toast.success(`Stored grid scenario ${numericScenarioId} deleted.`);
+
+      const response = await gridAnalyticsApi.getOptimizationScenarios({ projectId: numericProjectId });
+      const root =
+        response?.data && typeof response.data === "object" ? response.data : response || {};
+      const rows = Array.isArray(root?.Data)
+        ? root.Data
+        : Array.isArray(root?.data?.Data)
+          ? root.data.Data
+          : Array.isArray(root?.data)
+            ? root.data
+            : [];
+      const options = rows
+        .map((row) => ({
+          scenario_id: Number(row?.scenario_id ?? row?.id ?? 0),
+          scenario_name: String(row?.scenario_name ?? row?.name ?? "").trim(),
+          status: String(row?.status || "").trim(),
+          created_at: row?.created_at || null,
+        }))
+        .filter((row) => Number.isFinite(row.scenario_id) && row.scenario_id > 0);
+
+      setStoredGridScenarioOptions(options);
+      setStoredGridScenarioId((prev) => {
+        if (Number.isFinite(Number(prev)) && options.some((o) => o.scenario_id === Number(prev))) {
+          return Number(prev);
+        }
+        return options.length > 0 ? options[0].scenario_id : null;
+      });
+
+      await handleDeltaGridFetchStored({
+        version: storedGridVersion,
+        scenarioId:
+          options.length > 0
+            ? (options.some((o) => o.scenario_id === Number(storedGridScenarioId))
+                ? Number(storedGridScenarioId)
+                : options[0].scenario_id)
+            : undefined,
+      });
+    } catch (error) {
+      const message = String(error?.message || "").trim() || "Failed to delete stored grid scenario.";
+      toast.error(message);
+    }
+  }, [projectId, storedGridScenarioId, storedGridVersion, handleDeltaGridFetchStored]);
+
+  useEffect(() => {
+    const normalizedSiteVersion = String(sitePredictionVersion || "original").trim().toLowerCase();
+    if (normalizedSiteVersion !== "updated") {
+      setSitePredictionScenarioId(null);
+      return;
+    }
+  }, [sitePredictionVersion, sitePredictionScenarioId]);
+
+  useEffect(() => {
+    const normalizedSiteVersion = String(sitePredictionVersion || "original").trim().toLowerCase();
+    const shouldLoadScenarioOptions =
+      enableSiteToggle &&
+      String(siteToggle || "").toLowerCase() === "cell" &&
+      normalizedSiteVersion === "updated";
+
+    if (!shouldLoadScenarioOptions) return;
+
+    const numericProjectId = Number(projectId);
+    if (!Number.isFinite(numericProjectId) || numericProjectId <= 0) {
+      setSitePredictionScenarioOptions([]);
+      setSitePredictionScenarioId(null);
+      return;
+    }
+
+    let cancelled = false;
+    (async () => {
+      try {
+        const response = await mapViewApi.getSitePredictionScenarios({ projectId: numericProjectId });
+        const root =
+          response?.data && typeof response.data === "object" ? response.data : response || {};
+        const rows = Array.isArray(root?.Data)
+          ? root.Data
+          : Array.isArray(root?.data?.Data)
+            ? root.data.Data
+            : Array.isArray(root?.data)
+              ? root.data
+              : [];
+
+        const options = rows
+          .map((row) => ({
+            scenario_id: Number(row?.scenario_id ?? row?.id ?? 0),
+            status: String(row?.status || "").trim(),
+          }))
+          .filter((row) => Number.isFinite(row.scenario_id) && row.scenario_id > 0)
+          .sort((a, b) => a.scenario_id - b.scenario_id);
+
+        if (cancelled) return;
+        if (options.length > 0) {
+          setSitePredictionScenarioOptions(options);
+          setSitePredictionScenarioId((prev) => {
+            const parsed = Number(prev);
+            if (Number.isFinite(parsed) && parsed > 0 && options.some((o) => o.scenario_id === parsed)) {
+              return parsed;
+            }
+            return options[0].scenario_id;
+          });
+          return;
+        }
+
+        setSitePredictionScenarioOptions([]);
+        setSitePredictionScenarioId(null);
+      } catch {
+        if (cancelled) return;
+        setSitePredictionScenarioOptions([]);
+        setSitePredictionScenarioId(null);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId, enableSiteToggle, siteToggle, sitePredictionVersion]);
+
+  
+
   const handleDeltaGridComputeStore = useCallback(
     async ({ showGridAfterCompute = false, scenarioId } = {}) => {
     const numericProjectId = Number(projectId);
@@ -2405,6 +2548,7 @@ const UnifiedMapView = () => {
     [sampleLocations],
   );
 
+   // data hook calling for subsession 
   const {
     sessions: subSessionData,
     summary: subSessionSummary,
@@ -2438,7 +2582,6 @@ const UnifiedMapView = () => {
     fallbackSessionParam,
   ]);
 
-  // ✅ 6. Use Site Data (Existing)
   const {
     siteData: rawSiteData,
     loading: siteLoading,
@@ -2448,6 +2591,7 @@ const UnifiedMapView = () => {
     enableSiteToggle,
     siteToggle,
     sitePredictionVersion,
+    sitePredictionScenarioId,
     defaultBeamwidth: defaultSiteBeamwidth,
     projectId,
     sessionIds,
@@ -2455,6 +2599,63 @@ const UnifiedMapView = () => {
     filterEnabled: false,
     polygons: EMPTY_POLYGONS,
   });
+  const handleDeleteSitePredictionScenario = useCallback(async (scenarioIdFromRow = null) => {
+    const numericProjectId = Number(projectId);
+    const numericScenario = Number(scenarioIdFromRow ?? sitePredictionScenarioId);
+    if (!Number.isFinite(numericProjectId) || numericProjectId <= 0) {
+      toast.error("Select a valid project before deleting scenario.");
+      return;
+    }
+    if (!Number.isFinite(numericScenario) || numericScenario <= 0) {
+      toast.error("Select a valid scenario to delete.");
+      return;
+    }
+
+    const confirmed = window.confirm(
+      `Delete Scenario ${numericScenario} for project ${numericProjectId}?`,
+    );
+    if (!confirmed) return;
+
+    try {
+      await mapViewApi.deleteSitePredictionScenario({
+        ProjectId: numericProjectId,
+        Scenario: numericScenario,
+      });
+      toast.success(`Scenario ${numericScenario} deleted.`);
+
+      const response = await mapViewApi.getSitePredictionScenarios({ projectId: numericProjectId });
+      const root = response?.data && typeof response.data === "object" ? response.data : response || {};
+      const rows = Array.isArray(root?.Data)
+        ? root.Data
+        : Array.isArray(root?.data?.Data)
+          ? root.data.Data
+          : Array.isArray(root?.data)
+            ? root.data
+            : [];
+
+      const options = rows
+        .map((row) => ({
+          scenario_id: Number(row?.scenario_id ?? row?.id ?? 0),
+          status: String(row?.status || "").trim(),
+        }))
+        .filter((row) => Number.isFinite(row.scenario_id) && row.scenario_id > 0)
+        .sort((a, b) => a.scenario_id - b.scenario_id);
+
+      setSitePredictionScenarioOptions(options);
+      setSitePredictionScenarioId((prev) => {
+        const parsedPrev = Number(prev);
+        if (Number.isFinite(parsedPrev) && parsedPrev > 0 && options.some((o) => o.scenario_id === parsedPrev)) {
+          return parsedPrev;
+        }
+        return options.length > 0 ? options[0].scenario_id : null;
+      });
+
+      await refetchSites(true);
+    } catch (error) {
+      const message = String(error?.message || "").trim() || "Failed to delete site prediction scenario.";
+      toast.error(message);
+    }
+  }, [projectId, sitePredictionScenarioId, refetchSites]);
 
   const siteData = rawSiteData || [];
   const {
@@ -4914,6 +5115,10 @@ const UnifiedMapView = () => {
         siteRowCount={siteData?.length || 0}
         sitePredictionVersion={sitePredictionVersion}
         setSitePredictionVersion={setSitePredictionVersion}
+        sitePredictionScenarioId={sitePredictionScenarioId}
+        setSitePredictionScenarioId={setSitePredictionScenarioId}
+        sitePredictionScenarioOptions={sitePredictionScenarioOptions}
+        onDeleteSitePredictionScenario={handleDeleteSitePredictionScenario}
         showSessionNeighbors={showSessionNeighbors}
         setShowSessionNeighbors={setShowSessionNeighbors}
         neighborLogsAvailable={neighborLogsAvailable}
@@ -4995,6 +5200,7 @@ const UnifiedMapView = () => {
         deltaGridApiState={deltaGridApiState}
         onDeltaGridComputeStore={handleDeltaGridComputeStore}
         onDeltaGridFetchStored={handleDeltaGridManualFetch}
+        onDeleteStoredGridScenario={handleDeleteStoredGridScenario}
         mlGridEnabled={mlGridEnabled}
         setMlGridEnabled={setMlGridEnabled}
         mlGridSize={mlGridSize}
@@ -5239,6 +5445,7 @@ const UnifiedMapView = () => {
                   sessionIds={sessionIds}
                   siteToggle={siteToggle}
                   sitePredictionVersion={sitePredictionVersion}
+                  sitePredictionScenarioId={sitePredictionScenarioId}
                   defaultBeamwidth={defaultSiteBeamwidth}
                   enableSiteToggle={enableSiteToggle}
                   showSiteMarkers={showSiteMarkers}
@@ -5298,7 +5505,7 @@ const UnifiedMapView = () => {
                   showConnections={false}
                 />
               )}
-
+              // yaha pe subsession ke liye call hai 
               <SubSessionMarkers
                 show={showSubSession}
                 markers={subSessionMarkers}

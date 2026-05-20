@@ -313,6 +313,7 @@ export const useSiteData = ({
   enableSiteToggle, 
   siteToggle, 
   sitePredictionVersion = "original",
+  sitePredictionScenarioId = null,
   defaultBeamwidth = 30,
   projectId, 
   sessionIds,
@@ -361,6 +362,7 @@ export const useSiteData = ({
     const currentParams = JSON.stringify({
       siteToggle,
       sitePredictionVersion,
+      sitePredictionScenarioId,
       defaultBeamwidth: normalizedDefaultBeamwidth,
       projectId,
       sessionIds,
@@ -380,7 +382,7 @@ export const useSiteData = ({
       resource: 'unified-site-data',
       projectId: projectId || 'global',
       sessionIds,
-      variant: `${String(siteToggle || '').toLowerCase()}_${String(sitePredictionVersion || 'original').toLowerCase()}_bw${normalizedDefaultBeamwidth}`,
+      variant: `${String(siteToggle || '').toLowerCase()}_${String(sitePredictionVersion || 'original').toLowerCase()}_scn${Number(sitePredictionScenarioId) || 0}_bw${normalizedDefaultBeamwidth}`,
     });
 
     if (shouldUseLocalCache && !forceRefresh) {
@@ -416,6 +418,12 @@ export const useSiteData = ({
             response = await fetchAllSitePredictionRows({
               ...params,
               version: normalizedVersion,
+              scenario:
+                normalizedVersion === "combined" &&
+                Number.isFinite(Number(sitePredictionScenarioId)) &&
+                Number(sitePredictionScenarioId) > 0
+                  ? Number(sitePredictionScenarioId)
+                  : undefined,
             });
           }
           break;
@@ -458,7 +466,7 @@ export const useSiteData = ({
     } finally {
       if (isMounted.current) setLoading(false);
     }
-  }, [enableSiteToggle, siteToggle, sitePredictionVersion, defaultBeamwidth, projectId, sessionIds, siteData.length, filterEnabled, polygons]);
+  }, [enableSiteToggle, siteToggle, sitePredictionVersion, sitePredictionScenarioId, defaultBeamwidth, projectId, sessionIds, siteData.length, filterEnabled, polygons]);
 
   useEffect(() => {
     if (autoFetch) {

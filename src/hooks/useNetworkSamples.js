@@ -2,6 +2,7 @@
 import { useState, useRef, useCallback, useEffect, startTransition } from 'react';
 import { toast } from 'react-toastify';
 import { mapViewApi } from '@/api/apiEndpoints'; // Adjust path as needed
+import { isCancelledError } from '@/api/apiService';
 import { normalizeTechName, normalizeProviderName } from '@/utils/colorUtils';
 import {
   makeProjectCacheKey,
@@ -27,22 +28,6 @@ const withTimeout = (promise, timeoutMs = 30000) =>
     }),
   ]);
 
-const isRequestCancelled = (error) => {
-  if (!error) return false;
-
-  if (error.isCancelled === true) return true;
-
-  if (
-    error.name === 'AbortError' ||
-    error.name === 'CanceledError' ||
-    error.code === 'ERR_CANCELED' ||
-    error.message === 'Request cancelled' 
-  ) {
-    return true;
-  }
-
-  return false;
-};
 
 function indout(value) {
 
@@ -303,7 +288,7 @@ export const useNetworkSamples = (
           );
 
         } catch (fetchErr) {
-          if (isRequestCancelled(fetchErr)) break;
+          if (isCancelledError(fetchErr)) break;
           throw fetchErr;
         }
 
@@ -435,7 +420,7 @@ export const useNetworkSamples = (
 
 
     } catch (err) {
-      if (isRequestCancelled(err)) return;
+      if (isCancelledError(err)) return;
       if (mountedRef.current && fetchIdRef.current === currentFetchId) {
         setError(err.message);
         toast.error(`Error: ${err.message}`);

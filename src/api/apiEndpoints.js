@@ -1585,6 +1585,16 @@ export const mapViewApi = {
     }),
   updateSitePrediction: (payload) =>
     api.post("/api/MapView/UpdateSitePrediction", payload),
+  getSitePredictionScenarios: (params, config = {}) =>
+    api.get("/api/MapView/GetSitePredictionScenarios", {
+      ...config,
+      params: { ...params, _ts: Date.now() },
+      dedupe: false,
+    }),
+  deleteSitePredictionScenario: (payload, config = {}) =>
+    api.post("/api/MapView/DeleteSitePredictionScenario", payload, config),
+  deleteLtePredictionOptimisedScenario: (payload, config = {}) =>
+    api.post("/api/MapView/DeleteLtePredictionOptimisedScenario", payload, config),
   deleteSitePrediction: (payload) =>
     api.post("/api/MapView/DeleteSitePrediction", payload),
 

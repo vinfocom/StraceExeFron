@@ -2,6 +2,7 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { toast } from 'react-toastify';
 import { mapViewApi } from '@/api/apiEndpoints';
+import { isCancelledError } from '@/api/apiService';
 import { normalizeProviderName, normalizeTechName } from '@/utils/colorUtils';
 import {
   makeProjectCacheKey,
@@ -10,24 +11,6 @@ import {
 } from '@/utils/projectSessionCache';
 
 // ✅ FIX 1: Robust cancellation check including Axios 'CanceledError'
-const isRequestCancelled = (error) => {
-  if (!error) return false;
-  
-  // 1. Check custom property from apiService.js
-  if (error.isCancelled === true) return true;
-  
-  // 2. Check standard Axios/Browser cancellation names
-  if (
-    error.name === 'AbortError' || 
-    error.name === 'CanceledError' || 
-    error.code === 'ERR_CANCELED' ||
-    error.message === 'Request cancelled' // Matches apiService.js message
-  ) {
-    return true;
-  }
-  
-  return false;
-};
 export const useSessionNeighbors = (
   sessionIds,
   enabled = true,
@@ -166,7 +149,7 @@ export const useSessionNeighbors = (
       }
     } catch (err) {
       // ✅ FIX 4: Use the improved check so we don't toast errors for cancellations
-      if (isRequestCancelled(err)) return;
+      if (isCancelledError(err)) return;
       
       if (mountedRef.current) {
         setError(err.message);
