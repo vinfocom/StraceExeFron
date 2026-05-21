@@ -109,7 +109,7 @@ function AppShell({ isElectronRuntime }) {
             <Route path="/dashboard" element={<PrivateRoute><DashboardPage /></PrivateRoute>} />
             <Route path="/drive-test-sessions" element={<PrivateRoute><DriveTestSessionsPage /></PrivateRoute>} />
             <Route path="/mapview" element={<PrivateRoute><HighPerfMap /></PrivateRoute>} />
-            <Route path="/multi-map" element={<MultiViewPage />} />
+            <Route path="/multi-map" element={<PrivateRoute><MultiViewPage /></PrivateRoute>} />
             <Route path="/manage-users" element={<PrivateRoute><ManageUsersPage /></PrivateRoute>} />
             <Route path="/upload-data" element={<PrivateRoute><UploadDataPage /></PrivateRoute>} />
             <Route path="/settings" element={<PrivateRoute><SettingsPage /></PrivateRoute>} />

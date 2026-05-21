@@ -6,6 +6,8 @@ const isElectronRuntime =
   /electron/i.test(navigator.userAgent || "");
 
 const getRuntimePythonBaseUrl = () => {
+  // Security hardening: only allow query-based runtime overrides in local development.
+  if (!import.meta.env.DEV || !isElectronRuntime) return "";
   if (typeof window === "undefined") return "";
 
   try {

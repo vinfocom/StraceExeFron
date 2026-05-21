@@ -17,7 +17,6 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
 
-const SESSION_STORAGE_KEY = "stracer:data-deletion-session";
 const SESSION_TTL_MS = 10 * 60 * 1000;
 
 const maskValue = (value) => {
@@ -31,39 +30,6 @@ const formatRemainingTime = (ms) => {
   const minutes = Math.floor(totalSeconds / 60);
   const seconds = totalSeconds % 60;
   return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
-};
-
-const readStoredSession = () => {
-  if (typeof window === "undefined") return null;
-  try {
-    const raw = window.sessionStorage.getItem(SESSION_STORAGE_KEY);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw);
-    const token = String(parsed?.token || "").trim();
-    const expiresAt = Number(parsed?.expiresAt || 0);
-    if (!token || !expiresAt || Date.now() >= expiresAt) {
-      window.sessionStorage.removeItem(SESSION_STORAGE_KEY);
-      return null;
-    }
-    return { token, expiresAt };
-  } catch {
-    return null;
-  }
-};
-
-const writeStoredSession = (token) => {
-  if (typeof window === "undefined") return null;
-  const payload = {
-    token,
-    expiresAt: Date.now() + SESSION_TTL_MS,
-  };
-  window.sessionStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(payload));
-  return payload;
-};
-
-const clearStoredSession = () => {
-  if (typeof window === "undefined") return;
-  window.sessionStorage.removeItem(SESSION_STORAGE_KEY);
 };
 
 const SummaryRow = ({ label, value }) => (
@@ -98,11 +64,10 @@ const StepBadge = ({ number, title, subtitle, active }) => (
 );
 
 const DataDeletionPage = () => {
-  const restoredSession = readStoredSession();
   const [phoneNumber, setPhoneNumber] = useState("");
   const [otp, setOtp] = useState("");
-  const [deletionToken, setDeletionToken] = useState(restoredSession?.token || "");
-  const [sessionExpiresAt, setSessionExpiresAt] = useState(restoredSession?.expiresAt || 0);
+  const [deletionToken, setDeletionToken] = useState("");
+  const [sessionExpiresAt, setSessionExpiresAt] = useState(0);
   const [preview, setPreview] = useState(null);
   const [acknowledgedRisk, setAcknowledgedRisk] = useState(false);
   const [sendingOtp, setSendingOtp] = useState(false);
@@ -117,7 +82,6 @@ const DataDeletionPage = () => {
   useEffect(() => {
     if (!hasVerifiedSession) {
       if (deletionToken && sessionExpiresAt && sessionExpiresAt <= Date.now()) {
-        clearStoredSession();
         setDeletionToken("");
         setSessionExpiresAt(0);
         setPreview(null);
@@ -185,9 +149,8 @@ const DataDeletionPage = () => {
       if (!token) {
         throw new Error("Deletion session token was not returned.");
       }
-      const session = writeStoredSession(token);
       setDeletionToken(token);
-      setSessionExpiresAt(session?.expiresAt || 0);
+      setSessionExpiresAt(Date.now() + SESSION_TTL_MS);
       setPreview(null);
       setAcknowledgedRisk(false);
       toast.success(response?.message || "OTP verified");
@@ -232,7 +195,6 @@ const DataDeletionPage = () => {
         confirmPermanentDeletion: true,
       });
       toast.success(response?.message || "Deletion requested successfully");
-      clearStoredSession();
       setDeletionToken("");
       setSessionExpiresAt(0);
       setPreview(null);
@@ -246,7 +208,6 @@ const DataDeletionPage = () => {
   };
 
   const handleResetSession = () => {
-    clearStoredSession();
     setDeletionToken("");
     setSessionExpiresAt(0);
     setPreview(null);

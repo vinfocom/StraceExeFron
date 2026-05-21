@@ -2,7 +2,13 @@
 import axios from 'axios';
 import { clearProjectSessionCache } from '../utils/projectSessionCache';
 
+const isElectronRuntime =
+  typeof navigator !== "undefined" &&
+  /electron/i.test(navigator.userAgent || "");
+
 const getRuntimeCsharpApiBaseUrl = () => {
+  // Security hardening: only allow query-based runtime overrides in local development.
+  if (!import.meta.env.DEV || !isElectronRuntime) return "";
   if (typeof window === "undefined") return "";
   try {
     const fromQuery = new URLSearchParams(window.location.search)

@@ -14,7 +14,7 @@ const AuthProvider = ({ children }) => {
   const [loading, setLoading] = useState(true);
   const [authError, setAuthError] = useState(null);
   const authRequestVersionRef = useRef(0);
-  
+
   const navigate = useNavigate();
 
   const clearSession = useCallback(() => {
@@ -33,49 +33,19 @@ const AuthProvider = ({ children }) => {
     const verifyAuthStatus = async () => {
       const requestVersion = ++authRequestVersionRef.current;
       try {
-        const cachedUser = sessionStorage.getItem('user');
-        
         const response = await homeApi.getAuthStatus();
         if (requestVersion !== authRequestVersionRef.current) return;
-        
+
         if (response?.user) {
           setUser(response.user);
           sessionStorage.setItem('user', JSON.stringify(response.user));
           setProjectSessionCacheUserScope(response.user);
-        } else if (cachedUser && cachedUser !== 'undefined') {
-          // API returned success but no user object — trust the cache
-          try {
-            const parsedUser = JSON.parse(cachedUser);
-            setUser(parsedUser);
-            setProjectSessionCacheUserScope(parsedUser);
-          } catch {
-            clearSession();
-          }
         } else {
           clearSession();
         }
       } catch (error) {
         if (requestVersion !== authRequestVersionRef.current) return;
-        // On 401/403, only clear session if there's no cached user. 
-        // If there IS a cached user, trust it — the session cookie may just be 
-        // slow to propagate right after a fresh login.
-        const cachedUser = sessionStorage.getItem('user');
-        const isAuth = error.status === 401 || error.status === 403 || error.isAuthError;
-        
-        if (isAuth) {
-          clearSession();
-        } else if (cachedUser && cachedUser !== 'undefined') {
-          // Keep cached user only for non-auth/network failures.
-          try {
-            const parsedUser = JSON.parse(cachedUser);
-            setUser(parsedUser);
-            setProjectSessionCacheUserScope(parsedUser);
-          } catch {
-            clearSession();
-          }
-        } else {
-          clearSession();
-        }
+        clearSession();
       } finally {
         if (requestVersion !== authRequestVersionRef.current) return;
         setLoading(false);
@@ -97,7 +67,7 @@ const AuthProvider = ({ children }) => {
         navigate('/', { replace: true });
       }
     };
-    
+
     window.addEventListener('storage', handleStorageChange);
     return () => window.removeEventListener('storage', handleStorageChange);
   }, [clearSession, navigate]);
@@ -107,7 +77,7 @@ const AuthProvider = ({ children }) => {
       setAuthError(null);
       setLoading(true);
       authRequestVersionRef.current += 1;
-      
+
       const hashed = sha256(Password || '');
       const loginPayload = {
         Email,
@@ -130,7 +100,6 @@ const AuthProvider = ({ children }) => {
           response?.data?.User ||
           null;
 
-        // Some backend variants return success first and expose user only via auth status.
         if (!userData) {
           try {
             const statusResponse = await homeApi.getAuthStatus();
@@ -141,38 +110,29 @@ const AuthProvider = ({ children }) => {
               statusResponse?.data?.User ||
               null;
           } catch {
-            // Keep login flow alive if status check is temporarily unavailable.
+            // Handled below.
           }
         }
 
-        // Last fallback to mark user as authenticated when backend omits profile payload.
         if (!userData) {
-          userData = { Email };
+          const errorMessage = 'Login succeeded but no authenticated user context was returned.';
+          setAuthError(errorMessage);
+          clearSession();
+          return { success: false, message: errorMessage };
         }
-        
+
         clearProjectSessionCache();
         setUser(userData);
         sessionStorage.setItem('user', JSON.stringify(userData));
         setProjectSessionCacheUserScope(userData);
-        
+
         return { success: true, user: userData };
-      } else {
-        const errorMessage = response.message || 'Login failed';
-        setAuthError(errorMessage);
-        return { success: false, message: errorMessage };
       }
+
+      const errorMessage = response.message || 'Login failed';
+      setAuthError(errorMessage);
+      return { success: false, message: errorMessage };
     } catch (error) {
-      const cachedUserRaw = sessionStorage.getItem('user');
-      if (cachedUserRaw && cachedUserRaw !== 'undefined') {
-        try {
-          const cachedUser = JSON.parse(cachedUserRaw);
-          setUser(cachedUser);
-          setProjectSessionCacheUserScope(cachedUser);
-          return { success: true, user: cachedUser, fromCache: true };
-        } catch {
-          // Ignore JSON parse errors and continue with normal error flow.
-        }
-      }
       const errorMessage = error.response?.data?.message || error.message || 'Login failed';
       setAuthError(errorMessage);
       throw error;
@@ -184,12 +144,11 @@ const AuthProvider = ({ children }) => {
   const logout = async () => {
     try {
       setLoading(true);
-      
+
       await homeApi.logout();
-      
+
       localStorage.setItem('logout-event', Date.now().toString());
       localStorage.removeItem('logout-event');
-      
     } catch (error) {
       console.warn('Logout API failed; clearing local session anyway.', error);
     } finally {
