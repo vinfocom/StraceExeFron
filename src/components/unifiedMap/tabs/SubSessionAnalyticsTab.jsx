@@ -1,3 +1,4 @@
+import { ChevronDown } from "lucide-react";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 
 const formatNumber = (value, digits = 2) => {
@@ -129,6 +130,7 @@ export default function SubSessionAnalyticsTab({
           rowKey: `sub-row-${session.sessionId ?? sessionIndex}-${sub.subSessionId ?? subIndex}-${subIndex}`,
           sessionId: session.sessionId,
           subSessionId: sub.subSessionId,
+          subSessionType: sub.subSessionType,
           status: String(sub.resultStatus || "FAILED").toUpperCase(),
           markerId: sub.markerId ?? null,
           position: sub.markerPosition ?? sub.start ?? session.start ?? null,
@@ -326,9 +328,10 @@ export default function SubSessionAnalyticsTab({
         <div className="grid grid-cols-5 bg-slate-800 px-2 py-1.5 text-[11px] font-semibold text-slate-300">
           <span>Session ID</span>
           <span>Sub Session ID</span>
+          <span>Type</span>
           <span>Status</span>
           <span>Map</span>
-          <span>Drop</span>
+          <span>Details</span>
         </div>
 
         {sortedRows.map((row) => {
@@ -350,6 +353,7 @@ export default function SubSessionAnalyticsTab({
               >
                 <span>{row.sessionId}</span>
                 <span>{row.subSessionId}</span>
+                <span>{row.subSessionType == 1 ? "CS" : "PS"}</span>
                 <span>
                   <span
                     className={`inline-flex items-center rounded-md px-2 py-0.5 text-[11px] border ${
@@ -381,7 +385,7 @@ export default function SubSessionAnalyticsTab({
                     onClick={() => toggleRow(row.rowKey)}
                     className="px-2 py-0.5 rounded border border-slate-600 text-slate-200 hover:bg-slate-800"
                   >
-                    {isExpanded ? "Hide" : "Drop"}
+                    {isExpanded ? "Hide" : <ChevronDown />}
                   </button>
                 </span>
               </div>

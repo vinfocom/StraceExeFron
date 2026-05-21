@@ -73,6 +73,8 @@ const normalizeMetrics = (metrics = {}) => ({
 const normalizeSubSessionItem = (item = {}) => {
   const subSessionId =
     item.sub_session_id ?? item.subSessionId ?? item.subsession_id ?? null;
+  const subSessionType =
+    item.sub_session_type ?? item.subSessionType ?? item.subsession_type ?? null;
 
   const coordinates = item.coordinates || {};
   const start = normalizeLatLng(coordinates.start_lat, coordinates.start_lon);
@@ -80,6 +82,7 @@ const normalizeSubSessionItem = (item = {}) => {
 
   return {
     subSessionId,
+    subSessionType: subSessionType == null ? null : String(subSessionType).trim(),
     start,
     end,
     resultStatus: String(
@@ -136,6 +139,7 @@ const normalizeSessionItem = (item = {}, index = 0) => {
         markerType: "sub-session-start",
         sessionId,
         subSessionId: sub.subSessionId,
+        subSessionType: sub.subSessionType,
         resultStatus: sub.resultStatus,
         position: position,
         start: position,
@@ -165,6 +169,7 @@ const normalizeSessionItem = (item = {}, index = 0) => {
       markerType: "session-start",
       sessionId,
       subSessionId: null,
+      subSessionType: null,
       resultStatus: "FAILED",
       position: sessionStart,
       start: sessionStart,
@@ -321,7 +326,7 @@ export const useSubSessionAnalytics = (sessionIds, enabled = false) => {
       }
 
       const cacheKey = makeProjectCacheKey({
-        resource: "unified-sub-session-analytics",
+        resource: "unified-sub-session-analytics-v2",
         sessionIds: sessionIds || [],
       });
 

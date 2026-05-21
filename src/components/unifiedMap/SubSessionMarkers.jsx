@@ -17,9 +17,30 @@ const getNormalizedStatus = (statusRaw) => {
 
 const formatStatus = (statusRaw) => {
   const status = getNormalizedStatus(statusRaw);
-  if (status === "SUCCESS") return "Success";
-  return "Failed";
+
+  if (status === "SUCCESS") {
+    return {
+      status: "Success",
+      color: "#22C55E",
+    };
+  }
+
+  return {
+    status: "Failed",
+    color: "#EF4444",
+  };
 };
+
+const DIAMOND_PATH = "M 0,-10 10,0 0,10 -10,0 z";
+const HEXAGON_PATH = "M 0,-10 8.66,-5 8.66,5 0,10 -8.66,5 -8.66,-5 z";
+
+const getSubSessionMarkerPath = (subSessionType) => {
+  const value = String(subSessionType ?? "").trim();
+  if (value === "2") return HEXAGON_PATH;
+  return DIAMOND_PATH;
+};
+
+
 
 const SubSessionMarkers = ({
   markers = [],
@@ -64,8 +85,8 @@ const SubSessionMarkers = ({
           key={marker.id}
           position={marker.position}
           icon={{
-            path: "M 0,-10 10,0 0,10 -10,0 z",    // yeh  maine daimond bana rakkha hai 
-            fillColor: "#5219af",
+            path: getSubSessionMarkerPath(marker.subSessionType),
+            fillColor: formatStatus(marker.resultStatus).color,
             fillOpacity: 1,
             strokeColor: "#f7f8f8",
             strokeWeight: 2,
@@ -108,8 +129,12 @@ const SubSessionMarkers = ({
                 <span className="font-medium">{selectedMarker.subSessionId ?? "N/A"}</span>
               </div>
               <div className="flex justify-between gap-3">
+                <span className="text-slate-500">Type</span>
+                <span className="font-medium">{selectedMarker.subSessionType ?? "N/A"}</span>
+              </div>
+              <div className="flex justify-between gap-3">
                 <span className="text-slate-500">Status</span>
-                <span className="font-medium">{formatStatus(selectedMarker.resultStatus)}</span>
+                <span className="font-medium">{formatStatus(selectedMarker.resultStatus).status}</span>
               </div>
               <div className="flex justify-between gap-3">
                 <span className="text-slate-500">Success</span>
