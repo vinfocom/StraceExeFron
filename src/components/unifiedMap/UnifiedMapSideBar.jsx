@@ -448,6 +448,7 @@ const UnifiedMapSidebar = ({
   const [storedGridScenarioMenuOpen, setStoredGridScenarioMenuOpen] = useState(false);
   const [showCurrentViewInfo, setShowCurrentViewInfo] = useState(false);
   const [sidebarWidth, setSidebarWidth] = useState(340);
+  const [activeSidebarTab, setActiveSidebarTab] = useState("filter");
 
   useEffect(() => {
     if (!open) return;
@@ -566,6 +567,22 @@ const UnifiedMapSidebar = ({
     },
     [setEnableSiteToggle, siteRowCount],
   );
+
+  const handleFetchSiteLayerData = useCallback(async () => {
+    const isCellMode = String(siteToggle || "").trim().toLowerCase() === "cell";
+    const layerLabel = isCellMode ? "sector triangles" : "sites";
+    try {
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(
+          new Event(isCellMode ? "map:selectAllSectors" : "map:selectAllSites"),
+        );
+      }
+      toast.info(`Fetching ${layerLabel} data...`);
+    } catch (error) {
+      const message = error?.message || `Failed to fetch ${layerLabel} data.`;
+      toast.error(message);
+    }
+  }, [siteToggle]);
 
   const activeDataFiltersCount = useMemo(() => {
     if (!dataFilters) return 0;
@@ -1573,6 +1590,45 @@ const UnifiedMapSidebar = ({
                 </div>
               )}
 
+              <div className="grid grid-cols-3 gap-2 rounded-lg border border-slate-700/60 bg-slate-900/70 p-1">
+                <button
+                  type="button"
+                  onClick={() => setActiveSidebarTab("filter")}
+                  className={`h-8 rounded-md text-xs font-semibold transition-colors ${
+                    activeSidebarTab === "filter"
+                      ? "bg-blue-600 text-white"
+                      : "bg-slate-800 text-slate-300 hover:bg-slate-700"
+                  }`}
+                >
+                  Filter
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setActiveSidebarTab("raster")}
+                  className={`h-8 rounded-md text-xs font-semibold transition-colors ${
+                    activeSidebarTab === "raster"
+                      ? "bg-blue-600 text-white"
+                      : "bg-slate-800 text-slate-300 hover:bg-slate-700"
+                  }`}
+                >
+                  Raster
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setActiveSidebarTab("optimisation")}
+                  className={`h-8 rounded-md text-xs font-semibold transition-colors ${
+                    activeSidebarTab === "optimisation"
+                      ? "bg-blue-600 text-white"
+                      : "bg-slate-800 text-slate-300 hover:bg-slate-700"
+                  }`}
+                >
+                  Optimisation
+                </button>
+              </div>
+
+              {(activeSidebarTab === "filter" || activeSidebarTab === "raster") && (
+                <>
+              {activeSidebarTab === "filter" && (
               <CollapsibleSection
                 title="Data Layer"
                 icon={Database}
@@ -1701,7 +1757,9 @@ const UnifiedMapSidebar = ({
                   onChange={setShowNumCells}
                 />
           </CollapsibleSection>
+              )}
 
+          {activeSidebarTab === "raster" && (
           <CollapsibleSection
             title="Raster"
             icon={Grid3X3}
@@ -1909,10 +1967,97 @@ const UnifiedMapSidebar = ({
               </p>
             )}
           </CollapsibleSection>
+          )}
+          {activeSidebarTab === "filter" && (
+          <CollapsibleSection
+            title="Mobility"
+            icon={ArrowLeftRight}
+            badge={
+              (techHandover ? (technologyTransitions?.length || 0) : 0) +
+              (bandHandover ? (bandTransitions?.length || 0) : 0) +
+              (pciHandover ? (pciTransitions?.length || 0) : 0)
+            }
+          >
+            {/* Tech Handover */}
+            <ToggleRow
+              label="Tech Handovers"
+              description="Technology change points"
+              checked={techHandover}
+              onChange={setTechHandover}
+              useSwitch={true}
+            />
+            {techHandover && technologyTransitions?.length > 0 && (
+              <div className="bg-slate-800/50 rounded p-2 text-xs mb-2">
+                <InfoBadge
+                  label="Count"
+                  value={technologyTransitions.length}
+                  color="blue"
+                />
+              </div>
+            )}
 
+            {/* Band Handover */}
+            <ToggleRow
+              label="Band Handovers"
+              description="Frequency band changes"
+              checked={bandHandover}
+              onChange={setBandHandover}
+              useSwitch={true}
+            />
+            {bandHandover && bandTransitions?.length > 0 && (
+              <div className="bg-slate-800/50 rounded p-2 text-xs mb-2">
+                <InfoBadge
+                  label="Count"
+                  value={bandTransitions.length}
+                  color="green"
+                />
+              </div>
+            )}
+
+            {/* PCI Handover */}
+            <ToggleRow
+              label="PCI Handovers"
+              description="PCI changes"
+              checked={pciHandover}
+              onChange={setPciHandover}
+              useSwitch={true}
+            />
+            {pciHandover && pciTransitions?.length > 0 && (
+              <div className="bg-slate-800/50 rounded p-2 text-xs">
+                <InfoBadge
+                  label="Count"
+                  value={pciTransitions.length}
+                  color="orange"
+                />
+              </div>
+            )}
+          </CollapsibleSection>
+          )}
+
+              </>
+              )}
+
+          {activeSidebarTab === "optimisation" && (
+            <>
+          {activeSidebarTab === "optimisation" && (
           <CollapsibleSection title="Site & Prediction" icon={Radio}>
             {enableSiteToggle && (
               <>
+                <div className="pt-2">
+                  <Button
+                    type="button"
+                    onClick={handleFetchSiteLayerData}
+                    disabled={loading}
+                    className="w-full h-8 text-xs font-semibold bg-cyan-600 hover:bg-cyan-500"
+                  >
+                    <RefreshCw className={`h-3.5 w-3.5 mr-2 ${loading ? "animate-spin" : ""}`} />
+                    {loading
+                      ? "Fetching..."
+                      : String(siteToggle || "").trim().toLowerCase() === "cell"
+                        ? "Fetch Triangle Data"
+                        : "Fetch Site Data"}
+                  </Button>
+                </div>
                 <div className="grid grid-cols-3 gap-2">
                   <SelectRow
                     className="pt-2"
@@ -2471,84 +2616,21 @@ const UnifiedMapSidebar = ({
             </div>
           )}
           </CollapsibleSection>
+          )}
 
 
 
 
 
 
-          {/* Metric & Filters moved to Raster section */}
-
-          {/* Dominance/Coverage controls moved under Raster KPI */}
-          <CollapsibleSection
-            title="Mobility"
-            icon={ArrowLeftRight}
-            badge={
-              (techHandover ? (technologyTransitions?.length || 0) : 0) +
-              (bandHandover ? (bandTransitions?.length || 0) : 0) +
-              (pciHandover ? (pciTransitions?.length || 0) : 0)
-            }
-          >
-            {/* Tech Handover */}
-            <ToggleRow
-              label="Tech Handovers"
-              description="Technology change points"
-              checked={techHandover}
-              onChange={setTechHandover}
-              useSwitch={true}
-            />
-            {techHandover && technologyTransitions?.length > 0 && (
-              <div className="bg-slate-800/50 rounded p-2 text-xs mb-2">
-                <InfoBadge
-                  label="Count"
-                  value={technologyTransitions.length}
-                  color="blue"
-                />
-              </div>
-            )}
-
-            {/* Band Handover */}
-            <ToggleRow
-              label="Band Handovers"
-              description="Frequency band changes"
-              checked={bandHandover}
-              onChange={setBandHandover}
-              useSwitch={true}
-            />
-            {bandHandover && bandTransitions?.length > 0 && (
-              <div className="bg-slate-800/50 rounded p-2 text-xs mb-2">
-                <InfoBadge
-                  label="Count"
-                  value={bandTransitions.length}
-                  color="green"
-                />
-              </div>
-            )}
-
-            {/* PCI Handover */}
-            <ToggleRow
-              label="PCI Handovers"
-              description="PCI changes"
-              checked={pciHandover}
-              onChange={setPciHandover}
-              useSwitch={true}
-            />
-            {pciHandover && pciTransitions?.length > 0 && (
-              <div className="bg-slate-800/50 rounded p-2 text-xs">
-                <InfoBadge
-                  label="Count"
-                  value={pciTransitions.length}
-                  color="orange"
-                />
-              </div>
-            )}
-          </CollapsibleSection>
+          
+          
 
 
 
 
           {/* Coverage Hole Filters */}
-          {shouldShowMetricSelector && coverageHoleFilters && (
+          {activeSidebarTab === "raster" && shouldShowMetricSelector && coverageHoleFilters && (
             <CollapsibleSection
               title="Coverage Holes"
               icon={AlertTriangle}
@@ -2632,6 +2714,7 @@ const UnifiedMapSidebar = ({
             </CollapsibleSection>
           )}
 
+          {activeSidebarTab === "optimisation" && (
           <CollapsibleSection
           title="Optimisation" 
           icon={TowerControl} >
@@ -2761,6 +2844,9 @@ const UnifiedMapSidebar = ({
                   )}
                 </div>
               </CollapsibleSection>
+          )}
+            </>
+          )}
               </div>
 
               {/* Footer */}

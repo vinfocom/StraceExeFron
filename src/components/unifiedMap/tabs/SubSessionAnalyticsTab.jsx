@@ -35,6 +35,11 @@ const formatBytes = (value) => {
   return `${bytes.toFixed(0)} B`;
 };
 
+const formatPercent = (value) => {
+  if (value == null || Number.isNaN(value)) return "0%";
+  return `${Number(value).toFixed(1)}%`;
+};
+
 const toCount = (value) => {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : 0;
@@ -51,6 +56,27 @@ const formatLatLng = (position) => {
   const lng = Number(position.lng);
   if (Number.isNaN(lat) || Number.isNaN(lng)) return "N/A";
   return `${lat.toFixed(6)}, ${lng.toFixed(6)}`;
+};
+
+const normalizeSubSessionResultStatus = (statusRaw) => {
+  const numeric = Number(statusRaw);
+  if (Number.isFinite(numeric)) {
+    if (numeric === 1) return "success";
+    if (numeric === 2) return "failed";
+  }
+
+  const raw = String(statusRaw ?? "").trim().toLowerCase().replace(/[_\s-]+/g, " ");
+  if (!raw) return "failed";
+
+  if (["success", "succeeded", "pass", "passed", "connected"].includes(raw)) {
+    return "success";
+  }
+
+  if (["failed", "fail", "error", "not connected", "disconnected"].includes(raw)) {
+    return "failed";
+  }
+
+  return "failed";
 };
 
 const SORT_OPTIONS = [
@@ -131,7 +157,7 @@ export default function SubSessionAnalyticsTab({
           sessionId: session.sessionId,
           subSessionId: sub.subSessionId,
           subSessionType: sub.subSessionType,
-          status: String(sub.resultStatus || "FAILED").toUpperCase(),
+          status: normalizeSubSessionResultStatus(sub.resultStatus || "failed"),
           markerId: sub.markerId ?? null,
           position: sub.markerPosition ?? sub.start ?? session.start ?? null,
           start: sub.start ?? null,
@@ -195,6 +221,62 @@ export default function SubSessionAnalyticsTab({
     return sorted;
   }, [rows, sortBy]);
 
+  const callKpis = useMemo(() => {
+    const callRows = rows.filter((row) => String(row.subSessionType ?? "").trim() === "2");
+    const totalCalls = callRows.length;
+
+    let successStatusCalls = 0; // status = success
+    let failedStatusCalls = 0;  // status = failed
+
+    let successCalls = 0;       // status=success and duration > 120 sec
+    let dropCalls = 0;          // status=failed and du ration between 90 and 120 sec
+    let notConnectedCalls = 0;  // status=failed and duration < 15 sec
+    let otherFailedCalls = 0;   // status=failed with other duration/missing
+
+    callRows.forEach((row) => {
+      const status = normalizeSubSessionResultStatus(row.status);
+      const durationMs = Number(row.duration);
+
+      if (status === "success") {
+        successStatusCalls += 1;
+        if (Number.isFinite(durationMs) && durationMs / 1000 > 120) {
+          successCalls += 1;
+        }
+        return;
+      }
+
+      failedStatusCalls += 1;
+      if (!Number.isFinite(durationMs)) {
+        otherFailedCalls += 1;
+        return;
+      }
+
+      const durationSec = durationMs / 1000;
+      if (durationSec >= 90 && durationSec <= 120) {
+        dropCalls += 1;
+      } else if (durationSec < 15) {
+        notConnectedCalls += 1;
+      } else {
+        otherFailedCalls += 1;
+      }
+    });
+
+    const successRate = totalCalls > 0 ? (successStatusCalls / totalCalls) * 100 : 0;
+    const dropCallRate = totalCalls > 0 ? (dropCalls / totalCalls) * 100 : 0;
+
+    return {
+      totalCalls,
+      successStatusCalls,
+      failedStatusCalls,
+      successCalls,
+      dropCalls,
+      notConnectedCalls,
+      otherFailedCalls,
+      successRate,
+      dropCallRate,
+    };
+  }, [rows]);
+
   const toggleRow = (rowKey) => {
     setExpandedRows((previous) => ({
       ...previous,
@@ -247,6 +329,51 @@ export default function SubSessionAnalyticsTab({
             <span className="text-[11px] text-slate-300 bg-slate-800 px-2 py-1 rounded">
               Req Sessions: {requestedCount}
             </span>
+          </div>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+        <div className="bg-slate-900/70 border border-slate-700 rounded-lg p-3">
+          <div className="text-[11px] text-slate-400">Call Rows (Type 2)</div>
+          <div className="text-sm font-semibold text-white mt-1">
+            {formatNumber(callKpis.totalCalls, 0)}
+          </div>
+        </div>
+        <div className="bg-slate-900/70 border border-slate-700 rounded-lg p-3">
+          <div className="text-[11px] text-slate-400">Success Calls (Status=1)</div>
+          <div className="text-sm font-semibold text-emerald-300 mt-1">
+            {formatNumber(callKpis.successStatusCalls, 0)} ({formatPercent(callKpis.successRate)})
+          </div>
+        </div>
+        <div className="bg-slate-900/70 border border-slate-700 rounded-lg p-3">
+          <div className="text-[11px] text-slate-400">Failed Calls (Status=2)</div>
+          <div className="text-sm font-semibold text-rose-300 mt-1">
+            {formatNumber(callKpis.failedStatusCalls, 0)}
+          </div>
+        </div>
+        <div className="bg-slate-900/70 border border-slate-700 rounded-lg p-3">
+          <div className="text-[11px] text-slate-400">Call Success ({`>120s`})</div>
+          <div className="text-sm font-semibold text-emerald-300 mt-1">
+            {formatNumber(callKpis.successCalls, 0)} ({formatPercent(callKpis.successRate)})
+          </div>
+        </div>
+        <div className="bg-slate-900/70 border border-slate-700 rounded-lg p-3">
+          <div className="text-[11px] text-slate-400">Drop Call (90-120s)</div>
+          <div className="text-sm font-semibold text-rose-300 mt-1">
+            {formatNumber(callKpis.dropCalls, 0)} ({formatPercent(callKpis.dropCallRate)})
+          </div>
+        </div>
+        <div className="bg-slate-900/70 border border-slate-700 rounded-lg p-3">
+          <div className="text-[11px] text-slate-400">Not Connected ({`<15s`})</div>
+          <div className="text-sm font-semibold text-amber-300 mt-1">
+            {formatNumber(callKpis.notConnectedCalls, 0)}
+          </div>
+        </div>
+        <div className="bg-slate-900/70 border border-slate-700 rounded-lg p-3">
+          <div className="text-[11px] text-slate-400">Not Connected</div>
+          <div className="text-sm font-semibold text-slate-200 mt-1">
+            {formatNumber(callKpis.otherFailedCalls, 0)}
           </div>
         </div>
       </div>
@@ -357,12 +484,12 @@ export default function SubSessionAnalyticsTab({
                 <span>
                   <span
                     className={`inline-flex items-center rounded-md px-2 py-0.5 text-[11px] border ${
-                      row.status === "SUCCESS"
+                      row.status === "success"
                         ? "border-emerald-700/40 bg-emerald-900/20 text-emerald-300"
                         : "border-rose-700/40 bg-rose-900/20 text-rose-300"
                     }`}
                   >
-                    {row.status === "SUCCESS" ? "Success" : "Failed"}
+                    {row.status === "success" ? "Success" : "Failed"}
                   </span>
                 </span>
                 <span>

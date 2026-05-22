@@ -37,6 +37,11 @@ const debugUnifiedMapApi = (event, payload = {}) => {
   console.log(`[UnifiedMapApi] ${event}`, payload);
 };
 
+const getPublicApiHeaders = () => {
+  const key = String(import.meta.env.VITE_PUBLIC_API_KEY || "").trim();
+  return key ? { "X-Public-Api-Key": key } : {};
+};
+
 const triggerBrowserDownload = (blob, filename) => {
   const blobUrl = window.URL.createObjectURL(blob);
   const link = document.createElement("a");
@@ -49,10 +54,11 @@ const triggerBrowserDownload = (blob, filename) => {
   window.URL.revokeObjectURL(blobUrl);
 };
 
-const downloadUrlAsBlob = async (url, filename) => {
+const downloadUrlAsBlob = async (url, filename, headers = {}) => {
   const response = await axios.get(url, {
     responseType: "blob",
     withCredentials: true,
+    headers,
   });
   const blob = response?.data instanceof Blob
     ? response.data
@@ -1148,9 +1154,12 @@ export const mapViewApi = {
   getLtePredictionLocationStatsRefined: (params, config = {}) =>
     api.get("/api/MapView/GetLtePredictionLocationStatsRefined", { params, ...config }),
 
-  signup: (user) => api.post("/api/MapView/user_signup", user),
-  startSession: (data) => api.post("/api/MapView/start_session", data),
-  endSession: (data) => api.post("/api/MapView/end_session", data),
+  signup: (user) =>
+    api.post("/api/MapView/user_signup", user, { headers: getPublicApiHeaders() }),
+  startSession: (data) =>
+    api.post("/api/MapView/start_session", data, { headers: getPublicApiHeaders() }),
+  endSession: (data) =>
+    api.post("/api/MapView/end_session", data, { headers: getPublicApiHeaders() }),
   getDuration: ({ sessionIds }) => api.get(`/api/MapView/session/provider-network-time/combined`, { params: { sessionIds } }),
   getIOAnalysis: (params) =>
     api.get(`/api/MapView/GetIndoorOutdoorSessionAnalytics`, { params }),
@@ -1523,7 +1532,8 @@ export const mapViewApi = {
   getLogsByDateRange: (filters) =>
     api.get("/api/MapView/GetLogsByDateRange", { withCredentials: true, params: filters }),
 
-  logNetwork: (data) => api.post("/api/MapView/log_networkAsync", data),
+  logNetwork: (data) =>
+    api.post("/api/MapView/log_networkAsync", data, { headers: getPublicApiHeaders() }),
 
   getLogsByneighbour: (params) => {
     return api.get("/api/MapView/GetNeighbourLogsByDateRange", {
@@ -1612,9 +1622,10 @@ export const mapViewApi = {
   getSiteMl: (params) => api.get("/api/MapView/GetSiteMl", { params }),
 
   // ==================== Image Upload ====================
-  uploadImage: (formData) => api.post("/api/MapView/UploadImage", formData),
+  uploadImage: (formData) =>
+    api.post("/api/MapView/UploadImage", formData, { headers: getPublicApiHeaders() }),
   uploadImageLegacy: (formData) =>
-    api.post("/api/MapView/UploadImageLegacy", formData),
+    api.post("/api/MapView/UploadImageLegacy", formData, { headers: getPublicApiHeaders() }),
 };
 
 export const gridAnalyticsApi = {
@@ -1744,7 +1755,7 @@ export const excelApi = {
   downloadTemplate: (fileType) => {
     const url = `https://s-traccceer.vinfocom.co.in/ExcelUpload/DownloadExcel?fileType=${fileType}`;
     const filename = fileType === 3 ? "project_template.xlsx" : "upload_template.xlsx";
-    return downloadUrlAsBlob(url, filename);
+    return downloadUrlAsBlob(url, filename, getPublicApiHeaders());
   },
 
   getUploadedFiles: async (type) => {

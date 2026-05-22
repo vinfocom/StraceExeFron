@@ -20,6 +20,27 @@ const toFiniteNumber = (value) => {
   return Number.isFinite(parsed) ? parsed : null;
 };
 
+const normalizeSubSessionResultStatus = (statusRaw) => {
+  const numeric = Number(statusRaw);
+  if (Number.isFinite(numeric)) {
+    if (numeric === 1) return "success";
+    if (numeric === 2) return "failed";
+  }
+
+  const raw = String(statusRaw ?? "").trim().toLowerCase().replace(/[_\s-]+/g, " ");
+  if (!raw) return "failed";
+
+  if (["success", "succeeded", "pass", "passed", "connected"].includes(raw)) {
+    return "success";
+  }
+
+  if (["failed", "fail", "error", "not connected", "disconnected"].includes(raw)) {
+    return "failed";
+  }
+
+  return "failed";
+};
+
 const normalizeLatLng = (latRaw, lngRaw, allowZero = false) => {
   const lat = toFiniteNumber(latRaw);
   const lng = toFiniteNumber(lngRaw);
@@ -32,9 +53,17 @@ const normalizeLatLng = (latRaw, lngRaw, allowZero = false) => {
 };
 
 const normalizeStatusCounts = (statusCounts = {}) => {
-  const success = toFiniteNumber(statusCounts.success) ?? 0;
-  const failed = toFiniteNumber(statusCounts.failed) ?? 0;
-  const total = toFiniteNumber(statusCounts.total) ?? success + failed;
+  const success =
+    (toFiniteNumber(statusCounts.success) ?? 0) +
+    (toFiniteNumber(statusCounts.connected) ?? 0);
+  const failed =
+    (toFiniteNumber(statusCounts.failed) ?? 0) +
+    (toFiniteNumber(statusCounts.not_connected) ?? 0) +
+    (toFiniteNumber(statusCounts.notConnected) ?? 0);
+  const total =
+    toFiniteNumber(statusCounts.total) ??
+    toFiniteNumber(statusCounts.total_count) ??
+    success + failed;
 
   return { success, failed, total };
 };
@@ -85,9 +114,11 @@ const normalizeSubSessionItem = (item = {}) => {
     subSessionType: subSessionType == null ? null : String(subSessionType).trim(),
     start,
     end,
-    resultStatus: String(
-      item.result_status ?? item.resultStatus ?? item.status ?? "FAILED",
-    ).toUpperCase(),
+    resultStatus: normalizeSubSessionResultStatus(item.result_status ?? "failed"),
+    // Keep duration in milliseconds to match backend contract (`duration_ms`)
+    // and downstream KPI rules that convert ms -> sec.
+    duration: toFiniteNumber(item.duration_ms),
+
     rawCoordinates: coordinates,
     markerId: null,
     markerPosition: null,
@@ -138,6 +169,7 @@ const normalizeSessionItem = (item = {}, index = 0) => {
         id: markerId,
         markerType: "sub-session-start",
         sessionId,
+        duration: sub.duration,
         subSessionId: sub.subSessionId,
         subSessionType: sub.subSessionType,
         resultStatus: sub.resultStatus,
@@ -170,7 +202,7 @@ const normalizeSessionItem = (item = {}, index = 0) => {
       sessionId,
       subSessionId: null,
       subSessionType: null,
-      resultStatus: "FAILED",
+      resultStatus: "failed",
       position: sessionStart,
       start: sessionStart,
       end: sessionEnd,
@@ -326,7 +358,7 @@ export const useSubSessionAnalytics = (sessionIds, enabled = false) => {
       }
 
       const cacheKey = makeProjectCacheKey({
-        resource: "unified-sub-session-analytics-v2",
+        resource: "unified-sub-session-analytics-v4",
         sessionIds: sessionIds || [],
       });
 

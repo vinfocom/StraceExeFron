@@ -17,6 +17,59 @@ const EMPTY_ARRAY = [];
 const MAX_IMAGE_LOG_SCAN_POINTS = 12000;
 const METRIC_RANGE_EPSILON = 1e-9;
 
+const getLegendCategoryKeyFromLog = (log, colorBy) => {
+  const key = String(colorBy || "").trim().toLowerCase();
+
+  if (key === "provider") {
+    return (
+      normalizeProviderName(log?.provider || log?.Provider || log?.carrier) ||
+      "Unknown"
+    );
+  }
+
+  if (key === "technology") {
+    const tech = log?.network || log?.Network || log?.technology || log?.networkType;
+    const band =
+      log?.band ||
+      log?.Band ||
+      log?.neighbourBand ||
+      log?.neighborBand ||
+      log?.neighbour_band;
+    return normalizeTechName(tech, band);
+  }
+
+  if (key === "band") {
+    const rawBand = String(
+      log?.neighbourBand ||
+        log?.neighborBand ||
+        log?.neighbour_band ||
+        log?.band ||
+        log?.Band ||
+        "",
+    ).trim();
+    const normalizedBand = normalizeBandName(rawBand);
+    return normalizedBand === "-1" || normalizedBand === "" ? "Unknown" : normalizedBand;
+  }
+
+  if (key === "nodebid") {
+    const nodeb =
+      log?.nodebid ??
+      log?.nodeb_id ??
+      log?.nodebId ??
+      log?.NodeBID ??
+      log?.NodeBId ??
+      log?.NodebId;
+    return String(nodeb ?? "").trim() || "Unknown";
+  }
+
+  if (key === "pci") {
+    const pci = Number.parseInt(log?.pci ?? log?.PCI ?? log?.best_pci, 10);
+    return Number.isFinite(pci) ? String(pci) : "Unknown";
+  }
+
+  return "Unknown";
+};
+
 const matchesLegendMetricRange = (value, legendFilter) => {
   const min = Number(legendFilter?.min);
   const max = Number(legendFilter?.max);
@@ -1465,8 +1518,7 @@ const MapWithMultipleCircles = ({
 
   const getPrimaryColor = useCallback((loc) => {
     if (colorBy && colorBy !== 'metric') {
-        const key = colorBy.toLowerCase();
-        const value = loc?.[key];
+        const value = getLegendCategoryKeyFromLog(loc, colorBy);
         return resolveColor(value, colorBy);
     }
     if (String(selectedMetric || "").trim().toLowerCase() === "nodebid") {
@@ -1479,17 +1531,7 @@ const MapWithMultipleCircles = ({
 
   const getNeighborColor = useCallback((neighbor) => {
     if (colorBy && colorBy !== 'metric') {
-        const key = colorBy.toLowerCase();
-        let value;
-        if (key === 'technology') {
-             const rawTech = neighbor?.technology || neighbor?.networkType;
-             const bandForTech = neighbor?.neighbourBand || neighbor?.neighborBand || neighbor?.band;
-             value = normalizeTechName(rawTech, bandForTech);
-        } else if (key === 'band') {
-             value = neighbor?.neighbourBand || neighbor?.neighborBand || neighbor?.band;
-        } else {
-             value = neighbor?.[key];
-        }
+        const value = getLegendCategoryKeyFromLog(neighbor, colorBy);
         return resolveColor(value, colorBy);
     }
     const value = neighbor?.metricValue;

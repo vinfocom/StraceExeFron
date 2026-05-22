@@ -21,10 +21,37 @@ const getRuntimeCsharpApiBaseUrl = () => {
   }
 };
 
+const normalizeLoopbackHost = (url) => {
+  if (!url || typeof window === "undefined") return url;
+
+  try {
+    const parsed = new URL(url);
+    const pageHost = (window.location.hostname || "").toLowerCase();
+    const apiHost = (parsed.hostname || "").toLowerCase();
+    const isLoopbackHost = (host) => host === "localhost" || host === "127.0.0.1";
+
+    // Keep frontend and API on the same loopback host to avoid SameSite cookie issues.
+    if (isLoopbackHost(pageHost) && isLoopbackHost(apiHost) && pageHost !== apiHost) {
+      parsed.hostname = pageHost;
+      return parsed.toString().replace(/\/$/, "");
+    }
+  } catch {
+    // If URL parsing fails, keep original value.
+  }
+
+  return url;
+};
+
 const API_BASE_URL = (() => {
   const runtimeOverride = getRuntimeCsharpApiBaseUrl();
-  if (runtimeOverride) return runtimeOverride;
-  return import.meta.env.DEV ? "" : (import.meta.env.VITE_CSHARP_API_URL || "");
+  if (runtimeOverride) return normalizeLoopbackHost(runtimeOverride);
+
+  // In browser dev mode, prefer relative URLs so Vite proxy keeps auth same-origin.
+  if (import.meta.env.DEV && !isElectronRuntime) {
+    return "";
+  }
+
+  return normalizeLoopbackHost(import.meta.env.VITE_CSHARP_API_URL || "");
 })();
 
 if (!import.meta.env.DEV && !API_BASE_URL) {

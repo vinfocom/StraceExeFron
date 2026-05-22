@@ -7,10 +7,16 @@ const formatMetric = (value, suffix = "") => {
 };
 
 const getNormalizedStatus = (statusRaw) => {
-  const value = String(statusRaw || "FAILED").toUpperCase();
-  if (value === "SUCCESS" || value === "SUCCEEDED" || value === "PASS") return "SUCCESS";
-  if (value === "FAILED" || value === "FAIL" || value === "ERROR") return "FAILED";
-  return "FAILED";
+  const numeric = Number(statusRaw);
+  if (Number.isFinite(numeric)) {
+    if (numeric === 1) return "success";
+    if (numeric === 2) return "failed";
+  }
+
+  const value = String(statusRaw ?? "").trim().toLowerCase().replace(/[_\s-]+/g, " ");
+  if (["success", "succeeded", "pass", "passed", "connected"].includes(value)) return "success";
+  if (["failed", "fail", "error", "not connected", "disconnected"].includes(value)) return "failed";
+  return "failed";
 };
 
 
@@ -18,7 +24,7 @@ const getNormalizedStatus = (statusRaw) => {
 const formatStatus = (statusRaw) => {
   const status = getNormalizedStatus(statusRaw);
 
-  if (status === "SUCCESS") {
+  if (status === "success") {
     return {
       status: "Success",
       color: "#22C55E",
