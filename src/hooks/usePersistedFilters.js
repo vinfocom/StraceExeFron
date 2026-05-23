@@ -23,7 +23,8 @@ export const usePersistedFilters = (chartKey, initialFilters = {}) => {
         const parsed = JSON.parse(saved);
         return stripTimeFilters(parsed);
       }
-    } catch (error) {
+    } catch {
+      localStorage.removeItem(storageKey);
     }
     return stripTimeFilters(initialFilters);
   });
@@ -35,7 +36,8 @@ export const usePersistedFilters = (chartKey, initialFilters = {}) => {
       } else {
         localStorage.removeItem(storageKey);
       }
-    } catch (error) {
+    } catch {
+      // Ignore persistence failures (private mode, quota, blocked storage).
     }
   }, [filters, storageKey, chartKey]);
 

@@ -352,12 +352,12 @@ const projectParam = useMemo(()=>{
     fetchPolygons();
   }, [fetchPredictionData, fetchPolygons]);
 
- useEffect(() => {
+useEffect(() => {
   if (!projectId) return;
   setPredictionData(null);
   setPolygons([]);
   reloadData();
-}, [projectId, metric, reloadData]); // eslint-disable-line react-hooks/exhaustive-deps
+}, [projectId, metric, reloadData]);
 
   const debouncedSetViewport = useMemo(
     () => debounce((vp) => {

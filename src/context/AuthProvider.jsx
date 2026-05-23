@@ -63,12 +63,13 @@ const AuthProvider = ({ children }) => {
         } else {
           clearSession();
         }
-      } catch (error) {
+      } catch {
         if (requestVersion !== authRequestVersionRef.current) return;
         clearSession();
       } finally {
-        if (requestVersion !== authRequestVersionRef.current) return;
-        setLoading(false);
+        if (requestVersion === authRequestVersionRef.current) {
+          setLoading(false);
+        }
       }
     };
 

@@ -93,8 +93,6 @@ const CompanyForm = () => {
       status: formData.status ? 1 : 0,
     };
 
-    console.log("📤 Sending Payload:", JSON.stringify(payload, null, 2));
-
     try {
       const data = await companyApi.createCompany(payload);
 
@@ -132,12 +130,7 @@ const CompanyForm = () => {
         );
       }
     } catch (error) {
-      console.error(" API Error Object:", error);
-
-      // 2. CRITICAL DEBUGGING FOR 400 ERRORS
       if (error.response && error.response.data) {
-        console.log(" Server Response Data:", error.response.data);
-
         // Case A: Validation Errors (Standard ASP.NET 400)
         if (error.response.data.errors) {
           const errors = error.response.data.errors;

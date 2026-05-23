@@ -2619,18 +2619,6 @@ const UnifiedMapSidebar = ({
           )}
 
 
-
-
-
-
-          
-          
-
-
-
-
-          {/* Coverage Hole Filters */}
-          {activeSidebarTab === "raster" && shouldShowMetricSelector && coverageHoleFilters && (
             <CollapsibleSection
               title="Coverage Holes"
               icon={AlertTriangle}
@@ -2712,7 +2700,7 @@ const UnifiedMapSidebar = ({
                 </div>
               )}
             </CollapsibleSection>
-          )}
+          
 
           {activeSidebarTab === "optimisation" && (
           <CollapsibleSection

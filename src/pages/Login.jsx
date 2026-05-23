@@ -32,11 +32,13 @@ const LoginPage = () => {
   useEffect(() => {
     const fetchIp = async () => {
       try {
-        const response = await axios.get("https://api.ipify.org?  format=json");
+        const response = await axios.get("https://api.ipify.org?format=json");
         if (response.data && response.data.ip) {
           setIpAddress(response.data.ip);
         }
-      } catch (error) {}
+      } catch {
+        setIpAddress("");
+      }
     };
 
     fetchIp();

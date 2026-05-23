@@ -4,9 +4,12 @@ import App from './App';
 import './index.css';
 
 const enableStrictMode = String(import.meta.env.VITE_ENABLE_STRICT_MODE || '').toLowerCase() === 'true';
+const enablePythonProcessLogs =
+  import.meta.env.DEV ||
+  String(import.meta.env.VITE_ENABLE_PYTHON_PROCESS_LOGS || '').toLowerCase() === 'true';
 
 const electronWindow = window.electronWindow;
-if (electronWindow && typeof electronWindow.onPythonLog === 'function') {
+if (enablePythonProcessLogs && electronWindow && typeof electronWindow.onPythonLog === 'function') {
   electronWindow.onPythonLog((payload) => {
     const message = String(payload?.message ?? '');
     if (!message) {

@@ -34,6 +34,21 @@ const PYTHON_BASE_URL = String(
 
 let activePythonBaseUrl = PYTHON_BASE_URL;
 let discoveryPromise = null;
+const isVerboseApiLoggingEnabled =
+  import.meta.env.DEV ||
+  String(import.meta.env.VITE_ENABLE_API_LOGS || "").toLowerCase() === "true";
+
+const logApiDebug = (...args) => {
+  if (isVerboseApiLoggingEnabled) console.log(...args);
+};
+
+const logApiWarn = (...args) => {
+  if (isVerboseApiLoggingEnabled) console.warn(...args);
+};
+
+const logApiError = (...args) => {
+  if (isVerboseApiLoggingEnabled) console.error(...args);
+};
 
 const AXIOS_CONFIG_KEYS = new Set([
   'headers',
@@ -127,7 +142,7 @@ const discoverPythonBaseUrl = async () => {
  */
 pythonAxios.interceptors.request.use(
   (config) => {
-    console.log(`🚀 Python API Request: ${config.method?.toUpperCase()} ${config.url}`);
+    logApiDebug(`Python API Request: ${config.method?.toUpperCase()} ${config.url}`);
     
     // Handle FormData
     if (config.data instanceof FormData) {
@@ -137,7 +152,7 @@ pythonAxios.interceptors.request.use(
     return config;
   },
   (error) => {
-    console.error('❌ Python API Request Error:', error);
+    logApiError('Python API Request Error:', error?.message || error);
     return Promise.reject(error);
   }
 );
@@ -147,13 +162,13 @@ pythonAxios.interceptors.request.use(
  */
 pythonAxios.interceptors.response.use(
   (response) => {
-    console.log(`✅ Python API Response: ${response.config.url}`, response.data);
+    logApiDebug(`Python API Response: ${response.config.url}`);
     return response;
   },
   async (error) => {
     if (error.response) {
       const { status, data } = error.response;
-      console.error(`❌ Python API Error [${status}]:`, data);
+      logApiWarn(`Python API Error [${status}]:`, data?.message || data?.Message || data?.error || error.message);
       
       const errorMessage = 
         data?.error || 
@@ -164,13 +179,13 @@ pythonAxios.interceptors.response.use(
       
       error.message = `Python API error! Status: ${status} - ${errorMessage}`;
     } else if (error.request) {
-      console.error('❌ Python API No Response:', error.request);
+      logApiWarn('Python API No Response:', error.config?.url || activePythonBaseUrl);
       const originalConfig = error.config || {};
       if (!originalConfig.__portAutoRetried) {
         const discoveredBaseUrl = await discoverPythonBaseUrl();
         if (discoveredBaseUrl) {
           setPythonBaseUrl(discoveredBaseUrl);
-          console.log(`✅ Auto-detected Python backend at ${discoveredBaseUrl}`);
+          logApiDebug(`Auto-detected Python backend at ${discoveredBaseUrl}`);
           return pythonAxios({
             ...originalConfig,
             __portAutoRetried: true,
@@ -180,7 +195,7 @@ pythonAxios.interceptors.response.use(
 
       error.message = `No response from Python backend. Tried base URL: ${activePythonBaseUrl}`;
     } else {
-      console.error('❌ Python API Request Setup Error:', error.message);
+      logApiError('Python API Request Setup Error:', error.message);
     }
     
     return Promise.reject(error);
@@ -213,7 +228,7 @@ const pythonApiService = async (endpoint, options = {}) => {
     
     return response.data;
   } catch (error) {
-    console.error(`Python API call to ${endpoint} failed:`, error.message);
+    logApiError(`Python API call to ${endpoint} failed:`, error.message);
     throw error;
   }
 };

@@ -9,7 +9,9 @@ export const loadSavedViewport = () => {
     if (v && Number.isFinite(v.lat) && Number.isFinite(v.lng) && Number.isFinite(v.zoom)) {
       return v;
     }
-  } catch {}
+  } catch {
+    return null;
+  }
   return null;
 };
 
@@ -22,5 +24,7 @@ export const saveViewport = (map) => {
       VIEWPORT_KEY,
       JSON.stringify({ lat: c.lat(), lng: c.lng(), zoom: z })
     );
-  } catch {}
+  } catch {
+    // Ignore storage failures.
+  }
 };

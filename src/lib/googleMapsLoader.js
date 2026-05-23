@@ -3,7 +3,6 @@ const apiKey =
   (typeof import.meta !== 'undefined' &&
     import.meta.env &&
     import.meta.env.VITE_GOOGLE_MAPS_API_KEY) ||
-  process.env.VITE_GOOGLE_MAPS_API_KEY ||
   '';
 const mapId =
   (typeof import.meta !== 'undefined' &&

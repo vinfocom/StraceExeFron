@@ -6,6 +6,15 @@
 
 [[redirects]]
   from = "/api/*"
-  to = "http://65.2.162.237/:splat"
+  to = "https://s-traccceer.vinfocom.co.in/:splat"
   status = 200
   force = true
+
+[[headers]]
+  for = "/*"
+  [headers.values]
+    Strict-Transport-Security = "max-age=31536000; includeSubDomains; preload"
+    X-Content-Type-Options = "nosniff"
+    X-Frame-Options = "DENY"
+    Referrer-Policy = "strict-origin-when-cross-origin"
+    Permissions-Policy = "camera=(), microphone=(), geolocation=(self)"

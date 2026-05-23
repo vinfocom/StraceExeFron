@@ -49,12 +49,10 @@ export default function CanvasPointsOverlay({
 
     overlay.setMap(map);
     return () => overlay.setMap(null);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [map]);
 
   useEffect(() => {
     drawCanvas();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [points, getRadiusPx, opacity, maxDraw, padding, neigh, showLabels]);
 
   function resolveRadiusPx(zoom) {

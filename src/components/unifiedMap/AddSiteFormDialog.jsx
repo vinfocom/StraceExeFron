@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect } from "react";
 import { Loader2, MapPin, X, Plus, Trash2, Check, ChevronsUpDown } from "lucide-react";
 import { toast } from "react-toastify";
 import { mapViewApi } from "@/api/apiEndpoints";
@@ -343,8 +343,6 @@ const AddSiteFormDialog = ({
         latitude: latitudeValue,
         longitude: longitudeValue,
       };
-
-      console.log("Submitting Payload Details:", JSON.stringify(payload, null, 2));
 
       await mapViewApi.addSitePrediction(payload);
       toast.success("Site added successfully!");

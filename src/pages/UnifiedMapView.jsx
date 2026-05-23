@@ -62,6 +62,7 @@ import {
   generateColorFromHash,
 } from "@/utils/colorUtils";
 import { PolygonChecker as FastPolygonChecker } from "@/utils/polygonUtils";
+import { getMetricValueFromLog } from "@/utils/metrics";
 import {
   findProjectInProjectsCache,
   upsertProjectInProjectsCache,
@@ -3131,8 +3132,9 @@ const UnifiedMapView = () => {
     if (activeCoverageFilters.length > 0) {
       result = result.filter((loc) =>
         activeCoverageFilters.every(([metric, { threshold }]) => {
-          const val = parseFloat(loc[metric]);
-          return !isNaN(val) && val < threshold;
+          const val = getMetricValueFromLog(loc, metric);
+          const limit = Number.parseFloat(threshold);
+          return Number.isFinite(val) && Number.isFinite(limit) && val < limit;
         }),
       );
     }
