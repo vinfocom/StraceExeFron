@@ -17,6 +17,25 @@ const AuthProvider = ({ children }) => {
 
   const navigate = useNavigate();
 
+  const isSuccessResponse = (response) =>
+    response?.success === true || response?.Status === 1 || response?.status === 1;
+
+  const extractUserFromResponse = (response) => {
+    if (!response) return null;
+
+    return (
+      response?.user ||
+      response?.User ||
+      response?.data?.user ||
+      response?.data?.User ||
+      response?.Data?.user ||
+      response?.Data?.User ||
+      response?.Data ||
+      response?.data ||
+      null
+    );
+  };
+
   const clearSession = useCallback(() => {
     setUser(null);
     setAuthError(null);
@@ -36,10 +55,11 @@ const AuthProvider = ({ children }) => {
         const response = await homeApi.getAuthStatus();
         if (requestVersion !== authRequestVersionRef.current) return;
 
-        if (response?.user) {
-          setUser(response.user);
-          sessionStorage.setItem('user', JSON.stringify(response.user));
-          setProjectSessionCacheUserScope(response.user);
+        const authUser = extractUserFromResponse(response);
+        if (authUser) {
+          setUser(authUser);
+          sessionStorage.setItem('user', JSON.stringify(authUser));
+          setProjectSessionCacheUserScope(authUser);
         } else {
           clearSession();
         }
@@ -92,27 +112,17 @@ const AuthProvider = ({ children }) => {
 
       const response = await homeApi.login(loginPayload);
 
-      if (response.success) {
-        let userData =
-          response?.user ||
-          response?.User ||
-          response?.data?.user ||
-          response?.data?.User ||
-          null;
+if (isSuccessResponse(response)) {
+          let userData = extractUserFromResponse(response);
 
-        if (!userData) {
-          try {
-            const statusResponse = await homeApi.getAuthStatus();
-            userData =
-              statusResponse?.user ||
-              statusResponse?.User ||
-              statusResponse?.data?.user ||
-              statusResponse?.data?.User ||
-              null;
-          } catch {
-            // Handled below.
+          if (!userData) {
+            try {
+              const statusResponse = await homeApi.getAuthStatus();
+              userData = extractUserFromResponse(statusResponse);
+            } catch {
+              // Handled below.
+            }
           }
-        }
 
         if (!userData) {
           const errorMessage = 'Login succeeded but no authenticated user context was returned.';
@@ -129,11 +139,23 @@ const AuthProvider = ({ children }) => {
         return { success: true, user: userData };
       }
 
-      const errorMessage = response.message || 'Login failed';
+      const errorMessage =
+        response?.message ||
+        response?.Message ||
+        response?.data?.message ||
+        response?.data?.Message ||
+        response?.Data?.message ||
+        response?.Data?.Message ||
+        'Login failed';
       setAuthError(errorMessage);
       return { success: false, message: errorMessage };
     } catch (error) {
-      const errorMessage = error.response?.data?.message || error.message || 'Login failed';
+      const errorMessage =
+        error.response?.data?.message ||
+        error.response?.data?.Message ||
+        error.response?.data?.error ||
+        error.message ||
+        'Login failed';
       setAuthError(errorMessage);
       throw error;
     } finally {
@@ -173,11 +195,12 @@ const AuthProvider = ({ children }) => {
   const refreshUser = useCallback(async () => {
     try {
       const response = await homeApi.getAuthStatus();
-      if (response?.user) {
-        setUser(response.user);
-        sessionStorage.setItem('user', JSON.stringify(response.user));
-        setProjectSessionCacheUserScope(response.user);
-        return response.user;
+      const authUser = extractUserFromResponse(response);
+      if (authUser) {
+        setUser(authUser);
+        sessionStorage.setItem('user', JSON.stringify(authUser));
+        setProjectSessionCacheUserScope(authUser);
+        return authUser;
       }
     } catch (error) {
       if (error.status === 401 || error.status === 403) {
