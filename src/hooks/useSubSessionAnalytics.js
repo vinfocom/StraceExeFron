@@ -115,8 +115,6 @@ const normalizeSubSessionItem = (item = {}) => {
     start,
     end,
     resultStatus: normalizeSubSessionResultStatus(item.result_status ?? "failed"),
-    // Keep duration in milliseconds to match backend contract (`duration_ms`)
-    // and downstream KPI rules that convert ms -> sec.
     duration: toFiniteNumber(item.duration_ms),
 
     rawCoordinates: coordinates,

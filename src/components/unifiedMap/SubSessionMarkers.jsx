@@ -86,9 +86,9 @@ const SubSessionMarkers = ({
 
   return (
     <>
-      {markers.map((marker) => (
+      {markers.map((marker, index) => (
         <MarkerF
-          key={marker.id}
+          key={`${marker.id ?? "sub"}-${marker.sessionId ?? "na"}-${marker.subSessionId ?? "na"}-${index}`}
           position={marker.position}
           icon={{
             path: getSubSessionMarkerPath(marker.subSessionType),

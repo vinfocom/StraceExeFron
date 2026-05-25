@@ -40,14 +40,17 @@ const formatPercent = (value) => {
   return `${Number(value).toFixed(1)}%`;
 };
 
-const toCount = (value) => {
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : 0;
-};
-
 const toMetric = (value) => {
+  if (value == null) return null;
+  if (typeof value === "string" && value.trim() === "") return null;
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : null;
+};
+
+const toPositiveMetric = (value) => {
+  const parsed = toMetric(value);
+  if (parsed == null) return null;
+  return parsed > 0 ? parsed : null;
 };
 
 const formatLatLng = (position) => {
@@ -79,6 +82,13 @@ const normalizeSubSessionResultStatus = (statusRaw) => {
   return "failed";
 };
 
+const normalizeSubSessionType = (typeRaw) => {
+  const value = String(typeRaw ?? "").trim();
+  if (value === "1") return "1"; // CS
+  if (value === "2") return "2"; // PS
+  return "other";
+};
+
 const SORT_OPTIONS = [
   { key: "NONE", label: "SORT" },
   { key: "MX_SPD", label: "MX SPD" },
@@ -88,7 +98,7 @@ const SORT_OPTIONS = [
 
 export default function SubSessionAnalyticsTab({
   subSessionData = [],
-  subSessionSummary = null,
+  subSessionSummary: _subSessionSummary = null,
   requestedSessionIds = [],
   loading = false,
   onSubSessionSelect,
@@ -97,13 +107,10 @@ export default function SubSessionAnalyticsTab({
   const [expandedRows, setExpandedRows] = useState({});
   const [sortBy, setSortBy] = useState("NONE");
   const [isSortOpen, setIsSortOpen] = useState(false);
+  const [activeTypeTab, setActiveTypeTab] = useState("CS");
   const sortRef = useRef(null);
+  const [info, setInfo] = useState(false);
 
-  const safeSummary = useMemo(() => subSessionSummary || {}, [subSessionSummary]);
-  const summaryCounts = safeSummary.status_counts || {};
-  const summaryTotal = toCount(summaryCounts.total);
-  const summarySuccess = toCount(summaryCounts.success);
-  const summaryFailed = toCount(summaryCounts.failed);
   const requestedCount = Array.isArray(requestedSessionIds) ? requestedSessionIds.length : 0;
 
   const selectedSessionKey = useMemo(
@@ -141,6 +148,12 @@ export default function SubSessionAnalyticsTab({
     return () => document.removeEventListener("mousedown", handleOutsideClick);
   }, []);
 
+  useEffect(() => {
+    if (activeTypeTab !== "PS") {
+      setInfo(false);
+    }
+  }, [activeTypeTab]);
+
   const selectedSortLabel = useMemo(
     () => SORT_OPTIONS.find((option) => option.key === sortBy)?.label || "SORT",
     [sortBy],
@@ -157,7 +170,8 @@ export default function SubSessionAnalyticsTab({
           sessionId: session.sessionId,
           subSessionId: sub.subSessionId,
           subSessionType: sub.subSessionType,
-          status: normalizeSubSessionResultStatus(sub.resultStatus || "failed"),
+          subSessionTypeNormalized: normalizeSubSessionType(sub.subSessionType),
+          status: normalizeSubSessionResultStatus(sub.resultStatus ?? sub.result_status ?? "failed"),
           markerId: sub.markerId ?? null,
           position: sub.markerPosition ?? sub.start ?? session.start ?? null,
           start: sub.start ?? null,
@@ -182,10 +196,11 @@ export default function SubSessionAnalyticsTab({
               session.metrics?.total_file_size,
           ),
           duration: toMetric(
-            sub.duration ??
+            sub.duration_ms ??
+              sub.durationMs ??
+              sub.duration ??
               sub.total_duration ??
-              subMetrics.total_duration ??
-              session.metrics?.avg_duration,
+              subMetrics.total_duration,
           ),
         };
       }),
@@ -221,42 +236,77 @@ export default function SubSessionAnalyticsTab({
     return sorted;
   }, [rows, sortBy]);
 
+  const filteredRows = useMemo(() => {
+    const targetType = activeTypeTab === "CS" ? "1" : "2";
+    return sortedRows.filter((row) => row.subSessionTypeNormalized === targetType);
+  }, [sortedRows, activeTypeTab]);
+
+  const tabSummary = useMemo(() => {
+    const success = filteredRows.filter((row) => row.status === "success").length;
+    const failed = filteredRows.filter((row) => row.status === "failed").length;
+    const total = filteredRows.length;
+
+    const metric = (selector, mode = "avg", positiveOnly = false) => {
+      const values = filteredRows
+        .map(selector)
+        .map((value) => (positiveOnly ? toPositiveMetric(value) : toMetric(value)))
+        .filter((value) => value != null);
+
+      if (!values.length) return null;
+      if (mode === "sum") return values.reduce((acc, value) => acc + value, 0);
+      if (mode === "min") return Math.min(...values);
+      if (mode === "max") return Math.max(...values);
+      return values.reduce((acc, value) => acc + value, 0) / values.length;
+    };
+
+    return {
+      total,
+      success,
+      failed,
+      total_duration: metric((row) => row.duration, "sum", true),
+      avg_duration: metric((row) => row.duration, "avg", true),
+      total_speed: metric((row) => row.maxSpeed, "sum", true),
+      avg_speed: metric((row) => row.maxSpeed, "avg", true),
+      min_speed: metric((row) => row.minSpeed, "min", true),
+      max_speed: metric((row) => row.maxSpeed, "max", true),
+      total_file_size: metric((row) => row.fileSize, "sum", true),
+    };
+  }, [filteredRows]);
+
+  // calculation ayah pe ho rahi hai 
   const callKpis = useMemo(() => {
-    const callRows = rows.filter((row) => String(row.subSessionType ?? "").trim() === "2");
+    const callRows = filteredRows.filter((row) => row.subSessionTypeNormalized === "2");
     const totalCalls = callRows.length;
 
-    let successStatusCalls = 0; // status = success
-    let failedStatusCalls = 0;  // status = failed
+    let successStatusCalls = 0; 
+    let failedStatusCalls = 0;  
 
-    let successCalls = 0;       // status=success and duration > 120 sec
-    let dropCalls = 0;          // status=failed and du ration between 90 and 120 sec
-    let notConnectedCalls = 0;  // status=failed and duration < 15 sec
-    let otherFailedCalls = 0;   // status=failed with other duration/missing
+    let dropCalls = 0;         
+    let otherFailedCalls = 0;   
 
     callRows.forEach((row) => {
+      const isCallType = row.subSessionTypeNormalized === "2";
+      if (!isCallType) return;
+
       const status = normalizeSubSessionResultStatus(row.status);
-      const durationMs = Number(row.duration);
+      const durationMs = toPositiveMetric(row.duration);
 
-      if (status === "success") {
+      const durationSec = durationMs != null ? durationMs / 1000 : null;
+
+      // Success call now depends only on duration range, not result status.
+      if (durationSec != null && durationSec >= 90 && durationSec <= 120) {
         successStatusCalls += 1;
-        if (Number.isFinite(durationMs) && durationMs / 1000 > 120) {
-          successCalls += 1;
-        }
-        return;
       }
 
-      failedStatusCalls += 1;
-      if (!Number.isFinite(durationMs)) {
+      if (status === "failed") {
+        failedStatusCalls += 1;
+      }
+
+      if (durationSec == null) {
         otherFailedCalls += 1;
-        return;
-      }
-
-      const durationSec = durationMs / 1000;
-      if (durationSec >= 90 && durationSec <= 120) {
+      } else if (durationSec >= 15 && durationSec < 90) {
         dropCalls += 1;
-      } else if (durationSec < 15) {
-        notConnectedCalls += 1;
-      } else {
+      } else { 
         otherFailedCalls += 1;
       }
     });
@@ -268,14 +318,12 @@ export default function SubSessionAnalyticsTab({
       totalCalls,
       successStatusCalls,
       failedStatusCalls,
-      successCalls,
       dropCalls,
-      notConnectedCalls,
       otherFailedCalls,
       successRate,
       dropCallRate,
     };
-  }, [rows]);
+  }, [filteredRows]);
 
   const toggleRow = (rowKey) => {
     setExpandedRows((previous) => ({
@@ -317,14 +365,52 @@ export default function SubSessionAnalyticsTab({
   return (
     <div className="space-y-4">
       <div className="bg-slate-900/50 border border-slate-700 rounded-lg p-3 space-y-3">
+        <div className="flex items-center gap-2">
+          <div className="inline-flex items-center rounded-md border border-slate-700 bg-slate-800/60 p-1">
+            <button
+              type="button"
+              onClick={() => setActiveTypeTab("CS")}
+              className={`px-3 py-1 text-xs rounded ${
+                activeTypeTab === "CS" ? "bg-cyan-700 text-white" : "text-slate-300 hover:bg-slate-700"
+              }`}
+            >
+              CS
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveTypeTab("PS")}
+              className={`px-3 py-1 text-xs rounded ${
+                activeTypeTab === "PS" ? "bg-cyan-700 text-white" : "text-slate-300 hover:bg-slate-700"
+              }`}
+            >
+              PS
+            </button>
+          </div>
+          {activeTypeTab === "PS" && (
+            <button
+              type="button"
+              onClick={() => setInfo((prev) => !prev)}
+              className="h-6 w-6 rounded-full border border-slate-600 bg-slate-800 text-slate-200 text-xs font-semibold hover:bg-slate-700"
+              aria-label="Show PS call rules"
+              title="Show PS call rules"
+            >
+              i
+            </button>
+          )}
+        </div>
+        {activeTypeTab === "PS" && info && (
+          <div className="rounded-md border border-slate-700 bg-slate-800/60 px-3 py-2 text-[11px] text-slate-200">
+            Call Success: 120 sec to 90 sec | Call Drop: 90 sec to 15 sec | Less than 15 sec: Not Connected
+          </div>
+        )}
         <div className="flex items-center justify-between">
-          <h4 className="text-sm font-semibold text-slate-100">Overall Pass vs Fail</h4>
+          <h4 className="text-sm font-semibold text-slate-100">{activeTypeTab} Pass vs Fail</h4>
           <div className="flex items-center gap-2">
             <span className="text-[11px] text-slate-300 bg-slate-800 px-2 py-1 rounded">
-              Success {summarySuccess} | Failed {summaryFailed}
+              Success {formatNumber(tabSummary.success, 0)} | Failed {formatNumber(tabSummary.failed, 0)}
             </span>
             <span className="text-[11px] text-slate-300 bg-slate-800 px-2 py-1 rounded">
-              Total Sub Sessions: {formatNumber(summaryTotal, 0)}
+              Total Sub Sessions: {formatNumber(tabSummary.total, 0)}
             </span>
             <span className="text-[11px] text-slate-300 bg-slate-800 px-2 py-1 rounded">
               Req Sessions: {requestedCount}
@@ -333,41 +419,30 @@ export default function SubSessionAnalyticsTab({
         </div>
       </div>
 
+      {activeTypeTab === "PS" && (
       <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
         <div className="bg-slate-900/70 border border-slate-700 rounded-lg p-3">
-          <div className="text-[11px] text-slate-400">Call Rows (Type 2)</div>
+          <div className="text-[11px] text-slate-400">Call Rows</div>
           <div className="text-sm font-semibold text-white mt-1">
             {formatNumber(callKpis.totalCalls, 0)}
           </div>
         </div>
         <div className="bg-slate-900/70 border border-slate-700 rounded-lg p-3">
-          <div className="text-[11px] text-slate-400">Success Calls (Status=1)</div>
+          <div className="text-[11px] text-slate-400">Success Calls (90s-120s)</div>
           <div className="text-sm font-semibold text-emerald-300 mt-1">
             {formatNumber(callKpis.successStatusCalls, 0)} ({formatPercent(callKpis.successRate)})
           </div>
         </div>
         <div className="bg-slate-900/70 border border-slate-700 rounded-lg p-3">
-          <div className="text-[11px] text-slate-400">Failed Calls (Status=2)</div>
+          <div className="text-[11px] text-slate-400">Failed Calls </div>
           <div className="text-sm font-semibold text-rose-300 mt-1">
             {formatNumber(callKpis.failedStatusCalls, 0)}
           </div>
         </div>
         <div className="bg-slate-900/70 border border-slate-700 rounded-lg p-3">
-          <div className="text-[11px] text-slate-400">Call Success ({`>120s`})</div>
-          <div className="text-sm font-semibold text-emerald-300 mt-1">
-            {formatNumber(callKpis.successCalls, 0)} ({formatPercent(callKpis.successRate)})
-          </div>
-        </div>
-        <div className="bg-slate-900/70 border border-slate-700 rounded-lg p-3">
-          <div className="text-[11px] text-slate-400">Drop Call (90-120s)</div>
+          <div className="text-[11px] text-slate-400">Drop Call (15s-90s)</div>
           <div className="text-sm font-semibold text-rose-300 mt-1">
             {formatNumber(callKpis.dropCalls, 0)} ({formatPercent(callKpis.dropCallRate)})
-          </div>
-        </div>
-        <div className="bg-slate-900/70 border border-slate-700 rounded-lg p-3">
-          <div className="text-[11px] text-slate-400">Not Connected ({`<15s`})</div>
-          <div className="text-sm font-semibold text-amber-300 mt-1">
-            {formatNumber(callKpis.notConnectedCalls, 0)}
           </div>
         </div>
         <div className="bg-slate-900/70 border border-slate-700 rounded-lg p-3">
@@ -377,45 +452,52 @@ export default function SubSessionAnalyticsTab({
           </div>
         </div>
       </div>
+      )}
 
-      <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-        <div className="bg-slate-900/70 border border-slate-700 rounded-lg p-3">
-          <div className="text-[11px] text-slate-400">Total Duration</div>
-          <div className="text-sm font-semibold text-white mt-1">
-            {formatDuration(safeSummary.total_duration)}
+      
+
+
+
+      {activeTypeTab === "CS" && (
+        <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+          <div className="bg-slate-900/70 border border-slate-700 rounded-lg p-3">
+            <div className="text-[11px] text-slate-400">Total Duration</div>
+            <div className="text-sm font-semibold text-white mt-1">
+              {formatDuration(tabSummary.total_duration)}
+            </div>
+          </div>
+          <div className="bg-slate-900/70 border border-slate-700 rounded-lg p-3">
+            <div className="text-[11px] text-slate-400">Average Duration</div>
+            <div className="text-sm font-semibold text-white mt-1">
+              {formatDuration(tabSummary.avg_duration)}
+            </div>
+          </div>
+          <div className="bg-slate-900/70 border border-slate-700 rounded-lg p-3">
+            <div className="text-[11px] text-slate-400">Average Speed</div>
+            <div className="text-sm font-semibold text-white mt-1">
+              {formatSpeedKbps(tabSummary.avg_speed)}
+            </div>
+          </div>
+          <div className="bg-slate-900/70 border border-slate-700 rounded-lg p-3">
+            <div className="text-[11px] text-slate-400">Min Speed</div>
+            <div className="text-sm font-semibold text-white mt-1">
+              {formatSpeedKbps(tabSummary.min_speed)}
+            </div>
+          </div>
+          <div className="bg-slate-900/70 border border-slate-700 rounded-lg p-3">
+            <div className="text-[11px] text-slate-400">Max Speed</div>
+            <div className="text-sm font-semibold text-white mt-1">
+              {formatSpeedKbps(tabSummary.max_speed)}
+            </div>
+          </div>
+          <div className="bg-slate-900/70 border border-slate-700 rounded-lg p-3">
+            <div className="text-[11px] text-slate-400">Total File Size</div>
+            <div className="text-sm font-semibold text-white mt-1">
+              {formatBytes(tabSummary.total_file_size)}
+            </div>
           </div>
         </div>
-        <div className="bg-slate-900/70 border border-slate-700 rounded-lg p-3">
-          <div className="text-[11px] text-slate-400">Average Duration</div>
-          <div className="text-sm font-semibold text-white mt-1">
-            {formatDuration(safeSummary.avg_duration)}
-          </div>
-        </div>
-        <div className="bg-slate-900/70 border border-slate-700 rounded-lg p-3">
-          <div className="text-[11px] text-slate-400">Average Speed</div>
-          <div className="text-sm font-semibold text-white mt-1">
-            {formatSpeedKbps(safeSummary.avg_speed)}
-          </div>
-        </div>
-        <div className="bg-slate-900/70 border border-slate-700 rounded-lg p-3">
-          <div className="text-[11px] text-slate-400">Min Speed</div>
-          <div className="text-sm font-semibold text-white mt-1">
-            {formatSpeedKbps(safeSummary.min_speed)}
-          </div>
-        </div>
-        <div className="bg-slate-900/70 border border-slate-700 rounded-lg p-3">
-          <div className="text-[11px] text-slate-400">Max Speed</div>
-          <div className="text-sm font-semibold text-white mt-1">
-            {formatSpeedKbps(safeSummary.max_speed)}
-          </div>
-        </div>
-        <div className="bg-slate-900/70 border border-slate-700 rounded-lg p-3">
-          <div className="text-[11px] text-slate-400">Total File Size</div>
-          <div className="text-sm font-semibold text-white mt-1">
-            {formatBytes(safeSummary.total_file_size)}
-          </div>
-        </div>
-      </div>
+      )}
 
       <div className="space-y-3">
         <div className="flex items-center justify-between">
@@ -452,16 +534,20 @@ export default function SubSessionAnalyticsTab({
           </div>
         </div>
 
-        <div className="grid grid-cols-5 bg-slate-800 px-2 py-1.5 text-[11px] font-semibold text-slate-300">
+        <div
+          className={`grid ${
+            activeTypeTab === "PS" ? "grid-cols-5" : "grid-cols-6"
+          } bg-slate-800 px-2 py-1.5 text-[11px] font-semibold text-slate-300`}
+        >
           <span>Session ID</span>
           <span>Sub Session ID</span>
           <span>Type</span>
           <span>Status</span>
           <span>Map</span>
-          <span>Details</span>
+          {activeTypeTab !== "PS" && <span>Details</span>}
         </div>
 
-        {sortedRows.map((row) => {
+        {filteredRows.map((row) => {
           const isSelected =
             (selectedMarkerKey != null &&
               row.markerId != null &&
@@ -474,13 +560,15 @@ export default function SubSessionAnalyticsTab({
           return (
             <React.Fragment key={row.rowKey}>
               <div
-                className={`grid grid-cols-5 px-2 py-1.5 text-xs border-t border-slate-700 ${
+                className={`grid ${
+                  activeTypeTab === "PS" ? "grid-cols-5" : "grid-cols-6"
+                } px-2 py-1.5 text-xs border-t border-slate-700 ${
                   isSelected ? "bg-cyan-900/20 text-cyan-100" : "text-slate-200"
                 }`}
               >
                 <span>{row.sessionId}</span>
                 <span>{row.subSessionId}</span>
-                <span>{row.subSessionType == 1 ? "CS" : "PS"}</span>
+                <span>{row.subSessionTypeNormalized === "1" ? "CS" : row.subSessionTypeNormalized === "2" ? "PS" : "N/A"}</span>
                 <span>
                   <span
                     className={`inline-flex items-center rounded-md px-2 py-0.5 text-[11px] border ${
@@ -506,18 +594,20 @@ export default function SubSessionAnalyticsTab({
                     {row.position ? "Highlight" : "No Point"}
                   </button>
                 </span>
-                <span>
-                  <button
-                    type="button"
-                    onClick={() => toggleRow(row.rowKey)}
-                    className="px-2 py-0.5 rounded border border-slate-600 text-slate-200 hover:bg-slate-800"
-                  >
-                    {isExpanded ? "Hide" : <ChevronDown />}
-                  </button>
-                </span>
+                {activeTypeTab !== "PS" && (
+                  <span>
+                    <button
+                      type="button"
+                      onClick={() => toggleRow(row.rowKey)}
+                      className="px-2 py-0.5 rounded border border-slate-600 text-slate-200 hover:bg-slate-800"
+                    >
+                      {isExpanded ? "Hide" : <ChevronDown />}
+                    </button>
+                  </span>
+                )}
               </div>
 
-              {isExpanded && (
+              {activeTypeTab !== "PS" && isExpanded && (
                 <div
                   className={`border-t border-slate-700 px-3 py-2 ${
                     isSelected ? "bg-cyan-900/10 text-cyan-100" : "bg-slate-900/30 text-slate-300"
