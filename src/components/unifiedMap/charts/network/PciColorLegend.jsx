@@ -44,27 +44,10 @@ import { ChartContainer } from "../../common/ChartContainer";
 import { EmptyState } from "../../common/EmptyState";
 import { PCI_COLOR_PALETTE } from "@/components/map/layers/MultiColorCirclesLayer";
 import { CHART_CONFIG } from "@/utils/constants";
-import { normalizeBandName } from "@/utils/colorUtils";
-
-// Provider color mapping
-const PROVIDER_COLORS = {
-  "JIO": "#3B82F6",
-  "Jio": "#3B82F6",
-  "Jio True5G": "#3B82F6",
-  "JIO 4G": "#3B82F6",
-  "JIO4G": "#3B82F6",
-  "IND-JIO": "#3B82F6",
-  "IND airtel": "#EF4444",
-  "IND Airtel": "#EF4444",
-  "Airtel": "#EF4444",
-  "airtel": "#EF4444",
-  "Airtel 5G": "#EF4444",
-  "VI India": "#22C55E",
-  "Vi India": "#22C55E",
-  "Vodafone IN": "#22C55E",
-  "BSNL": "#F59E0B",
-  "Unknown": "#6B7280",
-};
+import {
+  normalizeBandName,
+  getProviderColor,
+} from "@/utils/colorUtils";
 
 // Technology color mapping
 const TECHNOLOGY_COLORS = {
@@ -228,19 +211,6 @@ const CELL_SORT_OPTIONS = {
   ul: { label: "Upload", key: "ul", getValue: (item) => parseFloat(item.avgUl?.avg) || 0 },
   latency: { label: "Latency", key: "latency", getValue: (item) => parseFloat(item.avgLatency?.avg) || 9999 },
   nodebId: { label: "NodeB ID", key: "nodebId", getValue: (item) => item.nodebId || "" },
-};
-
-const getProviderColor = (provider) => {
-  if (!provider) return "#6B7280";
-  if (PROVIDER_COLORS[provider]) return PROVIDER_COLORS[provider];
-  
-  const lower = provider.toLowerCase();
-  if (lower.includes("jio")) return "#3B82F6";
-  if (lower.includes("airtel")) return "#EF4444";
-  if (lower.includes("vi") || lower.includes("vodafone")) return "#22C55E";
-  if (lower.includes("bsnl")) return "#F59E0B";
-  
-  return "#6B7280";
 };
 
 const getTechnologyColor = (tech) => {

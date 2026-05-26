@@ -12,7 +12,7 @@ import {
 import { Activity, AlertTriangle, Building2, TreePine } from 'lucide-react';
 import ChartCard from '../ChartCard';
 import { useIndOut } from '@/hooks/useDashboardData';
-import { COLOR_SCHEMES, normalizeTechName, normalizeProviderName } from '@/utils/colorUtils';
+import { getProviderColor, normalizeTechName, normalizeProviderName } from '@/utils/colorUtils';
 
 const METRIC_CONFIG = {
   rsrp: { 
@@ -69,7 +69,7 @@ const CustomTooltip = React.memo(({ active, payload, label, metricConfig }) => {
       <div className="flex items-center gap-2 mb-2 pb-2 border-b border-gray-100">
         <div
           className="w-3 h-3 rounded-full"
-          style={{ backgroundColor: COLOR_SCHEMES.provider[normalizedLabel] || '#6B7280' }}
+          style={{ backgroundColor: getProviderColor(normalizedLabel) }}
         />
         <span className="text-sm font-bold text-gray-900">{normalizedLabel}</span>
       </div>
@@ -325,8 +325,7 @@ const IndoorOutdoorProviderChart = ({ chartFilters, onChartFiltersChange }) => {
                 <div
                   className="w-3 h-3 rounded-full"
                   style={{
-                    backgroundColor:
-                      COLOR_SCHEMES.provider[item.provider] || '#6B7280',
+                    backgroundColor: getProviderColor(item.provider),
                   }}
                 />
                 <span className="font-medium text-gray-700">{item.provider}</span>

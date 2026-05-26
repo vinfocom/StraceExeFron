@@ -68,55 +68,7 @@ export const getTechnologyColorMap = (technologies) => {
 
 // Provider/Operator colors
 // Provider/Operator colors
-const PROVIDER_COLORS = {
-  // Indian Carriers
-  "jio": "#3B82F6",          // Blue
-  "airtel": "#EF4444",       // Red
-  "vi": "#22C55E",           // Green
-  "vodafone": "#22C55E",     // Green
-  "bsnl": "#F59E0B",         // Amber
-  "mtnl": "#8B5CF6",         // Purple
-  
-  // US Carriers
-  "verizon": "#CD040B",      // Red
-  "at&t": "#00A8E0",         // Blue
-  "att": "#00A8E0",          // Blue
-  "t-mobile": "#E20074",     // Magenta
-  "tmobile": "#E20074",      // Magenta
-  "sprint": "#FFCE00",       // Yellow
-  "us cellular": "#0073CF",  // Blue
-  
-  // UK Carriers
-  "ee": "#00B8A9",           // Teal
-  "o2": "#0019A5",           // Dark Blue
-  "three": "#FF7F00",        // Orange
-  
-  // European Carriers
-  "orange": "#FF7900",       // Orange
-  "deutsche telekom": "#E20074", // Magenta
-  "telefonica": "#0066FF",   // Blue
-  "movistar": "#019DF4",     // Light Blue
-  
-  // Asian Carriers
-  "china mobile": "#0066B3", // Blue
-  "china unicom": "#D6001C", // Red
-  "china telecom": "#2196F3", // Blue
-  "ntt docomo": "#C8002D",   // Red
-  "Yas": "#C0C0C0",     // Silver
-  "sk telecom": "#E4002B",   // Red
-  
-  // Australian Carriers
-  "telstra": "#0064D2",      // Blue
-  "optus": "#007B3B",        // Green
-  
-  // Canadian Carriers
-  "rogers": "#DA291C",       // Red
-  "bell": "#0052A5",         // Blue
-  "telus": "#66CC00",        // Green
-  
-  // Default
-  "unknown": "#6B7280",      // Gray
-};
+const PROVIDER_COLORS = COLOR_SCHEMES.provider;
 
 /**
  * Get provider color with fuzzy matching
@@ -124,53 +76,7 @@ const PROVIDER_COLORS = {
  * @returns {string} Hex color code
  */
 export const getProviderColor = (provider) => {
-  if (!provider || typeof provider !== 'string') return PROVIDER_COLORS.unknown;
-  
-  // Clean the provider name
-  const cleanProvider = provider
-    .toLowerCase()
-    .trim()
-    .replace(/[-_]/g, ' ')      // Replace hyphens/underscores with spaces
-    .replace(/\s+/g, ' ')        // Normalize spaces
-    .replace(/^ind\s+/i, '')     // Remove "IND " prefix
-    .replace(/\s*(4g|5g|lte|true5g|volte)\s*/gi, ''); // Remove technology suffixes
-  
-  // Check for exact match first
-  if (PROVIDER_COLORS[cleanProvider]) {
-    return PROVIDER_COLORS[cleanProvider];
-  }
-  
-  // Fuzzy matching for common variations
-  // Indian carriers
-  if (cleanProvider.includes('jio')) return PROVIDER_COLORS.jio;
-  if (cleanProvider.includes('airtel')) return PROVIDER_COLORS.airtel;
-  if (cleanProvider.includes('vi') || cleanProvider.includes('vodafone') || cleanProvider.includes('idea')) {
-    return PROVIDER_COLORS.vi;
-  }
-  if (cleanProvider.includes('bsnl')) return PROVIDER_COLORS.bsnl;
-  if (cleanProvider.includes('Yas')) return PROVIDER_COLORS.Yas;
-  
-  // US carriers
-  if (cleanProvider.includes('verizon')) return PROVIDER_COLORS.verizon;
-  if (cleanProvider.includes('at&t') || cleanProvider.includes('att')) return PROVIDER_COLORS['at&t'];
-  if (cleanProvider.includes('t-mobile') || cleanProvider.includes('tmobile')) return PROVIDER_COLORS['t-mobile'];
-  if (cleanProvider.includes('sprint')) return PROVIDER_COLORS.sprint;
-  
-  // UK carriers
-  if (cleanProvider.includes('ee')) return PROVIDER_COLORS.ee;
-  if (cleanProvider.includes('o2')) return PROVIDER_COLORS.o2;
-  if (cleanProvider.includes('three') || cleanProvider === '3') return PROVIDER_COLORS.three;
-  
-  // European carriers
-  if (cleanProvider.includes('orange')) return PROVIDER_COLORS.orange;
-  if (cleanProvider.includes('telekom')) return PROVIDER_COLORS['deutsche telekom'];
-  if (cleanProvider.includes('movistar')) return PROVIDER_COLORS.movistar;
-  
-  const hash = provider.split('').reduce((acc, char) => {
-    return char.charCodeAt(0) + ((acc << 5) - acc);
-  }, 0);
-  const hue = Math.abs(hash) % 360;
-  return `hsl(${hue}, 70%, 50%)`;
+  return getProviderColorFromUtils(provider);
 };
 
 /**
@@ -243,3 +149,7 @@ export const CHART_CONFIG = {
     stroke: "#374151",
   },
 };
+import {
+  getProviderColor as getProviderColorFromUtils,
+  COLOR_SCHEMES,
+} from "@/utils/colorUtils";

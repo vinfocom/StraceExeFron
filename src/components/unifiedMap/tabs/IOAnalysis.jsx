@@ -224,7 +224,7 @@ const SimpleBarChart = memo(({ data, title, colorType }) => {
   // Get colors based on type (provider, technology, or default indoor/outdoor)
   const getBarColor = (name, type) => {
     if (type === "provider") {
-      return COLOR_SCHEMES.provider[name] || COLOR_SCHEMES.provider.Unknown;
+      return getProviderColor(name);
     }
     if (type === "technology") {
       return COLOR_SCHEMES.technology[name] || COLOR_SCHEMES.technology.Unknown;
@@ -272,7 +272,7 @@ const DataTable = memo(({ data, title, colorType }) => {
 
   const getColor = (name) => {
     if (colorType === "provider") {
-      return COLOR_SCHEMES.provider[name] || COLOR_SCHEMES.provider.Unknown;
+      return getProviderColor(name);
     }
     if (colorType === "technology") {
       return COLOR_SCHEMES.technology[name] || COLOR_SCHEMES.technology.Unknown;
