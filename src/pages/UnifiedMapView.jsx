@@ -1640,6 +1640,7 @@ const UnifiedMapView = () => {
     () => stateSessionParam || projectSessionParam || "",
     [stateSessionParam, projectSessionParam],
   );
+  const [manualSessionIds, setManualSessionIds] = useState(null);
 
   const inferredSessionIdsFromPassedLogs = useMemo(() => {
     if (!hasPassedLocations) return [];
@@ -1657,14 +1658,27 @@ const UnifiedMapView = () => {
   }, [hasPassedLocations, passedLocations]);
 
   const sessionIds = useMemo(() => {
+    if (Array.isArray(manualSessionIds)) {
+      return manualSessionIds;
+    }
     const explicit = parseSessionIds(querySessionParam || fallbackSessionParam);
     if (explicit.length > 0) return explicit;
     if (inferredSessionIdsFromPassedLogs.length > 0) {
       return inferredSessionIdsFromPassedLogs;
     }
     return [];
-  }, [querySessionParam, fallbackSessionParam, inferredSessionIdsFromPassedLogs]);
+  }, [
+    manualSessionIds,
+    querySessionParam,
+    fallbackSessionParam,
+    inferredSessionIdsFromPassedLogs,
+  ]);
   const sessionKey = useMemo(() => sessionIds.join(","), [sessionIds]);
+
+  const handleSessionIdsChange = useCallback((nextSessionIds) => {
+    const normalized = parseSessionIds(nextSessionIds);
+    setManualSessionIds(normalized);
+  }, []);
 
   const { isLoaded, loadError } = useJsApiLoader(GOOGLE_MAPS_LOADER_OPTIONS);
   const {
@@ -5219,6 +5233,7 @@ const UnifiedMapView = () => {
         coverageViolationThreshold={coverageViolationThreshold}
         setCoverageViolationThreshold={setCoverageViolationThreshold}
         onAddSiteClick={handleAddSiteClick}
+        onSessionIdsChange={handleSessionIdsChange}
       />
           </Suspense>
         )}

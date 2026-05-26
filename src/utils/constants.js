@@ -34,7 +34,6 @@ export const getTechnologyColor = (technology) => {
     return TECHNOLOGY_COLORS[cleanTech];
   }
   
-  // Fuzzy matching for variations
   if (cleanTech.includes('5g') || cleanTech.includes('nr')) {
     return TECHNOLOGY_COLORS['5g'];
   }
@@ -167,7 +166,6 @@ export const getProviderColor = (provider) => {
   if (cleanProvider.includes('telekom')) return PROVIDER_COLORS['deutsche telekom'];
   if (cleanProvider.includes('movistar')) return PROVIDER_COLORS.movistar;
   
-  // Generate consistent color for unknown providers based on name hash
   const hash = provider.split('').reduce((acc, char) => {
     return char.charCodeAt(0) + ((acc << 5) - acc);
   }, 0);
@@ -202,7 +200,7 @@ export const COLORS = {
     "5G": "#8b5cf6",
     "4G": "#3b82f6",
     "3G": "#f59e0b",
-    "2G": "#6b7280",
+    "2G": "#1317eb",
     "Wi-Fi": "#06b6d4",
   },
   

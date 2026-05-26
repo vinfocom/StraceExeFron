@@ -64,8 +64,8 @@ const formatLatLng = (position) => {
 const normalizeSubSessionResultStatus = (statusRaw) => {
   const numeric = Number(statusRaw);
   if (Number.isFinite(numeric)) {
-    if (numeric === 1) return "success";
-    if (numeric === 2) return "failed";
+    if (numeric === 1) return "Connected";
+    if (numeric === 2) return "Not Connected";
   }
 
   const raw = String(statusRaw ?? "").trim().toLowerCase().replace(/[_\s-]+/g, " ");
@@ -171,7 +171,7 @@ export default function SubSessionAnalyticsTab({
           subSessionId: sub.subSessionId,
           subSessionType: sub.subSessionType,
           subSessionTypeNormalized: normalizeSubSessionType(sub.subSessionType),
-          status: normalizeSubSessionResultStatus(sub.resultStatus ?? sub.result_status ?? "failed"),
+          status: normalizeSubSessionResultStatus(sub.resultStatus ?? sub.result_status ?? "Not Connected"),
           markerId: sub.markerId ?? null,
           position: sub.markerPosition ?? sub.start ?? session.start ?? null,
           start: sub.start ?? null,
@@ -428,7 +428,7 @@ export default function SubSessionAnalyticsTab({
           </div>
         </div>
         <div className="bg-slate-900/70 border border-slate-700 rounded-lg p-3">
-          <div className="text-[11px] text-slate-400">Success Calls (90s-120s)</div>
+          <div className="text-[11px] text-slate-400">Success Calls</div>
           <div className="text-sm font-semibold text-emerald-300 mt-1">
             {formatNumber(callKpis.successStatusCalls, 0)} ({formatPercent(callKpis.successRate)})
           </div>
@@ -440,7 +440,7 @@ export default function SubSessionAnalyticsTab({
           </div>
         </div>
         <div className="bg-slate-900/70 border border-slate-700 rounded-lg p-3">
-          <div className="text-[11px] text-slate-400">Drop Call (15s-90s)</div>
+          <div className="text-[11px] text-slate-400">Drop Call </div>
           <div className="text-sm font-semibold text-rose-300 mt-1">
             {formatNumber(callKpis.dropCalls, 0)} ({formatPercent(callKpis.dropCallRate)})
           </div>
@@ -548,6 +548,7 @@ export default function SubSessionAnalyticsTab({
         </div>
 
         {filteredRows.map((row) => {
+          const isPsRow = row.subSessionTypeNormalized === "2";
           const isSelected =
             (selectedMarkerKey != null &&
               row.markerId != null &&
@@ -577,7 +578,13 @@ export default function SubSessionAnalyticsTab({
                         : "border-rose-700/40 bg-rose-900/20 text-rose-300"
                     }`}
                   >
-                    {row.status === "success" ? "Success" : "Failed"}
+                    {row.status === "success"
+                      ? isPsRow
+                        ? "Connected"
+                        : "Success"
+                      : isPsRow
+                        ? "Not Connected"
+                        : "Failed"}
                   </span>
                 </span>
                 <span>

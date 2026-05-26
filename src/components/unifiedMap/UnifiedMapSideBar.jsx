@@ -442,6 +442,7 @@ const UnifiedMapSidebar = ({
   coverageViolationThreshold,
   setCoverageViolationThreshold,
   onAddSiteClick,
+  onSessionIdsChange,
 }) => {
   const { user, refreshUser } = useAuth();
   const [siteScenarioMenuOpen, setSiteScenarioMenuOpen] = useState(false);
@@ -449,6 +450,14 @@ const UnifiedMapSidebar = ({
   const [showCurrentViewInfo, setShowCurrentViewInfo] = useState(false);
   const [sidebarWidth, setSidebarWidth] = useState(340);
   const [activeSidebarTab, setActiveSidebarTab] = useState("filter");
+  const [isEditingSessions, setIsEditingSessions] = useState(false);
+  const [sessionInputValue, setSessionInputValue] = useState("");
+
+  useEffect(() => {
+    if (!isEditingSessions) {
+      setSessionInputValue(Array.isArray(sessionIds) ? sessionIds.join(", ") : "");
+    }
+  }, [isEditingSessions, sessionIds]);
 
   useEffect(() => {
     if (!open) return;
@@ -1571,6 +1580,59 @@ const UnifiedMapSidebar = ({
                           </div>
                         </div>
                       )}
+                      <div className="pt-1 space-y-2">
+                        {isEditingSessions ? (
+                          <>
+                            <Input
+                              value={sessionInputValue}
+                              onChange={(e) => setSessionInputValue(e.target.value)}
+                              placeholder="Enter session ids: 1001,1002"
+                              className="h-8 bg-slate-900 border-slate-700 text-xs text-white"
+                            />
+                            <div className="flex items-center gap-2">
+                              <Button
+                                type="button"
+                                size="sm"
+                                className="h-7 px-2 text-xs bg-blue-600 hover:bg-blue-500"
+                                onClick={() => {
+                                  const nextSessionIds = String(sessionInputValue || "")
+                                    .split(/[;,|]/)
+                                    .map((id) => id.trim())
+                                    .filter(Boolean);
+                                  onSessionIdsChange?.(nextSessionIds);
+                                  setIsEditingSessions(false);
+                                }}
+                              >
+                                Save
+                              </Button>
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="outline"
+                                className="h-7 px-2 text-xs border-slate-600 text-slate-200 hover:bg-slate-800"
+                                onClick={() => {
+                                  setSessionInputValue(
+                                    Array.isArray(sessionIds) ? sessionIds.join(", ") : "",
+                                  );
+                                  setIsEditingSessions(false);
+                                }}
+                              >
+                                Cancel
+                              </Button>
+                            </div>
+                          </>
+                        ) : (
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="ghost"
+                            className="h-7 px-2 text-xs bg-slate-800 border border-slate-600 text-slate-100 hover:bg-slate-700"
+                            onClick={() => setIsEditingSessions(true)}
+                          >
+                            Add / Edit Sessions
+                          </Button>
+                        )}
+                      </div>
                       {enableGrid && (
                         <div className="grid grid-cols-2 gap-2 pt-1">
                           <InfoBadge

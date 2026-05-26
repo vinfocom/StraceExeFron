@@ -231,8 +231,45 @@ const sortTransitionsByDriveSequence = (transitions = []) =>
     })
     .map((item) => item.transition);
 
+const METERS_TO_LAT = 1 / 111320;
+const toCoordBucketKey = (lat, lng) => `${Number(lat).toFixed(6)}|${Number(lng).toFixed(6)}`;
+
+const spreadOverlappingTransitions = (transitions = []) => {
+  const bucketCounts = new Map();
+
+  return (transitions || []).map((transition) => {
+    const lat = Number(transition?.lat);
+    const lng = Number(transition?.lng);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) return transition;
+
+    const key = toCoordBucketKey(lat, lng);
+    const index = bucketCounts.get(key) || 0;
+    bucketCounts.set(key, index + 1);
+
+    if (index === 0) {
+      return { ...transition, _renderLat: lat, _renderLng: lng };
+    }
+
+    const ring = Math.floor((Math.sqrt(index) + 1) / 2);
+    const stepInRing = index - (2 * ring - 1) ** 2;
+    const angle = (stepInRing * Math.PI) / Math.max(4, 8 * ring);
+    const radiusMeters = Math.min(30, 6 * ring);
+    const latOffset = Math.cos(angle) * radiusMeters * METERS_TO_LAT;
+    const lngScale = Math.max(0.2, Math.cos((lat * Math.PI) / 180));
+    const lngOffset = (Math.sin(angle) * radiusMeters * METERS_TO_LAT) / lngScale;
+
+    return {
+      ...transition,
+      _renderLat: lat + latOffset,
+      _renderLng: lng + lngOffset,
+    };
+  });
+};
+
 const HandoverMarker = memo(({ transition, onClick, isSelected, type }) => {
-  const { from, to, lat, lng } = transition;
+  const { from, to } = transition;
+  const lat = Number(transition?._renderLat ?? transition?.lat);
+  const lng = Number(transition?._renderLng ?? transition?.lng);
   const handoverType = getHandoverType(from, to, type);
   const fromColor = getColor(from, type);
   const toColor = getColor(to, type);
@@ -275,7 +312,9 @@ const HandoverMarker = memo(({ transition, onClick, isSelected, type }) => {
 HandoverMarker.displayName = "HandoverMarker";
 
 const CompactHandoverMarker = memo(({ transition, onClick, isSelected, type }) => {
-  const { from, to, lat, lng } = transition;
+  const { from, to } = transition;
+  const lat = Number(transition?._renderLat ?? transition?.lat);
+  const lng = Number(transition?._renderLng ?? transition?.lng);
   const handoverType = getHandoverType(from, to, type);
   const bgColor = type !== 'technology' ? "#3B82F6" : (handoverType === "upgrade" ? "#10B981" : handoverType === "downgrade" ? "#EF4444" : "#3B82F6");
 
@@ -346,6 +385,10 @@ const TechHandoverMarkers = ({ transitions = [], show = false, compactMode = fal
   const sortedTransitions = useMemo(
     () => sortTransitionsByDriveSequence(transitions),
     [transitions],
+  );
+  const renderedTransitions = useMemo(
+    () => spreadOverlappingTransitions(sortedTransitions),
+    [sortedTransitions],
   );
   const handleMarkerClick = (transition) => { setSelectedTransition(transition); onTransitionClick?.(transition); };
   const handlePopupClose = () => setSelectedTransition(null);
@@ -432,8 +475,8 @@ const TechHandoverMarkers = ({ transitions = [], show = false, compactMode = fal
       .filter(Boolean);
   }, [sortedTransitions, showConnections, type]);
 
-  if (!show || !sortedTransitions.length) return null;
-  const MarkerComponent = (compactMode || sortedTransitions.length > 20) ? CompactHandoverMarker : HandoverMarker;
+  if (!show || !renderedTransitions.length) return null;
+  const MarkerComponent = (compactMode || renderedTransitions.length > 20) ? CompactHandoverMarker : HandoverMarker;
 
   return (
     <>
@@ -446,7 +489,7 @@ const TechHandoverMarkers = ({ transitions = [], show = false, compactMode = fal
             options={{ strokeColor: "#F59E0B", strokeOpacity: 0.5, strokeWeight: 2, geodesic: true, icons: [{ icon: { path: window.google?.maps?.SymbolPath?.FORWARD_CLOSED_ARROW, scale: 3, fillColor: "#F59E0B", fillOpacity: 1, strokeWeight: 0 }, offset: "50%" }] }} 
         />
       ))}
-      {sortedTransitions.map((t, i) => (
+      {renderedTransitions.map((t, i) => (
         <MarkerComponent 
             // 👇 FIX: Ensure key is unique using type
            key={`handover-marker-${type}-${t.session_id}-${t.atIndex}-${i}`} 
