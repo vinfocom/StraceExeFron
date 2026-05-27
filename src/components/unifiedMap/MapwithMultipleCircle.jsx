@@ -869,6 +869,7 @@ const MapWithMultipleCircles = ({
   isLoaded,
   loadError,
   showNumCells = false,
+  showMetricLabels = false,
   areaData = [],
   locations = [],
   selectedMetric = "rsrp",
@@ -1787,6 +1788,8 @@ const MapWithMultipleCircles = ({
             radiusMaxPixels={40}
             showPrimaryLogs={showPoints}
             showNumCells={showNumCells}
+            showMetricLabels={showMetricLabels}
+            selectedMetric={selectedMetric}
             onHover={handleHover}
             neighbors={processedNeighbors}
             getNeighborColor={getNeighborColor}

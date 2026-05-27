@@ -1272,6 +1272,7 @@ const UnifiedMapView = () => {
   const [bandHandover, setBandHandover] = useState(false);
   const [pciHandover, setPciHandover] = useState(false);
   const [showNumCells, setShowNumCells] = useState(false);
+  const [showMetricLabels, setShowMetricLabels] = useState(false);
   const [indoor, setIndoor] = useState([]);
   const [outdoor, setOutdoor] = useState([]);
   const [distance, setDistance] = useState(null);
@@ -5142,6 +5143,8 @@ const UnifiedMapView = () => {
         gridCellStats={gridCellStats}
         showNumCells={showNumCells}
         setShowNumCells={setShowNumCells}
+        showMetricLabels={showMetricLabels}
+        setShowMetricLabels={setShowMetricLabels}
         setSiteToggle={setSiteToggle}
         projectId={projectId}
         sessionIds={sessionIds}
@@ -5340,6 +5343,7 @@ const UnifiedMapView = () => {
               defaultZoom={mapZoom}
               fitToLocations={(locationsToDisplay?.length || 0) > 0}
               showNumCells={showNumCells}
+              showMetricLabels={showMetricLabels}
               onLoad={handleMapLoad}
               pointRadius={logRadius}
               projectId={projectId}

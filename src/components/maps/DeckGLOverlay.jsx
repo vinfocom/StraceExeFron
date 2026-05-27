@@ -2,6 +2,17 @@
 import React, { useEffect, useRef, useMemo, useCallback } from 'react';
 import { GoogleMapsOverlay } from '@deck.gl/google-maps';
 import { ScatterplotLayer, PolygonLayer, TextLayer } from '@deck.gl/layers';
+import { getMetricConfig, getMetricValueFromLog } from '@/utils/metrics';
+
+const pickFirstNonEmpty = (obj, keys = []) => {
+  for (const key of keys) {
+    const value = obj?.[key];
+    if (value !== undefined && value !== null && String(value).trim() !== '') {
+      return String(value).trim();
+    }
+  }
+  return '';
+};
 
 const getPrimaryRenderLimit = (total) => {
   if (total > 120000) return 12000;
@@ -96,6 +107,8 @@ const DeckGLOverlay = ({
   onHover,
   map,
   showNumCells = false,
+  showMetricLabels = false,
+  selectedMetric = 'rsrp',
   locations = [],
   imageLogs = [],
   getColor,
@@ -274,6 +287,50 @@ const DeckGLOverlay = ({
       .filter(Boolean);
   }, [imageLogs, showImageLogs]);
 
+  const metricLabelData = useMemo(() => {
+    if (!showPrimaryLogs || !showMetricLabels || !primaryData.length) return [];
+    const metricConfig = getMetricConfig(selectedMetric);
+    const metricKey = String(metricConfig?.key || '').toLowerCase();
+
+    return primaryData
+      .map((d) => {
+        let labelText = '';
+
+        if (metricKey === 'nodebid') {
+          labelText = pickFirstNonEmpty(d.source, [
+            'nodebid',
+            'nodeb_id',
+            'node_b_id',
+            'nodebId',
+            'NodeBId',
+            'NodeBID',
+            'node_id',
+            'nodeId',
+            'eNodeB',
+            'enodeb',
+            'gNodeB',
+            'gnodeb',
+          ]);
+          if (!labelText) return null;
+        } else {
+          const rawValue = getMetricValueFromLog(d.source, selectedMetric);
+          if (!Number.isFinite(rawValue)) return null;
+
+          if (metricKey === 'pci' || metricKey === 'tac') {
+            labelText = `${Math.round(rawValue)}`;
+          } else {
+            labelText = `${rawValue.toFixed(1)}`;
+          }
+        }
+
+        return {
+          ...d,
+          metricLabel: labelText,
+        };
+      })
+      .filter(Boolean);
+  }, [showPrimaryLogs, showMetricLabels, primaryData, selectedMetric]);
+
   useEffect(() => {
     if (!overlayRef.current || !isValidMapInstance(map)) return;
     if (attachedMapRef.current !== map) return;
@@ -335,6 +392,22 @@ const DeckGLOverlay = ({
           getBackgroundColor: [255, 255, 255, 200],
         }));
       }
+
+      if (showMetricLabels && metricLabelData.length > 0) {
+        layers.push(new TextLayer({
+          id: 'primary-logs-metric-label-layer',
+          data: metricLabelData,
+          getPosition: d => d.position,
+          getText: d => d.metricLabel,
+          getSize: 12,
+          getColor: [0, 0, 0, 255],
+          getTextAnchor: 'start',
+          getAlignmentBaseline: 'center',
+          getPixelOffset: [10, 0],
+          background: false,
+          pickable: false,
+        }));
+      }
     }
 
     if (showImageLogs && imageLogData.length > 0) {
@@ -362,7 +435,7 @@ const DeckGLOverlay = ({
     } catch (e) {
       // Overlay can detach during map teardown; skip this update.
     }
-  }, [map, primaryData, neighborData, imageLogData, showPrimaryLogs, showNeighbors, showImageLogs, selectedIndex, radius, radiusMinPixels, radiusMaxPixels, opacity, neighborOpacity, showNumCells, getColor, getNeighborColor, handleImageLogClick, handlePrimaryHover, isValidMapInstance]);
+  }, [map, primaryData, neighborData, imageLogData, metricLabelData, showPrimaryLogs, showNeighbors, showImageLogs, selectedIndex, radius, radiusMinPixels, radiusMaxPixels, opacity, neighborOpacity, showNumCells, showMetricLabels, getColor, getNeighborColor, handleImageLogClick, handlePrimaryHover, isValidMapInstance]);
 
   useEffect(() => {
     return () => {

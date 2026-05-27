@@ -328,6 +328,8 @@ const UnifiedMapSidebar = ({
   setPciThreshold,
   showNumCells,
   setShowNumCells,
+  showMetricLabels = false,
+  setShowMetricLabels,
   enableDataToggle,
   setEnableDataToggle,
   dataToggle,
@@ -1817,6 +1819,14 @@ const UnifiedMapSidebar = ({
                   label="Secondary Cell Count"
                   checked={showNumCells}
                   onChange={setShowNumCells}
+                />
+
+                <ToggleRow
+                  label="Metric Labels"
+                  description="Show selected KPI value beside each log"
+                  checked={Boolean(showMetricLabels)}
+                  onChange={setShowMetricLabels}
+                  useSwitch={true}
                 />
           </CollapsibleSection>
               )}
