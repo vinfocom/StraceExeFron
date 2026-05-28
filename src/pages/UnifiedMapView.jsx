@@ -1760,7 +1760,6 @@ const UnifiedMapView = () => {
     projectId,
   );
 
-  // Prefer live fetched data whenever sample fetch is enabled.
   const sampleLocations = Array.isArray(fetchedSamples) && fetchedSamples.length > 0
     ? fetchedSamples
     : (hasPassedLocations ? passedLocations : fetchedSamples);
@@ -2495,7 +2494,6 @@ const UnifiedMapView = () => {
     [enableGrid, isStoredGridOverlayVisible],
   );
 
-  // ✅ 2. Use Prediction Data Hook
   const {
     locations: predictionLocations,
     colorSettings: predictionColorSettings,
@@ -2523,7 +2521,6 @@ const UnifiedMapView = () => {
     setDataToggle("sample");
   }, [isDataPredictionMode, predictionDataUnavailable]);
 
-  // ✅ 2b. Use LTE Prediction Hook
   const {
     locations: ltePredictionLocations,
     loading: ltePredictionLoading,
@@ -2537,7 +2534,6 @@ const UnifiedMapView = () => {
     polygons: EMPTY_POLYGONS,
   });
 
-  // ✅ 3. Use Session Neighbors Hook
   const shouldFetchNeighbors = !hasPassedNeighbors && sessionIds.length > 0;
 
   const {

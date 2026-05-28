@@ -961,6 +961,7 @@ const SettingsPage = ({ onSaveSuccess }) => {
         const fetchData = async () => {
             try {
                 const response = await settingApi.getThresholdSettings();
+                if (!response) return;
                 const data = extractResponseData(response);
                 
                 if (mounted) {
@@ -1004,6 +1005,7 @@ const SettingsPage = ({ onSaveSuccess }) => {
         try {
             const payload = buildSavePayload(thresholds, user?.id);
             const response = await settingApi.saveThreshold(payload);
+            if (!response) return;
             const data = extractResponseData(response);
             
             if (data?.Status === 1) {
@@ -1011,6 +1013,7 @@ const SettingsPage = ({ onSaveSuccess }) => {
                 if (onSaveSuccess) onSaveSuccess();
                 
                 const refetchResponse = await settingApi.getThresholdSettings();
+                if (!refetchResponse) return;
                 const refetchData = extractResponseData(refetchResponse);
                 
                 if (refetchData?.Status === 1 && refetchData.Data) {

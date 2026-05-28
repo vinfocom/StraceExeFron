@@ -11,7 +11,9 @@ const AppLayout = ({ children }) => {
   const location = useLocation();
 
   useEffect(() => {
-    cancelAllRequests();
+    return () => {
+      cancelAllRequests();
+    };
   }, [location.pathname]);
 
   const pathsWithoutHeader = ["/mapview", "/prediction-map", "/unified-map"];

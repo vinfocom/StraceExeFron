@@ -405,6 +405,15 @@ export const useSiteData = ({
     
     try {
       const params = { projectId: projectId || '' };
+      const polygonIds =
+        filterEnabled && Array.isArray(polygons)
+          ? polygons
+              .map((poly) => Number(poly?.id ?? poly?.polygon_id ?? poly?.polygonId))
+              .filter((id) => Number.isFinite(id) && id > 0)
+          : [];
+      if (polygonIds.length > 0) {
+        params.polygon_ids = polygonIds.join(",");
+      }
       let response;
 
       switch (siteToggle) {
@@ -447,7 +456,8 @@ export const useSiteData = ({
             });
 
       let finalData = normalizedData;
-      if (filterEnabled && polygons?.length > 0) {
+      // Fallback to client-side filtering only when polygon IDs are not available for backend filtering.
+      if (filterEnabled && polygons?.length > 0 && polygonIds.length === 0) {
         finalData = normalizedData.filter((site) =>
           polygons.some((poly) => isPointInPolygon(site, poly)),
         );

@@ -36,13 +36,7 @@ import MapWithMultipleCircles from "@/components/unifiedMap/MapwithMultipleCircl
 import LoadingProgress from "@/components/LoadingProgress";
 
 
-const containerStyle = {
-  width: "100%",
-  height: "100%",
-  position: "absolute",
-  top: 0,
-  left: 0,
-};
+
 
 const DEFAULT_CENTER = { lat: 28.6139, lng: 77.209 };
 

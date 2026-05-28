@@ -1668,6 +1668,9 @@ export const settingApi = {
       const response = await api.get("/api/Setting/CheckSession");
       return response;
     } catch (error) {
+      if (isCancelledError(error) || isRequestCancelled(error)) {
+        return null;
+      }
       console.error("CheckSession error:", error);
       throw error;
     }
@@ -1678,6 +1681,9 @@ export const settingApi = {
       const response = await api.get("/api/Setting/GetThresholdSettings");
       return response;
     } catch (error) {
+      if (isCancelledError(error) || isRequestCancelled(error)) {
+        return null;
+      }
       console.error("GetThresholdSettings error:", error);
       throw error;
     }
@@ -1689,6 +1695,9 @@ export const settingApi = {
       const response = await api.post("/api/Setting/SaveThreshold", payload);
       return response;
     } catch (error) {
+      if (isCancelledError(error) || isRequestCancelled(error)) {
+        return null;
+      }
       console.error("SaveThreshold error:", error);
       throw error;
     }

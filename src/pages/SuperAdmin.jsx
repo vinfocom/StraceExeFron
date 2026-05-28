@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { companyApi } from "../api/apiEndpoints";
+import { isCancelledError } from "../api/apiService";
 import DataTable from "../components/common/DataTable";
 import { useAuth } from "../context/AuthContext";
 import { Navigate } from "react-router-dom";
@@ -170,6 +171,9 @@ const SuperAdminCompanies = () => {
         setError(response?.Message || "Failed to fetch data");
       }
     } catch (err) {
+      if (isCancelledError(err)) {
+        return;
+      }
       console.error("Error fetching companies:", err);
       setError("API Error: Could not load companies.");
     } finally {

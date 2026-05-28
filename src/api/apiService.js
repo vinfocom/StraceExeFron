@@ -109,6 +109,7 @@ class RequestQueue {
 }
 
 const requestQueue = new RequestQueue(4); // Max 4 concurrent requests
+const activeAbortControllers = new Set();
 
 // ============================================
 // REQUEST CACHE - Prevents duplicate in-flight requests
@@ -291,8 +292,32 @@ const apiService = async (endpoint, options = {}) => {
   const { priority = 0, dedupe = true, ...axiosOptions } = options;
 
   const makeRequest = async () => {
-    const response = await csharpAxios({ url: endpoint, ...axiosOptions });
-    return response.status === 204 ? null : response.data;
+    const controller = new AbortController();
+    activeAbortControllers.add(controller);
+
+    // Preserve caller-provided abort signal while allowing global cancellation.
+    if (axiosOptions.signal) {
+      if (axiosOptions.signal.aborted) {
+        controller.abort();
+      } else {
+        axiosOptions.signal.addEventListener(
+          'abort',
+          () => controller.abort(),
+          { once: true }
+        );
+      }
+    }
+
+    try {
+      const response = await csharpAxios({
+        url: endpoint,
+        ...axiosOptions,
+        signal: controller.signal,
+      });
+      return response.status === 204 ? null : response.data;
+    } finally {
+      activeAbortControllers.delete(controller);
+    }
   };
 
   if (priority === 0) {
@@ -359,6 +384,8 @@ export const isNetworkError = (error) => error?.isNetworkError === true;
 export const isCancelledError = (error) => error?.isCancelled === true;
 
 export const cancelAllRequests = () => {
+  activeAbortControllers.forEach((controller) => controller.abort());
+  activeAbortControllers.clear();
   requestQueue.clear();
   inFlightRequests.clear();
 };
