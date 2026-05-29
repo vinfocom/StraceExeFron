@@ -1651,7 +1651,7 @@ export const gridAnalyticsApi = {
 };
 
 export const homeApi = {
-  login: (credentials) => api.post("/Home/UserLogin", credentials),
+  login: (credentials) => api.post("/api/auth/login", credentials),
   getStateInfo: () => api.post("/Home/GetStateIformation"),
   forgotPassword: (data) => api.post("/Home/GetUserForgotPassword", data),
   resetPassword: (data) => api.post("/Home/ForgotResetPassword", data),
