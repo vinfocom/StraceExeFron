@@ -10,6 +10,24 @@
   status = 200
   force = true
 
+[[redirects]]
+  from = "/Home/*"
+  to = "https://s-traccceer.vinfocom.co.in/Home/:splat"
+  status = 200
+  force = true
+
+[[redirects]]
+  from = "/Admin/*"
+  to = "https://s-traccceer.vinfocom.co.in/Admin/:splat"
+  status = 200
+  force = true
+
+[[redirects]]
+  from = "/ExcelUpload/*"
+  to = "https://s-traccceer.vinfocom.co.in/ExcelUpload/:splat"
+  status = 200
+  force = true
+
 [[headers]]
   for = "/*"
   [headers.values]
