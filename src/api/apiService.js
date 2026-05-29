@@ -208,12 +208,28 @@ csharpAxios.interceptors.response.use(
 
     const { status, data, config } = error.response;
 
+    const isAuthEndpoint = config?.url?.includes('/auth/');
+
+    // Login/auth endpoints need the backend's exact 401 message, e.g.
+    // "already logged in", so the login screen can offer/perform force login.
+    if ((status === 401 || status === 403) && isAuthEndpoint) {
+      return Promise.reject(
+        createError(`HTTP ${status}: ${extractErrorMessage(data)}`, {
+          status,
+          data,
+          response: error.response
+        })
+      );
+    }
+
     if ((status === 401 || status === 403) && !isAuthorizationScopeError(status, data)) {
       handleAuthError(config);
       return Promise.reject(
         createError('Session expired. Please login again.', {
           isAuthError: true,
-          status
+          status,
+          data,
+          response: error.response
         })
       );
     }
@@ -221,7 +237,8 @@ csharpAxios.interceptors.response.use(
     return Promise.reject(
       createError(`HTTP ${status}: ${extractErrorMessage(data)}`, {
         status,
-        data
+        data,
+        response: error.response
       })
     );
   }

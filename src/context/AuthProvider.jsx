@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { homeApi } from '../api/apiEndpoints';
-import { sha256 } from 'js-sha256';
 import { setAuthErrorHandler } from '../api/apiService';
 import { AuthContext } from './AuthContextBase'; // Import from Base
 import {
@@ -111,28 +110,10 @@ const AuthProvider = ({ children }) => {
         basePayload.country_code = country_code;
       }
 
-      // Try modern flow first (plain password), then legacy fallback (sha256 pre-hash).
-      let response = await homeApi.login({
+      const response = await homeApi.login({
         ...basePayload,
         Password: Password || '',
       });
-
-      if (!isSuccessResponse(response)) {
-        const message = String(
-          response?.message ||
-          response?.Message ||
-          response?.data?.message ||
-          response?.data?.Message ||
-          ''
-        ).toLowerCase();
-
-        if (message.includes('invalid email or password')) {
-          response = await homeApi.login({
-            ...basePayload,
-            Password: sha256(Password || ''),
-          });
-        }
-      }
 
 if (isSuccessResponse(response)) {
           let userData = extractUserFromResponse(response);
@@ -173,6 +154,9 @@ if (isSuccessResponse(response)) {
       return { success: false, message: errorMessage };
     } catch (error) {
       const errorMessage =
+        error.data?.message ||
+        error.data?.Message ||
+        error.data?.error ||
         error.response?.data?.message ||
         error.response?.data?.Message ||
         error.response?.data?.error ||
