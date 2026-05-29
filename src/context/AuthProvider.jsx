@@ -18,7 +18,10 @@ const AuthProvider = ({ children }) => {
   const navigate = useNavigate();
 
   const isSuccessResponse = (response) =>
-    response?.success === true || response?.Status === 1 || response?.status === 1;
+    response?.success === true ||
+    response?.Status === 1 ||
+    response?.status === 1 ||
+    String(response?.message || '').toLowerCase() === 'login successful';
 
   const extractUserFromResponse = (response) => {
     if (!response) return null;
