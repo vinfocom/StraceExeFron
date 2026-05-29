@@ -99,19 +99,37 @@ const AuthProvider = ({ children }) => {
       setLoading(true);
       authRequestVersionRef.current += 1;
 
-      const hashed = sha256(Password || '');
-      const loginPayload = {
+      const basePayload = {
         Email,
-        Password: hashed,
         IP,
         ForceLogin,
       };
-
       if (country_code) {
-        loginPayload.country_code = country_code;
+        basePayload.country_code = country_code;
       }
 
-      const response = await homeApi.login(loginPayload);
+      // Try modern flow first (plain password), then legacy fallback (sha256 pre-hash).
+      let response = await homeApi.login({
+        ...basePayload,
+        Password: Password || '',
+      });
+
+      if (!isSuccessResponse(response)) {
+        const message = String(
+          response?.message ||
+          response?.Message ||
+          response?.data?.message ||
+          response?.data?.Message ||
+          ''
+        ).toLowerCase();
+
+        if (message.includes('invalid email or password')) {
+          response = await homeApi.login({
+            ...basePayload,
+            Password: sha256(Password || ''),
+          });
+        }
+      }
 
 if (isSuccessResponse(response)) {
           let userData = extractUserFromResponse(response);

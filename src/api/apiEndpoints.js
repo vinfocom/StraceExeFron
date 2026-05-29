@@ -1655,7 +1655,15 @@ export const homeApi = {
   getStateInfo: () => api.post("/Home/GetStateIformation"),
   forgotPassword: (data) => api.post("/Home/GetUserForgotPassword", data),
   resetPassword: (data) => api.post("/Home/ForgotResetPassword", data),
-  logout: (ip) => api.get("/Home/Logout", { params: { IP: ip || "" } }),
+  logout: async (ip) => {
+    try {
+      // Preferred logout endpoint for the newer auth flow.
+      return await api.post("/api/auth/logout");
+    } catch (error) {
+      // Backward-compat fallback for older deployments.
+      return api.get("/Home/Logout", { params: { IP: ip || "" } });
+    }
+  },
   getLoggedUser: (ip) => api.post("/Home/GetLoggedUser", { ip }),
   getMasterUserTypes: () => api.get("/Home/GetMasterUserTypes"),
 
