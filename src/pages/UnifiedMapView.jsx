@@ -114,6 +114,8 @@ const GRID_VIEW_SUPPORTED_METRICS = Object.freeze([
   "latency",
   "jitter",
 ]);
+const GRID_POLYGON_FILL_OPACITY = 0.72;
+const GRID_POLYGON_STROKE_OPACITY = 0.85;
 const GRID_ONLY_METRICS = Object.freeze([
   "best_operator",
   "best_technology",
@@ -468,8 +470,8 @@ const toSessionCsv = (value) => {
 };
 
 const isPointInPolygon = (point, polygon) => {
-  const path = polygon?.paths?.[0];
-  if (!path?.length) return false;
+  const path = getPolygonPath(polygon);
+  if (!Array.isArray(path) || path.length < 3) return false;
   const lat = point.lat ?? point.latitude;
   const lng = point.lng ?? point.longitude;
   if (lat == null || lng == null) return false;
@@ -483,8 +485,11 @@ const isPointInPolygon = (point, polygon) => {
 
   let inside = false;
   for (let i = 0, j = path.length - 1; i < path.length; j = i++) {
-    const { lng: xi, lat: yi } = path[i];
-    const { lng: xj, lat: yj } = path[j];
+    const xi = Number(path[i]?.lng);
+    const yi = Number(path[i]?.lat);
+    const xj = Number(path[j]?.lng);
+    const yj = Number(path[j]?.lat);
+    if (![xi, yi, xj, yj].every(Number.isFinite)) continue;
     if (
       yi > lat !== yj > lat &&
       lng < ((xj - xi) * (lat - yi)) / (yj - yi) + xi
@@ -493,6 +498,133 @@ const isPointInPolygon = (point, polygon) => {
     }
   }
   return inside;
+};
+
+function getPolygonPath(polygon) {
+  const rawPaths = polygon?.paths;
+  if (Array.isArray(polygon?.path)) return polygon.path;
+  if (Array.isArray(rawPaths?.[0])) return rawPaths[0];
+  if (Array.isArray(rawPaths)) return rawPaths;
+  return [];
+}
+
+const getGridCellBounds = (point = {}) => {
+  if (Array.isArray(point?.polygon) && point.polygon.length >= 4) {
+    const coords = point.polygon
+      .map((coord) => ({
+        lng: Number(coord?.[0] ?? coord?.lng),
+        lat: Number(coord?.[1] ?? coord?.lat),
+      }))
+      .filter((coord) => Number.isFinite(coord.lat) && Number.isFinite(coord.lng));
+    if (coords.length >= 4) {
+      return {
+        south: Math.min(...coords.map((coord) => coord.lat)),
+        north: Math.max(...coords.map((coord) => coord.lat)),
+        west: Math.min(...coords.map((coord) => coord.lng)),
+        east: Math.max(...coords.map((coord) => coord.lng)),
+      };
+    }
+  }
+
+  const bounds = point?.bounds || {};
+  const south = Number(bounds.south ?? point.min_lat);
+  const north = Number(bounds.north ?? point.max_lat);
+  const west = Number(bounds.west ?? point.min_lon);
+  const east = Number(bounds.east ?? point.max_lon);
+  if ([south, north, west, east].every(Number.isFinite) && north > south && east > west) {
+    return { south, north, west, east };
+  }
+  return null;
+};
+
+const getPolygonArea = (path = []) => {
+  if (!Array.isArray(path) || path.length < 3) return 0;
+  let area = 0;
+  for (let i = 0, j = path.length - 1; i < path.length; j = i++) {
+    area += Number(path[j].lng) * Number(path[i].lat) - Number(path[i].lng) * Number(path[j].lat);
+  }
+  return Math.abs(area) / 2;
+};
+
+const interpolateByLng = (start, end, lng) => {
+  const delta = end.lng - start.lng;
+  if (Math.abs(delta) < 1e-12) return { lat: start.lat, lng };
+  const t = (lng - start.lng) / delta;
+  return { lat: start.lat + (end.lat - start.lat) * t, lng };
+};
+
+const interpolateByLat = (start, end, lat) => {
+  const delta = end.lat - start.lat;
+  if (Math.abs(delta) < 1e-12) return { lat, lng: start.lng };
+  const t = (lat - start.lat) / delta;
+  return { lat, lng: start.lng + (end.lng - start.lng) * t };
+};
+
+const clipPolygon = (path, isInside, getIntersection) => {
+  if (!Array.isArray(path) || path.length === 0) return [];
+  const output = [];
+  let previous = path[path.length - 1];
+  let previousInside = isInside(previous);
+
+  path.forEach((current) => {
+    const currentInside = isInside(current);
+    if (currentInside) {
+      if (!previousInside) output.push(getIntersection(previous, current));
+      output.push(current);
+    } else if (previousInside) {
+      output.push(getIntersection(previous, current));
+    }
+    previous = current;
+    previousInside = currentInside;
+  });
+
+  return output.filter((point) => Number.isFinite(point?.lat) && Number.isFinite(point?.lng));
+};
+
+const getPolygonRectOverlapArea = (polygon, bounds) => {
+  if (!bounds) return 0;
+  const path = getPolygonPath(polygon)
+    .map((point) => ({ lat: Number(point?.lat), lng: Number(point?.lng) }))
+    .filter((point) => Number.isFinite(point.lat) && Number.isFinite(point.lng));
+  if (path.length < 3) return 0;
+
+  let clipped = path;
+  clipped = clipPolygon(clipped, (p) => p.lng >= bounds.west, (a, b) => interpolateByLng(a, b, bounds.west));
+  clipped = clipPolygon(clipped, (p) => p.lng <= bounds.east, (a, b) => interpolateByLng(a, b, bounds.east));
+  clipped = clipPolygon(clipped, (p) => p.lat >= bounds.south, (a, b) => interpolateByLat(a, b, bounds.south));
+  clipped = clipPolygon(clipped, (p) => p.lat <= bounds.north, (a, b) => interpolateByLat(a, b, bounds.north));
+  return getPolygonArea(clipped);
+};
+
+const getWeightedGridAverageForPolygon = (polygon, points = [], metric, useGridWeights) => {
+  let weightedSum = 0;
+  let totalWeight = 0;
+  let contributingCells = 0;
+
+  points.forEach((point) => {
+    const direct = parseFloat(point?.[metric]);
+    const value = !Number.isNaN(direct)
+      ? direct
+      : parseFloat(point?.metric_value ?? point?.value);
+    if (!Number.isFinite(value)) return;
+
+    let weight = 0;
+    if (useGridWeights) {
+      weight = getPolygonRectOverlapArea(polygon, getGridCellBounds(point));
+    } else if (isPointInPolygon(point, polygon)) {
+      weight = 1;
+    }
+
+    if (weight <= 0) return;
+    weightedSum += value * weight;
+    totalWeight += weight;
+    contributingCells += 1;
+  });
+
+  return {
+    average: totalWeight > 0 ? weightedSum / totalWeight : null,
+    count: contributingCells,
+  };
 };
 
 const filterPointsInsidePolygons = (points = [], polygonChecker = null) => {
@@ -842,6 +974,15 @@ const calculateMedian = (values) => {
   const sorted = [...validValues].sort((a, b) => a - b);
   const mid = Math.floor(sorted.length / 2);
   return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+};
+
+const calculateAverage = (values) => {
+  if (!values?.length) return null;
+  const validValues = values
+    .map((value) => Number(value))
+    .filter((value) => Number.isFinite(value));
+  if (!validValues.length) return null;
+  return validValues.reduce((sum, value) => sum + value, 0) / validValues.length;
 };
 
 const calculateCategoryStats = (points, category, metric) => {
@@ -3537,12 +3678,42 @@ const UnifiedMapView = () => {
     return buildHandoverTransitions(finalDisplayLocations);
   }, [finalDisplayLocations]);
 
+  const polygonGridColorSource = useMemo(() => {
+    if (isStoredGridOverlayVisible) {
+      return Array.isArray(storedDeltaGridCells) ? storedDeltaGridCells : EMPTY_LIST;
+    }
+
+    if (isUnifiedGridView) {
+      if (Array.isArray(renderedGridLegendLogs) && renderedGridLegendLogs.length > 0) {
+        return renderedGridLegendLogs;
+      }
+      if (Array.isArray(gridFilteredData?.gridLocations) && gridFilteredData.gridLocations.length > 0) {
+        return gridFilteredData.gridLocations;
+      }
+      return Array.isArray(gridDisplayData?.gridLocations) ? gridDisplayData.gridLocations : EMPTY_LIST;
+    }
+
+    return EMPTY_LIST;
+  }, [
+    isStoredGridOverlayVisible,
+    storedDeltaGridCells,
+    isUnifiedGridView,
+    renderedGridLegendLogs,
+    gridFilteredData?.gridLocations,
+    gridDisplayData?.gridLocations,
+  ]);
+
   const polygonsWithColors = useMemo(() => {
     if (!showPolygons || !effectiveProjectPolygons?.length) return [];
-    if (!onlyInsidePolygons || !locations?.length) {
+    const useGridForPolygonColor =
+      Boolean(isUnifiedGridView) || Boolean(isStoredGridOverlayVisible);
+    const polygonColorSource = useGridForPolygonColor
+      ? polygonGridColorSource
+      : (Array.isArray(locations) ? locations : []);
+    if (!polygonColorSource.length) {
       return effectiveProjectPolygons.map((p) => ({
         ...p,
-        fillColor: "#4285F4",
+        fillColor: "#ccc",
         fillOpacity: polygonOpacity,
         pointCount: 0,
       }));
@@ -3550,9 +3721,46 @@ const UnifiedMapView = () => {
     const thresholdKey = getThresholdKey(selectedMetric);
     const currentThresholds = effectiveThresholds[thresholdKey] || [];
     return effectiveProjectPolygons.map((poly) => {
-      const pointsInside = locations.filter((pt) => isPointInPolygon(pt, poly));
+      if (useGridForPolygonColor) {
+        const weighted = getWeightedGridAverageForPolygon(
+          poly,
+          polygonColorSource,
+          selectedMetric,
+          true,
+        );
+        if (!Number.isFinite(weighted.average)) {
+          return {
+            ...poly,
+            fillColor: "#ccc",
+            fillOpacity: GRID_POLYGON_FILL_OPACITY,
+            strokeOpacity: GRID_POLYGON_STROKE_OPACITY,
+            pointCount: weighted.count,
+            medianValue: null,
+          };
+        }
+        return {
+          ...poly,
+          fillColor: getColorFromValueOrMetric(
+            weighted.average,
+            currentThresholds,
+            selectedMetric,
+          ),
+          fillOpacity: GRID_POLYGON_FILL_OPACITY,
+          strokeOpacity: GRID_POLYGON_STROKE_OPACITY,
+          pointCount: weighted.count,
+          medianValue: weighted.average,
+          averageValue: weighted.average,
+        };
+      }
+
+      const pointsInside = polygonColorSource.filter((pt) => isPointInPolygon(pt, poly));
       const values = pointsInside
-        .map((p) => parseFloat(p[selectedMetric]))
+        .map((p) => {
+          const direct = parseFloat(p?.[selectedMetric]);
+          if (!Number.isNaN(direct)) return direct;
+          const metricValue = parseFloat(p?.metric_value ?? p?.value);
+          return Number.isNaN(metricValue) ? NaN : metricValue;
+        })
         .filter((v) => !isNaN(v));
       if (!values.length) {
         return {
@@ -3564,7 +3772,7 @@ const UnifiedMapView = () => {
       }
       const median = calculateMedian(values);
       const fillColor = getColorFromValueOrMetric(
-        median,
+        useGridForPolygonColor ? calculateAverage(values) : median,
         currentThresholds,
         selectedMetric,
       );
@@ -3573,14 +3781,16 @@ const UnifiedMapView = () => {
         fillColor,
         fillOpacity: polygonOpacity,
         pointCount: pointsInside.length,
-        medianValue: median,
+        medianValue: useGridForPolygonColor ? calculateAverage(values) : median,
       };
     });
   }, [
     showPolygons,
     effectiveProjectPolygons,
-    onlyInsidePolygons,
     locations,
+    isUnifiedGridView,
+    isStoredGridOverlayVisible,
+    polygonGridColorSource,
     selectedMetric,
     effectiveThresholds,
     polygonOpacity,
@@ -3588,10 +3798,15 @@ const UnifiedMapView = () => {
 
   const areaPolygonsWithColors = useMemo(() => {
     if (!areaEnabled || !areaData?.length) return [];
-    if (!filteredLocations?.length) {
+    const useGridForPolygonColor =
+      Boolean(isUnifiedGridView) || Boolean(isStoredGridOverlayVisible);
+    const polygonColorSource = useGridForPolygonColor
+      ? polygonGridColorSource
+      : (Array.isArray(filteredLocations) ? filteredLocations : []);
+    if (!polygonColorSource?.length) {
       return areaData.map((p) => ({
         ...p,
-        fillColor: "#9333ea",
+        fillColor: "#ccc",
         fillOpacity: polygonOpacity,
         pointCount: 0,
         medianValue: null,
@@ -3609,7 +3824,37 @@ const UnifiedMapView = () => {
       higherIsBetter: true,
     };
     return areaData.map((poly) => {
-      const pointsInside = filteredLocations.filter((pt) =>
+      if (useGridForPolygonColor) {
+        const weighted = getWeightedGridAverageForPolygon(
+          poly,
+          polygonColorSource,
+          selectedMetric,
+          true,
+        );
+        const averageValue = weighted.average;
+        return {
+          ...poly,
+          fillColor: Number.isFinite(averageValue)
+            ? getColorFromValueOrMetric(
+              averageValue,
+              currentThresholds,
+              selectedMetric,
+            )
+            : "#ccc",
+          fillOpacity: GRID_POLYGON_FILL_OPACITY,
+          strokeOpacity: GRID_POLYGON_STROKE_OPACITY,
+          strokeWeight: 1,
+          pointCount: weighted.count,
+          medianValue: averageValue,
+          averageValue,
+          categoryStats: null,
+          bestProvider: null,
+          bestBand: null,
+          bestTechnology: null,
+        };
+      }
+
+      const pointsInside = polygonColorSource.filter((pt) =>
         isPointInPolygon(pt, poly),
       );
       if (!pointsInside.length) {
@@ -3641,9 +3886,16 @@ const UnifiedMapView = () => {
         selectedMetric,
       );
       const values = pointsInside
-        .map((p) => parseFloat(p[selectedMetric]))
+        .map((p) => {
+          const direct = parseFloat(p?.[selectedMetric]);
+          if (!Number.isNaN(direct)) return direct;
+          const metricValue = parseFloat(p?.metric_value ?? p?.value);
+          return Number.isNaN(metricValue) ? NaN : metricValue;
+        })
         .filter((v) => !isNaN(v) && v != null);
-      const medianValue = calculateMedian(values);
+      const medianValue = useGridForPolygonColor
+        ? calculateAverage(values)
+        : calculateMedian(values);
       const findBestByMetric = (stats) => {
         if (!stats?.stats?.length) return { best: null, value: null };
         let best = null;
@@ -3735,6 +3987,9 @@ const UnifiedMapView = () => {
     areaEnabled,
     areaData,
     filteredLocations,
+    isUnifiedGridView,
+    isStoredGridOverlayVisible,
+    polygonGridColorSource,
     selectedMetric,
     baseThresholds,
     colorBy,
@@ -5402,7 +5657,10 @@ const UnifiedMapView = () => {
                   filterPolygons={rawFilteringPolygons}
                   filterInsidePolygons={onlyInsidePolygons}
                   maxPoints={sectorPredictionGridPoints.length > 0 ? 120000 : 20000}
-                  enableGrid={lteGridEnabled || isStoredGridOverlayVisible}
+                  enableGrid={
+                    (lteGridEnabled || isStoredGridOverlayVisible) &&
+                    !(showPolygons || areaEnabled)
+                  }
                   gridSizeMeters={lteGridSizeMeters || 50}
                   gridAggregationMethod={lteGridAggregationMethod || "median"}
                   deltaComparisonMode={isDeltaSiteGridMode}
@@ -5426,7 +5684,7 @@ const UnifiedMapView = () => {
                       fillOpacity: poly.fillOpacity ?? polygonOpacity,
                       strokeColor: poly.fillColor || "#2563eb",
                       strokeWeight: 1,
-                      strokeOpacity: polygonOpacity,
+                      strokeOpacity: poly.strokeOpacity ?? polygonOpacity,
                       clickable: true,
                       zIndex: 50,
                     }}
@@ -5446,7 +5704,7 @@ const UnifiedMapView = () => {
                       fillOpacity: poly.fillOpacity ?? polygonOpacity,
                       strokeColor: poly.fillColor || "#7e22ce",
                       strokeWeight: 1,
-                      strokeOpacity: polygonOpacity,
+                      strokeOpacity: poly.strokeOpacity ?? polygonOpacity,
                       clickable: true,
                       zIndex: 60,
                     }}

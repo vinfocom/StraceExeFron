@@ -16,6 +16,7 @@ const CSHARP_API_BASE_URL = (
 const EMPTY_ARRAY = [];
 const MAX_IMAGE_LOG_SCAN_POINTS = 12000;
 const METRIC_RANGE_EPSILON = 1e-9;
+const GRID_POLYGON_FILL_OPACITY = 0.72;
 
 const getLegendCategoryKeyFromLog = (log, colorBy) => {
   const key = String(colorBy || "").trim().toLowerCase();
@@ -444,6 +445,91 @@ const getColorFromThresholds = (value, metricThresholds) => {
   if (value > parseFloat(sorted[sorted.length - 1].max)) return sorted[sorted.length - 1].color;
 
   return "#808080";
+};
+
+const getPrimaryPolygonPath = (polygonOrPath = []) => {
+  if (Array.isArray(polygonOrPath?.path)) return polygonOrPath.path;
+  if (Array.isArray(polygonOrPath?.paths?.[0])) return polygonOrPath.paths[0];
+  if (Array.isArray(polygonOrPath?.paths)) return polygonOrPath.paths;
+  if (Array.isArray(polygonOrPath?.[0])) return polygonOrPath[0];
+  return Array.isArray(polygonOrPath) ? polygonOrPath : [];
+};
+
+const getPolygonArea = (path = []) => {
+  if (!Array.isArray(path) || path.length < 3) return 0;
+  let area = 0;
+  for (let i = 0, j = path.length - 1; i < path.length; j = i++) {
+    area += Number(path[j].lng) * Number(path[i].lat) - Number(path[i].lng) * Number(path[j].lat);
+  }
+  return Math.abs(area) / 2;
+};
+
+const interpolateByLng = (start, end, lng) => {
+  const delta = end.lng - start.lng;
+  if (Math.abs(delta) < 1e-12) return { lat: start.lat, lng };
+  const t = (lng - start.lng) / delta;
+  return { lat: start.lat + (end.lat - start.lat) * t, lng };
+};
+
+const interpolateByLat = (start, end, lat) => {
+  const delta = end.lat - start.lat;
+  if (Math.abs(delta) < 1e-12) return { lat, lng: start.lng };
+  const t = (lat - start.lat) / delta;
+  return { lat, lng: start.lng + (end.lng - start.lng) * t };
+};
+
+const clipPolygon = (path, isInside, getIntersection) => {
+  if (!Array.isArray(path) || path.length === 0) return [];
+  const output = [];
+  let previous = path[path.length - 1];
+  let previousInside = isInside(previous);
+
+  path.forEach((current) => {
+    const currentInside = isInside(current);
+    if (currentInside) {
+      if (!previousInside) output.push(getIntersection(previous, current));
+      output.push(current);
+    } else if (previousInside) {
+      output.push(getIntersection(previous, current));
+    }
+    previous = current;
+    previousInside = currentInside;
+  });
+
+  return output.filter((point) => Number.isFinite(point?.lat) && Number.isFinite(point?.lng));
+};
+
+const getPolygonRectOverlapArea = (polygonOrPath, bounds) => {
+  if (!bounds) return 0;
+  const path = getPrimaryPolygonPath(polygonOrPath)
+    .map((point) => ({ lat: Number(point?.lat), lng: Number(point?.lng) }))
+    .filter((point) => Number.isFinite(point.lat) && Number.isFinite(point.lng));
+  if (path.length < 3) return 0;
+
+  let clipped = path;
+  clipped = clipPolygon(clipped, (p) => p.lng >= bounds.west, (a, b) => interpolateByLng(a, b, bounds.west));
+  clipped = clipPolygon(clipped, (p) => p.lng <= bounds.east, (a, b) => interpolateByLng(a, b, bounds.east));
+  clipped = clipPolygon(clipped, (p) => p.lat >= bounds.south, (a, b) => interpolateByLat(a, b, bounds.south));
+  clipped = clipPolygon(clipped, (p) => p.lat <= bounds.north, (a, b) => interpolateByLat(a, b, bounds.north));
+  return getPolygonArea(clipped);
+};
+
+const isPointInPolygonPath = (lat, lng, polygonOrPath = []) => {
+  const path = getPrimaryPolygonPath(polygonOrPath);
+  if (!Array.isArray(path) || path.length < 3) return false;
+  let inside = false;
+  for (let i = 0, j = path.length - 1; i < path.length; j = i++) {
+    const yi = Number(path[i]?.lat);
+    const xi = Number(path[i]?.lng);
+    const yj = Number(path[j]?.lat);
+    const xj = Number(path[j]?.lng);
+    if (![yi, xi, yj, xj].every(Number.isFinite)) continue;
+    const intersects = yi > lat !== yj > lat;
+    if (!intersects) continue;
+    const xIntersect = ((xj - xi) * (lat - yi)) / (yj - yi) + xi;
+    if (lng < xIntersect) inside = !inside;
+  }
+  return inside;
 };
 
 // ============== Grid Generator ==============
@@ -1437,6 +1523,64 @@ const MapWithMultipleCircles = ({
     });
   }, [gridCells, legendFilter]);
 
+  const polygonGridAverages = useMemo(() => {
+    if (!enableGrid || activePolygonData.length === 0) return activePolygonData;
+
+    return activePolygonData.map((poly) => {
+      let weightedSum = 0;
+      let totalWeight = 0;
+      let contributingCells = 0;
+      for (const cell of visibleGridCells) {
+        if (!cell || cell.count <= 0) continue;
+        const value = Number(cell.aggregatedValue);
+        if (!Number.isFinite(value)) continue;
+        const weight = getPolygonRectOverlapArea(poly, cell.bounds);
+        if (weight <= 0) continue;
+        weightedSum += value * weight;
+        totalWeight += weight;
+        contributingCells += 1;
+      }
+
+      const averageValue = totalWeight > 0 ? weightedSum / totalWeight : null;
+      const fillColor = Number.isFinite(averageValue)
+        ? resolveColor(averageValue, selectedMetric)
+        : poly.fillColor || "#9ca3af";
+
+      return {
+        ...poly,
+        averageValue,
+        contributingCells,
+        fillColor,
+      };
+    });
+  }, [enableGrid, activePolygonData, visibleGridCells, resolveColor, selectedMetric]);
+
+  const areaPolygonGridAverages = useMemo(() => {
+    if (!Array.isArray(areaData) || areaData.length === 0) return [];
+    if (!enableGrid) return areaData;
+
+    return areaData.map((zone) => {
+      let weightedSum = 0;
+      let totalWeight = 0;
+      let contributingCells = 0;
+      for (const cell of visibleGridCells) {
+        if (!cell || cell.count <= 0) continue;
+        const value = Number(cell.aggregatedValue);
+        if (!Number.isFinite(value)) continue;
+        const weight = getPolygonRectOverlapArea(zone, cell.bounds);
+        if (weight <= 0) continue;
+        weightedSum += value * weight;
+        totalWeight += weight;
+        contributingCells += 1;
+      }
+      const averageValue = totalWeight > 0 ? weightedSum / totalWeight : null;
+      const fillColor = Number.isFinite(averageValue)
+        ? resolveColor(averageValue, selectedMetric)
+        : zone?.fillColor || "#9ca3af";
+      return { ...zone, averageValue, contributingCells, fillColor };
+    });
+  }, [areaData, enableGrid, visibleGridCells, resolveColor, selectedMetric]);
+
   useEffect(() => {
     if (typeof onGridCellsStatsChange !== "function") return;
     if (!enableGrid) {
@@ -1729,18 +1873,19 @@ const MapWithMultipleCircles = ({
         defaultCenter={computedCenter}
         zoom={defaultZoom}
       >
-        {showPolygonBoundary && activePolygonData.map(({ path, uid, id, fillColor }, idx) => {
+        {showPolygonBoundary && polygonGridAverages.map(({ path, uid, id, fillColor }, idx) => {
           const polygonKey = uid ?? id ?? `polygon-${idx}`;
           const isEditableBoundary =
             projectPolygonEditEnabled && editableBoundaryPolygonIdSet.has(polygonKey);
           const boundaryStrokeColor = fillColor || "#2563eb";
+          const shouldFillFromGrid = enableGrid && hasActivePolygons;
           return (
             <PolygonF
               key={polygonKey}
               paths={path}
               options={{
-                fillColor: "transparent",
-                fillOpacity: 0,
+                fillColor: shouldFillFromGrid ? fillColor : "transparent",
+                fillOpacity: shouldFillFromGrid ? GRID_POLYGON_FILL_OPACITY : 0,
                 strokeColor: boundaryStrokeColor,
                 strokeWeight: 1,
                 strokeOpacity: resolvedPolygonOpacity,
@@ -1755,15 +1900,23 @@ const MapWithMultipleCircles = ({
           );
         })}
 
-        {areaEnabled && areaData.map((zone) => (
+        {areaEnabled && areaPolygonGridAverages.map((zone) => (
          <PolygonF
            key={zone.uid}
            paths={zone.paths}
-           options={{ fillColor: "#3b82f6", fillOpacity: resolvedPolygonOpacity, strokeColor: "#2563eb", strokeOpacity: resolvedPolygonOpacity, strokeWeight: 1, zIndex: 5, clickable: false }}
+           options={{
+             fillColor: enableGrid ? (zone.fillColor || "#9ca3af") : "#3b82f6",
+             fillOpacity: enableGrid ? GRID_POLYGON_FILL_OPACITY : resolvedPolygonOpacity,
+             strokeColor: enableGrid ? (zone.fillColor || "#2563eb") : "#2563eb",
+             strokeOpacity: resolvedPolygonOpacity,
+             strokeWeight: 1,
+             zIndex: 5,
+             clickable: false,
+           }}
          />
        ))}
        
-        {enableGrid && visibleGridCells.map((cell) => (
+        {enableGrid && !hasActivePolygons && visibleGridCells.map((cell) => (
           <RectangleF
             key={`grid-${cell.id}`}
             bounds={cell.bounds}

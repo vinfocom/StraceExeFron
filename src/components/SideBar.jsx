@@ -70,12 +70,12 @@ const SideBar = ({ compact = false }) => {
       path: '/manage-users',
       allowedRoles: [ROLES.SUPER_ADMIN, ROLES.ADMIN],
     },
-    // {
-    //   icon: Cuboid,
-    //   text: 'Indoor Planing',
-    //   path: '/indoor-planing',
-    //   allowedRoles: [ROLES.SUPER_ADMIN, ROLES.ADMIN],
-    // },
+    {
+      icon: Cuboid,
+      text: 'Indoor Planing',
+      path: '/indoor-planing',
+      allowedRoles: [ROLES.SUPER_ADMIN, ROLES.ADMIN],
+    },
     {
       icon: Settings,
       text: 'Settings',

@@ -169,7 +169,7 @@ function PredictionHeatmapOverlay({ predictions, rooms, wallThickness = 0.2 }) {
   )
 }
 
-export function FloorModel({ rooms, wallThickness, doors, windows, logs = [], sites = [], predictions = [] }) {
+export function FloorModel({ rooms, wallThickness, doors, windows, logs = [], sites = [], predictions = [], logGridCells = [] }) {
   const getRoomBounds = (room) => {
     if ((room.shape === 'polygon' || room.shape === 'poly') && Array.isArray(room.polygonPoints) && room.polygonPoints.length >= 3) {
       const xs = room.polygonPoints.map((point) => Number(point.x ?? point[0])).filter(Number.isFinite)
@@ -285,6 +285,12 @@ export function FloorModel({ rooms, wallThickness, doors, windows, logs = [], si
       })}
 
       <OpeningMeshes rooms={rooms} wallThickness={wallThickness} doors={doors} windows={windows} />
+      {logGridCells.map((cell) => (
+        <mesh key={cell.id} rotation-x={-Math.PI / 2} position={[cell.x, 0.055, cell.z]}>
+          <planeGeometry args={[cell.width, cell.depth]} />
+          <meshBasicMaterial color={cell.color || '#808080'} transparent opacity={0.45} depthWrite={false} toneMapped={false} />
+        </mesh>
+      ))}
       {logs.map((item) => (
         <mesh key={`log-${item.id}`} position={[item.x, 0.12, item.z]}>
           <sphereGeometry args={[0.12, 12, 12]} />
@@ -292,29 +298,32 @@ export function FloorModel({ rooms, wallThickness, doors, windows, logs = [], si
         </mesh>
       ))}
       {sites.map((site) => (
-        <group key={`site-${site.id}`} position={[site.x, 0, site.z]}>
+        <group key={`site-${site.id}`} position={[site.x, 0.12, site.z]}>
           {(() => {
-            const poleHeight = Math.max(0.5, Number(site.heightM) || 3)
-            const coneLen = 0.9
             const azRad = -((Number(site.azimuthDeg) || 0) * Math.PI) / 180
-            const coneAnchorY = Number.isFinite(Number(site.coneHeightM)) && Number(site.coneHeightM) > 0 ? Number(site.coneHeightM) : poleHeight
-            const dirX = Math.cos(azRad)
-            const dirZ = Math.sin(azRad)
             return (
-              <>
-                <mesh position={[0, poleHeight / 2, 0]}>
-                  <cylinderGeometry args={[0.18, 0.18, poleHeight, 16]} />
-                  <meshStandardMaterial color="#2b6cf0" />
+              <group rotation={[0, azRad, 0]}>
+                <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.001, 0]}>
+                  <circleGeometry args={[0.06, 20]} />
+                  <meshBasicMaterial color="#1d4ed8" toneMapped={false} />
                 </mesh>
-                <mesh rotation={[0, azRad, -Math.PI / 2]} position={[
-    -dirX * (coneLen / 2),
-    coneAnchorY,
-    -dirZ * (coneLen / 2),
-  ]}>
-                  <coneGeometry args={[0.22, coneLen, 20]} />
-                  <meshStandardMaterial color="#2563eb" emissive="#1d4ed8" emissiveIntensity={0.35} />
+                <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.002, 0]}>
+                  <ringGeometry args={[0.14, 0.17, 32, 1, -0.65, 1.3]} />
+                  <meshBasicMaterial color="#2563eb" side={2} toneMapped={false} />
                 </mesh>
-              </>
+                <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.003, 0]}>
+                  <ringGeometry args={[0.24, 0.27, 36, 1, -0.65, 1.3]} />
+                  <meshBasicMaterial color="#3b82f6" side={2} toneMapped={false} />
+                </mesh>
+                <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.004, 0]}>
+                  <ringGeometry args={[0.34, 0.37, 40, 1, -0.65, 1.3]} />
+                  <meshBasicMaterial color="#60a5fa" side={2} toneMapped={false} />
+                </mesh>
+                <mesh position={[0.4, 0.01, 0]}>
+                  <boxGeometry args={[0.16, 0.02, 0.02]} />
+                  <meshBasicMaterial color="#1d4ed8" toneMapped={false} />
+                </mesh>
+              </group>
             )
           })()}
         </group>
