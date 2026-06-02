@@ -380,6 +380,8 @@ const UnifiedMapSidebar = ({
   setShowPolygons,
   polygonSource,
   setPolygonSource,
+  buildingBorderEnabled = false,
+  setBuildingBorderEnabled,
   projectPolygonEditEnabled = false,
   setProjectPolygonEditEnabled,
   canSaveDrawnPolygonToProject = false,
@@ -1734,10 +1736,24 @@ const UnifiedMapSidebar = ({
                   return;
                 }
                 setShowPolygons?.(false);
-                setPolygonSource?.("map");
+                setPolygonSource?.(buildingBorderEnabled ? "save" : "map");
               }}
               useSwitch={true}
             />
+
+            {Boolean(deltaGridApiState?.gridVisible) && (
+              <ToggleRow
+                label="Border"
+                description="Color building edges from the stored grid under each edge"
+                checked={Boolean(buildingBorderEnabled)}
+                onChange={(checked) => {
+                  setBuildingBorderEnabled?.(checked);
+                  if (checked) setPolygonSource?.("save");
+                  if (!checked && !showPolygons) setPolygonSource?.("map");
+                }}
+                useSwitch={true}
+              />
+            )}
 
             <ToggleRow
               label="Edit Polygon"

@@ -11,7 +11,7 @@ import React, {
   useRef,
 } from "react";
 import { useSearchParams, useNavigate, useLocation } from "react-router-dom";
-import { useJsApiLoader, Polygon } from "@react-google-maps/api";
+import { useJsApiLoader, Polygon, Polyline } from "@react-google-maps/api";
 import { toast } from "react-toastify";
 
 import { mapViewApi, gridAnalyticsApi } from "../api/apiEndpoints";
@@ -625,6 +625,64 @@ const getWeightedGridAverageForPolygon = (polygon, points = [], metric, useGridW
     average: totalWeight > 0 ? weightedSum / totalWeight : null,
     count: contributingCells,
   };
+};
+
+const getGridCellCssColor = (cell, metric, thresholds) => {
+  const direct = parseFloat(cell?.[metric]);
+  const value = !Number.isNaN(direct)
+    ? direct
+    : parseFloat(cell?.metric_value ?? cell?.value);
+  return Number.isFinite(value)
+    ? getColorFromValueOrMetric(value, thresholds, metric)
+    : "#64748b";
+};
+
+const clipSegmentToBounds = (start, end, bounds) => {
+  if (!bounds) return null;
+  const x0 = Number(start.lng);
+  const y0 = Number(start.lat);
+  const x1 = Number(end.lng);
+  const y1 = Number(end.lat);
+  if (![x0, y0, x1, y1].every(Number.isFinite)) return null;
+
+  const dx = x1 - x0;
+  const dy = y1 - y0;
+  let t0 = 0;
+  let t1 = 1;
+  const checks = [
+    [-dx, x0 - bounds.west],
+    [dx, bounds.east - x0],
+    [-dy, y0 - bounds.south],
+    [dy, bounds.north - y0],
+  ];
+
+  for (const [p, q] of checks) {
+    if (Math.abs(p) < 1e-12) {
+      if (q < 0) return null;
+      continue;
+    }
+    const r = q / p;
+    if (p < 0) {
+      t0 = Math.max(t0, r);
+    } else {
+      t1 = Math.min(t1, r);
+    }
+    if (t0 > t1) return null;
+  }
+
+  if (t1 - t0 < 1e-6) return null;
+  return [
+    { lat: y0 + dy * t0, lng: x0 + dx * t0 },
+    { lat: y0 + dy * t1, lng: x0 + dx * t1 },
+  ];
+};
+
+const getSegmentProgress = (point, start, end) => {
+  const dx = Number(end.lng) - Number(start.lng);
+  const dy = Number(end.lat) - Number(start.lat);
+  const denominator = dx * dx + dy * dy;
+  if (denominator <= 1e-20) return 0;
+  return (((Number(point.lng) - Number(start.lng)) * dx) + ((Number(point.lat) - Number(start.lat)) * dy)) / denominator;
 };
 
 const filterPointsInsidePolygons = (points = [], polygonChecker = null) => {
@@ -1328,6 +1386,7 @@ const UnifiedMapView = () => {
   const [onlyInsidePolygons] = useState(true);
   const [areaEnabled, setAreaEnabled] = useState(false);
   const [ltePredictionUseBuildings, setLtePredictionUseBuildings] = useState(true);
+  const [buildingBorderEnabled, setBuildingBorderEnabled] = useState(false);
   const [coverageViolationThreshold, setCoverageViolationThreshold] =
     useState(null);
 
@@ -2630,6 +2689,12 @@ const UnifiedMapView = () => {
     () => Boolean(isFetchedStoredGridVisible),
     [isFetchedStoredGridVisible],
   );
+  useEffect(() => {
+    if (!isStoredGridOverlayVisible) {
+      setBuildingBorderEnabled(false);
+    }
+  }, [isStoredGridOverlayVisible]);
+
   const mapGridEnabled = useMemo(
     () => Boolean(enableGrid) && !isStoredGridOverlayVisible,
     [enableGrid, isStoredGridOverlayVisible],
@@ -3704,7 +3769,8 @@ const UnifiedMapView = () => {
   ]);
 
   const polygonsWithColors = useMemo(() => {
-    if (!showPolygons || !effectiveProjectPolygons?.length) return [];
+    const needsBuildingPolygons = Boolean(showPolygons || buildingBorderEnabled);
+    if (!needsBuildingPolygons || !effectiveProjectPolygons?.length) return [];
     const useGridForPolygonColor =
       Boolean(isUnifiedGridView) || Boolean(isStoredGridOverlayVisible);
     const polygonColorSource = useGridForPolygonColor
@@ -3786,6 +3852,7 @@ const UnifiedMapView = () => {
     });
   }, [
     showPolygons,
+    buildingBorderEnabled,
     effectiveProjectPolygons,
     locations,
     isUnifiedGridView,
@@ -4148,7 +4215,7 @@ const UnifiedMapView = () => {
   ]);
 
   const visiblePolygons = useMemo(() => {
-    if (!showPolygons || !displayPolygons?.length) return [];
+    if (!displayPolygons?.length) return [];
     if (!viewport) return displayPolygons;
     return displayPolygons.filter((poly) => {
       if (!poly.bbox) return true;
@@ -4159,7 +4226,117 @@ const UnifiedMapView = () => {
         poly.bbox.north < viewport.south
       );
     });
-  }, [showPolygons, displayPolygons, viewport]);
+  }, [displayPolygons, viewport]);
+
+  const buildingBorderSegments = useMemo(() => {
+    if (
+      !buildingBorderEnabled ||
+      polygonSource !== "save" ||
+      !isStoredGridOverlayVisible ||
+      !Array.isArray(visiblePolygons) ||
+      visiblePolygons.length === 0 ||
+      !Array.isArray(storedDeltaGridCells) ||
+      storedDeltaGridCells.length === 0
+    ) {
+      return [];
+    }
+
+    const thresholdKey = getThresholdKey(legendSelectedMetric);
+    const currentThresholds = effectiveThresholds[thresholdKey] || [];
+    const segments = [];
+
+    visiblePolygons.forEach((poly, polyIndex) => {
+      const path = getPolygonPath(poly);
+      if (!Array.isArray(path) || path.length < 2) return;
+
+      for (let i = 0; i < path.length; i += 1) {
+        const start = path[i];
+        const end = path[(i + 1) % path.length];
+        const startPoint = { lat: Number(start?.lat), lng: Number(start?.lng) };
+        const endPoint = { lat: Number(end?.lat), lng: Number(end?.lng) };
+        if (![startPoint.lat, startPoint.lng, endPoint.lat, endPoint.lng].every(Number.isFinite)) {
+          continue;
+        }
+
+        const edgeBounds = {
+          south: Math.min(startPoint.lat, endPoint.lat),
+          north: Math.max(startPoint.lat, endPoint.lat),
+          west: Math.min(startPoint.lng, endPoint.lng),
+          east: Math.max(startPoint.lng, endPoint.lng),
+        };
+        const edgeFragments = [];
+
+        storedDeltaGridCells.forEach((cell) => {
+          const bounds = getGridCellBounds(cell);
+          if (
+            !bounds ||
+            bounds.east < edgeBounds.west ||
+            bounds.west > edgeBounds.east ||
+            bounds.north < edgeBounds.south ||
+            bounds.south > edgeBounds.north
+          ) {
+            return;
+          }
+
+          const clipped = clipSegmentToBounds(startPoint, endPoint, bounds);
+          if (!clipped) return;
+          const tStart = getSegmentProgress(clipped[0], startPoint, endPoint);
+          const tEnd = getSegmentProgress(clipped[1], startPoint, endPoint);
+          if (Math.abs(tEnd - tStart) < 1e-5) return;
+          edgeFragments.push({
+            id: `${poly.uid || poly.id || polyIndex}-${i}-${cell.id}`,
+            path: clipped,
+            color: getGridCellCssColor(cell, legendSelectedMetric, currentThresholds),
+            tStart: Math.min(tStart, tEnd),
+            tEnd: Math.max(tStart, tEnd),
+          });
+        });
+
+        if (edgeFragments.length > 0) {
+          edgeFragments
+            .sort((a, b) => a.tStart - b.tStart || a.tEnd - b.tEnd)
+            .forEach(({ tStart, tEnd, ...segment }) => {
+              segments.push(segment);
+            });
+          continue;
+        }
+
+        {
+          const midpoint = {
+            lat: (startPoint.lat + endPoint.lat) / 2,
+            lng: (startPoint.lng + endPoint.lng) / 2,
+          };
+          const cell = storedDeltaGridCells.find((candidate) => {
+            const bounds = getGridCellBounds(candidate);
+            return (
+              bounds &&
+              midpoint.lat >= bounds.south &&
+              midpoint.lat <= bounds.north &&
+              midpoint.lng >= bounds.west &&
+              midpoint.lng <= bounds.east
+            );
+          });
+          if (cell) {
+            segments.push({
+              id: `${poly.uid || poly.id || polyIndex}-${i}-midpoint`,
+              path: [startPoint, endPoint],
+              color: getGridCellCssColor(cell, legendSelectedMetric, currentThresholds),
+            });
+          }
+        }
+      }
+    });
+
+    return segments;
+  }, [
+    buildingBorderEnabled,
+    polygonSource,
+    isStoredGridOverlayVisible,
+    visiblePolygons,
+    storedDeltaGridCells,
+    legendSelectedMetric,
+    effectiveThresholds,
+  ]);
 
   const mapCenter = useMemo(() => {
     if (!locations?.length) return mapCenterFallback || DEFAULT_CENTER;
@@ -5417,6 +5594,8 @@ const UnifiedMapView = () => {
         setShowPolygons={setShowPolygons}
         polygonSource={polygonSource}
         setPolygonSource={setPolygonSource}
+        buildingBorderEnabled={buildingBorderEnabled}
+        setBuildingBorderEnabled={setBuildingBorderEnabled}
         projectPolygonEditEnabled={projectPolygonEditEnabled}
         setProjectPolygonEditEnabled={setProjectPolygonEditEnabled}
         canSaveDrawnPolygonToProject={canSaveDrawnPolygonToProject}
@@ -5602,7 +5781,7 @@ const UnifiedMapView = () => {
               enablePolygonFilter={true}
               filterPolygons={mapBoundaryPolygons}
               externalPolygonsLoading={polygonLoading || areaLoading}
-              showPolygonBoundary={true}
+              showPolygonBoundary={!buildingBorderEnabled}
               projectPolygonEditEnabled={
                 projectPolygonEditEnabled && polygonSource === "map"
               }
@@ -5659,13 +5838,15 @@ const UnifiedMapView = () => {
                   maxPoints={sectorPredictionGridPoints.length > 0 ? 120000 : 20000}
                   enableGrid={
                     (lteGridEnabled || isStoredGridOverlayVisible) &&
-                    !(showPolygons || areaEnabled)
+                    !(showPolygons || areaEnabled || buildingBorderEnabled)
                   }
                   gridSizeMeters={lteGridSizeMeters || 50}
                   gridAggregationMethod={lteGridAggregationMethod || "median"}
                   deltaComparisonMode={isDeltaSiteGridMode}
                   externalGridCells={
-                    isStoredGridOverlayVisible ? storedDeltaGridCells : EMPTY_LIST
+                    isStoredGridOverlayVisible && !buildingBorderEnabled
+                      ? storedDeltaGridCells
+                      : EMPTY_LIST
                   }
                   mlGridEnabled={mlGridEnabled}
                   mlGridSize={mlGridSize}
@@ -5684,13 +5865,30 @@ const UnifiedMapView = () => {
                       fillOpacity: poly.fillOpacity ?? polygonOpacity,
                       strokeColor: poly.fillColor || "#2563eb",
                       strokeWeight: 1,
-                      strokeOpacity: poly.strokeOpacity ?? polygonOpacity,
+                      strokeOpacity: buildingBorderEnabled
+                        ? 0.15
+                        : poly.strokeOpacity ?? polygonOpacity,
                       clickable: true,
                       zIndex: 50,
                     }}
                     onMouseOver={(e) => handlePolygonMouseOver(poly, e)}
                     onMouseMove={handlePolygonMouseMove}
                     onMouseOut={handlePolygonMouseOut}
+                  />
+                ))}
+
+              {buildingBorderEnabled &&
+                buildingBorderSegments.map((segment) => (
+                  <Polyline
+                    key={`building-border-${segment.id}`}
+                    path={segment.path}
+                    options={{
+                      strokeColor: segment.color,
+                      strokeOpacity: 1,
+                      strokeWeight: 3,
+                      clickable: false,
+                      zIndex: 90,
+                    }}
                   />
                 ))}
 

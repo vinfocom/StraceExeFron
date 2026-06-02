@@ -65,7 +65,7 @@ const LoginPage = () => {
         Email: email,
         Password: password,
         IP: ipAddress,
-        ForceLogin: isElectronRuntime,
+        ForceLogin: false,
       });
 
       if (response.success) {
@@ -77,15 +77,9 @@ const LoginPage = () => {
           response.message.toLowerCase().includes("already logged in");
 
         if (alreadyLoggedIn) {
-          const shouldForceLogin = isElectronRuntime
-            ? true
-            : window.confirm(
-                "This account is reported active on another device. Do you want to continue and force login here?"
-              );
-
-          if (isElectronRuntime) {
-            toast.info("Recovering previous session and retrying login...");
-          }
+          const shouldForceLogin = window.confirm(
+            "This account is reported active on another device. Do you want to continue and force login here?"
+          );
 
           if (shouldForceLogin) {
             const forceResponse = await login({
@@ -127,15 +121,9 @@ const LoginPage = () => {
         displayMessage.toLowerCase().includes("already logged in");
 
       if (alreadyLoggedIn) {
-        const shouldForceLogin = isElectronRuntime
-          ? true
-          : window.confirm(
-              "This account is reported active on another device. Do you want to continue and force login here?"
-            );
-
-        if (isElectronRuntime) {
-          toast.info("Recovering previous session and retrying login...");
-        }
+        const shouldForceLogin = window.confirm(
+          "This account is reported active on another device. Do you want to continue and force login here?"
+        );
 
         if (shouldForceLogin) {
           try {
