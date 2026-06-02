@@ -46,24 +46,6 @@ function IndoorPlanningSidebar({
         <button className={buttonClass} type="button" onClick={downloadTemplate}><Download /></button>
       </div>
 
-      <label className="mb-3 grid gap-1.5 text-sm">
-        Upload Excel (.xlsx)
-        <input className={inputClass} type="file" accept=".xlsx,.xls" onChange={handleExcelUpload} />
-      </label>
-      <p className="mb-3 mt-1 text-xs text-slate-600">{uploadMessage}</p>
-
-      <label className="mb-3 grid gap-1.5 text-sm">
-        Upload Floorplan Image
-        <input className={inputClass} type="file" accept=".png,.jpg,.jpeg,.webp" onChange={handleImageUpload} disabled={isParsingImage} />
-      </label>
-      <p className="mb-3 mt-1 text-xs text-slate-600">{imageMessage}</p>
-
-      <label className="mb-3 grid gap-1.5 text-sm">
-        Upload Logs (.xlsx / .csv)
-        <input className={inputClass} type="file" accept=".xlsx,.xls,.csv,text/csv" onChange={handleLogsUpload} />
-      </label>
-      <p className="mb-3 mt-1 text-xs text-slate-600">{logsMessage}</p>
-
       <section className="mb-4 rounded-lg border border-slate-200 bg-slate-50 p-3">
         <h2>Uploaded Logs Grid</h2>
         <div className="mt-2 flex flex-wrap gap-2">
@@ -88,6 +70,7 @@ function IndoorPlanningSidebar({
       {detectedPlan && (
         <section className="mb-4 mt-2 rounded-lg border border-slate-300 bg-slate-50 p-2.5">
           <h2>Detected Rooms Review</h2>
+        
           {detectedPlan.rooms.map((room) => (
             <div key={room.id} className="mb-1.5 grid grid-cols-[1.9fr_repeat(5,0.9fr)_1fr] items-center gap-1.5">
               <input className="rounded-lg border border-slate-300 px-2 py-1.5 text-xs" value={room.name} onChange={(event) => updateDetectedRoom(room.id, "name", event.target.value)} />
@@ -100,7 +83,7 @@ function IndoorPlanningSidebar({
             </div>
           ))}
           <div className="mt-2 flex flex-wrap gap-2">
-            <button className={buttonClass} type="button" onClick={applyDetectedPlan}>Apply To 3D</button>
+            <button className={buttonClass} type="button" onClick={applyDetectedPlan}>Apply</button>
             <button className={buttonClass} type="button" onClick={downloadReviewedDetectedExcel}>Download Reviewed Excel</button>
             <button type="button" className={dangerButtonClass} onClick={() => setDetectedPlan(null)}>Discard</button>
           </div>
