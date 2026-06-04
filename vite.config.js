@@ -20,6 +20,8 @@ export default defineConfig({
       "@deck.gl/google-maps",
       "@loaders.gl/core",
       "@loaders.gl/worker-utils",
+      "clsx",
+      "tailwind-merge",
     ],
   },
   resolve: {

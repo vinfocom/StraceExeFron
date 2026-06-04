@@ -28,6 +28,7 @@ const DriveTestSessionsPage = lazy(() => import("./pages/DriveTestSessions"));
 const AppLayout = lazy(() => import("./components/layout/AppLayout"));
 const UploadDataPage = lazy(() => import("./pages/UploadData"));
 const IndoorPlaningPage = lazy(() => import("./pages/IndoorPlaning"));
+const IndoorPlanningProjectsPage = lazy(() => import("./pages/IndoorPlanningProjects"));
 const SettingsPage = lazy(() => import("./pages/Setting"));
 const UnifiedMapView = lazy(() => import("./pages/UnifiedMapView"));
 const HighPerfMap = lazy(() => import("@/pages/HighPerfMap"));
@@ -113,7 +114,8 @@ function AppShell({ isElectronRuntime }) {
             <Route path="/multi-map" element={<PrivateRoute><MultiViewPage /></PrivateRoute>} />
             <Route path="/manage-users" element={<PrivateRoute><ManageUsersPage /></PrivateRoute>} />
             <Route path="/upload-data" element={<PrivateRoute><UploadDataPage /></PrivateRoute>} />
-            <Route path="/indoor-planing" element={<PrivateRoute><IndoorPlaningPage /></PrivateRoute>} />
+            <Route path="/indoor-planing" element={<PrivateRoute><IndoorPlanningProjectsPage /></PrivateRoute>} />
+            <Route path="/indoor-planing/:projectId" element={<PrivateRoute><IndoorPlaningPage /></PrivateRoute>} />
             <Route path="/settings" element={<PrivateRoute><SettingsPage /></PrivateRoute>} />
             <Route path="/create-project" element={<PrivateRoute><ProjectsPage /></PrivateRoute>} />
             <Route path="/prediction-map" element={<PrivateRoute><PredictionMapPage /></PrivateRoute>} />

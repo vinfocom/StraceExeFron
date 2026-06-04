@@ -1,6 +1,7 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
+import { useLocation, useParams } from 'react-router-dom'
 import { Canvas } from '@react-three/fiber'
-import { OrbitControls } from '@react-three/drei'
+import { OrbitControls, OrthographicCamera, PerspectiveCamera } from '@react-three/drei'
 import { FloorModel } from '@/components/indoor/FloorModel'
 import IndoorPlanningSidebar from '@/components/indoor/IndoorPlanningSidebar'
 import { ALLOWED_EXCEL_TYPES, ALLOWED_IMAGE_TYPES, initialRooms, MAX_EXCEL_BYTES, MAX_IMAGE_BYTES } from '@/config/indoor/floorPlannerConfig'
@@ -9,9 +10,75 @@ import { createReviewedDetectedWorkbook, downloadWorkbook, parseBuildingWorkbook
 import { buildFloorOptions, getOverlapWarnings, getVisiblePlan, hasAllowedExtension, normalizeParsedPlan, toNumber } from '@/utils/indoor/floorPlan'
 import { buildAggregatedLogGridCells, getLogMetricValue } from '@/utils/indoor/indoorPlanningUtils'
 import { pythonApi } from '@/api/pythonApiService'
+import { indoorPlanningApi } from '@/api/apiEndpoints'
 import useColorForLog from '@/hooks/useColorForLog'
 
+const WALL_TYPE_OPTIONS = [
+  { value: 'drywall', label: 'Drywall / Plasterboard' },
+  { value: 'glass', label: 'Glass' },
+  { value: 'wooden', label: 'Wooden' },
+  { value: 'concrete', label: 'Concrete' },
+]
+
+const WALL_LOSS_BY_TYPE = {
+  drywall: 4,
+  glass: 4,
+  wooden: 6,
+  concrete: 25,
+}
+
+const FURNITURE_CONFIG = {
+  sofa: { label: 'Sofa', width: 2.4, depth: 0.9 },
+  almirah: { label: 'Almirah', width: 1.2, depth: 0.55 },
+  bed: { label: 'Bed', width: 2.1, depth: 1.6 },
+}
+
+const KPI_META = {
+  rsrp: { label: 'RSRP', unit: 'dBm' },
+  rsrq: { label: 'RSRQ', unit: 'dB' },
+  sinr: { label: 'SINR', unit: 'dB' },
+}
+
+const formatKpiRange = (item, unit) => {
+  if (item?.range) return item.range
+  const min = Number(item?.min)
+  const max = Number(item?.max)
+  if (Number.isFinite(min) && Number.isFinite(max)) return `${min} to ${max} ${unit}`
+  if (Number.isFinite(min)) return `${min}+ ${unit}`
+  if (Number.isFinite(max)) return `< ${max} ${unit}`
+  return unit
+}
+
+const buildDefaultSiteSectors = (baseAzimuth = 0) => {
+  const base = Number(baseAzimuth) || 0
+  return [0, 120, 240].map((offset, index) => ({
+    id: `sector-${index + 1}`,
+    name: `Sector ${index + 1}`,
+    azimuthDeg: (base + offset + 360) % 360,
+    beamwidthDeg: 120,
+    txPowerDbm: 30,
+    antennaGainDbi: 0,
+  }))
+}
+
+const getProjectName = (project) => project?.name || project?.Name || project?.projectName || project?.ProjectName
+const getProjectPlanJson = (project) => project?.planJson || project?.PlanJson || project?.plan_json
+
+const parseProjectPlan = (project) => {
+  const value = getProjectPlanJson(project)
+  if (!value) return null
+  if (typeof value === 'object') return value
+  if (typeof value !== 'string') return null
+  try {
+    return JSON.parse(value)
+  } catch {
+    return null
+  }
+}
+
 function IndoorPlaning() {
+  const { projectId } = useParams()
+  const location = useLocation()
   const [siteName, setSiteName] = useState('Network C - Block A')
   const [selectedFloorId, setSelectedFloorId] = useState('level-1')
   const [wallThickness, setWallThickness] = useState(0.2)
@@ -33,9 +100,23 @@ function IndoorPlaning() {
   const [isParsingImage, setIsParsingImage] = useState(false)
   const [detectedPlan, setDetectedPlan] = useState(null)
   const [sites, setSites] = useState([])
+  const [wifiPoints, setWifiPoints] = useState([])
+  const [furniture, setFurniture] = useState([])
+  const [interiorWalls, setInteriorWalls] = useState([])
+  const [draftWallStart, setDraftWallStart] = useState(null)
+  const [drawHoverPoint, setDrawHoverPoint] = useState(null)
+  const [snapToGrid, setSnapToGrid] = useState(true)
+  const [placementMode, setPlacementMode] = useState(null)
+  const [viewMode, setViewMode] = useState('2d')
+  const [showDrawMenu, setShowDrawMenu] = useState(false)
+  const [editMode, setEditMode] = useState(false)
+  const [selectedWall, setSelectedWall] = useState(null)
+  const [wallTypes, setWallTypes] = useState({})
+  const [dragTarget, setDragTarget] = useState(null)
   const [predictions, setPredictions] = useState([])
-  const [siteForm, setSiteForm] = useState({ name: 'Site-1', x: 2, z: 2, heightM: 3, coneHeightM: '', txPowerDbm: 30, freqMHz: 3500, antennaGainDbi: 0, azimuthDeg: 0 })
-  const [rfConfig, setRfConfig] = useState({ wallLossDb: 8, doorLossDb: 2.5, gridStepM: 1.2, rxGainDbi: 0 })
+  const [siteForm, setSiteForm] = useState({ name: 'Site-1', technology: '4G', antennaPattern: 'omni', x: 2, z: 2, heightM: 3, coneHeightM: '', txPowerDbm: 30, freqMHz: 3500, antennaGainDbi: 0, azimuthDeg: 0 })
+  const [wifiForm, setWifiForm] = useState({ name: 'Wi-Fi 1', antennaPattern: 'omni', x: 3, z: 3, heightM: 2.6, txPowerDbm: 20, freqMHz: 2400, antennaGainDbi: 2, azimuthDeg: 0 })
+  const [rfConfig, setRfConfig] = useState({ wallLossDb: 20, doorLossDb: 10, gridStepM: 1.2, rxGainDbi: 0 })
   const [logMetric, setLogMetric] = useState('rsrp')
   const inputClass = 'rounded-lg border border-slate-300 bg-white px-2.5 py-2 text-sm'
   const buttonClass = 'cursor-pointer rounded-lg bg-white   px-3 py-1 text-black border  border-black-500'
@@ -45,6 +126,62 @@ function IndoorPlaning() {
     const rows = getThresholdsForMetric(logMetric) || []
     return [...rows].sort((a, b) => Number(a.min) - Number(b.min))
   }, [getThresholdsForMetric, logMetric])
+
+  const snapPoint = (point) => {
+    const step = 0.5
+    if (!snapToGrid) return point
+    return {
+      x: Math.round(Number(point.x) / step) * step,
+      z: Math.round(Number(point.z) / step) * step,
+    }
+  }
+
+  useEffect(() => {
+    let cancelled = false
+
+    const applyProject = (project) => {
+      if (!project || cancelled) return
+
+      const name = getProjectName(project)
+      if (name) setSiteName(name)
+
+      const plan = parseProjectPlan(project)
+      if (!plan) return
+
+      if (plan.siteName || plan.site_name) setSiteName(String(plan.siteName || plan.site_name))
+      if (Array.isArray(plan.rooms) && plan.rooms.length > 0) setRooms(plan.rooms)
+      if (Array.isArray(plan.doors)) setDoors(plan.doors)
+      if (Array.isArray(plan.windows)) setWindows(plan.windows)
+      if (Array.isArray(plan.sites)) setSites(plan.sites)
+      if (Array.isArray(plan.wifiPoints)) setWifiPoints(plan.wifiPoints)
+      if (Array.isArray(plan.furniture)) setFurniture(plan.furniture)
+      if (Array.isArray(plan.interiorWalls)) setInteriorWalls(plan.interiorWalls)
+      if (plan.wallTypes && typeof plan.wallTypes === 'object') setWallTypes(plan.wallTypes)
+      if (Number.isFinite(Number(plan.wallThickness ?? plan.wall_thickness))) setWallThickness(Number(plan.wallThickness ?? plan.wall_thickness))
+      if (plan.selectedFloorId || plan.selected_floor_id) setSelectedFloorId(String(plan.selectedFloorId || plan.selected_floor_id))
+    }
+
+    const routeProject = location.state?.indoorProject
+    applyProject(routeProject)
+
+    if (!projectId) return () => {
+      cancelled = true
+    }
+
+    const loadProject = async () => {
+      try {
+        const project = await indoorPlanningApi.getProject(projectId)
+        applyProject(project?.project || project)
+      } catch (err) {
+        if (!cancelled) setImageMessage(err?.message || 'Could not load indoor planning project.')
+      }
+    }
+
+    loadProject()
+    return () => {
+      cancelled = true
+    }
+  }, [location.state, projectId])
 
   const floors = useMemo(() => buildFloorOptions(rooms), [rooms])
   const selectedFloor = useMemo(() => floors.find((floor) => floor.id === selectedFloorId) || floors[0] || { id: 'level-1', name: 'Level 1' }, [floors, selectedFloorId])
@@ -164,6 +301,43 @@ function IndoorPlaning() {
       return offsetM >= minOffset && offsetM <= maxOffset
     })
 
+  const getWallType = (roomId, side) => wallTypes[`${roomId}:${side}`]
+
+  const getSelectedWallTypeKey = () => {
+    if (!selectedWall) return null
+    if (selectedWall.wallId) return `interior:${selectedWall.wallId}`
+    return `${selectedWall.roomId}:${selectedWall.side}`
+  }
+
+  const selectedWallType = selectedWall ? wallTypes[getSelectedWallTypeKey()] || 'drywall' : 'drywall'
+
+  const setSelectedWallType = (wallType) => {
+    if (!selectedWall) return
+    const key = getSelectedWallTypeKey()
+    if (!key) return
+    setWallTypes((current) => ({ ...current, [key]: wallType }))
+  }
+
+  const removeSelectedInteriorWall = () => {
+    if (!selectedWall?.wallId) return
+    setInteriorWalls((current) => current.filter((wall) => wall.id !== selectedWall.wallId))
+    setWallTypes((current) => {
+      const next = { ...current }
+      delete next[`interior:${selectedWall.wallId}`]
+      return next
+    })
+    setSelectedWall(null)
+  }
+
+  const segmentsIntersect = (a, b, c, d) => {
+    const cross = (p, q, r) => (q.x - p.x) * (r.z - p.z) - (q.z - p.z) * (r.x - p.x)
+    const abC = cross(a, b, c)
+    const abD = cross(a, b, d)
+    const cdA = cross(c, d, a)
+    const cdB = cross(c, d, b)
+    return abC * abD < 0 && cdA * cdB < 0
+  }
+
   const wallIntersections = (sx, sz, tx, tz) => {
     const crossed = []
     visibleRooms.forEach((room) => {
@@ -192,11 +366,23 @@ function IndoorPlaning() {
         if (tSouth > 0 && tSouth < 1 && xSouth >= x1 && xSouth <= x2) crossed.push({ room, side: 'south', offset: xSouth - x1 })
       }
     })
+    interiorWalls
+      .filter((wall) => (wall.floorId || selectedFloor.id) === selectedFloor.id)
+      .forEach((wall) => {
+        const source = { x: sx, z: sz }
+        const target = { x: tx, z: tz }
+        const start = { x: Number(wall.x1), z: Number(wall.z1) }
+        const end = { x: Number(wall.x2), z: Number(wall.z2) }
+        if ([start.x, start.z, end.x, end.z].every(Number.isFinite) && segmentsIntersect(source, target, start, end)) {
+          crossed.push({ interiorWallId: wall.id })
+        }
+      })
     return crossed
   }
 
   const runIndoorPrediction = () => {
-    if (sites.length === 0 || visibleRooms.length === 0) return
+    const predictionSources = [...sites, ...wifiPoints]
+    if (predictionSources.length === 0 || visibleRooms.length === 0) return
     const step = Math.max(0.6, Number(rfConfig.gridStepM) || 1.2)
     const wallLoss = Math.max(0, Number(rfConfig.wallLossDb) || 8)
     const doorLoss = Math.max(0, Number(rfConfig.doorLossDb) || 2.5)
@@ -207,7 +393,7 @@ function IndoorPlaning() {
       for (let x = room.x + 0.4; x < room.x + room.width; x += step) {
         for (let z = room.z + 0.4; z < room.z + room.depth; z += step) {
           let bestRssi = -140
-          for (const site of sites) {
+          for (const site of predictionSources) {
             const dx = x - site.x
             const dz = z - site.z
             const distM = Math.max(1, Math.hypot(dx, dz))
@@ -216,16 +402,19 @@ function IndoorPlaning() {
             const walls = wallIntersections(site.x, site.z, x, z)
             const penetrationLoss = walls.reduce((sum, w) => {
               const hasDoor = getDoorOnWall(w.room, w.side, w.offset)
-              return sum + (hasDoor ? doorLoss : wallLoss)
+              const explicitWallType = w.interiorWallId ? wallTypes[`interior:${w.interiorWallId}`] : getWallType(w.room.id, w.side)
+              const typedWallLoss = explicitWallType ? WALL_LOSS_BY_TYPE[explicitWallType] ?? wallLoss : wallLoss
+              return sum + (hasDoor ? doorLoss : typedWallLoss)
             }, 0)
             const txGain = Number(site.antennaGainDbi) || 0
             const rxGain = Number(rfConfig.rxGainDbi) || 0
+            const antennaPattern = String(site.antennaPattern || 'omni').toLowerCase()
             const az = Number(site.azimuthDeg) || 0
             const bearing = (Math.atan2(dz, dx) * 180) / Math.PI
             const normBearing = ((bearing % 360) + 360) % 360
             const normAz = ((az % 360) + 360) % 360
             const angleDiff = Math.abs(((normBearing - normAz + 540) % 360) - 180)
-            const directionLoss = angleDiff <= 60 ? 0 : (angleDiff - 60) * 0.12
+            const directionLoss = antennaPattern === 'directional' ? (angleDiff <= 60 ? 0 : (angleDiff - 60) * 0.12) : 0
             const rssi = site.txPowerDbm + txGain + rxGain - fspl - penetrationLoss - directionLoss
             if (rssi > bestRssi) bestRssi = rssi
           }
@@ -264,6 +453,12 @@ function IndoorPlaning() {
     setRooms(plan.rooms)
     setDoors(plan.doors)
     setWindows(plan.windows)
+    setFurniture([])
+    setWifiPoints([])
+    setInteriorWalls([])
+    setDraftWallStart(null)
+    setWallTypes({})
+    setSelectedWall(null)
     setWallThickness(plan.wallThickness)
     if (plan.siteName) setSiteName(String(plan.siteName))
     setSelectedFloorId(plan.rooms[0].floorId || 'level-1')
@@ -287,19 +482,27 @@ function IndoorPlaning() {
   }
 
   const removeRoom = (id) => setRooms((current) => current.filter((room) => room.id !== id))
-  const addSite = (event) => {
+  const addSite = (event, position = {}) => {
     event?.preventDefault?.()
     const item = {
       id: `S${sites.length + 1}`,
       name: siteForm.name.trim() || `Site-${sites.length + 1}`,
-      x: Number(siteForm.x) || 0,
-      z: Number(siteForm.z) || 0,
-      heightM: Math.max(0.5, Number(siteForm.heightM) || 3),
+      technology: String(siteForm.technology || '').trim() || '4G',
+      antennaPattern: siteForm.antennaPattern === 'directional' ? 'directional' : 'omni',
+      x: Number.isFinite(Number(position.x)) ? Number(position.x) : Number(siteForm.x) || 0,
+      z: Number.isFinite(Number(position.z)) ? Number(position.z) : Number(siteForm.z) || 0,
+      heightM: Math.max(0.5, Math.min(200, Number(siteForm.heightM) || 3)),
       coneHeightM: Number.isFinite(Number(siteForm.coneHeightM)) && Number(siteForm.coneHeightM) > 0 ? Number(siteForm.coneHeightM) : null,
       txPowerDbm: Number(siteForm.txPowerDbm) || 30,
       freqMHz: Number(siteForm.freqMHz) || 3500,
       antennaGainDbi: Number(siteForm.antennaGainDbi) || 0,
       azimuthDeg: Number(siteForm.azimuthDeg) || 0,
+      sectors: buildDefaultSiteSectors(siteForm.azimuthDeg).map((sector) => ({
+        ...sector,
+        technology: String(siteForm.technology || '').trim() || '4G',
+        txPowerDbm: Number(siteForm.txPowerDbm) || 30,
+        antennaGainDbi: Number(siteForm.antennaGainDbi) || 0,
+      })),
     }
     setSites((prev) => [...prev, item])
     setSiteForm((prev) => ({ ...prev, name: `Site-${sites.length + 2}` }))
@@ -309,14 +512,160 @@ function IndoorPlaning() {
     setSites((prev) =>
       prev.map((site) => {
         if (site.id !== id) return site
-        if (key === 'name') return { ...site, [key]: value }
+        if (key === 'name' || key === 'technology' || key === 'antennaPattern') return { ...site, [key]: value }
         if (key === 'coneHeightM') {
           const n = Number(value)
           return { ...site, [key]: Number.isFinite(n) && n > 0 ? n : null }
         }
+        if (key === 'heightM') {
+          const n = Number(value)
+          return { ...site, [key]: Number.isFinite(n) ? Math.max(0.5, Math.min(200, n)) : site.heightM }
+        }
         return { ...site, [key]: Number(value) || 0 }
       }),
     )
+  }
+
+  const addWifiPoint = (x = Number(wifiForm.x) || 0, z = Number(wifiForm.z) || 0) => {
+    const nextIndex = wifiPoints.length + 1
+    setWifiPoints((prev) => [
+      ...prev,
+      {
+        id: `WIFI${nextIndex}`,
+        name: wifiForm.name.trim() || `Wi-Fi ${nextIndex}`,
+        antennaPattern: wifiForm.antennaPattern === 'directional' ? 'directional' : 'omni',
+        x,
+        z,
+        heightM: Math.max(0.5, Number(wifiForm.heightM) || 2.6),
+        txPowerDbm: Number(wifiForm.txPowerDbm) || 20,
+        freqMHz: Number(wifiForm.freqMHz) || 2400,
+        antennaGainDbi: Number(wifiForm.antennaGainDbi) || 0,
+        azimuthDeg: Number(wifiForm.azimuthDeg) || 0,
+      },
+    ])
+    setWifiForm((prev) => ({ ...prev, name: `Wi-Fi ${wifiPoints.length + 2}` }))
+  }
+
+  const removeWifiPoint = (id) => setWifiPoints((prev) => prev.filter((wifi) => wifi.id !== id))
+
+  const updateWifiPoint = (id, key, value) => {
+    setWifiPoints((prev) =>
+      prev.map((wifi) => {
+        if (wifi.id !== id) return wifi
+        if (key === 'name' || key === 'antennaPattern') return { ...wifi, [key]: value }
+        return { ...wifi, [key]: Number(value) || 0 }
+      }),
+    )
+  }
+
+  const addFurniture = (type, x, z, options = {}) => {
+    const nextIndex = furniture.length + 1
+    const furnitureConfig = FURNITURE_CONFIG[type] || { label: 'Furniture', width: 1.2, depth: 1.2 }
+    setFurniture((prev) => [
+      ...prev,
+      {
+        id: `F${nextIndex}`,
+        type,
+        name: `${furnitureConfig.label} ${nextIndex}`,
+        x,
+        z,
+        width: Number(options.width) || furnitureConfig.width,
+        depth: Number(options.depth) || furnitureConfig.depth,
+        rotationDeg: Number(options.rotationDeg) || 0,
+      },
+    ])
+  }
+
+  const removeFurniture = (id) => setFurniture((prev) => prev.filter((item) => item.id !== id))
+
+  const movePlannerItem = (type, id, x, z) => {
+    const update = (item) => (item.id === id ? { ...item, x, z } : item)
+    if (type === 'site') setSites((prev) => prev.map(update))
+    if (type === 'wifi') setWifiPoints((prev) => prev.map(update))
+    if (type === 'furniture') setFurniture((prev) => prev.map(update))
+  }
+
+  const handleCanvasPoint = ({ x, z }) => {
+    if (!placementMode) return
+    const point = snapPoint({ x, z })
+    x = point.x
+    z = point.z
+    if (['sofa', 'almirah', 'bed'].includes(placementMode)) {
+      if (!draftWallStart) {
+        setDraftWallStart({ x, z })
+        setDrawHoverPoint({ x, z })
+        return
+      }
+
+      const dx = x - draftWallStart.x
+      const dz = z - draftWallStart.z
+      const length = Math.hypot(dx, dz)
+      const furnitureConfig = FURNITURE_CONFIG[placementMode] || { depth: 1.2 }
+      if (length >= 0.25) {
+        addFurniture(placementMode, (draftWallStart.x + x) / 2, (draftWallStart.z + z) / 2, {
+          width: Math.max(0.5, length),
+          depth: furnitureConfig.depth,
+          rotationDeg: (Math.atan2(dz, dx) * 180) / Math.PI,
+        })
+      }
+      setDraftWallStart(null)
+      setDrawHoverPoint(null)
+      setPlacementMode(null)
+      return
+    }
+    if (placementMode === 'site') addSite({ preventDefault: () => {} }, { x, z })
+    if (placementMode === 'wifi') addWifiPoint(x, z)
+    if (placementMode === 'interior-wall') {
+      if (!draftWallStart) {
+        setDraftWallStart({ x, z })
+        setDrawHoverPoint({ x, z })
+        return
+      }
+      const length = Math.hypot(x - draftWallStart.x, z - draftWallStart.z)
+      if (length >= 0.25) {
+        const id = `IW${Date.now()}`
+        setInteriorWalls((prev) => [
+          ...prev,
+          {
+            id,
+            floorId: selectedFloor.id,
+            floorName: selectedFloor.name,
+            x1: draftWallStart.x,
+            z1: draftWallStart.z,
+            x2: x,
+            z2: z,
+            height: Math.max(2, Number(newRoom.height) || 3),
+          },
+        ])
+        setSelectedWall({ wallId: id, roomName: 'Interior', side: 'wall' })
+      }
+      setDraftWallStart(null)
+      setDrawHoverPoint(null)
+      setPlacementMode(null)
+      return
+    }
+    setDrawHoverPoint(null)
+    setPlacementMode(null)
+  }
+
+  const handleCanvasHover = (point) => {
+    if (!placementMode) return
+    setDrawHoverPoint(snapPoint(point))
+  }
+
+  const startFurniturePlacement = (type) => {
+    setPlacementMode(type)
+    setDraftWallStart(null)
+    setDrawHoverPoint(null)
+    setShowDrawMenu(false)
+    setEditMode(false)
+  }
+
+  const cancelDrawing = () => {
+    setPlacementMode(null)
+    setDraftWallStart(null)
+    setDrawHoverPoint(null)
+    setShowDrawMenu(false)
   }
 
   const updateDetectedRoom = (id, key, value) => {
@@ -378,6 +727,12 @@ function IndoorPlaning() {
       setDoors(parsed.doors)
       setWindows(parsed.windows)
       setLogs([])
+      setFurniture([])
+      setWifiPoints([])
+      setInteriorWalls([])
+      setDraftWallStart(null)
+      setWallTypes({})
+      setSelectedWall(null)
       setWallThickness(parsed.wallThickness)
       setBoundaryPolygon(parsed.boundaryPolygon || null)
       if (parsed.siteName) setSiteName(String(parsed.siteName))
@@ -515,6 +870,10 @@ function IndoorPlaning() {
           setLogGridSizeM={setLogGridSizeM}
           logGridAggregation={logGridAggregation}
           setLogGridAggregation={setLogGridAggregation}
+          showAddRoomPanel={showAddRoomPanel}
+          setShowAddRoomPanel={setShowAddRoomPanel}
+          showIndoorPlanningPanel={showIndoorPlanningPanel}
+          setShowIndoorPlanningPanel={setShowIndoorPlanningPanel}
           detectedPlan={detectedPlan}
           updateDetectedRoom={updateDetectedRoom}
           removeDetectedRoom={removeDetectedRoom}
@@ -538,6 +897,9 @@ function IndoorPlaning() {
           addSite={addSite}
           siteForm={siteForm}
           setSiteForm={setSiteForm}
+          addWifiPoint={addWifiPoint}
+          wifiForm={wifiForm}
+          setWifiForm={setWifiForm}
           rfConfig={rfConfig}
           setRfConfig={setRfConfig}
           logMetric={logMetric}
@@ -549,44 +911,88 @@ function IndoorPlaning() {
           sites={sites}
           updateSite={updateSite}
           removeSite={removeSite}
+          wifiPoints={wifiPoints}
+          updateWifiPoint={updateWifiPoint}
+          removeWifiPoint={removeWifiPoint}
+          furniture={furniture}
+          removeFurniture={removeFurniture}
           overlapWarnings={overlapWarnings}
         />
 
-        <section className="relative order-1 grid min-h-0 grid-rows-[auto_auto_1fr] overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm max-[980px]:min-h-[60vh]">
+        <section className="relative order-1 grid min-h-0 grid-rows-[auto_auto_minmax(0,1fr)] overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm max-[980px]:min-h-[60vh]">
           <header className="border-b border-slate-200 px-4 py-3">
-            <div className="flex flex-wrap items-start justify-between gap-3">
-              <div>
+            <div className="flex flex-wrap items-end gap-3">
+              <div className="min-w-[220px] flex-1">
                 <h2 className="text-lg font-semibold">{siteName || 'Untitled Site'} - {selectedFloor.name}</h2>
-                <p className="mt-1 text-sm text-slate-600">Drag to rotate, scroll to zoom.</p>
+                <p className="mt-1 text-sm text-slate-600">{viewMode === '2d' ? 'Pan and zoom while drawing.' : 'Drag to rotate, scroll to zoom.'}</p>
               </div>
-              <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
-                <label className="grid gap-1 text-xs text-slate-600">
+              <div className="grid min-w-[600px] flex-[2] grid-cols-[repeat(5,minmax(110px,1fr))] items-end gap-2 max-[900px]:min-w-full max-[900px]:grid-cols-2 max-[560px]:grid-cols-1">
+                <label className="grid min-w-0 gap-1 text-xs text-slate-600">
                   Building File
-                  <input className="rounded-md border border-slate-300 bg-white px-2 py-1.5 text-xs text-slate-700" type="file" accept=".xlsx,.xls" onChange={handleExcelUpload} />
+                  <input className="min-w-0 w-full rounded-md border border-slate-300 bg-white px-2 py-1.5 text-xs text-slate-700" type="file" accept=".xlsx,.xls" onChange={handleExcelUpload} />
                 </label>
-                <label className="grid gap-1 text-xs text-slate-600">
+                <label className="grid min-w-0 gap-1 text-xs text-slate-600">
                   Floorplan Image
-                  <input className="rounded-md border border-slate-300 bg-white px-2 py-1.5 text-xs text-slate-700" type="file" accept=".png,.jpg,.jpeg,.webp" onChange={handleImageUpload} disabled={isParsingImage} />
+                  <input className="min-w-0 w-full rounded-md border border-slate-300 bg-white px-2 py-1.5 text-xs text-slate-700" type="file" accept=".png,.jpg,.jpeg,.webp" onChange={handleImageUpload} disabled={isParsingImage} />
                 </label>
-                <label className="grid gap-1 text-xs text-slate-600">
+                <label className="grid min-w-0 gap-1 text-xs text-slate-600">
                   Logs
-                  <input className="rounded-md border border-slate-300 bg-white px-2 py-1.5 text-xs text-slate-700" type="file" accept=".xlsx,.xls,.csv,text/csv" onChange={handleLogsUpload} />
+                  <input className="min-w-0 w-full rounded-md border border-slate-300 bg-white px-2 py-1.5 text-xs text-slate-700" type="file" accept=".xlsx,.xls,.csv,text/csv" onChange={handleLogsUpload} />
                 </label>
+                <button className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700" type="button" onClick={() => setShowLogs((prev) => !prev)}>Logs: {showLogs ? 'ON' : 'OFF'}</button>
+                <button className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700" type="button" onClick={() => setShowLogGrid((prev) => !prev)}>Log Grid: {showLogGrid ? 'ON' : 'OFF'}</button>
               </div>
             </div>
           </header>
           <div className="flex flex-wrap items-center gap-2 border-b border-slate-100 bg-slate-50 px-3 py-2">
-            <button className="rounded-md bg-violet-600 px-3 py-1.5 text-sm font-medium text-white">Draw</button>
-            <button className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm text-slate-700">Edit</button>
-            <button className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm text-slate-700" onClick={() => setShowAddRoomPanel((v) => !v)}>Add Room</button>
-            <button className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm text-slate-700" onClick={() => setShowIndoorPlanningPanel((v) => !v)}>Indoor Network Planning</button>
-            <select className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm text-slate-700">
-              <option>Interior Wall</option>
+            <button
+              className={`rounded-md border px-3 py-1.5 text-sm ${viewMode === '3d' ? 'border-slate-900 bg-slate-900 text-white' : 'border-slate-300 bg-white text-slate-700'}`}
+              type="button"
+              onClick={() => setViewMode((mode) => (mode === '3d' ? '2d' : '3d'))}
+            >
+              {viewMode === '3d' ? 'Exit' : '3D'}
+            </button>
+            <div className="relative">
+              <button className={`rounded-md px-3 py-1.5 text-sm font-medium text-white ${placementMode && ['sofa', 'almirah', 'bed'].includes(placementMode) ? 'bg-indigo-700' : 'bg-violet-600'}`} type="button" onClick={() => setShowDrawMenu((value) => !value)}>Draw</button>
+              {showDrawMenu && (
+                <div className="absolute left-0 top-full z-50 mt-1 w-36 rounded-md border border-slate-200 bg-white py-1 shadow-lg">
+                  <button className="block w-full px-3 py-1.5 text-left text-sm text-slate-700 hover:bg-slate-50" type="button" onClick={() => startFurniturePlacement('sofa')}>Sofa</button>
+                  <button className="block w-full px-3 py-1.5 text-left text-sm text-slate-700 hover:bg-slate-50" type="button" onClick={() => startFurniturePlacement('almirah')}>Almirah</button>
+                  <button className="block w-full px-3 py-1.5 text-left text-sm text-slate-700 hover:bg-slate-50" type="button" onClick={() => startFurniturePlacement('bed')}>Bed</button>
+                  <button className="block w-full px-3 py-1.5 text-left text-sm text-slate-700 hover:bg-slate-50" type="button" onClick={() => startFurniturePlacement('interior-wall')}>Interior Wall</button>
+                </div>
+              )}
+            </div>
+            <button className={`rounded-md border px-3 py-1.5 text-sm ${editMode ? 'border-emerald-500 bg-emerald-50 text-emerald-700' : 'border-slate-300 bg-white text-slate-700'}`} type="button" onClick={() => { setEditMode((value) => !value); setPlacementMode(null); setShowDrawMenu(false) }}>Edit</button>
+            <button className={`rounded-md border px-3 py-1.5 text-sm ${placementMode === 'site' ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-slate-300 bg-white text-slate-700'}`} type="button" onClick={() => { setPlacementMode((mode) => (mode === 'site' ? null : 'site')); setEditMode(false); setShowDrawMenu(false) }}>Add Site</button>
+            <button className={`rounded-md border px-3 py-1.5 text-sm ${placementMode === 'wifi' ? 'border-cyan-500 bg-cyan-50 text-cyan-700' : 'border-slate-300 bg-white text-slate-700'}`} type="button" onClick={() => { setPlacementMode((mode) => (mode === 'wifi' ? null : 'wifi')); setEditMode(false); setShowDrawMenu(false) }}>Add Wi-Fi</button>
+            <button className={`rounded-md border px-3 py-1.5 text-sm ${placementMode === 'interior-wall' ? 'border-violet-500 bg-violet-50 text-violet-700' : 'border-slate-300 bg-white text-slate-700'}`} type="button" onClick={() => startFurniturePlacement('interior-wall')}>Wall</button>
+            <button className={`rounded-md border px-3 py-1.5 text-sm ${snapToGrid ? 'border-emerald-500 bg-emerald-50 text-emerald-700' : 'border-slate-300 bg-white text-slate-700'}`} type="button" onClick={() => setSnapToGrid((value) => !value)}>Snap</button>
+            <select className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm text-slate-700" value={selectedWallType} onChange={(event) => setSelectedWallType(event.target.value)} disabled={!selectedWall}>
+              {WALL_TYPE_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
             </select>
-            <select className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm text-slate-700">
-              <option>Drywall / Plasterboard</option>
-            </select>
-            <button className="rounded-md border border-rose-200 bg-rose-50 px-3 py-1.5 text-sm text-rose-600">Clear All</button>
+            {selectedWall && (
+              <span className="rounded-md border border-slate-200 bg-white px-2 py-1.5 text-xs text-slate-600">
+                {selectedWall.roomName} {selectedWall.side} wall
+              </span>
+            )}
+            {selectedWall?.wallId && (
+              <button className="rounded-md border border-rose-200 bg-rose-50 px-3 py-1.5 text-sm text-rose-600" type="button" onClick={removeSelectedInteriorWall}>Remove Wall</button>
+            )}
+            {placementMode === 'interior-wall' && (
+              <span className="rounded-md border border-violet-200 bg-violet-50 px-2 py-1.5 text-xs text-violet-700">
+                {draftWallStart ? 'Click wall end' : 'Click wall start'}
+              </span>
+            )}
+            {['sofa', 'almirah', 'bed'].includes(placementMode) && (
+              <span className="rounded-md border border-indigo-200 bg-indigo-50 px-2 py-1.5 text-xs text-indigo-700">
+                {draftWallStart ? 'Click furniture end' : 'Click furniture start'}
+              </span>
+            )}
+            {placementMode && (
+              <button className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm text-slate-700" type="button" onClick={cancelDrawing}>Cancel</button>
+            )}
+            <button className="rounded-md border border-rose-200 bg-rose-50 px-3 py-1.5 text-sm text-rose-600" type="button" onClick={() => { setFurniture([]); setWifiPoints([]); setSites([]); setInteriorWalls([]); setDraftWallStart(null); setPredictions([]); setSelectedWall(null); setWallTypes({}) }}>Clear All</button>
             {showLogGrid && (
               <div className="ml-auto flex flex-wrap items-center gap-2 text-xs">
                 <span className="rounded-md border border-emerald-200 bg-emerald-50 px-2 py-1 text-emerald-700">
@@ -598,50 +1004,82 @@ function IndoorPlaning() {
               </div>
             )}
           </div>
-          {showAddRoomPanel && (
-            <div className="absolute left-3 right-3 top-[132px] z-40 rounded-lg border border-slate-200 bg-white px-3 py-3 shadow-xl">
-              <div className="grid grid-cols-6 gap-2">
-                <input className={inputClass} value={newRoom.name} placeholder="Room Name" onChange={(event) => setNewRoom((c) => ({ ...c, name: event.target.value }))} />
-                <input className={inputClass} type="number" min="1" step="0.5" value={newRoom.width} onChange={(event) => setNewRoom((c) => ({ ...c, width: Number(event.target.value) || 1 }))} placeholder="Width" />
-                <input className={inputClass} type="number" min="1" step="0.5" value={newRoom.depth} onChange={(event) => setNewRoom((c) => ({ ...c, depth: Number(event.target.value) || 1 }))} placeholder="Depth" />
-                <input className={inputClass} type="number" min="2" step="0.1" value={newRoom.height} onChange={(event) => setNewRoom((c) => ({ ...c, height: Number(event.target.value) || 2.8 }))} placeholder="Height" />
-                <input className={inputClass} type="number" step="0.5" value={newRoom.x} onChange={(event) => setNewRoom((c) => ({ ...c, x: Number(event.target.value) || 0 }))} placeholder="X" />
-                <input className={inputClass} type="number" step="0.5" value={newRoom.z} onChange={(event) => setNewRoom((c) => ({ ...c, z: Number(event.target.value) || 0 }))} placeholder="Z" />
+          <div className="relative min-h-0">
+            <div className="pointer-events-none absolute right-3 top-3 z-20 w-44 rounded-lg border border-slate-200 bg-white/95 p-2.5 text-xs shadow-md backdrop-blur">
+              <div className="mb-2 flex items-center justify-between gap-2">
+                <span className="font-semibold text-slate-800">{KPI_META[logMetric]?.label || String(logMetric).toUpperCase()}</span>
+                <span className="text-[10px] font-medium uppercase text-slate-500">{KPI_META[logMetric]?.unit || ''}</span>
               </div>
-              <div className="mt-2">
-                <button className={buttonClass} type="button" onClick={addRoom}>Add Room</button>
-              </div>
-            </div>
-          )}
-          {showIndoorPlanningPanel && (
-            <div className="absolute left-3 right-3 top-[132px] z-40 rounded-lg border border-slate-200 bg-white px-3 py-3 shadow-xl">
-              <div className="grid grid-cols-9 gap-2">
-                <input className={inputClass} value={siteForm.name} onChange={(e) => setSiteForm((c) => ({ ...c, name: e.target.value }))} placeholder="Site Name" />
-                <input className={inputClass} type="number" step="0.5" value={siteForm.x} onChange={(e) => setSiteForm((c) => ({ ...c, x: e.target.value }))} placeholder="X (m)" />
-                <input className={inputClass} type="number" step="0.5" value={siteForm.z} onChange={(e) => setSiteForm((c) => ({ ...c, z: e.target.value }))} placeholder="Z (m)" />
-                <input className={inputClass} type="number" step="1" value={siteForm.txPowerDbm} onChange={(e) => setSiteForm((c) => ({ ...c, txPowerDbm: e.target.value }))} placeholder="Tx Power" />
-                <input className={inputClass} type="number" step="100" value={siteForm.freqMHz} onChange={(e) => setSiteForm((c) => ({ ...c, freqMHz: e.target.value }))} placeholder="Freq MHz" />
-                <input className={inputClass} type="number" step="1" value={siteForm.azimuthDeg} onChange={(e) => setSiteForm((c) => ({ ...c, azimuthDeg: e.target.value }))} placeholder="Azimuth" />
-                <input className={inputClass} type="number" step="0.5" value={rfConfig.wallLossDb} onChange={(e) => setRfConfig((c) => ({ ...c, wallLossDb: e.target.value }))} placeholder="Wall Loss" />
-                <input className={inputClass} type="number" step="0.5" value={rfConfig.doorLossDb} onChange={(e) => setRfConfig((c) => ({ ...c, doorLossDb: e.target.value }))} placeholder="Door Loss" />
-                <input className={inputClass} type="number" step="0.5" value={rfConfig.rxGainDbi} onChange={(e) => setRfConfig((c) => ({ ...c, rxGainDbi: e.target.value }))} placeholder="RX Gain" />
-                <input className={inputClass} type="number" step="0.2" min="0.6" value={rfConfig.gridStepM} onChange={(e) => setRfConfig((c) => ({ ...c, gridStepM: e.target.value }))} placeholder="Grid Step" />
-              </div>
-              <div className="mt-2 flex flex-wrap gap-2">
-                <button className={buttonClass} type="button" onClick={addSite}>Add Site</button>
-                <button className={buttonClass} type="button" onClick={runIndoorPrediction}>Run Indoor Prediction</button>
-                <button type="button" className={dangerButtonClass} onClick={() => setPredictions([])}>Clear Prediction</button>
+              <div className="grid gap-1.5">
+                {thresholdLegend.length > 0 ? thresholdLegend.map((item, index) => (
+                  <div key={`${logMetric}-legend-${item.min}-${item.max}-${index}`} className="flex min-w-0 items-center gap-2">
+                    <span className="h-3 w-3 shrink-0 rounded-sm border border-black/10" style={{ backgroundColor: item.color }} />
+                    <span className="min-w-0 truncate text-slate-700">{item.label || formatKpiRange(item, KPI_META[logMetric]?.unit || '')}</span>
+                  </div>
+                )) : (
+                  <div className="flex min-w-0 items-center gap-2 text-slate-500">
+                    <span className="h-3 w-3 shrink-0 rounded-sm border border-black/10 bg-slate-400" />
+                    <span>No KPI thresholds</span>
+                  </div>
+                )}
               </div>
             </div>
-          )}
-
-          <Canvas camera={{ position: [0, 40, 0.01], fov: 35 }}>
-            <color attach="background" args={['#f4f8fa']} />
-            <ambientLight intensity={0.85} />
-            <directionalLight intensity={1.05} position={[8, 12, 6]} />
-            <FloorModel rooms={visibleRooms} wallThickness={wallThickness} doors={visibleDoors} windows={visibleWindows} logs={showLogs ? coloredVisibleLogs : []} sites={sites} predictions={predictions} logGridCells={aggregatedLogGridCells} />
-            <OrbitControls makeDefault target={[10, 0, 6]} minPolarAngle={0} maxPolarAngle={Math.PI / 2.2} />
-          </Canvas>
+            <Canvas className="h-full w-full">
+              {viewMode === '2d' ? (
+                <OrthographicCamera makeDefault position={[10, 60, 6]} zoom={34} near={0.1} far={1000} />
+              ) : (
+                <PerspectiveCamera makeDefault position={[18, 22, 18]} fov={45} near={0.1} far={1000} />
+              )}
+              <color attach="background" args={['#f4f8fa']} />
+              <ambientLight intensity={0.85} />
+              <directionalLight intensity={1.05} position={[8, 12, 6]} />
+              <FloorModel
+                rooms={visibleRooms}
+                wallThickness={wallThickness}
+                doors={visibleDoors}
+                windows={visibleWindows}
+                logs={showLogs ? coloredVisibleLogs : []}
+                sites={sites}
+                wifiPoints={wifiPoints}
+                furniture={furniture}
+                draftFurniture={draftWallStart && ['sofa', 'almirah', 'bed'].includes(placementMode) && drawHoverPoint ? {
+                  id: 'draft',
+                  type: placementMode,
+                  name: FURNITURE_CONFIG[placementMode]?.label || 'Furniture',
+                  x: (draftWallStart.x + drawHoverPoint.x) / 2,
+                  z: (draftWallStart.z + drawHoverPoint.z) / 2,
+                  width: Math.max(0.5, Math.hypot(drawHoverPoint.x - draftWallStart.x, drawHoverPoint.z - draftWallStart.z)),
+                  depth: FURNITURE_CONFIG[placementMode]?.depth || 1.2,
+                  rotationDeg: (Math.atan2(drawHoverPoint.z - draftWallStart.z, drawHoverPoint.x - draftWallStart.x) * 180) / Math.PI,
+                } : null}
+                interiorWalls={interiorWalls.filter((wall) => (wall.floorId || selectedFloor.id) === selectedFloor.id)}
+                draftInteriorWall={draftWallStart ? { start: draftWallStart, end: drawHoverPoint, height: Math.max(2, Number(newRoom.height) || 3), floorId: selectedFloor.id } : null}
+                predictions={predictions}
+                logGridCells={aggregatedLogGridCells}
+                wallTypes={wallTypes}
+                selectedWall={selectedWall}
+                placementMode={placementMode}
+                viewMode={viewMode}
+                dragTarget={dragTarget}
+                editMode={editMode}
+                onSelectWall={setSelectedWall}
+                onCanvasPoint={handleCanvasPoint}
+                onCanvasHover={handleCanvasHover}
+                onStartDrag={setDragTarget}
+                onDragMove={movePlannerItem}
+                onEndDrag={() => setDragTarget(null)}
+              />
+              <OrbitControls
+                makeDefault
+                enabled={!editMode && !dragTarget}
+                target={[10, 0, 6]}
+                enableRotate
+                enablePan
+                minPolarAngle={viewMode === '2d' ? 0.18 : 0.15}
+                maxPolarAngle={viewMode === '2d' ? 0.18 : Math.PI / 2.2}
+              />
+            </Canvas>
+          </div>
         </section>
       </main>
     </div>

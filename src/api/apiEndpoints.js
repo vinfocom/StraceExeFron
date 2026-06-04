@@ -882,6 +882,12 @@ export const authApi = {
   checkStatus: () => api.get("/api/auth/status"),
 };
 
+export const indoorPlanningApi = {
+  getProjects: () => api.get("/api/IndoorPlanning/projects"),
+  createProject: (payload) => api.post("/api/IndoorPlanning/projects", payload),
+  getProject: (id) => api.get(`/api/IndoorPlanning/projects/${id}`),
+};
+
 export const adminApi = {
   getReactDashboardData: () => api.get("/Admin/GetReactDashboardData"),
   getDashboardGraphData: () => api.get("/Admin/GetDashboardGraphData"),
