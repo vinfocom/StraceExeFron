@@ -260,6 +260,12 @@ export const OverviewTab = ({
                 dlSpeedDurationSec: 0,
                 ulSpeedDurationTotal: 0,
                 ulSpeedDurationSec: 0,
+                dlSpeedSampleTotal: 0,
+                dlSpeedSampleCount: 0,
+                ulSpeedSampleTotal: 0,
+                ulSpeedSampleCount: 0,
+                sampleCount: 0,
+                constantThroughputSessions: 0,
                 sessionCount: 0,
                 sessions: [],
                 providerColor: getLogColor("provider", normalizedProvider),
@@ -272,6 +278,9 @@ export const OverviewTab = ({
             aggregated[key].durationSec += volumeData?.duration_sec || 0;
 
             const durationSec = volumeData?.duration_sec || 0;
+            const sampleCount = volumeData?.sample_count || 0;
+            aggregated[key].sampleCount += sampleCount;
+
             if (volumeData?.avg_dl_mbps && durationSec > 0) {
               aggregated[key].dlSpeedDurationTotal +=
                 volumeData.avg_dl_mbps * durationSec;
@@ -281,6 +290,19 @@ export const OverviewTab = ({
               aggregated[key].ulSpeedDurationTotal +=
                 volumeData.avg_ul_mbps * durationSec;
               aggregated[key].ulSpeedDurationSec += durationSec;
+            }
+            if (volumeData?.avg_dl_mbps && sampleCount > 0) {
+              aggregated[key].dlSpeedSampleTotal +=
+                volumeData.avg_dl_mbps * sampleCount;
+              aggregated[key].dlSpeedSampleCount += sampleCount;
+            }
+            if (volumeData?.avg_ul_mbps && sampleCount > 0) {
+              aggregated[key].ulSpeedSampleTotal +=
+                volumeData.avg_ul_mbps * sampleCount;
+              aggregated[key].ulSpeedSampleCount += sampleCount;
+            }
+            if (volumeData?.is_constant_tpt) {
+              aggregated[key].constantThroughputSessions += 1;
             }
 
             aggregated[key].sessionCount += 1;
@@ -294,11 +316,15 @@ export const OverviewTab = ({
 
     const processed = Object.values(aggregated).map((item) => {
       const avgDlSpeed =
-        item.dlSpeedDurationSec > 0
+        item.dlSpeedSampleCount > 0
+          ? item.dlSpeedSampleTotal / item.dlSpeedSampleCount
+          : item.dlSpeedDurationSec > 0
           ? item.dlSpeedDurationTotal / item.dlSpeedDurationSec
           : 0;
       const avgUlSpeed =
-        item.ulSpeedDurationSec > 0
+        item.ulSpeedSampleCount > 0
+          ? item.ulSpeedSampleTotal / item.ulSpeedSampleCount
+          : item.ulSpeedDurationSec > 0
           ? item.ulSpeedDurationTotal / item.ulSpeedDurationSec
           : 0;
 
@@ -316,6 +342,8 @@ export const OverviewTab = ({
         avgUlSpeedMbps: avgUlSpeed,
         avgDlSpeedFormatted: formatSpeed(avgDlSpeed),
         avgUlSpeedFormatted: formatSpeed(avgUlSpeed),
+        sampleCount: item.sampleCount,
+        constantThroughputSessions: item.constantThroughputSessions,
         sessionCount: item.sessionCount,
         sessions: item.sessions,
         providerColor: item.providerColor,
@@ -348,9 +376,19 @@ export const OverviewTab = ({
       (sum, item) => sum + (item.durationSec || 0),
       0
     );
+    const totalSampleCount = processedProviderVolume.reduce(
+      (sum, item) => sum + (item.sampleCount || 0),
+      0
+    );
 
     const avgDlSpeed =
-      totalDurationSec > 0
+      totalSampleCount > 0
+        ? processedProviderVolume.reduce(
+            (sum, item) =>
+              sum + (item.avgDlSpeedMbps || 0) * (item.sampleCount || 0),
+            0
+          ) / totalSampleCount
+        : totalDurationSec > 0
         ? processedProviderVolume.reduce(
             (sum, item) =>
               sum + (item.avgDlSpeedMbps || 0) * (item.durationSec || 0),
@@ -358,7 +396,13 @@ export const OverviewTab = ({
           ) / totalDurationSec
         : 0;
     const avgUlSpeed =
-      totalDurationSec > 0
+      totalSampleCount > 0
+        ? processedProviderVolume.reduce(
+            (sum, item) =>
+              sum + (item.avgUlSpeedMbps || 0) * (item.sampleCount || 0),
+            0
+          ) / totalSampleCount
+        : totalDurationSec > 0
         ? processedProviderVolume.reduce(
             (sum, item) =>
               sum + (item.avgUlSpeedMbps || 0) * (item.durationSec || 0),

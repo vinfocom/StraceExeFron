@@ -173,6 +173,16 @@ export const normalizeTechName = (tech, band = null) => {
 
   const t = techStr.toUpperCase();
 
+  if (
+    t.includes("LTE ANCHOR") ||
+    t.includes("LTE-ANCHOR") ||
+    t.includes("LTE_ANCHOR") ||
+    t.includes("ENDC") ||
+    t.includes("EN-DC")
+  ) {
+    return t.includes("4G") || t.includes("LTE") ? "4G" : "5G";
+  }
+
   if (t.includes("5G") || t.includes("NR") || t.includes("NSA") || t.includes("SA")) {
     return "5G";
   }
