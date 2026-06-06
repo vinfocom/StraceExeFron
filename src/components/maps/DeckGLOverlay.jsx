@@ -102,7 +102,6 @@ const downsample = (rows, maxRows) => {
   return rows.filter((_, index) => index % step === 0).slice(0, maxRows);
 };
 
-
 const DeckGLOverlay = ({
   onHover,
   map,
@@ -129,6 +128,7 @@ const DeckGLOverlay = ({
   showNeighbors = true,
   pickable = true,
   autoHighlight = true,
+  primaryRenderLimit = null,
 }) => {
   const overlayRef = useRef(null);
   const isCleanedUpRef = useRef(false);
@@ -243,7 +243,10 @@ const DeckGLOverlay = ({
 
   const primaryData = useMemo(() => {
     if (!showPrimaryLogs || !locations?.length) return [];
-    const sampled = downsample(locations, getPrimaryRenderLimit(locations.length));
+    const renderLimit = Number.isFinite(primaryRenderLimit)
+      ? primaryRenderLimit
+      : getPrimaryRenderLimit(locations.length);
+    const sampled = downsample(locations, renderLimit);
     return sampled.map((loc, idx) => ({
       index: idx,
       source: loc,
@@ -253,7 +256,7 @@ const DeckGLOverlay = ({
       ],
       computedColor: getColor ? parseColorToRGB(getColor(loc)) : [16, 185, 129, 200],
     }));
-  }, [locations, showPrimaryLogs, getColor]);
+  }, [locations, showPrimaryLogs, getColor, primaryRenderLimit]);
 
   const neighborData = useMemo(() => {
     if (!showNeighbors || !neighbors?.length) return [];
@@ -408,6 +411,7 @@ const DeckGLOverlay = ({
           pickable: false,
         }));
       }
+
     }
 
     if (showImageLogs && imageLogData.length > 0) {

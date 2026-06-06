@@ -34,6 +34,12 @@ import { useNetworkSamples } from "@/hooks/useNetworkSamples";
 import { useSessionNeighbors } from "@/hooks/useSessionNeighbors";
 import MapWithMultipleCircles from "@/components/unifiedMap/MapwithMultipleCircle";
 import LoadingProgress from "@/components/LoadingProgress";
+import { getMetricValueFromLog } from "@/utils/metrics";
+import {
+  normalizeBandName,
+  normalizeProviderName,
+  normalizeTechName,
+} from "@/utils/colorUtils";
 
 
 
@@ -46,6 +52,7 @@ const MAP_OPTIONS = {
   fullscreenControl: true,
   zoomControl: true,
   gestureHandling: "greedy",
+  renderingType: "RASTER",
 };
 
 const normalizeMetric = (metric) => {
@@ -77,19 +84,82 @@ const getMetricUnit = (metric) => {
 };
 
 const getMetricValue = (log, metric) => {
-  const key = normalizeMetric(metric);
-  if (key === "dl_thpt") return log.dl_thpt ?? log.dl_tpt ?? log.DL_TPT ?? -120;
-  if (key === "ul_thpt") return log.ul_thpt ?? log.ul_tpt ?? log.UL_TPT ?? -120;
-  if (key === "rsrp") {
-    const rsrpOrRssi =
-      log.rsrp ??
-      log.RSRP ??
-      log.rssi ??
-      log.RSSI ??
-      log.Rssi;
-    return rsrpOrRssi ?? -120;
+  const value = getMetricValueFromLog(log, normalizeMetric(metric));
+  return Number.isFinite(value) ? value : null;
+};
+
+const matchesLegendMetricRange = (value, legendFilter) => {
+  const min = Number(legendFilter?.min);
+  const max = Number(legendFilter?.max);
+  const includeMax = Boolean(legendFilter?.includeMax);
+  const epsilon = 1e-9;
+
+  if (!Number.isFinite(value)) return false;
+  if (legendFilter?.min === null && Number.isFinite(max)) return value < max;
+  if (Number.isFinite(min) && legendFilter?.max === null) return value >= min;
+  if (![min, max].every(Number.isFinite)) return false;
+
+  const lowerMatch = value >= min - epsilon;
+  const upperMatch = includeMax
+    ? value <= max + epsilon
+    : value < max - epsilon;
+  return lowerMatch && upperMatch;
+};
+
+const getLegendCategoryValue = (log, key) => {
+  const normalizedKey = String(key || "").trim().toLowerCase();
+
+  if (normalizedKey === "provider") {
+    return normalizeProviderName(log.provider || log.Provider || log.carrier) || "Unknown";
   }
-  return log[key] ?? log.rsrp ?? log.rssi ?? -120;
+
+  if (normalizedKey === "technology") {
+    const tech = log.network || log.Network || log.technology || log.networkType;
+    const band = log.band || log.Band || log.neighbourBand || log.neighborBand || log.neighbour_band;
+    return normalizeTechName(tech, band);
+  }
+
+  if (normalizedKey === "band") {
+    const band = String(log.neighbourBand || log.neighborBand || log.neighbour_band || log.band || log.Band || "").trim();
+    const normalizedBand = normalizeBandName(band);
+    return normalizedBand === "-1" || normalizedBand === "" ? "Unknown" : normalizedBand;
+  }
+
+  if (normalizedKey === "nodebid") {
+    return String(log?.nodebid ?? log?.nodeb_id ?? log?.nodebId ?? "").trim() || "Unknown";
+  }
+
+  if (normalizedKey === "pci") {
+    const pci = Number.parseInt(log.pci ?? log.PCI ?? log.best_pci, 10);
+    return Number.isFinite(pci) ? String(pci) : "Unknown";
+  }
+
+  return "Unknown";
+};
+
+const matchesLegendFilter = (log, legendFilter) => {
+  if (!legendFilter) return true;
+
+  if (legendFilter.type === "metric") {
+    const value = getMetricValue(log, legendFilter.metric);
+    return matchesLegendMetricRange(value, legendFilter);
+  }
+
+  if (legendFilter.type === "pci") {
+    const value = getMetricValueFromLog(log, "pci");
+    return Number.isFinite(value) && Math.floor(value) === legendFilter.value;
+  }
+
+  if (legendFilter.type === "tac") {
+    const value = log.tac || log.TAC;
+    return String(value) === String(legendFilter.value);
+  }
+
+  if (legendFilter.type === "category") {
+    return getLegendCategoryValue(log, legendFilter.key) === legendFilter.value;
+  }
+
+  return true;
 };
 
 
@@ -255,7 +325,6 @@ function SessionMapDebug() {
   const [onlyInsidePolygons, setOnlyInsidePolygons] = useState(false);
   const [legendFilter, setLegendFilter] = useState(null);
 
-  // Use the color hook
   const {
     getMetricColor,
     getThresholdsForMetric,
@@ -295,10 +364,8 @@ function SessionMapDebug() {
       .filter(Boolean);
   }, [sessionIdParam]);
 
-  // Google Maps loader
   const { isLoaded, loadError } = useJsApiLoader(GOOGLE_MAPS_LOADER_OPTIONS);
 
-  // Safe UI defaults
   const safeUi = useMemo(
     () => ({
       drawEnabled: false,
@@ -385,9 +452,11 @@ function SessionMapDebug() {
         const metricValue = getMetricValue(log, activeMetric);
 
         if (filters.minSignal !== "" && !isNaN(parseFloat(filters.minSignal))) {
+          if (!Number.isFinite(metricValue)) return false;
           if (metricValue < parseFloat(filters.minSignal)) return false;
         }
         if (filters.maxSignal !== "" && !isNaN(parseFloat(filters.maxSignal))) {
+          if (!Number.isFinite(metricValue)) return false;
           if (metricValue > parseFloat(filters.maxSignal)) return false;
         }
         if (filters.technology && filters.technology !== "ALL") {
@@ -422,30 +491,39 @@ function SessionMapDebug() {
       });
   }, [logs, filters]);
 
+  const visibleLogs = useMemo(() => {
+    if (!legendFilter) return filteredLogs;
+    return filteredLogs.filter((log) => matchesLegendFilter(log, legendFilter));
+  }, [filteredLogs, legendFilter]);
+
   // Show toast when filtered count changes
   const prevFilteredCountRef = useRef(0);
   useEffect(() => {
     if (
       logs.length > 0 &&
-      filteredLogs.length !== prevFilteredCountRef.current
+      visibleLogs.length !== prevFilteredCountRef.current
     ) {
       if (
         prevFilteredCountRef.current > 0 &&
-        filteredLogs.length !== logs.length
+        visibleLogs.length !== logs.length
       ) {
-        toast.info(`Showing ${filteredLogs.length} of ${logs.length} points`, {
+        toast.info(`Showing ${visibleLogs.length} of ${logs.length} points`, {
           autoClose: 2000,
           toastId: "filter-toast",
         });
       }
-      prevFilteredCountRef.current = filteredLogs.length;
+      prevFilteredCountRef.current = visibleLogs.length;
     }
-  }, [filteredLogs.length, logs.length]);
+  }, [visibleLogs.length, logs.length]);
 
   const handleClearFilter = useCallback(
     (key) => resetFilter(key),
     [resetFilter],
   );
+  const handleClearAllVisibleFilters = useCallback(() => {
+    clearFilters();
+    setLegendFilter(null);
+  }, [clearFilters]);
 
   // Enhanced Save Polygon with full support for polygon/rectangle/circle
   const handleSavePolygon = async () => {
@@ -497,14 +575,14 @@ function SessionMapDebug() {
 
   // Stats CSV download
   const handleStatsDownload = useCallback(() => {
-    if (filteredLogs.length === 0) {
+    if (visibleLogs.length === 0) {
       toast.error("No data to download");
       return;
     }
 
-    const values = filteredLogs
+    const values = visibleLogs
       .map((log) => getMetricValue(log, activeMetric))
-      .filter((v) => v !== null && !isNaN(v));
+      .filter(Number.isFinite);
     const sortedValues = [...values].sort((a, b) => a - b);
 
     const activeFiltersStr =
@@ -525,7 +603,8 @@ function SessionMapDebug() {
     const csvRows = [
       ["Metric", "Value"],
       ["Session IDs", sessionIds.join("; ")],
-      ["Total Points (Filtered)", filteredLogs.length],
+      ["Total Points (Filtered)", visibleLogs.length],
+      ["Total Points (Before Legend)", filteredLogs.length],
       ["Total Points (Original)", logs.length],
       ["Active Filters", activeFiltersStr],
       ["Polygon WKT", polygonWkt],
@@ -563,11 +642,11 @@ function SessionMapDebug() {
     a.click();
     URL.revokeObjectURL(url);
     toast.success("Stats CSV downloaded!");
-  }, [filteredLogs, logs.length, sessionIds, filters, analysis]);
+  }, [visibleLogs, filteredLogs.length, logs.length, sessionIds, filters, analysis, activeMetric]);
 
   // Raw logs CSV download
   const handleRawDownload = useCallback(() => {
-    if (filteredLogs.length === 0) {
+    if (visibleLogs.length === 0) {
       toast.error("No logs to download");
       return;
     }
@@ -586,7 +665,7 @@ function SessionMapDebug() {
     ];
     const rows = [
       headers.join(","),
-      ...filteredLogs.map((l) =>
+      ...visibleLogs.map((l) =>
         [
           l.session_id || "",
           l.lat || "",
@@ -609,8 +688,8 @@ function SessionMapDebug() {
     a.download = `raw_logs_${new Date().toISOString().slice(0, 10)}.csv`;
     a.click();
     URL.revokeObjectURL(url);
-    toast.success(`Downloaded ${filteredLogs.length.toLocaleString()} points!`);
-  }, [filteredLogs]);
+    toast.success(`Downloaded ${visibleLogs.length.toLocaleString()} points!`);
+  }, [visibleLogs]);
 
   // Set download handlers in context (prevents stale closures)
   const downloadHandlersRef = useRef({
@@ -632,19 +711,19 @@ function SessionMapDebug() {
   // Update polygon stats whenever filtered logs change
   const prevFilteredLengthRef = useRef(0);
   useEffect(() => {
-    if (filteredLogs.length !== prevFilteredLengthRef.current) {
-      prevFilteredLengthRef.current = filteredLogs.length;
+    if (visibleLogs.length !== prevFilteredLengthRef.current) {
+      prevFilteredLengthRef.current = visibleLogs.length;
 
-      if (filteredLogs.length > 0) {
-        const values = filteredLogs
+      if (visibleLogs.length > 0) {
+        const values = visibleLogs
           .map((l) => getMetricValue(l, activeMetric))
-          .filter((v) => v !== null && !isNaN(v));
+          .filter(Number.isFinite);
         const sorted = [...values].sort((a, b) => a - b);
 
         setPolygonStats({
-          count: filteredLogs.length,
+          count: visibleLogs.length,
           type: "session",
-          logs: filteredLogs,
+          logs: visibleLogs,
           stats: {
             mean:
               values.length > 0
@@ -656,7 +735,7 @@ function SessionMapDebug() {
               values.length > 0 ? sorted[Math.floor(sorted.length / 2)] : 0,
           },
           intersectingSessions: sessionIds.map((id) => ({ id })),
-          activeFilters: filters,
+          activeFilters: { ...filters, legendFilter },
           selectedMetric: activeMetric || "RSRP",
         });
         setHasLogs(true);
@@ -665,7 +744,7 @@ function SessionMapDebug() {
         setHasLogs(false);
       }
     }
-  }, [filteredLogs, sessionIds, filters, setPolygonStats, setHasLogs]);
+  }, [visibleLogs, sessionIds, filters, legendFilter, setPolygonStats, setHasLogs, activeMetric]);
 
   // Map callbacks
   const onMapLoad = useCallback((m) => setMap(m), []);
@@ -673,18 +752,18 @@ function SessionMapDebug() {
 
   // Auto-fit bounds when logs load or filter changes
   useEffect(() => {
-    if (map && filteredLogs.length > 0 && window.google) {
+    if (map && visibleLogs.length > 0 && window.google) {
       const bounds = new window.google.maps.LatLngBounds();
       // Sample points for performance if there are too many
-      const sampleSize = Math.min(filteredLogs.length, 500);
-      const step = Math.max(1, Math.floor(filteredLogs.length / sampleSize));
+      const sampleSize = Math.min(visibleLogs.length, 500);
+      const step = Math.max(1, Math.floor(visibleLogs.length / sampleSize));
       
-      for (let i = 0; i < filteredLogs.length; i += step) {
-        bounds.extend({ lat: filteredLogs[i].lat, lng: filteredLogs[i].lng });
+      for (let i = 0; i < visibleLogs.length; i += step) {
+        bounds.extend({ lat: visibleLogs[i].lat, lng: visibleLogs[i].lng });
       }
       map.fitBounds(bounds, 50); // 50px padding
     }
-  }, [map, filteredLogs]);
+  }, [map, visibleLogs]);
 
   const handleDrawingSummary = useCallback(
     (stats) => {
@@ -724,10 +803,10 @@ function SessionMapDebug() {
   }, [allThresholds]);
 
   const mapCenter = useMemo(() => {
-    if (filteredLogs.length > 0)
-      return { lat: filteredLogs[0].lat, lng: filteredLogs[0].lng };
+    if (visibleLogs.length > 0)
+      return { lat: visibleLogs[0].lat, lng: visibleLogs[0].lng };
     return DEFAULT_CENTER;
-  }, [filteredLogs]);
+  }, [visibleLogs]);
 
   // Loading State - This is the conditional return that was causing issues
   if (!isLoaded) {
@@ -767,14 +846,18 @@ function SessionMapDebug() {
       <MapWithMultipleCircles
         isLoaded={isLoaded}
         loadError={loadError}
-        locations={filteredLogs}
+        locations={visibleLogs}
         neighborData={neighborData}
         showNeighbors={true}
         selectedMetric={selectedMetric}
         thresholds={formattedThresholds}
+        disableDeckInteractions={safeUi.drawEnabled && Boolean(safeUi.shapeMode)}
+        drawingEnabled={safeUi.drawEnabled}
+        drawingShapeMode={safeUi.shapeMode}
         onLoad={onMapLoad}
         options={MAP_OPTIONS}
-        legendFilter={legendFilter}
+        legendFilter={null}
+        primaryRenderLimit={Number.MAX_SAFE_INTEGER}
         center={mapCenter}
         fitToLocations={true}
         showPoints={true}
@@ -782,6 +865,7 @@ function SessionMapDebug() {
         showStats={false}
         activeMarkerIndex={null}
         onMarkerClick={() => {}}
+        debugMode={true}
         debugNeighbors={true}
         neighborSquareSize={6}
         neighborOpacity={0.5}
@@ -790,7 +874,7 @@ function SessionMapDebug() {
           <DrawingToolsLayer
             map={map}
             enabled={safeUi.drawEnabled}
-            logs={filteredLogs}
+            logs={visibleLogs}
             sessions={sessionMarkers}
             thresholds={formattedThresholds}
             selectedMetric={selectedMetric}
@@ -807,7 +891,7 @@ function SessionMapDebug() {
       </MapWithMultipleCircles>
 
       <AllLogsPanelToggle
-        logs={filteredLogs}
+        logs={visibleLogs}
         thresholds={formattedThresholds}
         selectedMetric={selectedMetric}
         isLoading={loading}
@@ -835,7 +919,7 @@ function SessionMapDebug() {
       )}
 
       {/* No results overlay when filters eliminate everything */}
-      {filteredLogs.length === 0 && logs.length > 0 && (
+      {visibleLogs.length === 0 && logs.length > 0 && (
         <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 z-20 bg-white/95 backdrop-blur-sm rounded-lg shadow-lg px-6 py-4 text-center">
           <Filter className="h-8 w-8 text-gray-400 mx-auto mb-2" />
           <p className="text-gray-700 font-medium">
@@ -845,7 +929,7 @@ function SessionMapDebug() {
             {logs.length.toLocaleString()} points available. Try adjusting your
             filters.
           </p>
-          <Button size="sm" className="mt-3" onClick={clearFilters}>
+          <Button size="sm" className="mt-3" onClick={handleClearAllVisibleFilters}>
             Clear All Filters
           </Button>
         </div>

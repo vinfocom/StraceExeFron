@@ -40,6 +40,24 @@ const formatStatus = (statusRaw) => {
 const DIAMOND_PATH = "M 0,-10 10,0 0,10 -10,0 z";
 const HEXAGON_PATH = "M 0,-10 8.66,-5 8.66,5 0,10 -8.66,5 -8.66,-5 z";
 
+const formatSubSessionType = (subSessionType) => {
+  const value = String(subSessionType ?? "").trim();
+  if (value === "1") return "PS";
+  if (value === "2") return "CS";
+  return value || "N/A";
+};
+
+const formatSubSessionStatus = (statusRaw, subSessionType) => {
+  const status = getNormalizedStatus(statusRaw);
+  const type = formatSubSessionType(subSessionType);
+
+  if (status === "success") {
+    return type === "CS" ? "Connected" : "Success";
+  }
+
+  return type === "CS" ? "Not Connected" : "Failed";
+};
+
 const getSubSessionMarkerPath = (subSessionType) => {
   const value = String(subSessionType ?? "").trim();
   if (value === "2") return HEXAGON_PATH;
@@ -99,7 +117,7 @@ const SubSessionMarkers = ({
             scale: 1,
           }}
           title={`Session ${marker.sessionId}${marker.subSessionId != null ? ` / Sub ${marker.subSessionId}` : ""
-            }`}
+            } / ${formatSubSessionType(marker.subSessionType)}`}
           onClick={() => {
             if (selectedMarkerId == null) {
               setInternalSelectedMarkerId(marker.id);
@@ -136,11 +154,13 @@ const SubSessionMarkers = ({
               </div>
               <div className="flex justify-between gap-3">
                 <span className="text-slate-500">Type</span>
-                <span className="font-medium">{selectedMarker.subSessionType ?? "N/A"}</span>
+                <span className="font-medium">{formatSubSessionType(selectedMarker.subSessionType)}</span>
               </div>
               <div className="flex justify-between gap-3">
                 <span className="text-slate-500">Status</span>
-                <span className="font-medium">{formatStatus(selectedMarker.resultStatus).status}</span>
+                <span className="font-medium">
+                  {formatSubSessionStatus(selectedMarker.resultStatus, selectedMarker.subSessionType)}
+                </span>
               </div>
               <div className="flex justify-between gap-3">
                 <span className="text-slate-500">Success</span>

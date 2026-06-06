@@ -10,13 +10,40 @@ const WALL_MATERIALS = {
   concrete: { color: '#9ca3af', opacity: 1, transparent: false },
 }
 
-const colorToRgb = (input) => {
-  const s = String(input || '').trim()
-  const rgb = s.match(/^rgb\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*\)$/i)
-  if (rgb) return [Number(rgb[1]), Number(rgb[2]), Number(rgb[3])]
-  const hex = s.replace('#', '')
-  if (hex.length === 6) return [parseInt(hex.slice(0, 2), 16), parseInt(hex.slice(2, 4), 16), parseInt(hex.slice(4, 6), 16)]
-  return [128, 128, 128]
+const hexToRgb = (input) => {
+  const hex = String(input || '').replace('#', '')
+  if (hex.length !== 6) return [220, 38, 38]
+  return [parseInt(hex.slice(0, 2), 16), parseInt(hex.slice(2, 4), 16), parseInt(hex.slice(4, 6), 16)]
+}
+
+const lerp = (a, b, t) => a + (b - a) * t
+
+const lerpRgb = (from, to, t) => [
+  Math.round(lerp(from[0], to[0], t)),
+  Math.round(lerp(from[1], to[1], t)),
+  Math.round(lerp(from[2], to[2], t)),
+]
+
+const SIGNAL_STOPS = [
+  { value: 0, rgb: hexToRgb('#2563eb') },
+  { value: 0.2, rgb: hexToRgb('#2563eb') },
+  { value: 0.4, rgb: hexToRgb('#16a34a') },
+  { value: 0.7, rgb: hexToRgb('#facc15') },
+  { value: 1, rgb: hexToRgb('#f97316') },
+  { value: 1.15, rgb: hexToRgb('#dc2626') },
+]
+
+const signalColorFromLossRatio = (lossRatio) => {
+  const value = Math.max(0, Number(lossRatio) || 0)
+  for (let i = 1; i < SIGNAL_STOPS.length; i += 1) {
+    const previous = SIGNAL_STOPS[i - 1]
+    const current = SIGNAL_STOPS[i]
+    if (value <= current.value) {
+      const t = (value - previous.value) / ((current.value - previous.value) || 1)
+      return lerpRgb(previous.rgb, current.rgb, Math.max(0, Math.min(1, t)))
+    }
+  }
+  return SIGNAL_STOPS[SIGNAL_STOPS.length - 1].rgb
 }
 
 const wallMaterialFor = (type, selected) => {
@@ -114,12 +141,6 @@ function PredictionHeatmapOverlay({ predictions, rooms, wallThickness = 0.2 }) {
         const ctx = canvas.getContext('2d')
         if (!ctx) return null
 
-        const layer = document.createElement('canvas')
-        layer.width = size
-        layer.height = size
-        const lctx = layer.getContext('2d')
-        if (!lctx) return null
-
         const fieldSize = 384
         const fieldCanvas = document.createElement('canvas')
         fieldCanvas.width = fieldSize
@@ -127,40 +148,42 @@ function PredictionHeatmapOverlay({ predictions, rooms, wallThickness = 0.2 }) {
         const fctx = fieldCanvas.getContext('2d')
         if (!fctx) return null
         const image = fctx.createImageData(fieldSize, fieldSize)
-        const pts = roomPreds.map((p) => ({
-          x: Number(p.x),
-          z: Number(p.z),
-          rgb: colorToRgb(p.color),
-        }))
+        const pts = roomPreds
+          .map((p) => ({
+            x: Number(p.x),
+            z: Number(p.z),
+            lossRatio: Number(p.signalLossRatio),
+          }))
+          .filter((p) => Number.isFinite(p.x) && Number.isFinite(p.z) && Number.isFinite(p.lossRatio))
+
+        if (!pts.length) return null
+
         for (let py = 0; py < fieldSize; py += 1) {
           for (let px = 0; px < fieldSize; px += 1) {
             const ux = px / (fieldSize - 1)
             const uz = 1 - py / (fieldSize - 1)
             const wx = Number(room.x) + inset + ux * innerW
             const wz = Number(room.z) + inset + uz * innerD
-            let r = 0
-            let g = 0
-            let b = 0
+            let lossSum = 0
             let wSum = 0
             for (let i = 0; i < pts.length; i += 1) {
               const dx = wx - pts[i].x
               const dz = wz - pts[i].z
               const w = 1 / (dx * dx + dz * dz + 0.08)
-              r += pts[i].rgb[0] * w
-              g += pts[i].rgb[1] * w
-              b += pts[i].rgb[2] * w
+              lossSum += pts[i].lossRatio * w
               wSum += w
             }
+            const rgb = signalColorFromLossRatio(lossSum / wSum)
             const idx = (py * fieldSize + px) * 4
-            image.data[idx] = Math.round(r / wSum)
-            image.data[idx + 1] = Math.round(g / wSum)
-            image.data[idx + 2] = Math.round(b / wSum)
+            image.data[idx] = rgb[0]
+            image.data[idx + 1] = rgb[1]
+            image.data[idx + 2] = rgb[2]
             image.data[idx + 3] = 255
           }
         }
         fctx.putImageData(image, 0, 0)
         ctx.imageSmoothingEnabled = true
-        ctx.filter = 'blur(2px)'
+        ctx.filter = 'blur(1.5px)'
         ctx.drawImage(fieldCanvas, 0, 0, size, size)
         ctx.filter = 'none'
 
@@ -223,6 +246,11 @@ export function FloorModel({
 }) {
   const is2dView = viewMode === '2d'
   const visibleFurniture = draftFurniture ? [...furniture, draftFurniture] : furniture
+  const draggableItems = useMemo(() => ({
+    site: sites,
+    wifi: wifiPoints,
+    furniture: visibleFurniture,
+  }), [sites, wifiPoints, visibleFurniture])
 
   const getRoomBounds = (room) => {
     if ((room.shape === 'polygon' || room.shape === 'poly') && Array.isArray(room.polygonPoints) && room.polygonPoints.length >= 3) {
@@ -264,7 +292,12 @@ export function FloorModel({
     }
     if (dragTarget) {
       event.stopPropagation()
-      onDragMove?.(dragTarget.type, dragTarget.id, event.point.x, event.point.z)
+      onDragMove?.(
+        dragTarget.type,
+        dragTarget.id,
+        event.point.x + (Number(dragTarget.offsetX) || 0),
+        event.point.z + (Number(dragTarget.offsetZ) || 0),
+      )
       return
     }
     onSelectWall?.(null)
@@ -278,7 +311,12 @@ export function FloorModel({
     }
     if (!dragTarget) return
     event.stopPropagation()
-    onDragMove?.(dragTarget.type, dragTarget.id, event.point.x, event.point.z)
+    onDragMove?.(
+      dragTarget.type,
+      dragTarget.id,
+      event.point.x + (Number(dragTarget.offsetX) || 0),
+      event.point.z + (Number(dragTarget.offsetZ) || 0),
+    )
   }
 
   const handlePlanPointerUp = (event) => {
@@ -290,7 +328,30 @@ export function FloorModel({
   const startDrag = (event, type, id) => {
     if (!editMode) return
     event.stopPropagation()
-    onStartDrag?.({ type, id })
+    const item = draggableItems[type]?.find((entry) => String(entry.id) === String(id))
+    onStartDrag?.({
+      type,
+      id,
+      offsetX: Number(item?.x || 0) - event.point.x,
+      offsetZ: Number(item?.z || 0) - event.point.z,
+    })
+  }
+
+  const renderDragPlane = () => {
+    if (!dragTarget) return null
+    return (
+      <mesh
+        key="drag-plane"
+        rotation-x={-Math.PI / 2}
+        position={[(bounds.minX + bounds.maxX) / 2, 0.72, (bounds.minZ + bounds.maxZ) / 2]}
+        onPointerMove={handlePlanPointerMove}
+        onPointerUp={handlePlanPointerUp}
+        onPointerLeave={handlePlanPointerUp}
+      >
+        <planeGeometry args={[bounds.maxX - bounds.minX + 6, bounds.maxZ - bounds.minZ + 6]} />
+        <meshBasicMaterial transparent opacity={0} depthWrite={false} />
+      </mesh>
+    )
   }
 
   const selectWall = (event, room, side) => {
@@ -578,6 +639,7 @@ export function FloorModel({
             </group>
           )
         })}
+        {renderDragPlane()}
         <Grid position={[0, -0.01, 0]} args={[80, 80]} sectionColor="#94a3b8" cellColor="#cbd5e1" sectionSize={5} sectionThickness={1} cellSize={1} cellThickness={0.5} fadeDistance={80} fadeStrength={1} />
       </group>
     )
@@ -824,6 +886,7 @@ export function FloorModel({
         )
       })}
       <PredictionHeatmapOverlay predictions={predictions} rooms={rooms} wallThickness={wallThickness} />
+      {renderDragPlane()}
       <Grid position={[0, -0.01, 0]} args={[80, 80]} sectionColor="#4b6c7b" cellColor="#9cb5c0" sectionSize={5} sectionThickness={1} cellSize={1} cellThickness={0.5} fadeDistance={80} fadeStrength={1} />
     </group>
   )

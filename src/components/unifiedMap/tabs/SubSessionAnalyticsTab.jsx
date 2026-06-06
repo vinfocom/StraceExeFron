@@ -84,9 +84,20 @@ const normalizeSubSessionResultStatus = (statusRaw) => {
 
 const normalizeSubSessionType = (typeRaw) => {
   const value = String(typeRaw ?? "").trim();
-  if (value === "1") return "1"; // CS
-  if (value === "2") return "2"; // PS
+  if (value === "1") return "1"; // PS
+  if (value === "2") return "2"; // CS
   return "other";
+};
+
+const CALL_TYPE_TAB = "CS";
+const DETAIL_TYPE_TAB = "PS";
+
+const getSubSessionTypeForTab = (typeTab) => (typeTab === CALL_TYPE_TAB ? "2" : "1");
+
+const getSubSessionTypeLabel = (typeNormalized) => {
+  if (typeNormalized === "1") return "PS";
+  if (typeNormalized === "2") return "CS";
+  return "N/A";
 };
 
 const SORT_OPTIONS = [
@@ -149,7 +160,7 @@ export default function SubSessionAnalyticsTab({
   }, []);
 
   useEffect(() => {
-    if (activeTypeTab !== "PS") {
+    if (activeTypeTab !== CALL_TYPE_TAB) {
       setInfo(false);
     }
   }, [activeTypeTab]);
@@ -237,7 +248,7 @@ export default function SubSessionAnalyticsTab({
   }, [rows, sortBy]);
 
   const filteredRows = useMemo(() => {
-    const targetType = activeTypeTab === "CS" ? "1" : "2";
+    const targetType = getSubSessionTypeForTab(activeTypeTab);
     return sortedRows.filter((row) => row.subSessionTypeNormalized === targetType);
   }, [sortedRows, activeTypeTab]);
 
@@ -275,7 +286,7 @@ export default function SubSessionAnalyticsTab({
 
   // calculation ayah pe ho rahi hai 
   const callKpis = useMemo(() => {
-    const callRows = filteredRows.filter((row) => row.subSessionTypeNormalized === "2");
+    const callRows = filteredRows.filter((row) => getSubSessionTypeLabel(row.subSessionTypeNormalized) === CALL_TYPE_TAB);
     const totalCalls = callRows.length;
 
     let successStatusCalls = 0; 
@@ -285,7 +296,7 @@ export default function SubSessionAnalyticsTab({
     let otherFailedCalls = 0;   
 
     callRows.forEach((row) => {
-      const isCallType = row.subSessionTypeNormalized === "2";
+      const isCallType = getSubSessionTypeLabel(row.subSessionTypeNormalized) === CALL_TYPE_TAB;
       if (!isCallType) return;
 
       const status = normalizeSubSessionResultStatus(row.status);
@@ -386,19 +397,19 @@ export default function SubSessionAnalyticsTab({
               PS
             </button>
           </div>
-          {activeTypeTab === "PS" && (
+          {activeTypeTab === CALL_TYPE_TAB && (
             <button
               type="button"
               onClick={() => setInfo((prev) => !prev)}
               className="h-6 w-6 rounded-full border border-slate-600 bg-slate-800 text-slate-200 text-xs font-semibold hover:bg-slate-700"
-              aria-label="Show PS call rules"
-              title="Show PS call rules"
+              aria-label="Show CS call rules"
+              title="Show CS call rules"
             >
               i
             </button>
           )}
         </div>
-        {activeTypeTab === "PS" && info && (
+        {activeTypeTab === CALL_TYPE_TAB && info && (
           <div className="rounded-md border border-slate-700 bg-slate-800/60 px-3 py-2 text-[11px] text-slate-200">
             Call Success: 120 sec to 90 sec | Call Drop: 90 sec to 15 sec | Less than 15 sec: Not Connected
           </div>
@@ -419,7 +430,7 @@ export default function SubSessionAnalyticsTab({
         </div>
       </div>
 
-      {activeTypeTab === "PS" && (
+      {activeTypeTab === CALL_TYPE_TAB && (
       <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
         <div className="bg-slate-900/70 border border-slate-700 rounded-lg p-3">
           <div className="text-[11px] text-slate-400">Call Rows</div>
@@ -458,7 +469,7 @@ export default function SubSessionAnalyticsTab({
 
 
 
-      {activeTypeTab === "CS" && (
+      {activeTypeTab === DETAIL_TYPE_TAB && (
         <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
           <div className="bg-slate-900/70 border border-slate-700 rounded-lg p-3">
             <div className="text-[11px] text-slate-400">Total Duration</div>
@@ -536,7 +547,7 @@ export default function SubSessionAnalyticsTab({
 
         <div
           className={`grid ${
-            activeTypeTab === "PS" ? "grid-cols-5" : "grid-cols-6"
+            activeTypeTab === CALL_TYPE_TAB ? "grid-cols-5" : "grid-cols-6"
           } bg-slate-800 px-2 py-1.5 text-[11px] font-semibold text-slate-300`}
         >
           <span>Session ID</span>
@@ -544,11 +555,11 @@ export default function SubSessionAnalyticsTab({
           <span>Type</span>
           <span>Status</span>
           <span>Map</span>
-          {activeTypeTab !== "PS" && <span>Details</span>}
+          {activeTypeTab !== CALL_TYPE_TAB && <span>Details</span>}
         </div>
 
         {filteredRows.map((row) => {
-          const isPsRow = row.subSessionTypeNormalized === "2";
+          const isCallRow = getSubSessionTypeLabel(row.subSessionTypeNormalized) === CALL_TYPE_TAB;
           const isSelected =
             (selectedMarkerKey != null &&
               row.markerId != null &&
@@ -562,14 +573,14 @@ export default function SubSessionAnalyticsTab({
             <React.Fragment key={row.rowKey}>
               <div
                 className={`grid ${
-                  activeTypeTab === "PS" ? "grid-cols-5" : "grid-cols-6"
+                  activeTypeTab === CALL_TYPE_TAB ? "grid-cols-5" : "grid-cols-6"
                 } px-2 py-1.5 text-xs border-t border-slate-700 ${
                   isSelected ? "bg-cyan-900/20 text-cyan-100" : "text-slate-200"
                 }`}
               >
                 <span>{row.sessionId}</span>
                 <span>{row.subSessionId}</span>
-                <span>{row.subSessionTypeNormalized === "1" ? "CS" : row.subSessionTypeNormalized === "2" ? "PS" : "N/A"}</span>
+                <span>{getSubSessionTypeLabel(row.subSessionTypeNormalized)}</span>
                 <span>
                   <span
                     className={`inline-flex items-center rounded-md px-2 py-0.5 text-[11px] border ${
@@ -579,10 +590,10 @@ export default function SubSessionAnalyticsTab({
                     }`}
                   >
                     {row.status === "success"
-                      ? isPsRow
+                      ? isCallRow
                         ? "Connected"
                         : "Success"
-                      : isPsRow
+                      : isCallRow
                         ? "Not Connected"
                         : "Failed"}
                   </span>
@@ -601,7 +612,7 @@ export default function SubSessionAnalyticsTab({
                     {row.position ? "Highlight" : "No Point"}
                   </button>
                 </span>
-                {activeTypeTab !== "PS" && (
+                {activeTypeTab !== CALL_TYPE_TAB && (
                   <span>
                     <button
                       type="button"
@@ -614,7 +625,7 @@ export default function SubSessionAnalyticsTab({
                 )}
               </div>
 
-              {activeTypeTab !== "PS" && isExpanded && (
+              {activeTypeTab !== CALL_TYPE_TAB && isExpanded && (
                 <div
                   className={`border-t border-slate-700 px-3 py-2 ${
                     isSelected ? "bg-cyan-900/10 text-cyan-100" : "bg-slate-900/30 text-slate-300"

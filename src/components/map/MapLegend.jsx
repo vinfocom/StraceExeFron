@@ -16,17 +16,13 @@ import {
   getLogColor,
 } from "@/utils/colorUtils";
 
-const METRIC_RANGE_EPSILON = 1e-9;
-
 const matchesMetricRange = (value, min, max, includeMax = false) => {
   if (!Number.isFinite(value)) return false;
   if (min === null && Number.isFinite(max)) return value < max;
   if (Number.isFinite(min) && max === null) return value >= min;
   if (![min, max].every(Number.isFinite)) return false;
-  const lowerMatch = value >= min - METRIC_RANGE_EPSILON;
-  const upperMatch = includeMax
-    ? value <= max + METRIC_RANGE_EPSILON
-    : value < max - METRIC_RANGE_EPSILON;
+  const lowerMatch = value >= min;
+  const upperMatch = includeMax ? value <= max : value < max;
   return lowerMatch && upperMatch;
 };
 
@@ -311,7 +307,6 @@ const PciLegend = ({ logs, activeFilter, onFilterChange }) => {
   );
 };
 
-// ✅ Metric Threshold Legend
 const MetricThresholdLegend = ({
   thresholds,
   selectedMetric,

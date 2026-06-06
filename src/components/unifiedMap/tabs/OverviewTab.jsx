@@ -256,8 +256,10 @@ export const OverviewTab = ({
                 dl_gb: 0,
                 ul_gb: 0,
                 durationSec: 0,
-                avgDlSpeedMbps: [],
-                avgUlSpeedMbps: [],
+                dlSpeedDurationTotal: 0,
+                dlSpeedDurationSec: 0,
+                ulSpeedDurationTotal: 0,
+                ulSpeedDurationSec: 0,
                 sessionCount: 0,
                 sessions: [],
                 providerColor: getLogColor("provider", normalizedProvider),
@@ -269,11 +271,16 @@ export const OverviewTab = ({
             aggregated[key].ul_gb += volumeData?.ul_gb || 0;
             aggregated[key].durationSec += volumeData?.duration_sec || 0;
 
-            if (volumeData?.avg_dl_mbps) {
-              aggregated[key].avgDlSpeedMbps.push(volumeData.avg_dl_mbps);
+            const durationSec = volumeData?.duration_sec || 0;
+            if (volumeData?.avg_dl_mbps && durationSec > 0) {
+              aggregated[key].dlSpeedDurationTotal +=
+                volumeData.avg_dl_mbps * durationSec;
+              aggregated[key].dlSpeedDurationSec += durationSec;
             }
-            if (volumeData?.avg_ul_mbps) {
-              aggregated[key].avgUlSpeedMbps.push(volumeData.avg_ul_mbps);
+            if (volumeData?.avg_ul_mbps && durationSec > 0) {
+              aggregated[key].ulSpeedDurationTotal +=
+                volumeData.avg_ul_mbps * durationSec;
+              aggregated[key].ulSpeedDurationSec += durationSec;
             }
 
             aggregated[key].sessionCount += 1;
@@ -287,14 +294,12 @@ export const OverviewTab = ({
 
     const processed = Object.values(aggregated).map((item) => {
       const avgDlSpeed =
-        item.avgDlSpeedMbps.length > 0
-          ? item.avgDlSpeedMbps.reduce((a, b) => a + b, 0) /
-            item.avgDlSpeedMbps.length
+        item.dlSpeedDurationSec > 0
+          ? item.dlSpeedDurationTotal / item.dlSpeedDurationSec
           : 0;
       const avgUlSpeed =
-        item.avgUlSpeedMbps.length > 0
-          ? item.avgUlSpeedMbps.reduce((a, b) => a + b, 0) /
-            item.avgUlSpeedMbps.length
+        item.ulSpeedDurationSec > 0
+          ? item.ulSpeedDurationTotal / item.ulSpeedDurationSec
           : 0;
 
       return {
@@ -344,20 +349,21 @@ export const OverviewTab = ({
       0
     );
 
-    const allDlSpeeds = processedProviderVolume
-      .map((item) => item.avgDlSpeedMbps)
-      .filter(Boolean);
-    const allUlSpeeds = processedProviderVolume
-      .map((item) => item.avgUlSpeedMbps)
-      .filter(Boolean);
-
     const avgDlSpeed =
-      allDlSpeeds.length > 0
-        ? allDlSpeeds.reduce((a, b) => a + b, 0) / allDlSpeeds.length
+      totalDurationSec > 0
+        ? processedProviderVolume.reduce(
+            (sum, item) =>
+              sum + (item.avgDlSpeedMbps || 0) * (item.durationSec || 0),
+            0
+          ) / totalDurationSec
         : 0;
     const avgUlSpeed =
-      allUlSpeeds.length > 0
-        ? allUlSpeeds.reduce((a, b) => a + b, 0) / allUlSpeeds.length
+      totalDurationSec > 0
+        ? processedProviderVolume.reduce(
+            (sum, item) =>
+              sum + (item.avgUlSpeedMbps || 0) * (item.durationSec || 0),
+            0
+          ) / totalDurationSec
         : 0;
 
     const byProvider = {};

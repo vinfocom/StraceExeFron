@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useLocation, useParams } from 'react-router-dom'
 import { Canvas } from '@react-three/fiber'
 import { OrbitControls, OrthographicCamera, PerspectiveCamera } from '@react-three/drei'
@@ -9,6 +9,7 @@ import { createStoryBuildingTemplateWorkbook } from '@/templates/indoor/building
 import { createReviewedDetectedWorkbook, downloadWorkbook, parseBuildingWorkbook, parseLogsWorkbook, parseLogsCsv } from '@/utils/indoor/excelPlan'
 import { buildFloorOptions, getOverlapWarnings, getVisiblePlan, hasAllowedExtension, normalizeParsedPlan, toNumber } from '@/utils/indoor/floorPlan'
 import { buildAggregatedLogGridCells, getLogMetricValue } from '@/utils/indoor/indoorPlanningUtils'
+import { OMNI_SIGNAL_LEGEND, buildDefaultSiteSectors, calculateIndoorPredictionPoints } from '@/utils/indoor/indoorPrediction'
 import { pythonApi } from '@/api/pythonApiService'
 import { indoorPlanningApi } from '@/api/apiEndpoints'
 import useColorForLog from '@/hooks/useColorForLog'
@@ -49,20 +50,38 @@ const formatKpiRange = (item, unit) => {
   return unit
 }
 
-const buildDefaultSiteSectors = (baseAzimuth = 0) => {
-  const base = Number(baseAzimuth) || 0
-  return [0, 120, 240].map((offset, index) => ({
-    id: `sector-${index + 1}`,
-    name: `Sector ${index + 1}`,
-    azimuthDeg: (base + offset + 360) % 360,
-    beamwidthDeg: 120,
-    txPowerDbm: 30,
-    antennaGainDbi: 0,
-  }))
-}
-
 const getProjectName = (project) => project?.name || project?.Name || project?.projectName || project?.ProjectName
 const getProjectPlanJson = (project) => project?.planJson || project?.PlanJson || project?.plan_json
+
+const isPointInsideRoom = (x, z, room) => {
+  const shape = String(room?.shape || 'rectangle').toLowerCase()
+  if (shape === 'circle') {
+    const radius = Number.isFinite(Number(room.radius)) && Number(room.radius) > 0 ? Number(room.radius) : Math.min(Number(room.width), Number(room.depth)) / 2
+    const cx = Number(room.x) + Number(room.width) / 2
+    const cz = Number(room.z) + Number(room.depth) / 2
+    return Math.hypot(x - cx, z - cz) <= radius
+  }
+  if ((shape === 'polygon' || shape === 'poly') && Array.isArray(room.polygonPoints) && room.polygonPoints.length >= 3) {
+    let inside = false
+    for (let i = 0, j = room.polygonPoints.length - 1; i < room.polygonPoints.length; j = i, i += 1) {
+      const xi = Number(room.polygonPoints[i].x ?? room.polygonPoints[i][0])
+      const zi = Number(room.polygonPoints[i].z ?? room.polygonPoints[i][1])
+      const xj = Number(room.polygonPoints[j].x ?? room.polygonPoints[j][0])
+      const zj = Number(room.polygonPoints[j].z ?? room.polygonPoints[j][1])
+      if (![xi, zi, xj, zj].every(Number.isFinite)) continue
+      const intersect = zi > z !== zj > z && x < ((xj - xi) * (z - zi)) / ((zj - zi) || 1e-9) + xi
+      if (intersect) inside = !inside
+    }
+    return inside
+  }
+  return x >= Number(room.x) && x <= Number(room.x) + Number(room.width) && z >= Number(room.z) && z <= Number(room.z) + Number(room.depth)
+}
+
+const isSourceInsideRooms = (source, rooms) => {
+  const x = Number(source?.x)
+  const z = Number(source?.z)
+  return Number.isFinite(x) && Number.isFinite(z) && rooms.some((room) => isPointInsideRoom(x, z, room))
+}
 
 const parseProjectPlan = (project) => {
   const value = getProjectPlanJson(project)
@@ -79,7 +98,7 @@ const parseProjectPlan = (project) => {
 function IndoorPlaning() {
   const { projectId } = useParams()
   const location = useLocation()
-  const [siteName, setSiteName] = useState('Network C - Block A')
+  const [siteName, setSiteName] = useState('Omni Site Signal')
   const [selectedFloorId, setSelectedFloorId] = useState('level-1')
   const [wallThickness, setWallThickness] = useState(0.2)
   const [newRoom, setNewRoom] = useState({ name: '', width: 6, depth: 4, height: 3, x: 0, z: 0 })
@@ -114,10 +133,13 @@ function IndoorPlaning() {
   const [wallTypes, setWallTypes] = useState({})
   const [dragTarget, setDragTarget] = useState(null)
   const [predictions, setPredictions] = useState([])
-  const [siteForm, setSiteForm] = useState({ name: 'Site-1', technology: '4G', antennaPattern: 'omni', x: 2, z: 2, heightM: 3, coneHeightM: '', txPowerDbm: 30, freqMHz: 3500, antennaGainDbi: 0, azimuthDeg: 0 })
+  const [siteForm, setSiteForm] = useState({ name: 'Omni Signal 1', technology: '4G', antennaPattern: 'omni', x: 2, z: 2, heightM: 3, coneHeightM: '', txPowerDbm: 30, freqMHz: 3500, antennaGainDbi: 0, azimuthDeg: 0 })
   const [wifiForm, setWifiForm] = useState({ name: 'Wi-Fi 1', antennaPattern: 'omni', x: 3, z: 3, heightM: 2.6, txPowerDbm: 20, freqMHz: 2400, antennaGainDbi: 2, azimuthDeg: 0 })
-  const [rfConfig, setRfConfig] = useState({ wallLossDb: 20, doorLossDb: 10, gridStepM: 1.2, rxGainDbi: 0 })
+  const [rfConfig, setRfConfig] = useState({ wallLossDb: 20, doorLossDb: 10, gridStepM: 0.6, rxGainDbi: 0, omniRangeM: 50 })
   const [logMetric, setLogMetric] = useState('rsrp')
+  const [projectHydrated, setProjectHydrated] = useState(!projectId)
+  const lastSavedPlanJsonRef = useRef('')
+  const saveTimerRef = useRef(null)
   const inputClass = 'rounded-lg border border-slate-300 bg-white px-2.5 py-2 text-sm'
   const buttonClass = 'cursor-pointer rounded-lg bg-white   px-3 py-1 text-black border  border-black-500'
   const dangerButtonClass = 'cursor-pointer rounded-lg bg-rose-600 px-2.5 py-1.5 text-xs text-white'
@@ -146,7 +168,10 @@ function IndoorPlaning() {
       if (name) setSiteName(name)
 
       const plan = parseProjectPlan(project)
-      if (!plan) return
+      if (!plan) {
+        lastSavedPlanJsonRef.current = ''
+        return
+      }
 
       if (plan.siteName || plan.site_name) setSiteName(String(plan.siteName || plan.site_name))
       if (Array.isArray(plan.rooms) && plan.rooms.length > 0) setRooms(plan.rooms)
@@ -159,10 +184,12 @@ function IndoorPlaning() {
       if (plan.wallTypes && typeof plan.wallTypes === 'object') setWallTypes(plan.wallTypes)
       if (Number.isFinite(Number(plan.wallThickness ?? plan.wall_thickness))) setWallThickness(Number(plan.wallThickness ?? plan.wall_thickness))
       if (plan.selectedFloorId || plan.selected_floor_id) setSelectedFloorId(String(plan.selectedFloorId || plan.selected_floor_id))
+      lastSavedPlanJsonRef.current = JSON.stringify(plan)
     }
 
     const routeProject = location.state?.indoorProject
     applyProject(routeProject)
+    if (routeProject) setProjectHydrated(true)
 
     if (!projectId) return () => {
       cancelled = true
@@ -172,6 +199,7 @@ function IndoorPlaning() {
       try {
         const project = await indoorPlanningApi.getProject(projectId)
         applyProject(project?.project || project)
+        if (!cancelled) setProjectHydrated(true)
       } catch (err) {
         if (!cancelled) setImageMessage(err?.message || 'Could not load indoor planning project.')
       }
@@ -185,6 +213,66 @@ function IndoorPlaning() {
 
   const floors = useMemo(() => buildFloorOptions(rooms), [rooms])
   const selectedFloor = useMemo(() => floors.find((floor) => floor.id === selectedFloorId) || floors[0] || { id: 'level-1', name: 'Level 1' }, [floors, selectedFloorId])
+
+  const savedPlanJson = useMemo(() => JSON.stringify({
+    siteName,
+    selectedFloorId,
+    wallThickness,
+    boundaryPolygon,
+    rooms,
+    doors,
+    windows,
+    sites,
+    wifiPoints,
+    furniture,
+    interiorWalls,
+    wallTypes,
+    rfConfig,
+    logMetric,
+    logGridSizeM,
+    logGridAggregation,
+  }), [
+    siteName,
+    selectedFloorId,
+    wallThickness,
+    boundaryPolygon,
+    rooms,
+    doors,
+    windows,
+    sites,
+    wifiPoints,
+    furniture,
+    interiorWalls,
+    wallTypes,
+    rfConfig,
+    logMetric,
+    logGridSizeM,
+    logGridAggregation,
+  ])
+
+  useEffect(() => {
+    if (!projectId || !projectHydrated) return undefined
+    if (savedPlanJson === lastSavedPlanJsonRef.current) return undefined
+
+    if (saveTimerRef.current) window.clearTimeout(saveTimerRef.current)
+    saveTimerRef.current = window.setTimeout(async () => {
+      try {
+        await indoorPlanningApi.saveFloor(projectId, {
+          name: siteName || 'Indoor planing',
+          floorName: selectedFloor.name,
+          planJson: savedPlanJson,
+        })
+        lastSavedPlanJsonRef.current = savedPlanJson
+      } catch (err) {
+        setUploadMessage(err?.message || 'Could not save indoor planning changes.')
+      }
+    }, 800)
+
+    return () => {
+      if (saveTimerRef.current) window.clearTimeout(saveTimerRef.current)
+    }
+  }, [projectId, projectHydrated, savedPlanJson, selectedFloor.name, siteName])
+
   const { visibleRooms, visibleDoors, visibleWindows } = useMemo(() => getVisiblePlan({ rooms, doors, windows, selectedFloor }), [rooms, doors, windows, selectedFloor])
   const visibleLogs = useMemo(() => logs.filter((item) => (item.floorId || 'level-1') === selectedFloor.id), [logs, selectedFloor])
   const floorBoundsById = useMemo(() => {
@@ -272,16 +360,27 @@ function IndoorPlaning() {
   }, [visibleRooms, logGridSizeM, aggregatedLogGridCells])
   const totalArea = useMemo(() => visibleRooms.reduce((sum, room) => sum + room.width * room.depth, 0).toFixed(2), [visibleRooms])
   const overlapWarnings = useMemo(() => getOverlapWarnings(visibleRooms), [visibleRooms])
+
+  useEffect(() => {
+    if (predictions.length === 0) return
+    const hasValidSource = [...sites, ...wifiPoints].some((source) => isSourceInsideRooms(source, visibleRooms))
+    if (!hasValidSource) setPredictions([])
+  }, [predictions.length, sites, visibleRooms, wifiPoints])
+
   const simSummary = useMemo(() => {
     if (predictions.length === 0) return null
     const vals = predictions.map((p) => p.rssiDbm)
     const rsrqVals = predictions.map((p) => p.rsrqDb)
     const sinrVals = predictions.map((p) => p.sinrDb)
     const qualityVals = predictions.map((p) => p.qualityScore)
+    const pathLossVals = predictions.map((p) => p.totalLossDb).filter(Number.isFinite)
+    const distanceVals = predictions.map((p) => p.distanceM).filter(Number.isFinite)
     const avg = vals.reduce((a, b) => a + b, 0) / vals.length
     const avgRsrq = rsrqVals.reduce((a, b) => a + b, 0) / rsrqVals.length
     const avgSinr = sinrVals.reduce((a, b) => a + b, 0) / sinrVals.length
     const avgQuality = qualityVals.reduce((a, b) => a + b, 0) / qualityVals.length
+    const avgLoss = pathLossVals.length ? pathLossVals.reduce((a, b) => a + b, 0) / pathLossVals.length : 0
+    const maxDistance = distanceVals.length ? Math.max(...distanceVals) : 0
     return {
       min: Math.min(...vals).toFixed(1),
       max: Math.max(...vals).toFixed(1),
@@ -289,6 +388,8 @@ function IndoorPlaning() {
       avgRsrq: avgRsrq.toFixed(1),
       avgSinr: avgSinr.toFixed(1),
       avgQuality: avgQuality.toFixed(1),
+      avgLoss: avgLoss.toFixed(1),
+      maxDistance: maxDistance.toFixed(1),
     }
   }, [predictions])
 
@@ -381,67 +482,28 @@ function IndoorPlaning() {
   }
 
   const runIndoorPrediction = () => {
-    const predictionSources = [...sites, ...wifiPoints]
-    if (predictionSources.length === 0 || visibleRooms.length === 0) return
-    const step = Math.max(0.6, Number(rfConfig.gridStepM) || 1.2)
+    const predictionSources = [...sites, ...wifiPoints].filter((source) => isSourceInsideRooms(source, visibleRooms))
+    if (predictionSources.length === 0 || visibleRooms.length === 0) {
+      setPredictions([])
+      setUploadMessage('Add a site or Wi-Fi point inside the building before running prediction.')
+      return
+    }
     const wallLoss = Math.max(0, Number(rfConfig.wallLossDb) || 8)
     const doorLoss = Math.max(0, Number(rfConfig.doorLossDb) || 2.5)
-    const points = []
-    let idx = 1
-    for (const room of visibleRooms) {
-      if (room.shape && room.shape !== 'rectangle') continue
-      for (let x = room.x + 0.4; x < room.x + room.width; x += step) {
-        for (let z = room.z + 0.4; z < room.z + room.depth; z += step) {
-          let bestRssi = -140
-          for (const site of predictionSources) {
-            const dx = x - site.x
-            const dz = z - site.z
-            const distM = Math.max(1, Math.hypot(dx, dz))
-            const distKm = distM / 1000
-            const fspl = 32.44 + 20 * Math.log10(site.freqMHz) + 20 * Math.log10(distKm)
-            const walls = wallIntersections(site.x, site.z, x, z)
-            const penetrationLoss = walls.reduce((sum, w) => {
-              const hasDoor = getDoorOnWall(w.room, w.side, w.offset)
-              const explicitWallType = w.interiorWallId ? wallTypes[`interior:${w.interiorWallId}`] : getWallType(w.room.id, w.side)
-              const typedWallLoss = explicitWallType ? WALL_LOSS_BY_TYPE[explicitWallType] ?? wallLoss : wallLoss
-              return sum + (hasDoor ? doorLoss : typedWallLoss)
-            }, 0)
-            const txGain = Number(site.antennaGainDbi) || 0
-            const rxGain = Number(rfConfig.rxGainDbi) || 0
-            const antennaPattern = String(site.antennaPattern || 'omni').toLowerCase()
-            const az = Number(site.azimuthDeg) || 0
-            const bearing = (Math.atan2(dz, dx) * 180) / Math.PI
-            const normBearing = ((bearing % 360) + 360) % 360
-            const normAz = ((az % 360) + 360) % 360
-            const angleDiff = Math.abs(((normBearing - normAz + 540) % 360) - 180)
-            const directionLoss = antennaPattern === 'directional' ? (angleDiff <= 60 ? 0 : (angleDiff - 60) * 0.12) : 0
-            const rssi = site.txPowerDbm + txGain + rxGain - fspl - penetrationLoss - directionLoss
-            if (rssi > bestRssi) bestRssi = rssi
-          }
-          const rsrq = Math.max(-20, Math.min(-3, -3 - ((-60 - bestRssi) * 0.18)))
-          const sinr = Math.max(-10, Math.min(30, bestRssi + 110 - 2))
-          const rsrpNorm = Math.max(0, Math.min(1, (bestRssi + 140) / 96))
-          const rsrqNorm = Math.max(0, Math.min(1, (rsrq + 20) / 17))
-          const sinrNorm = Math.max(0, Math.min(1, (sinr + 10) / 40))
-          const qualityScore = (rsrpNorm * 0.5 + rsrqNorm * 0.2 + sinrNorm * 0.3) * 100
-          const metricValue = logMetric === 'rsrq' ? rsrq : logMetric === 'sinr' ? sinr : bestRssi
-          const color = getMetricColor(metricValue, logMetric)
-          points.push({
-            id: idx++,
-            roomId: room.id,
-            roomKey: `${room.id}:${room.x}:${room.z}:${room.width}:${room.depth}`,
-            x,
-            z,
-            rssiDbm: bestRssi,
-            rsrqDb: rsrq,
-            sinrDb: sinr,
-            qualityScore,
-            color,
-            metricValue,
-          })
-        }
-      }
-    }
+    const getPenetrationLossDb = (walls) => walls.reduce((sum, w) => {
+      const hasDoor = w.room ? getDoorOnWall(w.room, w.side, w.offset) : false
+      const explicitWallType = w.interiorWallId ? wallTypes[`interior:${w.interiorWallId}`] : getWallType(w.room.id, w.side)
+      const typedWallLoss = explicitWallType ? WALL_LOSS_BY_TYPE[explicitWallType] ?? wallLoss : wallLoss
+      return sum + (hasDoor ? doorLoss : typedWallLoss)
+    }, 0)
+    const points = calculateIndoorPredictionPoints({
+      rooms: visibleRooms,
+      sources: predictionSources,
+      rfConfig,
+      logMetric,
+      wallIntersections,
+      getPenetrationLossDb,
+    })
     setPredictions(points)
   }
 
@@ -484,19 +546,26 @@ function IndoorPlaning() {
   const removeRoom = (id) => setRooms((current) => current.filter((room) => room.id !== id))
   const addSite = (event, position = {}) => {
     event?.preventDefault?.()
+    const x = Number.isFinite(Number(position.x)) ? Number(position.x) : Number(siteForm.x) || 0
+    const z = Number.isFinite(Number(position.z)) ? Number(position.z) : Number(siteForm.z) || 0
+    if (!isSourceInsideRooms({ x, z }, visibleRooms)) {
+      setUploadMessage('Place the site inside the building before running prediction.')
+      return
+    }
     const item = {
       id: `S${sites.length + 1}`,
       name: siteForm.name.trim() || `Site-${sites.length + 1}`,
       technology: String(siteForm.technology || '').trim() || '4G',
       antennaPattern: siteForm.antennaPattern === 'directional' ? 'directional' : 'omni',
-      x: Number.isFinite(Number(position.x)) ? Number(position.x) : Number(siteForm.x) || 0,
-      z: Number.isFinite(Number(position.z)) ? Number(position.z) : Number(siteForm.z) || 0,
+      x,
+      z,
       heightM: Math.max(0.5, Math.min(200, Number(siteForm.heightM) || 3)),
       coneHeightM: Number.isFinite(Number(siteForm.coneHeightM)) && Number(siteForm.coneHeightM) > 0 ? Number(siteForm.coneHeightM) : null,
       txPowerDbm: Number(siteForm.txPowerDbm) || 30,
       freqMHz: Number(siteForm.freqMHz) || 3500,
       antennaGainDbi: Number(siteForm.antennaGainDbi) || 0,
       azimuthDeg: Number(siteForm.azimuthDeg) || 0,
+      omniRangeM: Math.max(20, Math.min(50, Number(rfConfig.omniRangeM) || 50)),
       sectors: buildDefaultSiteSectors(siteForm.azimuthDeg).map((sector) => ({
         ...sector,
         technology: String(siteForm.technology || '').trim() || '4G',
@@ -527,6 +596,10 @@ function IndoorPlaning() {
   }
 
   const addWifiPoint = (x = Number(wifiForm.x) || 0, z = Number(wifiForm.z) || 0) => {
+    if (!isSourceInsideRooms({ x, z }, visibleRooms)) {
+      setUploadMessage('Place the Wi-Fi point inside the building before running prediction.')
+      return
+    }
     const nextIndex = wifiPoints.length + 1
     setWifiPoints((prev) => [
       ...prev,
@@ -579,6 +652,7 @@ function IndoorPlaning() {
   const removeFurniture = (id) => setFurniture((prev) => prev.filter((item) => item.id !== id))
 
   const movePlannerItem = (type, id, x, z) => {
+    if ((type === 'site' || type === 'wifi') && !isSourceInsideRooms({ x, z }, visibleRooms)) return
     const update = (item) => (item.id === id ? { ...item, x, z } : item)
     if (type === 'site') setSites((prev) => prev.map(update))
     if (type === 'wifi') setWifiPoints((prev) => prev.map(update))
@@ -923,7 +997,7 @@ function IndoorPlaning() {
           <header className="border-b border-slate-200 px-4 py-3">
             <div className="flex flex-wrap items-end gap-3">
               <div className="min-w-[220px] flex-1">
-                <h2 className="text-lg font-semibold">{siteName || 'Untitled Site'} - {selectedFloor.name}</h2>
+                <h2 className="text-lg font-semibold">{siteName || 'Omni Site Signal'} - {selectedFloor.name}</h2>
                 <p className="mt-1 text-sm text-slate-600">{viewMode === '2d' ? 'Pan and zoom while drawing.' : 'Drag to rotate, scroll to zoom.'}</p>
               </div>
               <div className="grid min-w-[600px] flex-[2] grid-cols-[repeat(5,minmax(110px,1fr))] items-end gap-2 max-[900px]:min-w-full max-[900px]:grid-cols-2 max-[560px]:grid-cols-1">
@@ -964,7 +1038,7 @@ function IndoorPlaning() {
               )}
             </div>
             <button className={`rounded-md border px-3 py-1.5 text-sm ${editMode ? 'border-emerald-500 bg-emerald-50 text-emerald-700' : 'border-slate-300 bg-white text-slate-700'}`} type="button" onClick={() => { setEditMode((value) => !value); setPlacementMode(null); setShowDrawMenu(false) }}>Edit</button>
-            <button className={`rounded-md border px-3 py-1.5 text-sm ${placementMode === 'site' ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-slate-300 bg-white text-slate-700'}`} type="button" onClick={() => { setPlacementMode((mode) => (mode === 'site' ? null : 'site')); setEditMode(false); setShowDrawMenu(false) }}>Add Site</button>
+            <button className={`rounded-md border px-3 py-1.5 text-sm ${placementMode === 'site' ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-slate-300 bg-white text-slate-700'}`} type="button" onClick={() => { setPlacementMode((mode) => (mode === 'site' ? null : 'site')); setEditMode(false); setShowDrawMenu(false) }}>Add Omni Signal</button>
             <button className={`rounded-md border px-3 py-1.5 text-sm ${placementMode === 'wifi' ? 'border-cyan-500 bg-cyan-50 text-cyan-700' : 'border-slate-300 bg-white text-slate-700'}`} type="button" onClick={() => { setPlacementMode((mode) => (mode === 'wifi' ? null : 'wifi')); setEditMode(false); setShowDrawMenu(false) }}>Add Wi-Fi</button>
             <button className={`rounded-md border px-3 py-1.5 text-sm ${placementMode === 'interior-wall' ? 'border-violet-500 bg-violet-50 text-violet-700' : 'border-slate-300 bg-white text-slate-700'}`} type="button" onClick={() => startFurniturePlacement('interior-wall')}>Wall</button>
             <button className={`rounded-md border px-3 py-1.5 text-sm ${snapToGrid ? 'border-emerald-500 bg-emerald-50 text-emerald-700' : 'border-slate-300 bg-white text-slate-700'}`} type="button" onClick={() => setSnapToGrid((value) => !value)}>Snap</button>
@@ -1007,11 +1081,16 @@ function IndoorPlaning() {
           <div className="relative min-h-0">
             <div className="pointer-events-none absolute right-3 top-3 z-20 w-44 rounded-lg border border-slate-200 bg-white/95 p-2.5 text-xs shadow-md backdrop-blur">
               <div className="mb-2 flex items-center justify-between gap-2">
-                <span className="font-semibold text-slate-800">{KPI_META[logMetric]?.label || String(logMetric).toUpperCase()}</span>
-                <span className="text-[10px] font-medium uppercase text-slate-500">{KPI_META[logMetric]?.unit || ''}</span>
+                <span className="font-semibold text-slate-800">{predictions.length ? 'Omni Signal' : (KPI_META[logMetric]?.label || String(logMetric).toUpperCase())}</span>
+                <span className="text-[10px] font-medium uppercase text-slate-500">{predictions.length ? `${Math.max(20, Math.min(50, Number(rfConfig.omniRangeM) || 50))} m` : (KPI_META[logMetric]?.unit || '')}</span>
               </div>
               <div className="grid gap-1.5">
-                {thresholdLegend.length > 0 ? thresholdLegend.map((item, index) => (
+                {predictions.length > 0 ? OMNI_SIGNAL_LEGEND.map((item, index) => (
+                  <div key={`omni-legend-${index}`} className="flex min-w-0 items-center gap-2">
+                    <span className="h-3 w-3 shrink-0 rounded-sm border border-black/10" style={{ backgroundColor: item.color }} />
+                    <span className="min-w-0 truncate text-slate-700">{item.label}</span>
+                  </div>
+                )) : thresholdLegend.length > 0 ? thresholdLegend.map((item, index) => (
                   <div key={`${logMetric}-legend-${item.min}-${item.max}-${index}`} className="flex min-w-0 items-center gap-2">
                     <span className="h-3 w-3 shrink-0 rounded-sm border border-black/10" style={{ backgroundColor: item.color }} />
                     <span className="min-w-0 truncate text-slate-700">{item.label || formatKpiRange(item, KPI_META[logMetric]?.unit || '')}</span>

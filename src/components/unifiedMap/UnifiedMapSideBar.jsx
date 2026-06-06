@@ -1593,11 +1593,11 @@ const UnifiedMapSidebar = ({
                               placeholder="Enter session ids: 1001,1002"
                               className="h-8 bg-slate-900 border-slate-700 text-xs text-white"
                             />
-                            <div className="flex items-center gap-2">
+                            <div className="grid grid-cols-2 gap-2">
                               <Button
                                 type="button"
                                 size="sm"
-                                className="h-7 px-2 text-xs bg-blue-600 hover:bg-blue-500"
+                                className="h-8 min-w-0 justify-center gap-1.5 px-2 text-xs bg-blue-600 hover:bg-blue-500"
                                 onClick={() => {
                                   const nextSessionIds = String(sessionInputValue || "")
                                     .split(/[;,|]/)
@@ -1607,13 +1607,14 @@ const UnifiedMapSidebar = ({
                                   setIsEditingSessions(false);
                                 }}
                               >
+                                <Check className="h-3.5 w-3.5 shrink-0" />
                                 Save
                               </Button>
                               <Button
                                 type="button"
                                 size="sm"
                                 variant="outline"
-                                className="h-7 px-2 text-xs border-slate-600 text-slate-200 hover:bg-slate-800"
+                                className="h-8 min-w-0 justify-center gap-1.5 px-2 text-xs border-slate-600 bg-slate-900/70 text-slate-200 hover:bg-slate-800 hover:text-white"
                                 onClick={() => {
                                   setSessionInputValue(
                                     Array.isArray(sessionIds) ? sessionIds.join(", ") : "",
@@ -1621,6 +1622,7 @@ const UnifiedMapSidebar = ({
                                   setIsEditingSessions(false);
                                 }}
                               >
+                                <X className="h-3.5 w-3.5 shrink-0" />
                                 Cancel
                               </Button>
                             </div>

@@ -886,6 +886,7 @@ export const indoorPlanningApi = {
   getProjects: () => api.get("/api/IndoorPlanning/projects"),
   createProject: (payload) => api.post("/api/IndoorPlanning/projects", payload),
   getProject: (id) => api.get(`/api/IndoorPlanning/projects/${id}`),
+  saveFloor: (id, payload) => api.put(`/api/IndoorPlanning/projects/${id}/floor`, payload),
 };
 
 export const adminApi = {
@@ -1334,6 +1335,9 @@ export const mapViewApi = {
       throw error;
     }
   },
+
+  updateProjectSessions: (payload) =>
+    api.put("/api/MapView/UpdateProjectSessions", payload),
 
   deleteProject: async (projectId) => {
     try {

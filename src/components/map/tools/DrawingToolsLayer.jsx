@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useCallback, memo } from "react";
+import React, { useEffect, useRef, useCallback, useState, memo } from "react";
 import { toast } from "react-toastify";
 
 // --- Helper Functions (Same as before, collapsed for brevity) ---
@@ -196,16 +196,17 @@ function pixelateShape(type, overlay, logs, selectedMetric, thresholds, cellSize
 function serializeOverlay(type, overlay) {
   if (!overlay) return null;
   if (type === "polyline") {
-    const path = overlay.getPath().getArray().map(p => ({ lat: p.lat(), lng: p.lng() }));
+    const path = overlay.getPath?.()?.getArray?.()?.map(p => ({ lat: p.lat(), lng: p.lng() })) || [];
     return { type, path };
   }
   const bounds = type === "polygon" ? buildPolygonBounds(overlay) : overlay.getBounds();
+  if (!bounds) return { type };
   const sw = bounds.getSouthWest();
   const ne = bounds.getNorthEast();
   const boundObj = { south: sw.lat(), west: sw.lng(), north: ne.lat(), east: ne.lng() };
 
   if (type === "polygon") {
-    const path = overlay.getPath().getArray().map(p => ({ lat: p.lat(), lng: p.lng() }));
+    const path = overlay.getPath?.()?.getArray?.()?.map(p => ({ lat: p.lat(), lng: p.lng() })) || [];
     return { type, polygon: path, bounds: boundObj };
   }
   if (type === "rectangle") return { type, rectangle: { sw: { lat: sw.lat(), lng: sw.lng() }, ne: { lat: ne.lat(), lng: ne.lng() } } };
@@ -215,7 +216,8 @@ function serializeOverlay(type, overlay) {
 
 function getPolylineDetails(polyline) {
   const gm = window.google.maps;
-  const path = polyline.getPath();
+  const path = polyline.getPath?.();
+  if (!path) return { length: 0, center: null };
   const len = gm.geometry.spherical.computeLength(path);
   const points = path.getArray();
   if (points.length < 2) return { length: 0, center: points[0] };
@@ -242,12 +244,138 @@ const clampOpacity = (value, fallback = 0.35) => {
   return Math.max(0, Math.min(1, parsed));
 };
 
+const getShapeOptions = (type, polygonOpacity, polygonFillOpacity) => {
+  const baseAreaOptions = {
+    clickable: true,
+    editable: true,
+    draggable: true,
+    strokeWeight: 2,
+    strokeColor: "#1d4ed8",
+    strokeOpacity: polygonOpacity,
+    fillColor: "#1d4ed8",
+    fillOpacity: polygonFillOpacity,
+  };
+
+  if (type === "polyline") {
+    return {
+      clickable: true,
+      editable: true,
+      draggable: true,
+      strokeWeight: 3,
+      strokeColor: "#ea580c",
+    };
+  }
+
+  return baseAreaOptions;
+};
+
+const createBoundsFromLatLngs = (a, b) => {
+  const gm = window.google.maps;
+  const bounds = new gm.LatLngBounds();
+  bounds.extend(a);
+  bounds.extend(b);
+  return bounds;
+};
+
+const getLatLngDistance = (a, b) => {
+  const gm = window.google?.maps;
+  if (!a || !b) return Infinity;
+  if (gm?.geometry?.spherical) {
+    return gm.geometry.spherical.computeDistanceBetween(a, b);
+  }
+  const latDiff = Math.abs(a.lat() - b.lat());
+  const lngDiff = Math.abs(a.lng() - b.lng());
+  return Math.max(latDiff, lngDiff) * 111320;
+};
+
+const isDuplicateVertex = (points, nextPoint) => {
+  const lastPoint = points[points.length - 1];
+  return lastPoint && getLatLngDistance(lastPoint, nextPoint) < 0.5;
+};
+
+const isClosingVertex = (points, nextPoint) => {
+  const firstPoint = points[0];
+  return points.length >= 3 && firstPoint && getLatLngDistance(firstPoint, nextPoint) < 10;
+};
+
+const getVertexMarkerIcon = (type, isFirst = false) => {
+  const gm = window.google.maps;
+  const color = type === "polyline" ? "#ea580c" : "#1d4ed8";
+  return {
+    path: gm.SymbolPath.CIRCLE,
+    scale: isFirst ? 6 : 5,
+    fillColor: color,
+    fillOpacity: 1,
+    strokeColor: "#ffffff",
+    strokeOpacity: 1,
+    strokeWeight: 2,
+  };
+};
+
+const createVertexMarker = ({
+  map,
+  position,
+  type,
+  index,
+  title,
+  draggable = false,
+  onClick,
+  onDrag,
+  onDragEnd,
+}) => {
+  const gm = window.google.maps;
+  const isFirst = index === 0;
+  const marker = new gm.Marker({
+    map,
+    position,
+    clickable: true,
+    cursor: draggable ? "grab" : "pointer",
+    draggable,
+    icon: getVertexMarkerIcon(type, isFirst),
+    optimized: false,
+    title: title || "Vertex",
+    zIndex: 3000 + index,
+  });
+  const listeners = [];
+
+  if (onClick) {
+    listeners.push(gm.event.addListener(marker, "click", (event) => onClick(event, index)));
+  }
+  if (onDrag) {
+    listeners.push(gm.event.addListener(marker, "drag", (event) => onDrag(event, index)));
+  }
+  if (onDragEnd) {
+    listeners.push(gm.event.addListener(marker, "dragend", (event) => onDragEnd(event, index)));
+  }
+  if (draggable) {
+    listeners.push(gm.event.addListener(marker, "dragstart", () => marker.setOptions({ cursor: "grabbing" })));
+    listeners.push(gm.event.addListener(marker, "dragend", () => marker.setOptions({ cursor: "grab" })));
+  }
+
+  return { marker, listeners };
+};
+
+const clearVertexMarkers = (vertexMarkers = []) => {
+  vertexMarkers.forEach(({ marker, listeners = [] }) => {
+    listeners.forEach((listener) => window.google.maps.event.removeListener(listener));
+    marker?.setMap(null);
+  });
+};
+
+const syncVertexMarkerPositions = (vertexMarkers = [], path) => {
+  if (!path) return;
+  vertexMarkers.forEach(({ marker }, index) => {
+    const position = path.getAt?.(index);
+    if (position) marker?.setPosition(position);
+  });
+};
+
 // --- Component Definition ---
 
 function DrawingToolsLayerComponent({
   map,
   enabled,
-  shapeMode, 
+  shapeMode,
   showDrawingControl = false,
   logs,
   sessions,
@@ -261,15 +389,18 @@ function DrawingToolsLayerComponent({
   colorizeCells = true,
   polygonOpacity = 0.35,
   polygonFillOpacity = null,
-  onUIChange, // ✅ NEW PROP: To reset state after drawing
+  onUIChange,
 }) {
-  const managerRef = useRef(null);
+  const [activeDraft, setActiveDraft] = useState(null);
+  const activeDrawingRef = useRef(null);
   const shapesRef = useRef([]);
   const collectedDrawingRef = useRef([]);
   const lastClearSignalRef = useRef(clearSignal);
-  const missingLibraryNotifiedRef = useRef(false);
   const callbacksRef = useRef({ onSummary, onDrawingsChange, onUIChange });
   const reAnalyzeShapeRef = useRef(null);
+  const registerCompletedShapeRef = useRef(null);
+  const finishActiveDrawingRef = useRef(null);
+  const cancelActiveDrawingRef = useRef(null);
   const shapeModeRef = useRef(shapeMode);
   const resolvedPolygonOpacity = clampOpacity(polygonOpacity);
   const resolvedPolygonFillOpacity =
@@ -296,13 +427,19 @@ function DrawingToolsLayerComponent({
     let lengthInMeters = 0;
 
     if (gm.geometry?.spherical) {
-      if (type === "polygon") areaInMeters = gm.geometry.spherical.computeArea(overlay.getPath());
+      if (type === "polygon") {
+        const path = overlay.getPath?.();
+        if (path) areaInMeters = gm.geometry.spherical.computeArea(path);
+      }
       else if (type === "rectangle") {
         const b = overlay.getBounds();
         const p = [b.getNorthEast(), new gm.LatLng(b.getNorthEast().lat(), b.getSouthWest().lng()), b.getSouthWest(), new gm.LatLng(b.getSouthWest().lat(), b.getNorthEast().lng())];
         areaInMeters = gm.geometry.spherical.computeArea(p);
       } else if (type === "circle") areaInMeters = Math.PI * Math.pow(overlay.getRadius(), 2);
-      else if (type === "polyline") lengthInMeters = gm.geometry.spherical.computeLength(overlay.getPath());
+      else if (type === "polyline") {
+        const path = overlay.getPath?.();
+        if (path) lengthInMeters = gm.geometry.spherical.computeLength(path);
+      }
     }
 
     const insideLogs = type === "polyline" ? [] : filterItemsInside(type, overlay, allLogs);
@@ -339,13 +476,46 @@ function DrawingToolsLayerComponent({
     reAnalyzeShapeRef.current = reAnalyzeShape;
   }, [reAnalyzeShape]);
 
-  const registerCompletedShape = useCallback((type, overlay, drawingManager = null) => {
+  const cleanupActiveDrawing = useCallback((keepOverlay = false, { completeIfPossible = false } = {}) => {
+    const active = activeDrawingRef.current;
+    if (!active) return;
+
+    const pointCount = active.points?.length ?? active.path?.getLength?.() ?? 0;
+    const minPoints = active.type === "polygon" ? 3 : 2;
+
+    active.listeners?.forEach((listener) =>
+      window.google.maps.event.removeListener(listener),
+    );
+    clearVertexMarkers(active.vertexMarkers);
+
+    if (completeIfPossible && active.overlay && pointCount >= minPoints) {
+      if (active.points) active.overlay.setPath(active.points);
+      active.overlay.setOptions?.({
+        clickable: true,
+        editable: true,
+        draggable: true,
+        ...(active.finalOptions || {}),
+      });
+      activeDrawingRef.current = null;
+      setActiveDraft(null);
+      registerCompletedShapeRef.current?.(active.type, active.overlay);
+      return;
+    }
+
+    if (!keepOverlay) active.overlay?.setMap(null);
+    activeDrawingRef.current = null;
+    setActiveDraft(null);
+  }, []);
+
+  const registerCompletedShape = useCallback((type, overlay) => {
     if (!overlay) return;
+
     const shapeObj = {
       id: Date.now(),
       type,
       overlay,
       gridOverlays: [],
+      vertexMarkers: [],
       createdAt: new Date().toISOString(),
     };
     shapesRef.current.push(shapeObj);
@@ -353,6 +523,28 @@ function DrawingToolsLayerComponent({
     const entry = isMeasurementTool ? null : reAnalyzeShapeRef.current?.(shapeObj);
     const listeners = [];
     const update = () => reAnalyzeShapeRef.current?.(shapeObj);
+    const rebuildVertexMarkers = () => {
+      if (type !== "polygon" && type !== "polyline") return;
+
+      const path = overlay.getPath?.();
+      if (!path) return;
+
+      clearVertexMarkers(shapeObj.vertexMarkers);
+      shapeObj.vertexMarkers = path.getArray().map((position, index) =>
+        createVertexMarker({
+          map,
+          position,
+          type,
+          index,
+          title: "Drag vertex",
+          draggable: true,
+          onDrag: (event, markerIndex) => {
+            if (!event.latLng) return;
+            path.setAt(markerIndex, event.latLng);
+          },
+        }),
+      );
+    };
 
     if (type === "polyline") {
       const updateDistanceLabel = () => {
@@ -382,16 +574,36 @@ function DrawingToolsLayerComponent({
           shapeObj.labelMarker.setLabel({ ...lbl, text });
         }
       };
-      const path = overlay.getPath();
-      ["set_at", "insert_at", "remove_at"].forEach((ev) =>
-        listeners.push(window.google.maps.event.addListener(path, ev, updateDistanceLabel)),
-      );
-      updateDistanceLabel();
+      const path = overlay.getPath?.();
+      if (path) {
+        listeners.push(window.google.maps.event.addListener(path, "set_at", () => {
+          updateDistanceLabel();
+          syncVertexMarkerPositions(shapeObj.vertexMarkers, path);
+        }));
+        ["insert_at", "remove_at"].forEach((ev) =>
+          listeners.push(window.google.maps.event.addListener(path, ev, () => {
+            updateDistanceLabel();
+            rebuildVertexMarkers();
+          })),
+        );
+        updateDistanceLabel();
+        rebuildVertexMarkers();
+      }
     } else if (type === "polygon") {
-      const path = overlay.getPath();
-      ["set_at", "insert_at", "remove_at"].forEach((ev) =>
-        listeners.push(window.google.maps.event.addListener(path, ev, update)),
-      );
+      const path = overlay.getPath?.();
+      if (path) {
+        listeners.push(window.google.maps.event.addListener(path, "set_at", () => {
+          syncVertexMarkerPositions(shapeObj.vertexMarkers, path);
+          update();
+        }));
+        ["insert_at", "remove_at"].forEach((ev) =>
+          listeners.push(window.google.maps.event.addListener(path, ev, () => {
+            rebuildVertexMarkers();
+            update();
+          })),
+        );
+        rebuildVertexMarkers();
+      }
     } else if (type === "rectangle") {
       listeners.push(window.google.maps.event.addListener(overlay, "bounds_changed", update));
     } else if (type === "circle") {
@@ -404,8 +616,6 @@ function DrawingToolsLayerComponent({
 
     // For non-measurement tools, reAnalyzeShape already fires onDrawingsChange with
     // full data including logs, geometry, and stats.
-    drawingManager?.setDrawingMode(null);
-    callbacksRef.current.onUIChange?.({ drawEnabled: false, shapeMode: null });
     if (isMeasurementTool) {
       callbacksRef.current.onSummary?.(null);
       callbacksRef.current.onDrawingsChange?.([...collectedDrawingRef.current]);
@@ -423,62 +633,297 @@ function DrawingToolsLayerComponent({
     } else {
       toast.success("Distance measured.", { position: "bottom-right", autoClose: 2000 });
     }
+
+    callbacksRef.current.onUIChange?.({ drawEnabled: false, shapeMode: null });
   }, [map]);
 
-
-  // ✅ Initialize Manager with drawingControl: false
   useEffect(() => {
-    if (!map) return;
-    if (!window.google?.maps?.drawing) {
-      if (enabled && !missingLibraryNotifiedRef.current) {
-        missingLibraryNotifiedRef.current = true;
-        toast.error("Google Drawing library is not loaded.");
+    registerCompletedShapeRef.current = registerCompletedShape;
+  }, [registerCompletedShape]);
+
+  useEffect(() => {
+    if (!map || !window.google?.maps) {
+      return undefined;
+    }
+
+    cleanupActiveDrawing(false, { completeIfPossible: true });
+
+    if (!enabled || !shapeMode) {
+      return undefined;
+    }
+
+    const gm = window.google.maps;
+    const type = String(shapeMode).toLowerCase();
+    const listeners = [];
+    const shapeOptions = getShapeOptions(
+      type,
+      resolvedPolygonOpacity,
+      resolvedPolygonFillOpacity,
+    );
+
+    const finishPathShape = () => {
+      const active = activeDrawingRef.current;
+      if (!active?.overlay) {
+        return;
       }
-      return;
-    }
-    missingLibraryNotifiedRef.current = false;
-    
-    if (managerRef.current) {
-      managerRef.current.setMap(null);
-      managerRef.current = null;
-    }
+      const path = active.path || active.overlay.getPath?.();
+      const points = active.points;
+      const pointCount = points?.length ?? path?.getLength?.() ?? 0;
+      const minPoints = active.type === "polygon" ? 3 : 2;
 
-    if (!enabled) return;
+      if (!path && !points) {
+        return;
+      }
 
-    const dm = new window.google.maps.drawing.DrawingManager({
-      drawingMode: null, // Start with nothing
-      drawingControl: Boolean(showDrawingControl),
-      drawingControlOptions: {
-        position: window.google.maps.ControlPosition.TOP_CENTER,
-        drawingModes: [
-          window.google.maps.drawing.OverlayType.POLYGON,
-          window.google.maps.drawing.OverlayType.RECTANGLE,
-          window.google.maps.drawing.OverlayType.CIRCLE,
-          window.google.maps.drawing.OverlayType.POLYLINE,
-        ],
-      },
-      polygonOptions: { clickable: true, editable: true, draggable: true, strokeWeight: 2, strokeColor: "#1d4ed8", strokeOpacity: resolvedPolygonOpacity, fillColor: "#1d4ed8", fillOpacity: resolvedPolygonFillOpacity },
-      rectangleOptions: { clickable: true, editable: true, draggable: true, strokeWeight: 2, strokeColor: "#1d4ed8", strokeOpacity: resolvedPolygonOpacity, fillColor: "#1d4ed8", fillOpacity: resolvedPolygonFillOpacity },
-      circleOptions: { clickable: true, editable: true, draggable: true, strokeWeight: 2, strokeColor: "#1d4ed8", strokeOpacity: resolvedPolygonOpacity, fillColor: "#1d4ed8", fillOpacity: resolvedPolygonFillOpacity },
-      polylineOptions: { clickable: true, editable: true, draggable: true, strokeWeight: 3, strokeColor: "#ea580c" },
-    });
+      if (pointCount < minPoints) {
+        toast.warn(
+          active.type === "polygon"
+            ? "Add at least 3 points to finish the polygon."
+            : "Add at least 2 points to measure distance.",
+          { position: "bottom-right", autoClose: 2000 },
+        );
+        return;
+      }
 
-    dm.setMap(map);
-    dm.setDrawingMode(shapeModeRef.current);
-
-    const handleComplete = (e) => {
-      registerCompletedShape(e.type, e.overlay, dm);
+      active.overlay.setOptions({
+        clickable: true,
+        editable: true,
+        draggable: true,
+        ...(active.finalOptions || {}),
+      });
+      if (active.points) {
+        active.overlay.setPath(active.points);
+      }
+      cleanupActiveDrawing(true);
+      registerCompletedShape(active.type, active.overlay);
     };
 
-    const listener = window.google.maps.event.addListener(dm, "overlaycomplete", handleComplete);
-    managerRef.current = dm;
+    finishActiveDrawingRef.current = finishPathShape;
+    cancelActiveDrawingRef.current = () => cleanupActiveDrawing();
+
+    if (type === "polygon" || type === "polyline") {
+      const committedPoints = [];
+      const overlay =
+        type === "polygon"
+          ? new gm.Polygon({
+              map,
+              ...shapeOptions,
+              clickable: false,
+              editable: false,
+              draggable: false,
+              fillOpacity: 0,
+            })
+          : new gm.Polyline({
+              map,
+              path: [],
+              ...shapeOptions,
+              clickable: false,
+              editable: false,
+              draggable: false,
+            });
+
+      activeDrawingRef.current = {
+        type,
+        overlay,
+        path: null,
+        points: committedPoints,
+        vertexMarkers: [],
+        finalOptions: type === "polygon" ? { fillOpacity: resolvedPolygonFillOpacity } : null,
+        listeners,
+      };
+      setActiveDraft({ type, pointCount: 0, canFinish: false });
+
+      const addDraftVertexMarker = (position, index) => {
+        const markerEntry = createVertexMarker({
+          map,
+          position,
+          type,
+          index,
+          title: index === 0 && type === "polygon"
+            ? "Start point - click to finish polygon"
+            : "Vertex",
+          onClick: () => {
+            if (type === "polygon" && index === 0 && committedPoints.length >= 3) {
+              finishPathShape();
+            } else if (type === "polyline" && index === committedPoints.length - 1 && committedPoints.length >= 2) {
+              finishPathShape();
+            }
+          },
+        });
+        activeDrawingRef.current?.vertexMarkers?.push(markerEntry);
+      };
+
+      listeners.push(
+        gm.event.addListener(map, "click", (event) => {
+          if (!event.latLng) {
+            return;
+          }
+          if (activeDrawingRef.current?.overlay !== overlay) {
+            return;
+          }
+          if (type === "polygon") {
+            if (isClosingVertex(committedPoints, event.latLng)) {
+              finishPathShape();
+              return;
+            }
+
+            if (isDuplicateVertex(committedPoints, event.latLng)) {
+              return;
+            }
+            committedPoints.push(event.latLng);
+            overlay.setPath(committedPoints);
+            addDraftVertexMarker(event.latLng, committedPoints.length - 1);
+          } else {
+            if (isDuplicateVertex(committedPoints, event.latLng)) {
+              return;
+            }
+            committedPoints.push(event.latLng);
+            overlay.setPath(committedPoints);
+            addDraftVertexMarker(event.latLng, committedPoints.length - 1);
+          }
+
+          setActiveDraft({
+            type,
+            pointCount: committedPoints.length,
+            canFinish: committedPoints.length >= (type === "polygon" ? 3 : 2),
+          });
+        }),
+      );
+
+      listeners.push(
+        gm.event.addListener(map, "mousemove", (event) => {
+          if (!event.latLng || activeDrawingRef.current?.overlay !== overlay) return;
+          if (committedPoints.length === 0) return;
+          overlay.setPath([...committedPoints, event.latLng]);
+        }),
+      );
+
+      listeners.push(
+        gm.event.addListener(map, "dblclick", (event) => {
+          event?.domEvent?.preventDefault?.();
+          finishPathShape();
+        }),
+      );
+
+      listeners.push(
+        gm.event.addListener(map, "rightclick", () => {
+          finishPathShape();
+        }),
+      );
+
+      toast.info(
+        type === "polygon"
+          ? "Click points on the map. Double-click or right-click to finish."
+          : "Click distance points. Double-click or right-click to finish.",
+        { position: "bottom-right", autoClose: 2500 },
+      );
+    } else if (type === "rectangle" || type === "circle") {
+      let startPoint = null;
+      let overlay = null;
+      let hasDragged = false;
+
+      const resetDragShape = () => {
+        overlay?.setMap(null);
+        overlay = null;
+        startPoint = null;
+        hasDragged = false;
+        activeDrawingRef.current = { type, overlay: null, listeners };
+      };
+
+      const completeDragShape = () => {
+        if (!overlay || !startPoint) return;
+        if (!hasDragged) {
+          resetDragShape();
+          return;
+        }
+
+        const completedOverlay = overlay;
+        completedOverlay.setOptions({ clickable: true, editable: true, draggable: true });
+        overlay = null;
+        startPoint = null;
+        hasDragged = false;
+        cleanupActiveDrawing(true);
+        registerCompletedShape(type, completedOverlay);
+      };
+
+      listeners.push(
+        gm.event.addListener(map, "mousedown", (event) => {
+          if (!event.latLng) return;
+          startPoint = event.latLng;
+          hasDragged = false;
+
+          if (type === "rectangle") {
+            overlay = new gm.Rectangle({
+              map,
+              bounds: createBoundsFromLatLngs(startPoint, startPoint),
+              ...shapeOptions,
+              clickable: false,
+              editable: false,
+              draggable: false,
+            });
+          } else {
+            overlay = new gm.Circle({
+              map,
+              center: startPoint,
+              radius: 1,
+              ...shapeOptions,
+              clickable: false,
+              editable: false,
+              draggable: false,
+            });
+          }
+
+          activeDrawingRef.current = { type, overlay, listeners };
+        }),
+      );
+
+      listeners.push(
+        gm.event.addListener(map, "mousemove", (event) => {
+          if (!overlay || !startPoint || !event.latLng) return;
+
+          const distance = gm.geometry?.spherical
+            ? gm.geometry.spherical.computeDistanceBetween(startPoint, event.latLng)
+            : 0;
+          if (distance > 1) hasDragged = true;
+
+          if (type === "rectangle") {
+            overlay.setBounds(createBoundsFromLatLngs(startPoint, event.latLng));
+          } else {
+            const radius = gm.geometry?.spherical ? distance : 1;
+            overlay.setRadius(Math.max(radius, 1));
+          }
+        }),
+      );
+
+      listeners.push(
+        gm.event.addListener(map, "mouseup", () => {
+          completeDragShape();
+        }),
+      );
+
+      toast.info(
+        type === "rectangle"
+          ? "Drag on the map to draw a rectangle."
+          : "Drag from the center to draw a circle.",
+        { position: "bottom-right", autoClose: 2200 },
+      );
+    }
 
     return () => {
-      window.google.maps.event.removeListener(listener);
-      managerRef.current?.setMap(null);
-      managerRef.current = null;
+      finishActiveDrawingRef.current = null;
+      cancelActiveDrawingRef.current = null;
+      cleanupActiveDrawing(false, { completeIfPossible: true });
     };
-  }, [map, enabled, shapeMode, showDrawingControl, registerCompletedShape, resolvedPolygonOpacity]);
+  }, [
+    map,
+    enabled,
+    shapeMode,
+    cleanupActiveDrawing,
+    registerCompletedShape,
+    resolvedPolygonOpacity,
+    resolvedPolygonFillOpacity,
+    showDrawingControl,
+  ]);
 
   useEffect(() => {
     shapesRef.current.forEach(({ type, overlay }) => {
@@ -489,13 +934,6 @@ function DrawingToolsLayerComponent({
       });
     });
   }, [resolvedPolygonOpacity]);
-
-  // Keep DrawingManager mode in sync when tool or enabled state changes.
-  useEffect(() => {
-    if (managerRef.current) {
-      managerRef.current.setDrawingMode(enabled ? shapeMode : null);
-    }
-  }, [map, enabled, shapeMode]);
 
   // Keep map and overlay cursor in sync with active drawing mode.
   useEffect(() => {
@@ -552,6 +990,7 @@ function DrawingToolsLayerComponent({
       s.overlay?.setMap(null);
       s.gridOverlays?.forEach(r => r.setMap(null));
       s.labelMarker?.setMap(null);
+      clearVertexMarkers(s.vertexMarkers);
     });
     shapesRef.current = [];
     collectedDrawingRef.current = [];
@@ -566,7 +1005,37 @@ function DrawingToolsLayerComponent({
     }
   }, [logs, sessions, selectedMetric, thresholds, pixelateRect, cellSizeMeters, colorizeCells, reAnalyzeShape]);
 
-  return null;
+  if (!activeDraft || !enabled || !shapeMode) return null;
+
+  const draftLabel =
+    activeDraft.type === "polygon"
+      ? `${activeDraft.pointCount} point${activeDraft.pointCount === 1 ? "" : "s"}`
+      : `${activeDraft.pointCount} segment point${activeDraft.pointCount === 1 ? "" : "s"}`;
+
+  return (
+    <div className="absolute bottom-4 left-1/2 z-30 -translate-x-1/2 rounded-md border border-slate-200 bg-white/95 px-3 py-2 shadow-lg backdrop-blur-sm">
+      <div className="flex items-center gap-2 text-xs text-slate-700">
+        <span className="font-medium capitalize">{activeDraft.type}</span>
+        <span className="text-slate-400">|</span>
+        <span>{draftLabel}</span>
+        <button
+          type="button"
+          disabled={!activeDraft.canFinish}
+          onClick={() => finishActiveDrawingRef.current?.()}
+          className="ml-2 rounded bg-blue-600 px-2.5 py-1 font-medium text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-slate-300"
+        >
+          Finish
+        </button>
+        <button
+          type="button"
+          onClick={() => cancelActiveDrawingRef.current?.()}
+          className="rounded border border-slate-300 px-2.5 py-1 font-medium text-slate-700 transition hover:bg-slate-100"
+        >
+          Cancel
+        </button>
+      </div>
+    </div>
+  );
 }
 
 export default memo(DrawingToolsLayerComponent);

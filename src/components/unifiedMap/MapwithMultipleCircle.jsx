@@ -15,7 +15,6 @@ const CSHARP_API_BASE_URL = (
 ).replace(/\/+$/, "");
 const EMPTY_ARRAY = [];
 const MAX_IMAGE_LOG_SCAN_POINTS = 12000;
-const METRIC_RANGE_EPSILON = 1e-9;
 const GRID_POLYGON_FILL_OPACITY = 0.72;
 
 const getLegendCategoryKeyFromLog = (log, colorBy) => {
@@ -80,10 +79,8 @@ const matchesLegendMetricRange = (value, legendFilter) => {
   if (Number.isFinite(min) && legendFilter?.max === null) return value >= min;
   if (![min, max].every(Number.isFinite)) return false;
 
-  const lowerMatch = value >= min - METRIC_RANGE_EPSILON;
-  const upperMatch = includeMax
-    ? value <= max + METRIC_RANGE_EPSILON
-    : value < max - METRIC_RANGE_EPSILON;
+  const lowerMatch = value >= min;
+  const upperMatch = includeMax ? value <= max : value < max;
   return lowerMatch && upperMatch;
 };
 
@@ -911,12 +908,37 @@ const getThroughputValue = (log, direction = "dl") => {
   return null;
 };
 
+const getLogLatLng = (log) => {
+  const lat = Number(log?.lat ?? log?.latitude ?? log?.Lat);
+  const lng = Number(log?.lng ?? log?.longitude ?? log?.lon ?? log?.Lng);
+  return { lat, lng };
+};
+
+const areLogsStacked = (a, b, tolerance = 0.000001) => {
+  const first = getLogLatLng(a);
+  const second = getLogLatLng(b);
+  return (
+    Number.isFinite(first.lat) &&
+    Number.isFinite(first.lng) &&
+    Number.isFinite(second.lat) &&
+    Number.isFinite(second.lng) &&
+    Math.abs(first.lat - second.lat) <= tolerance &&
+    Math.abs(first.lng - second.lng) <= tolerance
+  );
+};
+
+const getLogDisplayId = (log, fallbackIndex) =>
+  log?.id ?? log?.log_id ?? log?.network_log_id ?? log?.timestamp ?? `#${fallbackIndex + 1}`;
+
 const PrimaryLogInfoWindow = React.memo(({ log, onClose, resolveColor, selectedMetric }) => {
   if (!log) return null;
   const metricValue = getMetricValueFromLog(log, selectedMetric);
   const metricColor = resolveColor(metricValue, selectedMetric);
   const dlValue = getThroughputValue(log, "dl");
   const ulValue = getThroughputValue(log, "ul");
+  const overlapLogs = Array.isArray(log.__overlapLogs) ? log.__overlapLogs : [];
+  const hiddenOverlapCount = Math.max(0, overlapLogs.length - 1);
+  const overlapPreview = overlapLogs.slice(0, 6);
 
   return (
     <InfoWindow
@@ -939,6 +961,35 @@ const PrimaryLogInfoWindow = React.memo(({ log, onClose, resolveColor, selectedM
           {dlValue !== null && <div className="flex justify-between text-xs"><span className="text-gray-500">DL Throughput</span><span className="font-medium">{dlValue.toFixed(2)} Mbps</span></div>}
           {ulValue !== null && <div className="flex justify-between text-xs"><span className="text-gray-500">UL Throughput</span><span className="font-medium">{ulValue.toFixed(2)} Mbps</span></div>}
         </div>
+        {hiddenOverlapCount > 0 && (
+          <div className="mt-2 rounded-md border border-amber-200 bg-amber-50 px-2 py-1.5">
+            <div className="mb-1 flex items-center justify-between text-[11px] font-semibold text-amber-800">
+              <span>{overlapLogs.length.toLocaleString()} logs overlap here</span>
+              <span>+{hiddenOverlapCount.toLocaleString()} behind</span>
+            </div>
+            <div className="max-h-28 overflow-y-auto space-y-1">
+              {overlapPreview.map((item, index) => {
+                const value = getMetricValueFromLog(item, selectedMetric);
+                const itemColor = resolveColor(value, selectedMetric);
+                const band = item.band || item.Band || "-";
+                return (
+                  <div key={`${getLogDisplayId(item, index)}-${index}`} className="grid grid-cols-[10px_1fr_auto] items-center gap-1 text-[10px] text-slate-700">
+                    <span className="h-2 w-2 rounded-full" style={{ backgroundColor: itemColor }} />
+                    <span className="truncate">Band {band}</span>
+                    <span className="font-semibold">
+                      {Number.isFinite(value) ? value.toFixed(1) : "N/A"}
+                    </span>
+                  </div>
+                );
+              })}
+              {overlapLogs.length > overlapPreview.length && (
+                <div className="text-[10px] text-amber-700">
+                  {overlapLogs.length - overlapPreview.length} more hidden at this point
+                </div>
+              )}
+            </div>
+          </div>
+        )}
         <div className="mt-2 pt-2 border-t border-gray-100"><div className="text-[10px] text-gray-400 font-mono text-center">📍 {log.lat.toFixed(6)}, {log.lng.toFixed(6)}</div></div>
       </div>
     </InfoWindow>
@@ -1006,6 +1057,7 @@ const MapWithMultipleCircles = ({
   projectPolygonEditEnabled = false,
   editableBoundaryPolygonIds = [],
   onProjectPolygonBoundaryChange,
+  primaryRenderLimit = null,
 }) => {
   const { 
     getMetricColor: getMetricColorFromHook, 
@@ -1258,11 +1310,7 @@ const MapWithMultipleCircles = ({
         filtered = activePolygonChecker.filterLocations(filtered);
       }
     }
-    // NOTE: When filterInsidePolygons is false, we must NEVER block on activePolygonsReady.
-    //       Polygons may still be loading (for boundary drawing) but that doesn't affect point visibility.
 
-    // B. Apply Legend Filter. In grid mode, keep raw logs stable and filter
-    // the rendered grid cells instead so aggregation values do not change.
     if (legendFilter && !enableGrid) {
       filtered = filtered.filter(log => {
         if (legendFilter.type === 'metric') {
@@ -1767,12 +1815,18 @@ const MapWithMultipleCircles = ({
   }, [neighborSquareSize, neighborMinSquareSize]);
 
   const handlePrimaryClick = useCallback((index, loc) => {
-    setSelectedLog(loc);
+    const overlapLogs = locationsToRender.filter((candidate) =>
+      areLogsStacked(candidate, loc),
+    );
+    setSelectedLog({
+      ...loc,
+      __overlapLogs: overlapLogs.length > 1 ? overlapLogs : [],
+    });
     setSelectedNeighbor(null);
     setSelectedImageLog(null);
     setSelectedImageLoadFailed(false);
     onMarkerClickRef.current?.(index, loc);
-  }, []); 
+  }, [locationsToRender]);
 
   const handleNeighborClick = useCallback((neighbor) => {
     setSelectedNeighbor(neighbor);
@@ -1811,6 +1865,40 @@ const MapWithMultipleCircles = ({
 
     return sampled;
   }, [locationsToRender, showImageIcons]);
+
+  const renderDebugStats = useMemo(() => {
+    const safeLimit = Number.isFinite(Number(primaryRenderLimit))
+      ? Math.max(0, Number(primaryRenderLimit))
+      : Number.MAX_SAFE_INTEGER;
+    const primaryRendered = showPoints
+      ? Math.min(locationsToRender.length, safeLimit)
+      : 0;
+    const gridCellCount = enableGrid ? visibleGridCells.length : 0;
+    const populatedGridCellCount = enableGrid
+      ? visibleGridCells.reduce((count, cell) => count + (cell.count > 0 ? 1 : 0), 0)
+      : 0;
+
+    return {
+      loaded: Array.isArray(locations) ? locations.length : 0,
+      filtered: locationsToRender.length,
+      primaryRendered,
+      neighborsRendered: showNeighbors ? processedNeighbors.length : 0,
+      imageIcons: showImageIcons ? imageLogs.length : 0,
+      gridCellCount,
+      populatedGridCellCount,
+    };
+  }, [
+    locations,
+    locationsToRender,
+    primaryRenderLimit,
+    showPoints,
+    showNeighbors,
+    processedNeighbors,
+    showImageIcons,
+    imageLogs,
+    enableGrid,
+    visibleGridCells,
+  ]);
 
   const shouldRenderDeckOverlay =
     (showPoints && locationsToRender.length > 0) ||
@@ -1857,6 +1945,11 @@ const MapWithMultipleCircles = ({
     setHoveredCellTooltipPos(null);
   }, []);
 
+  const googleMapOptions = useMemo(
+    () => ({ ...options, gestureHandling: 'greedy', disableDefaultUI: false }),
+    [options],
+  );
+
   if (loadError) return <div className="flex items-center justify-center w-full h-full text-red-500">Failed to load Google Maps</div>;
   if (!isLoaded) return null;
 
@@ -1869,7 +1962,7 @@ const MapWithMultipleCircles = ({
         mapContainerStyle={containerStyle}
         onLoad={handleMapLoad}
         onUnmount={handleMapUnmount}
-        options={{ ...options, gestureHandling: 'greedy', disableDefaultUI: false }}
+        options={googleMapOptions}
         defaultCenter={computedCenter}
         zoom={defaultZoom}
       >
@@ -1944,6 +2037,7 @@ const MapWithMultipleCircles = ({
             showMetricLabels={showMetricLabels}
             selectedMetric={selectedMetric}
             onHover={handleHover}
+            primaryRenderLimit={primaryRenderLimit}
             neighbors={processedNeighbors}
             getNeighborColor={getNeighborColor}
             neighborSquareSize={resolvedNeighborSquareSize}
@@ -2037,6 +2131,42 @@ const MapWithMultipleCircles = ({
       {isLoadingPolygons && (
         <div className="absolute top-16 left-1/2 transform -translate-x-1/2 bg-blue-500 text-white px-4 py-2 rounded-lg shadow-lg z-20 text-sm">
           <span className="animate-pulse">Loading polygon boundaries...</span>
+        </div>
+      )}
+
+      {debugMode && (
+        <div className="absolute left-3 top-3 z-30 rounded-lg border border-slate-700/60 bg-slate-950/85 px-3 py-2 text-[11px] font-medium text-slate-100 shadow-xl backdrop-blur-sm pointer-events-none">
+          <div className="mb-1 text-[10px] uppercase tracking-[0.16em] text-cyan-200">
+            Map Render
+          </div>
+          <div className="grid grid-cols-[auto_auto] gap-x-3 gap-y-0.5">
+            <span className="text-slate-300">Loaded</span>
+            <span className="text-right font-semibold">{renderDebugStats.loaded.toLocaleString()}</span>
+            <span className="text-slate-300">Filtered</span>
+            <span className="text-right font-semibold">{renderDebugStats.filtered.toLocaleString()}</span>
+            <span className="text-slate-300">Points</span>
+            <span className="text-right font-semibold text-cyan-100">{renderDebugStats.primaryRendered.toLocaleString()}</span>
+            {renderDebugStats.neighborsRendered > 0 && (
+              <>
+                <span className="text-slate-300">Neighbors</span>
+                <span className="text-right font-semibold">{renderDebugStats.neighborsRendered.toLocaleString()}</span>
+              </>
+            )}
+            {renderDebugStats.gridCellCount > 0 && (
+              <>
+                <span className="text-slate-300">Grid cells</span>
+                <span className="text-right font-semibold">
+                  {renderDebugStats.populatedGridCellCount.toLocaleString()} / {renderDebugStats.gridCellCount.toLocaleString()}
+                </span>
+              </>
+            )}
+            {renderDebugStats.imageIcons > 0 && (
+              <>
+                <span className="text-slate-300">Images</span>
+                <span className="text-right font-semibold">{renderDebugStats.imageIcons.toLocaleString()}</span>
+              </>
+            )}
+          </div>
         </div>
       )}
 

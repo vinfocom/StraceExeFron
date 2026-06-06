@@ -1337,7 +1337,7 @@ BestNetworkLegend.displayName = "BestNetworkLegend";
 
 const UnifiedMapView = () => {
   // ... (State hooks remain exactly the same) ...
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -1876,10 +1876,47 @@ const UnifiedMapView = () => {
   ]);
   const sessionKey = useMemo(() => sessionIds.join(","), [sessionIds]);
 
-  const handleSessionIdsChange = useCallback((nextSessionIds) => {
-    const normalized = parseSessionIds(nextSessionIds);
-    setManualSessionIds(normalized);
-  }, []);
+  const handleSessionIdsChange = useCallback(
+    async (nextSessionIds) => {
+      const normalized = parseSessionIds(nextSessionIds);
+      const nextSessionParam = normalized.join(",");
+      setManualSessionIds(normalized);
+
+      setSearchParams(
+        (prevParams) => {
+          const nextParams = new URLSearchParams(prevParams);
+          SESSION_QUERY_KEYS.forEach((key) => nextParams.delete(key));
+
+          if (nextSessionParam) {
+            nextParams.set("session", nextSessionParam);
+          }
+
+          return nextParams;
+        },
+        { replace: true },
+      );
+
+      if (!projectId) return;
+
+      try {
+        const response = await mapViewApi.updateProjectSessions({
+          ProjectId: Number(projectId),
+          SessionIds: normalized.map((id) => Number(id)).filter((id) => Number.isFinite(id) && id > 0),
+        });
+        const updatedProject = response?.Data || response?.data || null;
+        const nextProject = updatedProject
+          ? { ...(project || {}), ...updatedProject }
+          : { ...(project || {}), id: projectId, ref_session_id: nextSessionParam };
+
+        setProject(nextProject);
+        upsertProjectInProjectsCache(nextProject);
+        toast.success("Project sessions saved.");
+      } catch (error) {
+        toast.error(error?.message || "Could not save project sessions.");
+      }
+    },
+    [project, projectId, setSearchParams],
+  );
 
   const { isLoaded, loadError } = useJsApiLoader(GOOGLE_MAPS_LOADER_OPTIONS);
   const {
@@ -5805,6 +5842,7 @@ const UnifiedMapView = () => {
               legendFilter={legendFilter}
               drawingEnabled={ui.drawEnabled}
               drawingShapeMode={ui.shapeMode}
+              debugMode={true}
             >
               <DrawingToolsLayer
                 map={mapRef.current}

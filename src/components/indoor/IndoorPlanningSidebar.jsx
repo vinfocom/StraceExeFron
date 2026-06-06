@@ -63,6 +63,7 @@ function IndoorPlanningSidebar({
   setRfConfig,
   runIndoorPrediction,
   setPredictions,
+  simSummary,
   detectedPlan,
   updateDetectedRoom,
   removeDetectedRoom,
@@ -93,7 +94,7 @@ function IndoorPlanningSidebar({
   return (
     <aside className="order-2 overflow-auto rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
       <div className="mb-3 flex items-center justify-between p-1">
-        <h1 className="font-bold">Floor Planner</h1>
+        <h1 className="font-bold">Indoor planing</h1>
         <button className={buttonClass} type="button" onClick={downloadTemplate}><Download /></button>
       </div>
 
@@ -101,7 +102,7 @@ function IndoorPlanningSidebar({
         <h2>Planning Tools</h2>
         <div className="mt-2 grid gap-2">
           <button className={buttonClass} type="button" onClick={() => { setShowAddRoomPanel?.((value) => !value); setShowIndoorPlanningPanel?.(false) }}>Add Room</button>
-          <button className={buttonClass} type="button" onClick={() => { setShowIndoorPlanningPanel?.((value) => !value); setShowAddRoomPanel?.(false) }}>Indoor Network Planning</button>
+          <button className={buttonClass} type="button" onClick={() => { setShowIndoorPlanningPanel?.((value) => !value); setShowAddRoomPanel?.(false) }}>Omni Signal Planning</button>
         </div>
         {showAddRoomPanel && (
           <div className="mt-3 rounded-lg border border-indigo-100 bg-white p-2.5">
@@ -122,7 +123,7 @@ function IndoorPlanningSidebar({
         {showIndoorPlanningPanel && (
           <div className="mt-3 grid gap-3 rounded-lg border border-indigo-100 bg-white p-2.5">
             <div>
-              <div className="mb-1 text-xs font-semibold text-slate-600">Site Tower</div>
+              <div className="mb-1 text-xs font-semibold text-slate-600">Omni Signal Source</div>
               <div className="grid grid-cols-2 gap-2">
                 <TinyInput label="Name" className="rounded-md border border-blue-200 bg-white px-2 py-1.5 text-xs" value={siteForm.name} onChange={(event) => setSiteForm?.((current) => ({ ...current, name: event.target.value }))} />
                 <TinyInput label="Technology" className="rounded-md border border-blue-200 bg-white px-2 py-1.5 text-xs" value={siteForm.technology || ""} onChange={(event) => setSiteForm?.((current) => ({ ...current, technology: event.target.value }))} />
@@ -162,16 +163,25 @@ function IndoorPlanningSidebar({
                 <TinyInput label="Wall Loss" className="rounded-md border border-slate-300 bg-white px-2 py-1.5 text-xs" type="number" step="0.5" value={rfConfig.wallLossDb} onChange={(event) => setRfConfig?.((current) => ({ ...current, wallLossDb: event.target.value }))} />
                 <TinyInput label="Door Loss" className="rounded-md border border-slate-300 bg-white px-2 py-1.5 text-xs" type="number" step="0.5" value={rfConfig.doorLossDb} onChange={(event) => setRfConfig?.((current) => ({ ...current, doorLossDb: event.target.value }))} />
                 <TinyInput label="RX Gain" className="rounded-md border border-slate-300 bg-white px-2 py-1.5 text-xs" type="number" step="0.5" value={rfConfig.rxGainDbi} onChange={(event) => setRfConfig?.((current) => ({ ...current, rxGainDbi: event.target.value }))} />
-                <TinyInput label="Grid Step" className="rounded-md border border-slate-300 bg-white px-2 py-1.5 text-xs" type="number" step="0.2" min="0.6" value={rfConfig.gridStepM} onChange={(event) => setRfConfig?.((current) => ({ ...current, gridStepM: event.target.value }))} />
+                <TinyInput label="Omni Range" className="rounded-md border border-slate-300 bg-white px-2 py-1.5 text-xs" type="number" step="1" min="20" max="50" value={rfConfig.omniRangeM ?? 50} onChange={(event) => setRfConfig?.((current) => ({ ...current, omniRangeM: Math.max(20, Math.min(50, Number(event.target.value) || 50)) }))} />
+                <TinyInput label="Grid Step" className="rounded-md border border-slate-300 bg-white px-2 py-1.5 text-xs" type="number" step="0.2" min="0.3" value={rfConfig.gridStepM} onChange={(event) => setRfConfig?.((current) => ({ ...current, gridStepM: event.target.value }))} />
               </div>
             </div>
             <div className="flex flex-wrap gap-2">
-              <button className={buttonClass} type="button" onClick={addSite}>Add Site</button>
+              <button className={buttonClass} type="button" onClick={addSite}>Add Omni Signal</button>
               <button className={buttonClass} type="button" onClick={() => addWifiPoint?.()}>Add Wi-Fi</button>
               <button className={buttonClass} type="button" onClick={runIndoorPrediction}>Run Prediction</button>
               <button type="button" className={dangerButtonClass} onClick={() => setPredictions?.([])}>Clear</button>
               <button className="rounded-md border border-slate-200 bg-white px-2.5 py-1.5 text-xs text-slate-600" type="button" onClick={() => setShowIndoorPlanningPanel?.(false)}>X</button>
             </div>
+            {simSummary && (
+              <div className="grid grid-cols-2 gap-2 rounded-md border border-slate-200 bg-slate-50 p-2 text-xs text-slate-700">
+                <span>Avg Rx: {simSummary.avg} dBm</span>
+                <span>Avg Loss: {simSummary.avgLoss} dB</span>
+                <span>Max distance: {simSummary.maxDistance} m</span>
+                <span>Quality: {simSummary.avgQuality}%</span>
+              </div>
+            )}
           </div>
         )}
       </section>
@@ -217,7 +227,7 @@ function IndoorPlanningSidebar({
       )}
 
       <label className="mb-3 grid gap-1.5 text-sm">
-        Site Name
+        Omni Site Signal Name
         <input className={inputClass} value={siteName} onChange={(event) => setSiteName(event.target.value)} />
       </label>
       <label className="mb-3 grid gap-1.5 text-sm">
