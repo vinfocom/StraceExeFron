@@ -1049,7 +1049,6 @@ const MapWithMultipleCircles = ({
   onFilteredNeighborsChange,
   onGridCellsStatsChange,
   onGridLegendLocationsChange,
-  debugMode = false,
   legendFilter = null,
   drawingEnabled = false,
   drawingShapeMode = null,
@@ -1866,40 +1865,6 @@ const MapWithMultipleCircles = ({
     return sampled;
   }, [locationsToRender, showImageIcons]);
 
-  const renderDebugStats = useMemo(() => {
-    const safeLimit = Number.isFinite(Number(primaryRenderLimit))
-      ? Math.max(0, Number(primaryRenderLimit))
-      : Number.MAX_SAFE_INTEGER;
-    const primaryRendered = showPoints
-      ? Math.min(locationsToRender.length, safeLimit)
-      : 0;
-    const gridCellCount = enableGrid ? visibleGridCells.length : 0;
-    const populatedGridCellCount = enableGrid
-      ? visibleGridCells.reduce((count, cell) => count + (cell.count > 0 ? 1 : 0), 0)
-      : 0;
-
-    return {
-      loaded: Array.isArray(locations) ? locations.length : 0,
-      filtered: locationsToRender.length,
-      primaryRendered,
-      neighborsRendered: showNeighbors ? processedNeighbors.length : 0,
-      imageIcons: showImageIcons ? imageLogs.length : 0,
-      gridCellCount,
-      populatedGridCellCount,
-    };
-  }, [
-    locations,
-    locationsToRender,
-    primaryRenderLimit,
-    showPoints,
-    showNeighbors,
-    processedNeighbors,
-    showImageIcons,
-    imageLogs,
-    enableGrid,
-    visibleGridCells,
-  ]);
-
   const shouldRenderDeckOverlay =
     (showPoints && locationsToRender.length > 0) ||
     (showNeighbors && processedNeighbors.length > 0) ||
@@ -2131,42 +2096,6 @@ const MapWithMultipleCircles = ({
       {isLoadingPolygons && (
         <div className="absolute top-16 left-1/2 transform -translate-x-1/2 bg-blue-500 text-white px-4 py-2 rounded-lg shadow-lg z-20 text-sm">
           <span className="animate-pulse">Loading polygon boundaries...</span>
-        </div>
-      )}
-
-      {debugMode && (
-        <div className="absolute left-3 top-3 z-30 rounded-lg border border-slate-700/60 bg-slate-950/85 px-3 py-2 text-[11px] font-medium text-slate-100 shadow-xl backdrop-blur-sm pointer-events-none">
-          <div className="mb-1 text-[10px] uppercase tracking-[0.16em] text-cyan-200">
-            Map Render
-          </div>
-          <div className="grid grid-cols-[auto_auto] gap-x-3 gap-y-0.5">
-            <span className="text-slate-300">Loaded</span>
-            <span className="text-right font-semibold">{renderDebugStats.loaded.toLocaleString()}</span>
-            <span className="text-slate-300">Filtered</span>
-            <span className="text-right font-semibold">{renderDebugStats.filtered.toLocaleString()}</span>
-            <span className="text-slate-300">Points</span>
-            <span className="text-right font-semibold text-cyan-100">{renderDebugStats.primaryRendered.toLocaleString()}</span>
-            {renderDebugStats.neighborsRendered > 0 && (
-              <>
-                <span className="text-slate-300">Neighbors</span>
-                <span className="text-right font-semibold">{renderDebugStats.neighborsRendered.toLocaleString()}</span>
-              </>
-            )}
-            {renderDebugStats.gridCellCount > 0 && (
-              <>
-                <span className="text-slate-300">Grid cells</span>
-                <span className="text-right font-semibold">
-                  {renderDebugStats.populatedGridCellCount.toLocaleString()} / {renderDebugStats.gridCellCount.toLocaleString()}
-                </span>
-              </>
-            )}
-            {renderDebugStats.imageIcons > 0 && (
-              <>
-                <span className="text-slate-300">Images</span>
-                <span className="text-right font-semibold">{renderDebugStats.imageIcons.toLocaleString()}</span>
-              </>
-            )}
-          </div>
         </div>
       )}
 

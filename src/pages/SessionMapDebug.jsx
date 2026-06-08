@@ -865,7 +865,6 @@ function SessionMapDebug() {
         showStats={false}
         activeMarkerIndex={null}
         onMarkerClick={() => {}}
-        debugMode={true}
         debugNeighbors={true}
         neighborSquareSize={6}
         neighborOpacity={0.5}
