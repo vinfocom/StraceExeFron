@@ -479,6 +479,17 @@ function matchesSiteLegendFilter(row, activeFilter, colorMode, sitePredictionVer
   );
 }
 
+function getSiteLegendColorOverrideKey(mode, value) {
+  return `${String(mode || "").trim().toLowerCase()}:${String(value ?? "").trim().toLowerCase()}`;
+}
+
+function getSiteLegendColorOverride(overrides = {}, row, colorMode, sitePredictionVersion) {
+  if (!overrides || typeof overrides !== "object") return null;
+  const category = getSiteLegendFilterValue(row, colorMode, sitePredictionVersion);
+  const color = overrides[getSiteLegendColorOverrideKey(category.mode, category.value)];
+  return typeof color === "string" && color.trim() ? color : null;
+}
+
 function normalizeLteRows(rawRows = [], fallbackSiteId = "", selectedMetric = "rsrp") {
   if (!Array.isArray(rawRows)) return [];
   const metricLower = String(selectedMetric || "rsrp").trim().toLowerCase();
@@ -1188,7 +1199,7 @@ function generateSectorsFromSite(site, siteIndex, colorMode = "Operator", option
   const effectiveDeltaVariant = isSitePredictionUpdated(site) ? "updated" : deltaVariant;
 
   const colorField = getSiteSectorColorField(options?.siteLabelField, colorMode);
-  const color = resolveSiteSectorColor({
+  const defaultColor = resolveSiteSectorColor({
     deltaVariant: effectiveDeltaVariant,
     colorField,
     band,
@@ -1196,6 +1207,13 @@ function generateSectorsFromSite(site, siteIndex, colorMode = "Operator", option
     network,
     pci,
   });
+  const color =
+    getSiteLegendColorOverride(
+      options?.siteColorOverrides,
+      { ...site, deltaVariant: effectiveDeltaVariant },
+      colorMode,
+      options?.sitePredictionVersion,
+    ) || defaultColor;
 
   if (Number.isNaN(lat) || Number.isNaN(lng) || (lat === 0 && lng === 0)) return [];
 
@@ -1269,6 +1287,7 @@ const NetworkPlannerMap = ({
   onSectorPredictionPointsChange = null,
   triangleScaleMultiplier = 1,
   siteLegendFilter = null,
+  siteColorOverrides = {},
 }) => {
   const siteLteDebugEnabled = useMemo(() => isSiteLteDebugEnabled(), []);
   const { siteData, loading, error, fetchSiteData } = useSiteData({
@@ -1623,9 +1642,11 @@ const NetworkPlannerMap = ({
           forceSingleSector: String(siteToggle || "").toLowerCase() === "cell",
           defaultBeamwidth,
           siteLabelField,
+          sitePredictionVersion,
+          siteColorOverrides,
         }),
       ),
-    [filteredSiteData, colorMode, siteToggle, defaultBeamwidth, siteLabelField],
+    [filteredSiteData, colorMode, siteToggle, defaultBeamwidth, siteLabelField, sitePredictionVersion, siteColorOverrides],
   );
 
   const uniqueSectors = useMemo(() => {
@@ -1772,6 +1793,8 @@ const NetworkPlannerMap = ({
             forceSingleSector: String(siteToggle || "").toLowerCase() === "cell",
             defaultBeamwidth,
             siteLabelField,
+            sitePredictionVersion,
+            siteColorOverrides,
           }),
         )
         .filter((s) => pointInsideAnyPolygon({ lat: s.lat, lng: s.lng }));
@@ -1891,6 +1914,7 @@ const NetworkPlannerMap = ({
       pointInsideAnyPolygon,
       siteToggle,
       enableSiteLteOverlay,
+      siteColorOverrides,
     ],
   );
 

@@ -126,7 +126,10 @@ const DEFAULT_DATA_FILTERS = {
   providers: [],
   bands: [],
   technologies: [],
+  cellIds: [],
+  apps: [],
   indoorOutdoor: [],
+  excludedMetricValue: "",
 };
 
 const DRAWN_POLYGON_OPACITY = 0.58;
@@ -279,6 +282,13 @@ const METRIC_CONFIG = {
     label: "Packet Loss",
     min: 0,
     max: 100,
+  },
+  cell_id: {
+    higherIsBetter: true,
+    unit: "",
+    label: "Cell ID",
+    min: 0,
+    max: 1000000,
   },
 };
 
@@ -769,6 +779,29 @@ const isUnknownOption = (value) => {
     normalized === "undefined" ||
     normalized === "-"
   );
+};
+
+const splitAppNames = (value) =>
+  String(value ?? "")
+    .split(/[,;|]/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+
+const locationMatchesSelectedApps = (location, selectedApps = []) => {
+  if (!selectedApps?.length) return true;
+  const selected = new Set(
+    selectedApps.map((app) => String(app ?? "").trim().toLowerCase()).filter(Boolean),
+  );
+  if (selected.size === 0) return true;
+  const rowApps = splitAppNames(
+    location?.apps ??
+      location?.app ??
+      location?.appName ??
+      location?.AppName ??
+      location?.application ??
+      location?.Application,
+  ).map((app) => app.toLowerCase());
+  return rowApps.some((app) => selected.has(app));
 };
 
 const getLocationSessionKey = (loc) =>
@@ -1406,6 +1439,7 @@ const UnifiedMapView = () => {
     drawCellSizeMeters: 100,
     drawClearSignal: 0,
     colorizeCells: true,
+    overlapDrawOrder: "original",
   });
 
   const [drawnPoints, setDrawnPoints] = useState(null);
@@ -1414,6 +1448,7 @@ const UnifiedMapView = () => {
   const [isSavingProjectPolygon, setIsSavingProjectPolygon] = useState(false);
   const [legendFilter, setLegendFilter] = useState(null);
   const [siteLegendFilter, setSiteLegendFilter] = useState(null);
+  const [siteColorOverrides, setSiteColorOverrides] = useState({});
   const [opacity, setOpacity] = useState(0.8);
   const [logRadius, setLogRadius] = useState(10);
   const [neighborSquareSize, setNeighborSquareSize] = useState(12);
@@ -1481,6 +1516,7 @@ const UnifiedMapView = () => {
   const [dominanceData, setDominanceData] = useState([]);
   const [manualSiteData, setManualSiteData] = useState([]);
   const [manualSiteLoading, setManualSiteLoading] = useState(false);
+  const [manualSiteDataReady, setManualSiteDataReady] = useState(false);
 
   useEffect(() => {
     if (isSideOpen) {
@@ -1491,6 +1527,8 @@ const UnifiedMapView = () => {
   useEffect(() => {
     if (!enableSiteToggle) {
       setManualSiteData([]);
+      setManualSiteLoading(false);
+      setManualSiteDataReady(false);
       setSelectedSites([]);
       setSiteLegendFilter(null);
     }
@@ -1547,10 +1585,21 @@ const UnifiedMapView = () => {
     };
   }, []);
 
-  // ... (All existing useEffects and handlers remain exactly the same) ...
   const handleSitesLoaded = useCallback((data, isLoading) => {
-    setManualSiteData(data);
-    setManualSiteLoading(isLoading);
+    setManualSiteData(Array.isArray(data) ? data : []);
+    setManualSiteLoading(Boolean(isLoading));
+    setManualSiteDataReady(true);
+  }, []);
+
+  const handleSiteLegendColorChange = useCallback((item, color) => {
+    const mode = String(item?.mode || "").trim().toLowerCase();
+    const value = String(item?.value ?? item?.label ?? "").trim().toLowerCase();
+    const nextColor = String(color || "").trim();
+    if (!mode || !value || !/^#[0-9a-f]{6}$/i.test(nextColor)) return;
+    setSiteColorOverrides((prev) => ({
+      ...prev,
+      [`${mode}:${value}`]: nextColor,
+    }));
   }, []);
 
   useEffect(() => {
@@ -2236,25 +2285,44 @@ const UnifiedMapView = () => {
           status: String(row?.status || "").trim(),
           created_at: row?.created_at || null,
         }))
-        .filter((row) => Number.isFinite(row.scenario_id) && row.scenario_id > 0);
+        .filter(
+          (row) =>
+            Number.isFinite(row.scenario_id) &&
+            row.scenario_id > 0 &&
+            row.scenario_id !== numericScenarioId,
+        );
+      const currentScenarioId = Number(storedGridScenarioId);
+      const nextScenarioId =
+        Number.isFinite(currentScenarioId) &&
+        currentScenarioId > 0 &&
+        currentScenarioId !== numericScenarioId &&
+        options.some((option) => option.scenario_id === currentScenarioId)
+          ? currentScenarioId
+          : options.length > 0
+            ? options[0].scenario_id
+            : null;
 
       setStoredGridScenarioOptions(options);
-      setStoredGridScenarioId((prev) => {
-        if (Number.isFinite(Number(prev)) && options.some((o) => o.scenario_id === Number(prev))) {
-          return Number(prev);
-        }
-        return options.length > 0 ? options[0].scenario_id : null;
-      });
+      setStoredGridScenarioId(nextScenarioId);
 
-      await handleDeltaGridFetchStored({
-        version: storedGridVersion,
-        scenarioId:
-          options.length > 0
-            ? (options.some((o) => o.scenario_id === Number(storedGridScenarioId))
-                ? Number(storedGridScenarioId)
-                : options[0].scenario_id)
-            : undefined,
-      });
+      if (nextScenarioId) {
+        await handleDeltaGridFetchStored({
+          version: storedGridVersion,
+          scenarioId: nextScenarioId,
+        });
+      } else {
+        setDeltaGridApiState((prev) => ({
+          ...prev,
+          fetching: false,
+          lastStatus: "idle",
+          lastMessage: "",
+          lastError: "",
+          grids: [],
+          gridsCount: 0,
+          gridVisible: false,
+          lastUpdatedAt: new Date().toISOString(),
+        }));
+      }
     } catch (error) {
       const message = String(error?.message || "").trim() || "Failed to delete stored grid scenario.";
       toast.error(message);
@@ -2893,26 +2961,37 @@ const UnifiedMapView = () => {
           scenario_id: Number(row?.scenario_id ?? row?.id ?? 0),
           status: String(row?.status || "").trim(),
         }))
-        .filter((row) => Number.isFinite(row.scenario_id) && row.scenario_id > 0)
+        .filter(
+          (row) =>
+            Number.isFinite(row.scenario_id) &&
+            row.scenario_id > 0 &&
+            row.scenario_id !== numericScenario,
+        )
         .sort((a, b) => a.scenario_id - b.scenario_id);
+      const currentScenarioId = Number(sitePredictionScenarioId);
+      const nextScenarioId =
+        Number.isFinite(currentScenarioId) &&
+        currentScenarioId > 0 &&
+        currentScenarioId !== numericScenario &&
+        options.some((option) => option.scenario_id === currentScenarioId)
+          ? currentScenarioId
+          : options.length > 0
+            ? options[0].scenario_id
+            : null;
 
       setSitePredictionScenarioOptions(options);
-      setSitePredictionScenarioId((prev) => {
-        const parsedPrev = Number(prev);
-        if (Number.isFinite(parsedPrev) && parsedPrev > 0 && options.some((o) => o.scenario_id === parsedPrev)) {
-          return parsedPrev;
-        }
-        return options.length > 0 ? options[0].scenario_id : null;
-      });
-
-      await refetchSites(true);
+      setSitePredictionScenarioId(nextScenarioId);
+      setManualSiteData([]);
+      setManualSiteDataReady(!nextScenarioId);
     } catch (error) {
       const message = String(error?.message || "").trim() || "Failed to delete site prediction scenario.";
       toast.error(message);
     }
-  }, [projectId, sitePredictionScenarioId, refetchSites]);
+  }, [projectId, sitePredictionScenarioId]);
 
   const siteData = rawSiteData || [];
+  const effectiveSiteData = manualSiteDataReady ? manualSiteData : siteData;
+  const effectiveSiteLoading = manualSiteLoading || siteLoading;
   const {
     allNeighbors: rawAllNeighbors,
     stats: neighborStats,
@@ -3264,6 +3343,8 @@ const UnifiedMapView = () => {
     const providers = new Set();
     const bands = new Set();
     const technologies = new Set();
+    const cellIds = new Set();
+    const apps = new Set();
 
     (locations || []).forEach((loc) => {
       const providerName = normalizeProviderName(
@@ -3283,6 +3364,22 @@ const UnifiedMapView = () => {
       if (technologyName && !isUnknownOption(technologyName)) {
         technologies.add(technologyName);
       }
+      const cellId = String(
+        loc?.cell_id ?? loc?.cellId ?? loc?.CellId ?? "",
+      ).trim();
+      if (cellId && !isUnknownOption(cellId)) {
+        cellIds.add(cellId);
+      }
+      splitAppNames(
+        loc?.apps ??
+          loc?.app ??
+          loc?.appName ??
+          loc?.AppName ??
+          loc?.application ??
+          loc?.Application,
+      ).forEach((app) => {
+        if (!isUnknownOption(app)) apps.add(app);
+      });
     });
 
     (polygonFilteredNeighborData || []).forEach((n) => {
@@ -3309,6 +3406,13 @@ const UnifiedMapView = () => {
         return numA - numB;
       }),
       technologies: [...technologies].sort(),
+      cellIds: [...cellIds].sort((a, b) => {
+        const numA = Number(a);
+        const numB = Number(b);
+        if (Number.isFinite(numA) && Number.isFinite(numB)) return numA - numB;
+        return a.localeCompare(b);
+      }),
+      apps: [...apps].sort((a, b) => a.localeCompare(b)),
     };
   }, [locations, polygonFilteredNeighborData]);
 
@@ -3392,7 +3496,7 @@ const UnifiedMapView = () => {
         }),
       );
     }
-    const { providers, bands, technologies, indoorOutdoor } = dataFilters;
+    const { providers, bands, technologies, cellIds, apps, indoorOutdoor } = dataFilters;
     if (providers?.length)
       result = result.filter((l) => {
         const providerName = normalizeProviderName(
@@ -3406,10 +3510,22 @@ const UnifiedMapView = () => {
       result = result.filter((l) =>
         technologies.includes(normalizeTechName(l.technology)),
       );
+    if (cellIds?.length)
+      result = result.filter((l) =>
+        cellIds.includes(String(l?.cell_id ?? l?.cellId ?? l?.CellId ?? "").trim()),
+      );
+    if (apps?.length)
+      result = result.filter((l) => locationMatchesSelectedApps(l, apps));
     if (indoorOutdoor?.length > 0) {
       const lowerFilters = indoorOutdoor.map((v) => v.toLowerCase());
       result = result.filter(
         (l) => lowerFilters.includes(formatIndoorOutdoorValue(l?.indoor_outdoor)),
+      );
+    }
+    const excludedMetricValue = Number.parseFloat(dataFilters?.excludedMetricValue);
+    if (Number.isFinite(excludedMetricValue)) {
+      result = result.filter(
+        (loc) => getMetricValueFromLog(loc, selectedMetric) !== excludedMetricValue,
       );
     }
     if (isSampleMode && pciThreshold > 0) {
@@ -3482,6 +3598,7 @@ const UnifiedMapView = () => {
     dominanceThreshold,
     coverageViolationByLogId,
     coverageViolationThreshold,
+    selectedMetric,
   ]);
 
   const finalDisplayLocations = useMemo(() => {
@@ -5494,7 +5611,7 @@ const UnifiedMapView = () => {
             dataToggle={dataToggle}
             enableDataToggle={enableDataToggle}
             selectedMetric={selectedMetric}
-            siteData={siteData}
+            siteData={effectiveSiteData}
             durationTime={durationTime}
             siteToggle={siteToggle}
             enableSiteToggle={enableSiteToggle}
@@ -5732,12 +5849,14 @@ const UnifiedMapView = () => {
 
         <SiteLegend
           enabled={enableSiteToggle}
-          sites={manualSiteData}
+          sites={effectiveSiteData}
           colorMode={siteLegendColorMode}
-          isLoading={manualSiteLoading}
+          isLoading={effectiveSiteLoading}
           sitePredictionVersion={sitePredictionVersion}
           activeFilter={siteLegendFilter}
           onFilterChange={setSiteLegendFilter}
+          colorOverrides={siteColorOverrides}
+          onColorChange={handleSiteLegendColorChange}
         />
 
         <BestNetworkLegend
@@ -5811,6 +5930,7 @@ const UnifiedMapView = () => {
               fitToLocations={(locationsToDisplay?.length || 0) > 0}
               showNumCells={showNumCells}
               showMetricLabels={showMetricLabels}
+              overlapDrawOrder={ui.overlapDrawOrder}
               onLoad={handleMapLoad}
               pointRadius={logRadius}
               projectId={projectId}
@@ -5978,6 +6098,7 @@ const UnifiedMapView = () => {
                   onSectorPredictionPointsChange={setSectorPredictionGridPoints}
                   triangleScaleMultiplier={triangleScaleMultiplier}
                   siteLegendFilter={siteLegendFilter}
+                  siteColorOverrides={siteColorOverrides}
                   options={{
                     scale: 0.6,
                     zIndex: 1000,

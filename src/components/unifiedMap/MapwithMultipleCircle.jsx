@@ -62,6 +62,11 @@ const getLegendCategoryKeyFromLog = (log, colorBy) => {
     return String(nodeb ?? "").trim() || "Unknown";
   }
 
+  if (key === "cell_id") {
+    const cellId = log?.cell_id ?? log?.cellId ?? log?.CellId ?? log?.CELL_ID;
+    return String(cellId ?? "").trim() || "Unknown";
+  }
+
   if (key === "pci") {
     const pci = Number.parseInt(log?.pci ?? log?.PCI ?? log?.best_pci, 10);
     return Number.isFinite(pci) ? String(pci) : "Unknown";
@@ -545,8 +550,9 @@ const generateGridCellsOptimized = (
   const isBestOperatorMetric = categoryGridMetric === "best_operator";
   const isBestTechnologyMetric = categoryGridMetric === "best_technology";
   const isBestPciMetric = categoryGridMetric === "best_pci";
+  const isCellIdMetric = categoryGridMetric === "cell_id";
   const isCategoryGridMetric =
-    isBestOperatorMetric || isBestTechnologyMetric || isBestPciMetric;
+    isBestOperatorMetric || isBestTechnologyMetric || isBestPciMetric || isCellIdMetric;
 
   let globalBounds = null;
   for (const { bbox } of polygonData) {
@@ -584,6 +590,7 @@ const generateGridCellsOptimized = (
     if (key === "technology") return "Technology";
     if (key === "band") return "Band";
     if (key === "nodebid") return "NodeB ID";
+    if (key === "cell_id") return "Cell ID";
     if (key === "pci") return "PCI";
     return "Category";
   };
@@ -611,6 +618,11 @@ const generateGridCellsOptimized = (
     const value = String(raw ?? "").trim();
     return value || "Unknown";
   };
+  const resolveCellId = (log) => {
+    const raw = log?.cell_id ?? log?.cellId ?? log?.CellId ?? log?.CELL_ID ?? "";
+    const value = String(raw ?? "").trim();
+    return value || "Unknown";
+  };
   const resolveCategoryValue = (log) => {
     if (normalizedColorBy === "provider" || normalizedColorBy === "operator") {
       return resolveProviderName(log);
@@ -618,6 +630,7 @@ const generateGridCellsOptimized = (
     if (normalizedColorBy === "technology") return resolveTechnologyName(log);
     if (normalizedColorBy === "band") return resolveBandName(log);
     if (normalizedColorBy === "nodebid") return resolveNodebId(log);
+    if (normalizedColorBy === "cell_id") return resolveCellId(log);
     if (normalizedColorBy === "pci") {
       const pci = resolvePciValue(log);
       return Number.isFinite(pci) ? String(pci) : null;
@@ -637,6 +650,9 @@ const generateGridCellsOptimized = (
     }
     if (normalizedColorBy === "nodebid") {
       return getLogColor("nodebid", categoryName);
+    }
+    if (normalizedColorBy === "cell_id") {
+      return getLogColor("cell_id", categoryName);
     }
     if (normalizedColorBy === "pci") {
       const pci = Number.parseInt(categoryName, 10);
@@ -689,12 +705,14 @@ const generateGridCellsOptimized = (
         const providerCountBuckets = new Map();
         const technologyCountBuckets = new Map();
         const pciCountBuckets = new Map();
+        const cellIdCountBuckets = new Map();
         let validCount = 0;
         for (const idx of cellLocationIndices) {
           const log = locations[idx];
           const provider = resolveProviderName(log);
           const technology = resolveTechnologyName(log);
           const pci = resolvePciValue(log);
+          const cellId = resolveCellId(log);
 
           if (provider && provider !== "Unknown") {
             providerCountBuckets.set(provider, (providerCountBuckets.get(provider) || 0) + 1);
@@ -707,6 +725,9 @@ const generateGridCellsOptimized = (
           }
           if (Number.isFinite(pci)) {
             pciCountBuckets.set(pci, (pciCountBuckets.get(pci) || 0) + 1);
+          }
+          if (cellId && cellId !== "Unknown") {
+            cellIdCountBuckets.set(cellId, (cellIdCountBuckets.get(cellId) || 0) + 1);
           }
 
           if (isCategoryGridMetric) {
@@ -775,6 +796,17 @@ const generateGridCellsOptimized = (
               count: rankedPcis[0][1],
             };
             fillColor = getPciColor(rankedPcis[0][0]);
+          } else if (isCellIdMetric && cellIdCountBuckets.size > 0) {
+            const rankedCellIds = Array.from(cellIdCountBuckets.entries()).sort(
+              (a, b) => b[1] - a[1],
+            );
+            aggregatedValue = rankedCellIds[0][0];
+            bestByColor = {
+              label: "Cell ID",
+              name: rankedCellIds[0][0],
+              count: rankedCellIds[0][1],
+            };
+            fillColor = getLogColor("cell_id", rankedCellIds[0][0]);
           }
         } else if (validCount > 0) {
           const values = valuesBuffer.subarray(0, validCount);
@@ -927,13 +959,77 @@ const areLogsStacked = (a, b, tolerance = 0.000001) => {
   );
 };
 
+const getOverlapCoordinateKey = (log) => {
+  const { lat, lng } = getLogLatLng(log);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+  return `${lat.toFixed(6)}|${lng.toFixed(6)}`;
+};
+
+const getLogTimestampMs = (log) => {
+  const raw =
+    log?.timestamp ??
+    log?.time ??
+    log?.datetime ??
+    log?.created_at ??
+    log?.CreatedAt ??
+    log?.date_time;
+  const parsed = Date.parse(raw);
+  return Number.isFinite(parsed) ? parsed : null;
+};
+
+const sortStackedLogsForTop = (logs = [], selectedMetric, overlapDrawOrder) => {
+  const mode = String(overlapDrawOrder || "original").trim().toLowerCase();
+  if (mode === "original" || !Array.isArray(logs) || logs.length < 2) return logs;
+
+  const groups = new Map();
+  logs.forEach((log, index) => {
+    const key = getOverlapCoordinateKey(log) || `__single_${index}`;
+    const group = groups.get(key) || [];
+    group.push({ log, index });
+    groups.set(key, group);
+  });
+
+  const compareWithinStack = (a, b) => {
+    if (mode === "latest" || mode === "earliest") {
+      const aTime = getLogTimestampMs(a.log);
+      const bTime = getLogTimestampMs(b.log);
+      if (Number.isFinite(aTime) && Number.isFinite(bTime) && aTime !== bTime) {
+        return mode === "latest" ? aTime - bTime : bTime - aTime;
+      }
+    }
+
+    if (mode === "highest_metric" || mode === "lowest_metric") {
+      const aValue = getMetricValueFromLog(a.log, selectedMetric);
+      const bValue = getMetricValueFromLog(b.log, selectedMetric);
+      if (Number.isFinite(aValue) && Number.isFinite(bValue) && aValue !== bValue) {
+        return mode === "highest_metric" ? aValue - bValue : bValue - aValue;
+      }
+    }
+
+    return a.index - b.index;
+  };
+
+  return Array.from(groups.values()).flatMap((group) => {
+    if (group.length < 2) return group.map((item) => item.log);
+    return [...group].sort(compareWithinStack).map((item) => item.log);
+  });
+};
+
 const getLogDisplayId = (log, fallbackIndex) =>
   log?.id ?? log?.log_id ?? log?.network_log_id ?? log?.timestamp ?? `#${fallbackIndex + 1}`;
 
 const PrimaryLogInfoWindow = React.memo(({ log, onClose, resolveColor, selectedMetric }) => {
   if (!log) return null;
-  const metricValue = getMetricValueFromLog(log, selectedMetric);
-  const metricColor = resolveColor(metricValue, selectedMetric);
+  const selectedMetricKey = String(selectedMetric || "").trim().toLowerCase();
+  const selectedCellId = String(log?.cell_id ?? log?.cellId ?? log?.CellId ?? "").trim();
+  const metricValue =
+    selectedMetricKey === "cell_id"
+      ? selectedCellId
+      : getMetricValueFromLog(log, selectedMetric);
+  const metricColor =
+    selectedMetricKey === "cell_id"
+      ? resolveColor(selectedCellId || "Unknown", "cell_id")
+      : resolveColor(metricValue, selectedMetric);
   const dlValue = getThroughputValue(log, "dl");
   const ulValue = getThroughputValue(log, "ul");
   const overlapLogs = Array.isArray(log.__overlapLogs) ? log.__overlapLogs : [];
@@ -969,15 +1065,26 @@ const PrimaryLogInfoWindow = React.memo(({ log, onClose, resolveColor, selectedM
             </div>
             <div className="max-h-28 overflow-y-auto space-y-1">
               {overlapPreview.map((item, index) => {
-                const value = getMetricValueFromLog(item, selectedMetric);
-                const itemColor = resolveColor(value, selectedMetric);
+                const itemCellId = String(item?.cell_id ?? item?.cellId ?? item?.CellId ?? "").trim();
+                const value =
+                  selectedMetricKey === "cell_id"
+                    ? itemCellId
+                    : getMetricValueFromLog(item, selectedMetric);
+                const itemColor =
+                  selectedMetricKey === "cell_id"
+                    ? resolveColor(itemCellId || "Unknown", "cell_id")
+                    : resolveColor(value, selectedMetric);
                 const band = item.band || item.Band || "-";
                 return (
                   <div key={`${getLogDisplayId(item, index)}-${index}`} className="grid grid-cols-[10px_1fr_auto] items-center gap-1 text-[10px] text-slate-700">
                     <span className="h-2 w-2 rounded-full" style={{ backgroundColor: itemColor }} />
                     <span className="truncate">Band {band}</span>
                     <span className="font-semibold">
-                      {Number.isFinite(value) ? value.toFixed(1) : "N/A"}
+                      {selectedMetricKey === "cell_id"
+                        ? value || "N/A"
+                        : Number.isFinite(value)
+                          ? value.toFixed(1)
+                          : "N/A"}
                     </span>
                   </div>
                 );
@@ -1057,6 +1164,7 @@ const MapWithMultipleCircles = ({
   editableBoundaryPolygonIds = [],
   onProjectPolygonBoundaryChange,
   primaryRenderLimit = null,
+  overlapDrawOrder = "original",
 }) => {
   const { 
     getMetricColor: getMetricColorFromHook, 
@@ -1077,6 +1185,7 @@ const MapWithMultipleCircles = ({
   const [selectedLog, setSelectedLog] = useState(null);
   const [selectedImageLog, setSelectedImageLog] = useState(null);
   const [selectedImageLoadFailed, setSelectedImageLoadFailed] = useState(false);
+  const [categoryColorVersion, setCategoryColorVersion] = useState(0);
   
   const onFilteredLocationsChangeRef = useRef(onFilteredLocationsChange);
   const onFilteredNeighborsChangeRef = useRef(onFilteredNeighborsChange);
@@ -1091,6 +1200,16 @@ const MapWithMultipleCircles = ({
   useEffect(() => { onFilteredLocationsChangeRef.current = onFilteredLocationsChange; }, [onFilteredLocationsChange]);
   useEffect(() => { onFilteredNeighborsChangeRef.current = onFilteredNeighborsChange; }, [onFilteredNeighborsChange]);
   useEffect(() => { onGridLegendLocationsChangeRef.current = onGridLegendLocationsChange; }, [onGridLegendLocationsChange]);
+  useEffect(() => {
+    if (typeof window === "undefined") return undefined;
+    const handleCategoryColorChange = () => {
+      setCategoryColorVersion((version) => version + 1);
+    };
+    window.addEventListener("stracer:map-category-color-change", handleCategoryColorChange);
+    return () => {
+      window.removeEventListener("stracer:map-category-color-change", handleCategoryColorChange);
+    };
+  }, []);
 
   // ✅ Unified Color Resolver - UPDATED TO SUPPORT TAC
   const resolvedPolygonOpacity = Math.max(
@@ -1113,7 +1232,7 @@ const MapWithMultipleCircles = ({
     }
     
     // ✅ 2. Categorical Coloring
-    if (['provider', 'technology', 'band', 'operator'].includes(typeKey)) {
+    if (['provider', 'technology', 'band', 'operator', 'cell_id'].includes(typeKey)) {
         return getLogColor(typeKey, value);
     }
     
@@ -1132,7 +1251,7 @@ const MapWithMultipleCircles = ({
     }
     
     return "#808080";
-  }, [thresholds, thresholdsReady, getMetricColorFromHook]);
+  }, [thresholds, thresholdsReady, getMetricColorFromHook, categoryColorVersion]);
 
 
   // Fetch polygons
@@ -1341,6 +1460,8 @@ const MapWithMultipleCircles = ({
              key = (normalizedBand === "-1" || normalizedBand === "") ? "Unknown" : normalizedBand;
            } else if (legendFilter.key === 'nodebid') {
              key = String(log?.nodebid ?? log?.nodeb_id ?? log?.nodebId ?? "").trim() || "Unknown";
+           } else if (legendFilter.key === 'cell_id') {
+             key = String(log?.cell_id ?? log?.cellId ?? log?.CellId ?? "").trim() || "Unknown";
            } else if (legendFilter.key === 'pci') {
              const pci = Number.parseInt(log.pci ?? log.PCI ?? log.best_pci, 10);
              key = Number.isFinite(pci) ? String(pci) : "Unknown";
@@ -1477,6 +1598,8 @@ const MapWithMultipleCircles = ({
              key = (normalizedBand === "-1" || normalizedBand === "") ? "Unknown" : normalizedBand;
            } else if (legendFilter.key === 'nodebid') {
              key = String(n?.nodebid ?? n?.nodeb_id ?? n?.nodebId ?? "").trim() || "Unknown";
+           } else if (legendFilter.key === 'cell_id') {
+             key = String(n?.cell_id ?? n?.cellId ?? n?.CellId ?? "").trim() || "Unknown";
            } else if (legendFilter.key === 'pci') {
              const pci = Number.parseInt(n.neighbourPci || n.pci, 10);
              key = Number.isFinite(pci) ? String(pci) : "Unknown";
@@ -1516,25 +1639,30 @@ const MapWithMultipleCircles = ({
     if (callback) callback(locationsToRender);
   }, [locationsToRender]);
 
+  const orderedLocationsToRender = useMemo(
+    () => sortStackedLogsForTop(locationsToRender, selectedMetric, overlapDrawOrder),
+    [locationsToRender, selectedMetric, overlapDrawOrder],
+  );
+
   useEffect(() => {
     const callback = onFilteredNeighborsChangeRef.current;
     if (callback) callback(processedNeighbors);
   }, [processedNeighbors]);
 
   const gridCells = useMemo(() => {
-    if (!enableGrid || !gridPolygonData.length || !locationsToRender.length) return [];
+    if (!enableGrid || !gridPolygonData.length || !orderedLocationsToRender.length) return [];
     
     return generateGridCellsOptimized(
       gridPolygonData, 
       gridSizeMeters, 
-      locationsToRender, 
+      orderedLocationsToRender, 
       selectedMetric, 
       resolveColor, 
       gridAggregationMethod,
       spatialIndexRef.current,
       colorBy
     );
-  }, [enableGrid, gridSizeMeters, gridPolygonData, locationsToRender, selectedMetric, gridAggregationMethod, resolveColor, colorBy]);
+  }, [enableGrid, gridSizeMeters, gridPolygonData, orderedLocationsToRender, selectedMetric, gridAggregationMethod, resolveColor, colorBy]);
 
   const visibleGridCells = useMemo(() => {
     if (!legendFilter) return gridCells;
@@ -1694,6 +1822,8 @@ const MapWithMultipleCircles = ({
         } else if (categoryKey === "nodebid") {
           row.nodebid = categoryName || "Unknown";
           row.nodeb_id = row.nodebid;
+        } else if (categoryKey === "cell_id" || metricKey === "cell_id") {
+          row.cell_id = categoryName || String(metricValue ?? "").trim() || "Unknown";
         } else if (categoryKey === "pci" || metricKey === "best_pci") {
           const pci = Number.parseInt(categoryName ?? metricValue, 10);
           if (Number.isFinite(pci)) {
@@ -1716,6 +1846,10 @@ const MapWithMultipleCircles = ({
     if (String(selectedMetric || "").trim().toLowerCase() === "nodebid") {
       const nodeb = String(loc?.nodebid ?? loc?.nodeb_id ?? loc?.nodebId ?? "").trim() || "Unknown";
       return resolveColor(nodeb, "nodebid");
+    }
+    if (String(selectedMetric || "").trim().toLowerCase() === "cell_id") {
+      const cellId = String(loc?.cell_id ?? loc?.cellId ?? loc?.CellId ?? "").trim() || "Unknown";
+      return resolveColor(cellId, "cell_id");
     }
     const value = getMetricValueFromLog(loc, selectedMetric);
     return resolveColor(value, selectedMetric);
@@ -1814,7 +1948,7 @@ const MapWithMultipleCircles = ({
   }, [neighborSquareSize, neighborMinSquareSize]);
 
   const handlePrimaryClick = useCallback((index, loc) => {
-    const overlapLogs = locationsToRender.filter((candidate) =>
+    const overlapLogs = orderedLocationsToRender.filter((candidate) =>
       areLogsStacked(candidate, loc),
     );
     setSelectedLog({
@@ -1825,7 +1959,7 @@ const MapWithMultipleCircles = ({
     setSelectedImageLog(null);
     setSelectedImageLoadFailed(false);
     onMarkerClickRef.current?.(index, loc);
-  }, [locationsToRender]);
+  }, [orderedLocationsToRender]);
 
   const handleNeighborClick = useCallback((neighbor) => {
     setSelectedNeighbor(neighbor);
@@ -1840,19 +1974,19 @@ const MapWithMultipleCircles = ({
     String(drawingShapeMode || "").toLowerCase() === "polyline";
   const showPoints =
     showPointsProp && ((!enableGrid && !areaEnabled) || isMeasurementMode);
-  const showImageIcons = showPointsProp && locationsToRender.length > 0;
+  const showImageIcons = showPointsProp && orderedLocationsToRender.length > 0;
 
   const imageLogs = useMemo(() => {
-    if (!showImageIcons || !locationsToRender?.length) return EMPTY_ARRAY;
+    if (!showImageIcons || !orderedLocationsToRender?.length) return EMPTY_ARRAY;
 
     const step = Math.max(
       1,
-      Math.ceil(locationsToRender.length / MAX_IMAGE_LOG_SCAN_POINTS),
+      Math.ceil(orderedLocationsToRender.length / MAX_IMAGE_LOG_SCAN_POINTS),
     );
     const sampled = [];
 
-    for (let i = 0; i < locationsToRender.length; i += step) {
-      const log = locationsToRender[i];
+    for (let i = 0; i < orderedLocationsToRender.length; i += step) {
+      const log = orderedLocationsToRender[i];
       const rawImagePath = normalizeImagePath(log?.image_path);
       if (!rawImagePath) continue;
       sampled.push({
@@ -1863,10 +1997,10 @@ const MapWithMultipleCircles = ({
     }
 
     return sampled;
-  }, [locationsToRender, showImageIcons]);
+  }, [orderedLocationsToRender, showImageIcons]);
 
   const shouldRenderDeckOverlay =
-    (showPoints && locationsToRender.length > 0) ||
+    (showPoints && orderedLocationsToRender.length > 0) ||
     (showNeighbors && processedNeighbors.length > 0) ||
     (showImageIcons && imageLogs.length > 0);
 
@@ -1988,7 +2122,7 @@ const MapWithMultipleCircles = ({
         {map && shouldRenderDeckOverlay && (
           <DeckGLOverlay
             map={map}
-            locations={showPoints ? locationsToRender : []}
+            locations={showPoints ? orderedLocationsToRender : []}
             imageLogs={imageLogs}
             getColor={getPrimaryColor}
             radius={pointRadius}

@@ -26,6 +26,7 @@ const EMPTY_THRESHOLD_STATE = {
     tac: [],
     dominance: [],
     coverage_violation: [],
+    cell_id: [],
 };
 
 const withTimeout = (promise, timeoutMs = 8000) =>
@@ -124,7 +125,7 @@ function useColorForLog() {
         const lowerMetric = metric?.toLowerCase();
 
         // 1. Handle Categorical Coloring (Provider, Technology, Band)
-        if (['provider', 'technology', 'band', 'nodebid'].includes(lowerMetric)) {
+        if (['provider', 'technology', 'band', 'nodebid', 'cell_id'].includes(lowerMetric)) {
             return getLogColor(lowerMetric, value);
         }
 

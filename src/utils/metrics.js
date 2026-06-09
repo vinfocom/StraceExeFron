@@ -241,6 +241,12 @@ export const METRIC_CONFIG = {
     unit: '',
     fields: ['pci', 'PCI', 'Pci', 'physical_cell_id'],
   },
+  cell_id: {
+    thresholdKey: 'cell_id',
+    label: 'Cell ID',
+    unit: '',
+    fields: ['cell_id', 'cellId', 'CellId', 'CELL_ID'],
+  },
   best_pci: {
     thresholdKey: 'pci',
     label: 'Best PCI',

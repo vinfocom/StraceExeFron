@@ -97,9 +97,30 @@ const DEFAULT_DATA_FILTERS = {
   providers: [],
   bands: [],
   technologies: [],
+  apps: [],
 };
 
 const normalizeValue = (value) => String(value ?? "").trim().toLowerCase();
+
+const splitAppNames = (value) =>
+  String(value ?? "")
+    .split(/[,;|]/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+
+const matchesSelectedApps = (location, selectedApps = []) => {
+  const selected = new Set((selectedApps || []).map(normalizeValue).filter(Boolean));
+  if (selected.size === 0) return true;
+  const rowApps = splitAppNames(
+    location?.apps ??
+      location?.app ??
+      location?.appName ??
+      location?.AppName ??
+      location?.application ??
+      location?.Application,
+  ).map(normalizeValue);
+  return rowApps.some((app) => selected.has(app));
+};
 
 const applyDataFiltersToLocations = (locations = [], filters = DEFAULT_DATA_FILTERS) => {
   if (!Array.isArray(locations) || locations.length === 0) return [];
@@ -107,10 +128,12 @@ const applyDataFiltersToLocations = (locations = [], filters = DEFAULT_DATA_FILT
   const providers = new Set((filters.providers || []).map(normalizeValue).filter(Boolean));
   const bands = new Set((filters.bands || []).map(normalizeValue).filter(Boolean));
   const technologies = new Set((filters.technologies || []).map(normalizeValue).filter(Boolean));
+  const apps = filters.apps || [];
 
   const hasProviderFilter = providers.size > 0;
   const hasBandFilter = bands.size > 0;
   const hasTechFilter = technologies.size > 0;
+  const hasAppFilter = apps.length > 0;
 
   return locations.filter((loc) => {
     if (hasProviderFilter) {
@@ -127,6 +150,8 @@ const applyDataFiltersToLocations = (locations = [], filters = DEFAULT_DATA_FILT
       const technology = normalizeValue(loc.technology || loc.networkType);
       if (!technologies.has(technology)) return false;
     }
+
+    if (hasAppFilter && !matchesSelectedApps(loc, apps)) return false;
 
     return true;
   });

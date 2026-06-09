@@ -16,6 +16,7 @@ import {
   ArrowLeftRight,
   PlusCircle,
   Check,
+  Smartphone,
   TowerControl,
   Trash2,
 } from "lucide-react";
@@ -513,6 +514,7 @@ const UnifiedMapSidebar = ({
         { value: "jitter", label: "Jitter" },
         { value: "latency", label: "Latency" },
         { value: "packet_loss", label: "Packet Loss" },
+        { value: "cell_id", label: "Cell ID" },
         { value: "nodebid", label: "NodeB ID" },
         { value: "tac", label: "TAC/LAC" },
         { value: "dominance", label: "Dominance Analysis" },
@@ -544,6 +546,7 @@ const UnifiedMapSidebar = ({
         { value: "provider", label: "By Provider" },
         { value: "band", label: "By Band" },
         { value: "technology", label: "By Technology" },
+        { value: "cell_id", label: "By Cell ID" },
         { value: "nodebid", label: "By NodeB ID" },
       ];
     },
@@ -562,9 +565,36 @@ const UnifiedMapSidebar = ({
   );
 
   const clearAllDataFilters = useCallback(() => {
-    setDataFilters?.({ providers: [], bands: [], technologies: [], indoorOutdoor: [] });
+    setDataFilters?.((prev) => ({
+      ...prev,
+      providers: [],
+      bands: [],
+      technologies: [],
+      cellIds: [],
+      indoorOutdoor: [],
+      excludedMetricValue: "",
+    }));
     setPciThreshold(0);
   }, [setDataFilters, setPciThreshold]);
+
+  const toggleAppFilter = useCallback(
+    (appName, checked) => {
+      setDataFilters?.((prev) => {
+        const current = Array.isArray(prev?.apps) ? prev.apps : [];
+        const exists = current.includes(appName);
+        const nextApps = checked
+          ? exists
+            ? current
+            : [...current, appName]
+          : current.filter((app) => app !== appName);
+        return {
+          ...prev,
+          apps: nextApps,
+        };
+      });
+    },
+    [setDataFilters],
+  );
 
   const handleSiteToggleChange = useCallback(
     (checked) => {
@@ -602,9 +632,17 @@ const UnifiedMapSidebar = ({
     return (
       (dataFilters.providers?.length > 0 ? 1 : 0) +
       (dataFilters.bands?.length > 0 ? 1 : 0) +
-      (dataFilters.technologies?.length > 0 ? 1 : 0)
+      (dataFilters.technologies?.length > 0 ? 1 : 0) +
+      (dataFilters.cellIds?.length > 0 ? 1 : 0) +
+      (dataFilters.indoorOutdoor?.length > 0 ? 1 : 0) +
+      (String(dataFilters.excludedMetricValue ?? "").trim() ? 1 : 0)
     );
   }, [dataFilters]);
+
+  const activeAppFiltersCount = useMemo(
+    () => (Array.isArray(dataFilters?.apps) ? dataFilters.apps.length : 0),
+    [dataFilters?.apps],
+  );
 
   const updateCoverageFilter = useCallback(
     (metric, field, value) => {
@@ -1492,6 +1530,25 @@ const UnifiedMapSidebar = ({
     return "all";
   }, [dataFilters?.indoorOutdoor]);
 
+  const appFilterOptions = useMemo(() => {
+    if (!Array.isArray(availableFilterOptions?.apps)) return [];
+    return availableFilterOptions.apps
+      .map((app) => String(app || "").trim())
+      .filter(Boolean);
+  }, [availableFilterOptions?.apps]);
+
+  useEffect(() => {
+    const selectedApps = Array.isArray(dataFilters?.apps) ? dataFilters.apps : [];
+    if (selectedApps.length === 0 || appFilterOptions.length === 0) return;
+    const available = new Set(appFilterOptions);
+    const nextApps = selectedApps.filter((app) => available.has(app));
+    if (nextApps.length === selectedApps.length) return;
+    setDataFilters?.((prev) => ({
+      ...prev,
+      apps: nextApps,
+    }));
+  }, [appFilterOptions, dataFilters?.apps, setDataFilters]);
+
   const updateEnvironment = useCallback(
     (value) => {
       setDataFilters?.((prev) => ({
@@ -1846,6 +1903,21 @@ const UnifiedMapSidebar = ({
                   onChange={setShowMetricLabels}
                   useSwitch={true}
                 />
+
+                <SelectRow
+                  label="Overlapping Logs"
+                  value={ui?.overlapDrawOrder || "original"}
+                  onChange={(value) => onUIChange?.({ overlapDrawOrder: value })}
+                  options={[
+                    { value: "original", label: "Original order" },
+                    { value: "latest", label: "Latest on top" },
+                    { value: "earliest", label: "Earliest on top" },
+                    { value: "highest_metric", label: "Highest KPI on top" },
+                    { value: "lowest_metric", label: "Lowest KPI on top" },
+                  ]}
+                  placeholder="Choose top log"
+                  disabled={!enableDataToggle}
+                />
           </CollapsibleSection>
               )}
 
@@ -2022,6 +2094,42 @@ const UnifiedMapSidebar = ({
                       disabled={!enableDataToggle}
                     />
 
+                    <SelectRow
+                      label="Cell ID"
+                      value={dataFilters?.cellIds?.[0] || "all"}
+                      onChange={(v) => updateDataFilter("cellIds", v)}
+                      options={[
+                        { value: "all", label: "All Cell IDs" },
+                        ...(availableFilterOptions?.cellIds?.map((cellId) => ({
+                          value: cellId,
+                          label: cellId,
+                        })) || []),
+                      ]}
+                      disabled={!enableDataToggle}
+                    />
+
+                    <div className="space-y-1.5">
+                      <Label className="text-sm font-semibold text-white">
+                        Remove KPI Value
+                      </Label>
+                      <Input
+                        type="number"
+                        value={dataFilters?.excludedMetricValue ?? ""}
+                        onChange={(e) =>
+                          setDataFilters?.((prev) => ({
+                            ...prev,
+                            excludedMetricValue: e.target.value,
+                          }))
+                        }
+                        disabled={!enableDataToggle}
+                        placeholder="e.g. -56"
+                        className="h-8 bg-slate-800 border-slate-600 text-xs text-white placeholder:text-slate-500"
+                      />
+                      <div className="text-[10px] text-slate-500">
+                        Removes logs where selected KPI equals this value
+                      </div>
+                    </div>
+
                   </div>
                 </div>
                 
@@ -2057,6 +2165,68 @@ const UnifiedMapSidebar = ({
               </p>
             )}
           </CollapsibleSection>
+          )}
+          {activeSidebarTab === "raster" && (
+            <CollapsibleSection
+              title="App"
+              icon={Smartphone}
+              defaultOpen={false}
+              badge={activeAppFiltersCount > 0 ? activeAppFiltersCount : null}
+            >
+              <div className="space-y-2">
+                <div className="flex items-center justify-between gap-2">
+                  <Label className="text-xs text-slate-400">
+                    All Available Apps
+                  </Label>
+                  {activeAppFiltersCount > 0 && (
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setDataFilters?.((prev) => ({
+                          ...prev,
+                          apps: [],
+                        }))
+                      }
+                      className="text-[10px] text-blue-400 hover:underline"
+                    >
+                      Clear
+                    </button>
+                  )}
+                </div>
+                {appFilterOptions.length > 0 ? (
+                  <div className="max-h-56 space-y-1 overflow-y-auto pr-1">
+                    {appFilterOptions.map((appName) => {
+                      const checked = Boolean(dataFilters?.apps?.includes(appName));
+                      return (
+                        <label
+                          key={appName}
+                          className={`flex items-center gap-2 rounded px-1.5 py-1 text-xs text-slate-200 ${
+                            enableDataToggle
+                              ? "cursor-pointer hover:bg-slate-800/70"
+                              : "opacity-50"
+                          }`}
+                        >
+                          <Checkbox
+                            checked={checked}
+                            disabled={!enableDataToggle}
+                            onChange={(nextChecked) =>
+                              toggleAppFilter(appName, nextChecked)
+                            }
+                          />
+                          <span className="min-w-0 flex-1 truncate" title={appName}>
+                            {appName}
+                          </span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <div className="text-[11px] text-slate-500">
+                    No app names found in loaded logs.
+                  </div>
+                )}
+              </div>
+            </CollapsibleSection>
           )}
           {activeSidebarTab === "filter" && (
           <CollapsibleSection

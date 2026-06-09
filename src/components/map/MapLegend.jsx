@@ -1,6 +1,7 @@
 // src/components/map/MapLegend.jsx
-import React, { useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { ChevronDown, Layers, Settings2, X } from "lucide-react";
+import { Rnd } from "react-rnd";
 import {
   PCI_COLOR_PALETTE,
   getPciColor as getMetricPciColor,
@@ -14,7 +15,79 @@ import {
   COLOR_SCHEMES,
   generateColorFromHash,
   getLogColor,
+  registerColor,
 } from "@/utils/colorUtils";
+
+const MAP_COLOR_PRESETS = [
+  "#facc15",
+  "#f59e0b",
+  "#ef4444",
+  "#22c55e",
+  "#3b82f6",
+  "#8b5cf6",
+  "#ec4899",
+  "#06b6d4",
+  "#14b8a6",
+  "#64748b",
+  "#111827",
+  "#ffffff",
+];
+
+const DEFAULT_LEGEND_SIZE = {
+  width: 280,
+  height: 320,
+};
+
+const LEGEND_VIEWPORT_MARGIN = 16;
+const DEFAULT_LEGEND_TOP = 140;
+const COLLAPSED_LEGEND_HEIGHT = 44;
+
+const getViewportSize = () => ({
+  width: typeof window === "undefined" ? 1024 : window.innerWidth,
+  height: typeof window === "undefined" ? 768 : window.innerHeight,
+});
+
+const getInitialLegendPosition = () => {
+  const viewport = getViewportSize();
+  return {
+    x: Math.max(
+      LEGEND_VIEWPORT_MARGIN,
+      viewport.width - DEFAULT_LEGEND_SIZE.width - LEGEND_VIEWPORT_MARGIN,
+    ),
+    y: Math.min(
+      Math.max(LEGEND_VIEWPORT_MARGIN, DEFAULT_LEGEND_TOP),
+      Math.max(
+        LEGEND_VIEWPORT_MARGIN,
+        viewport.height - DEFAULT_LEGEND_SIZE.height - LEGEND_VIEWPORT_MARGIN,
+      ),
+    ),
+  };
+};
+
+const clampLegendPosition = (position, size) => {
+  const viewport = getViewportSize();
+  const width = Number(size?.width) || DEFAULT_LEGEND_SIZE.width;
+  const height = Number(size?.height) || COLLAPSED_LEGEND_HEIGHT;
+  const maxX = Math.max(
+    LEGEND_VIEWPORT_MARGIN,
+    viewport.width - width - LEGEND_VIEWPORT_MARGIN,
+  );
+  const maxY = Math.max(
+    LEGEND_VIEWPORT_MARGIN,
+    viewport.height - height - LEGEND_VIEWPORT_MARGIN,
+  );
+
+  return {
+    x: Math.min(
+      Math.max(Number(position?.x) || LEGEND_VIEWPORT_MARGIN, LEGEND_VIEWPORT_MARGIN),
+      maxX,
+    ),
+    y: Math.min(
+      Math.max(Number(position?.y) || LEGEND_VIEWPORT_MARGIN, LEGEND_VIEWPORT_MARGIN),
+      maxY,
+    ),
+  };
+};
 
 const matchesMetricRange = (value, min, max, includeMax = false) => {
   if (!Number.isFinite(value)) return false;
@@ -88,6 +161,11 @@ const getNormalizedKey = (log, colorBy, scheme) => {
       const nodeb = String(raw ?? "").trim();
       return nodeb || "Unknown";
     }
+    case "cell_id": {
+      const raw = log.cell_id ?? log.cellId ?? log.CellId ?? log.CELL_ID;
+      const cellId = String(raw ?? "").trim();
+      return cellId || "Unknown";
+    }
     default:
       return "Unknown";
   }
@@ -95,6 +173,9 @@ const getNormalizedKey = (log, colorBy, scheme) => {
 
 const ColorSchemeLegend = ({ colorBy, logs, activeFilter, onFilterChange }) => {
   const scheme = COLOR_SCHEMES[colorBy] || {};
+  const [openColorKey, setOpenColorKey] = useState(null);
+  const [customColorValue, setCustomColorValue] = useState("");
+  const [colorOverrides, setColorOverrides] = useState({});
 
   const { counts, total, usedEntries } = useMemo(() => {
     const tempCounts = {};
@@ -109,13 +190,14 @@ const ColorSchemeLegend = ({ colorBy, logs, activeFilter, onFilterChange }) => {
       .sort((a, b) => b[1] - a[1])
       .map(([key]) => [
         key,
-        colorBy === "pci"
+        colorOverrides[key] ||
+        (colorBy === "pci"
           ? getMetricPciColor(key)
-          : scheme[key] || getLogColor(colorBy, key),
+          : scheme[key] || getLogColor(colorBy, key)),
       ]);
 
     return { counts: tempCounts, total: logs?.length || 0, usedEntries: used };
-  }, [logs, colorBy, scheme]);
+  }, [logs, colorBy, scheme, colorOverrides]);
 
   
   const handleRowClick = (key) => {
@@ -124,6 +206,25 @@ const ColorSchemeLegend = ({ colorBy, logs, activeFilter, onFilterChange }) => {
     } else {
       onFilterChange({ type: "category", value: key, key: colorBy });
     }
+  };
+
+  const handleColorChange = (key, color) => {
+    if (!/^#[0-9a-f]{6}$/i.test(color)) return;
+    registerColor(colorBy, key, color);
+    setColorOverrides((prev) => ({ ...prev, [key]: color }));
+    if (typeof window !== "undefined") {
+      window.dispatchEvent(
+        new CustomEvent("stracer:map-category-color-change", {
+          detail: { colorBy, value: key, color },
+        }),
+      );
+    }
+  };
+
+  const toggleColorPalette = (event, key, color) => {
+    event.stopPropagation();
+    setOpenColorKey((current) => (current === key ? null : key));
+    setCustomColorValue(color || "");
   };
 
   if (!usedEntries.length) {
@@ -136,23 +237,60 @@ const ColorSchemeLegend = ({ colorBy, logs, activeFilter, onFilterChange }) => {
 
   return (
     <div className="flex flex-col h-full">
-      <div className="flex-1 overflow-y-auto max-h-[200px] space-y-0.5 pr-1 custom-scrollbar">
+      <div className="flex-1 min-h-0 overflow-y-auto space-y-0.5 pr-1 custom-scrollbar">
         {usedEntries.map(([key, color]) => {
           const isActive =
             activeFilter?.type === "category" && activeFilter?.value === key;
           const isDimmed = activeFilter && !isActive;
+          const isPaletteOpen = openColorKey === key;
 
           return (
-            <LegendRow
-              key={key}
-              color={color}
-              label={key}
-              count={counts[key]}
-              total={total}
-              onClick={() => handleRowClick(key)}
-              isActive={isActive}
-              isDimmed={isDimmed}
-            />
+            <div key={key} className="space-y-1">
+              <LegendRow
+                color={color}
+                label={key}
+                count={counts[key]}
+                total={total}
+                onClick={() => handleRowClick(key)}
+                isActive={isActive}
+                isDimmed={isDimmed}
+                onColorClick={(event) => toggleColorPalette(event, key, color)}
+              />
+              {isPaletteOpen && (
+                <div
+                  className="rounded-md border border-gray-700 bg-gray-950/95 p-2"
+                  onClick={(event) => event.stopPropagation()}
+                >
+                  <div className="grid grid-cols-6 gap-1.5">
+                    {MAP_COLOR_PRESETS.map((preset) => (
+                      <button
+                        key={preset}
+                        type="button"
+                        aria-label={`Use ${preset}`}
+                        className={`h-5 w-5 rounded border ${
+                          preset.toLowerCase() === color.toLowerCase()
+                            ? "border-white"
+                            : "border-gray-700"
+                        }`}
+                        style={{ backgroundColor: preset }}
+                        onClick={() => handleColorChange(key, preset)}
+                      />
+                    ))}
+                  </div>
+                  <input
+                    type="text"
+                    value={customColorValue}
+                    placeholder="#facc15"
+                    className="mt-2 h-7 w-full rounded border border-gray-700 bg-gray-900 px-2 text-[11px] text-gray-100 outline-none focus:border-blue-400"
+                    onChange={(event) => {
+                      const value = event.target.value;
+                      setCustomColorValue(value);
+                      handleColorChange(key, value);
+                    }}
+                  />
+                </div>
+              )}
+            </div>
           );
         })}
       </div>
@@ -203,7 +341,7 @@ const TacLegend = ({ logs, activeFilter, onFilterChange }) => {
 
     return (
       <div className="flex flex-col h-full">
-        <div className="flex-1 overflow-y-auto max-h-[200px] space-y-0.5 pr-1 custom-scrollbar">
+        <div className="flex-1 min-h-0 overflow-y-auto space-y-0.5 pr-1 custom-scrollbar">
           {stats.sorted.map(({ label, count, color }) => {
             const isActive =
               activeFilter?.type === "tac" && activeFilter?.value === label;
@@ -278,7 +416,7 @@ const PciLegend = ({ logs, activeFilter, onFilterChange }) => {
 
   return (
     <div className="flex flex-col h-full">
-      <div className="flex-1 overflow-y-auto max-h-[200px] space-y-0.5 pr-1 custom-scrollbar">
+      <div className="flex-1 min-h-0 overflow-y-auto space-y-0.5 pr-1 custom-scrollbar">
         {pciStats.allPcis.map(([pci, count]) => {
           const isActive =
             activeFilter?.type === "pci" && activeFilter?.value === pci;
@@ -413,7 +551,7 @@ const MetricThresholdLegend = ({
 
   return (
     <div className="flex flex-col h-full">
-      <div className="flex-1 overflow-y-auto max-h-[200px] space-y-0.5 pr-1 custom-scrollbar">
+      <div className="flex-1 min-h-0 overflow-y-auto space-y-0.5 pr-1 custom-scrollbar">
         {usedThresholds.map((t) => {
           const id = `metric-${t.min}-${t.max}`;
           const isActive = activeFilter?.id === id;
@@ -463,6 +601,7 @@ const LegendRow = ({
   onClick,
   isActive,
   isDimmed,
+  onColorClick,
 }) => {
   const safeTotal = Number(total);
   const safeCount = Number(count) || 0;
@@ -479,10 +618,28 @@ const LegendRow = ({
         ${isDimmed ? "opacity-30 hover:opacity-50" : "opacity-100"}
       `}
     >
-      <div
-        className="w-2.5 h-2.5 rounded-full flex-shrink-0"
-        style={{ backgroundColor: color }}
-      />
+      {onColorClick ? (
+        <button
+          type="button"
+          aria-label={`Change ${label} color`}
+          title={`Change ${label} color`}
+          className="flex h-5 w-5 flex-shrink-0 items-center justify-center rounded hover:bg-white/10"
+          onClick={(event) => {
+            event.stopPropagation();
+            onColorClick(event);
+          }}
+        >
+          <span
+            className="h-2.5 w-2.5 rounded-full"
+            style={{ backgroundColor: color }}
+          />
+        </button>
+      ) : (
+        <span
+          className="h-2.5 w-2.5 rounded-full flex-shrink-0"
+          style={{ backgroundColor: color }}
+        />
+      )}
       <span className="text-[11px] text-white flex-1 truncate">{label}</span>
       <span className="text-sm tabular-nums text-white min-w-[96px] text-right">
         {safeCount.toLocaleString()}
@@ -536,6 +693,33 @@ export default function MapLegend({
   className, // Added className prop
 }) {
   const [collapsed, setCollapsed] = useState(false);
+  const [legendSize, setLegendSize] = useState(DEFAULT_LEGEND_SIZE);
+  const [legendPosition, setLegendPosition] = useState(getInitialLegendPosition);
+  const visibleLegendSize = useMemo(
+    () => ({
+      width: legendSize.width,
+      height: collapsed ? COLLAPSED_LEGEND_HEIGHT : legendSize.height,
+    }),
+    [collapsed, legendSize],
+  );
+
+  const clampCurrentPosition = useCallback(
+    () =>
+      setLegendPosition((position) =>
+        clampLegendPosition(position, visibleLegendSize),
+      ),
+    [visibleLegendSize],
+  );
+
+  useEffect(() => {
+    clampCurrentPosition();
+  }, [clampCurrentPosition]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return undefined;
+    window.addEventListener("resize", clampCurrentPosition);
+    return () => window.removeEventListener("resize", clampCurrentPosition);
+  }, [clampCurrentPosition]);
 
   // Clear filter button if active
   const clearFilter = (e) => {
@@ -594,6 +778,20 @@ export default function MapLegend({
       };
     }
 
+    if (selectedMetric?.toLowerCase() === "cell_id") {
+      return {
+        content: (
+          <ColorSchemeLegend
+            colorBy="cell_id"
+            logs={logs}
+            activeFilter={activeFilter}
+            onFilterChange={onFilterChange}
+          />
+        ),
+        title: "Cell ID",
+      };
+    }
+
     const config = getMetricConfig(selectedMetric);
     return {
       content: (
@@ -620,56 +818,101 @@ export default function MapLegend({
         .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.25); }
       `}</style>
 
-      {/* Used the className prop or default to absolute if not provided */}
-      <div className={className || "absolute top-35 right-4 z-10"}>
-        <div
-          className={`bg-gray-900/95 backdrop-blur-lg border border-gray-700/40 rounded-lg shadow-xl shadow-black/20 transition-all duration-200 ${
-            collapsed ? "w-auto" : "min-w-[240px] max-w-[280px]"
-          }`}
+      {/* Full-window layer keeps the draggable legend recoverable inside the viewport. */}
+      <div className={className || "fixed inset-0 z-10 pointer-events-none"}>
+        <Rnd
+          position={legendPosition}
+          size={
+            collapsed
+              ? { width: legendSize.width, height: "auto" }
+              : legendSize
+          }
+          minWidth={240}
+          minHeight={160}
+          bounds="parent"
+          dragHandleClassName="map-legend-drag-handle"
+          enableResizing={!collapsed}
+          onDragStop={(event, data) => {
+            setLegendPosition(
+              clampLegendPosition({ x: data.x, y: data.y }, visibleLegendSize),
+            );
+          }}
+          onResize={(event, direction, ref, delta, position) => {
+            const nextSize = {
+              width: ref.offsetWidth,
+              height: ref.offsetHeight,
+            };
+            setLegendSize(nextSize);
+            setLegendPosition(clampLegendPosition(position, nextSize));
+          }}
+          onResizeStop={(event, direction, ref, delta, position) => {
+            const nextSize = {
+              width: ref.offsetWidth,
+              height: ref.offsetHeight,
+            };
+            setLegendSize(nextSize);
+            setLegendPosition(clampLegendPosition(position, nextSize));
+          }}
+          className="pointer-events-auto"
+          resizeHandleStyles={{
+            bottomRight: {
+              bottom: "3px",
+              right: "3px",
+              width: "12px",
+              height: "12px",
+              cursor: "nwse-resize",
+            },
+          }}
         >
-          <button
-            onClick={() => setCollapsed(!collapsed)}
-            className="w-full px-3 py-2.5 flex items-center justify-between gap-3 hover:bg-white/5 rounded-lg transition-colors group"
+          <div
+            className={`flex h-full min-h-0 flex-col bg-gray-900/95 backdrop-blur-lg border border-gray-700/40 rounded-lg shadow-xl shadow-black/20 transition-all duration-200 ${
+              collapsed ? "" : "min-w-[240px]"
+            }`}
           >
-            <div className="flex items-center gap-2">
-              <Layers className="w-4 h-4 text-gray-400" />
-              <span className="text-sm font-medium text-gray-100">{title}</span>
-              {activeFilter && (
-                <span className="flex h-2 w-2 rounded-full bg-blue-500 animate-pulse ml-1" />
-              )}
-            </div>
-
-            <div className="flex items-center gap-1">
-              <div
-                onClick={openSettings}
-                className="p-1 hover:bg-white/10 rounded text-gray-400 hover:text-white"
-                title="Settings"
-              >
-                <Settings2 className="w-3.5 h-3.5" />
+            <button
+              onClick={() => setCollapsed(!collapsed)}
+              className="map-legend-drag-handle w-full px-3 py-2.5 flex items-center justify-between gap-3 hover:bg-white/5 rounded-lg transition-colors group cursor-move select-none"
+            >
+              <div className="flex items-center gap-2">
+                <Layers className="w-4 h-4 text-gray-400" />
+                <span className="text-sm font-medium text-gray-100">{title}</span>
+                {activeFilter && (
+                  <span className="flex h-2 w-2 rounded-full bg-blue-500 animate-pulse ml-1" />
+                )}
               </div>
-              {activeFilter && (
-                <div
-                  onClick={clearFilter}
-                  className="p-1 hover:bg-white/10 rounded text-gray-400 hover:text-white mr-1"
-                  title="Clear filter"
-                >
-                  <X className="w-3.5 h-3.5" />
-                </div>
-              )}
-              <ChevronDown
-                className={`w-4 h-4 text-gray-500 transition-transform duration-200 ${
-                  collapsed ? "" : "rotate-180"
-                }`}
-              />
-            </div>
-          </button>
 
-          {!collapsed && (
-            <div className="px-2 pb-2">
-              <div className="pt-1 border-t border-gray-700/40">{content}</div>
-            </div>
-          )}
-        </div>
+              <div className="flex items-center gap-1">
+                <div
+                  onClick={openSettings}
+                  className="p-1 hover:bg-white/10 rounded text-gray-400 hover:text-white"
+                  title="Settings"
+                >
+                  <Settings2 className="w-3.5 h-3.5" />
+                </div>
+                {activeFilter && (
+                  <div
+                    onClick={clearFilter}
+                    className="p-1 hover:bg-white/10 rounded text-gray-400 hover:text-white mr-1"
+                    title="Clear filter"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </div>
+                )}
+                <ChevronDown
+                  className={`w-4 h-4 text-gray-500 transition-transform duration-200 ${
+                    collapsed ? "" : "rotate-180"
+                  }`}
+                />
+              </div>
+            </button>
+
+            {!collapsed && (
+              <div className="min-h-0 flex-1 px-2 pb-2">
+                <div className="flex h-full min-h-0 flex-col pt-1 border-t border-gray-700/40">{content}</div>
+              </div>
+            )}
+          </div>
+        </Rnd>
       </div>
     </>
   );

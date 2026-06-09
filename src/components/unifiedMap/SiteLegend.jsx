@@ -18,6 +18,24 @@ const normalizeDeltaVariant = (value) => {
   return variant;
 };
 
+const getColorOverrideKey = (mode, value) =>
+  `${String(mode || "").trim().toLowerCase()}:${String(value ?? "").trim().toLowerCase()}`;
+
+const SITE_COLOR_PRESETS = [
+  "#facc15",
+  "#f59e0b",
+  "#ef4444",
+  "#22c55e",
+  "#3b82f6",
+  "#8b5cf6",
+  "#ec4899",
+  "#06b6d4",
+  "#14b8a6",
+  "#64748b",
+  "#111827",
+  "#ffffff",
+];
+
 const readSiteId = (row = {}) =>
   String(
     row.site_id ??
@@ -59,10 +77,14 @@ export default function SiteLegend({
   sitePredictionVersion = "original",
   activeFilter = null,
   onFilterChange = null,
+  colorOverrides = {},
+  onColorChange = null,
 }) {
   const [collapsed, setCollapsed] = useState(false);
+  const [openColorKey, setOpenColorKey] = useState(null);
+  const [customColorValue, setCustomColorValue] = useState("");
 
-  const uniqueSectorRows = useMemo(() => {
+  const legendRows = useMemo(() => {
     if (!Array.isArray(sites) || sites.length === 0) return [];
 
     const seen = new Set();
@@ -88,11 +110,11 @@ export default function SiteLegend({
   }, [sites]);
 
   const legendItems = useMemo(() => {
-    if (!uniqueSectorRows.length) return [];
+    if (!legendRows.length) return [];
 
     const isDeltaMode =
       String(sitePredictionVersion || "").trim().toLowerCase() === "delta" ||
-      uniqueSectorRows.some((site) => {
+      legendRows.some((site) => {
         const variant = normalizeDeltaVariant(site?.deltaVariant ?? site?.delta_variant ?? "");
         return variant === "baseline" || variant === "optimized" || variant === "optimised";
       });
@@ -100,7 +122,7 @@ export default function SiteLegend({
     if (isDeltaMode) {
       let baselineCount = 0;
       let optimizedCount = 0;
-      uniqueSectorRows.forEach((site) => {
+      legendRows.forEach((site) => {
         const variant = normalizeDeltaVariant(site?.deltaVariant ?? site?.delta_variant ?? "");
         if (variant === "baseline") baselineCount += 1;
         if (variant === "optimized") optimizedCount += 1;
@@ -113,13 +135,16 @@ export default function SiteLegend({
       if (optimizedCount > 0) {
         items.push({ label: "Optimized", value: "optimized", mode: "delta", color: "#16a34a", count: optimizedCount });
       }
-      return items;
+      return items.map((item) => ({
+        ...item,
+        color: colorOverrides[getColorOverrideKey(item.mode, item.value)] || item.color,
+      }));
     }
 
     const itemMap = new Map();
     const mode = colorMode.toLowerCase();
 
-    uniqueSectorRows.forEach(site => {
+    legendRows.forEach(site => {
       let rawName = "Unknown";
       let normalized = "Unknown";
       let color = "#9ca3af";
@@ -144,11 +169,12 @@ export default function SiteLegend({
       }
       
       if (!itemMap.has(normalized)) {
+        const itemMode = mode === "operator" ? "operator" : mode;
         itemMap.set(normalized, {
           label: mode === "band" ? formatBandLegendLabel(rawName) : normalized,
           value: normalized,
-          mode,
-          color: color,
+          mode: itemMode,
+          color: colorOverrides[getColorOverrideKey(itemMode, normalized)] || color,
           count: 1
         });
       } else {
@@ -170,7 +196,7 @@ export default function SiteLegend({
        }
        return a.label.localeCompare(b.label);
     });
-  }, [uniqueSectorRows, colorMode, sitePredictionVersion]);
+  }, [legendRows, colorMode, sitePredictionVersion, colorOverrides]);
 
   const handleItemClick = (item) => {
     if (typeof onFilterChange !== "function") return;
@@ -183,6 +209,18 @@ export default function SiteLegend({
       String(activeFilter?.mode || "").toLowerCase() === String(nextFilter.mode || "").toLowerCase() &&
       String(activeFilter?.value || "").toLowerCase() === String(nextFilter.value || "").toLowerCase();
     onFilterChange(isActive ? null : nextFilter);
+  };
+
+  const handleColorInputChange = (item, color) => {
+    if (typeof onColorChange !== "function") return;
+    onColorChange(item, color);
+  };
+
+  const toggleColorPalette = (event, item) => {
+    event.stopPropagation();
+    const key = getColorOverrideKey(item.mode, item.value ?? item.label);
+    setOpenColorKey((current) => (current === key ? null : key));
+    setCustomColorValue(item.color || "");
   };
 
   if (!enabled) return null;
@@ -214,32 +252,88 @@ export default function SiteLegend({
         {!collapsed && (
           <div className="px-3 pb-3 pt-1 space-y-2 max-h-[250px] overflow-y-auto custom-scrollbar">
             {legendItems.length > 0 ? (
-              legendItems.map((item) => (
-                <button
-                  key={item.label}
-                  type="button"
-                  onClick={() => handleItemClick(item)}
-                  className={`w-full flex items-center justify-between gap-2.5 rounded px-1.5 py-1 text-left transition-colors ${
-                    String(activeFilter?.mode || "").toLowerCase() === String(item.mode || "").toLowerCase() &&
-                    String(activeFilter?.value || "").toLowerCase() === String(item.value ?? item.label).toLowerCase()
-                      ? "bg-blue-500/20 ring-1 ring-blue-400/40"
-                      : "hover:bg-white/5"
-                  }`}
-                >
-                  <div className="flex items-center gap-2.5">
-                    <div className="flex items-center justify-center w-4">
-                      <div
-                        className="w-0 h-0 border-l-[6px] border-r-[6px] border-b-[10px] border-l-transparent border-r-transparent"
-                        style={{ borderBottomColor: item.color }}
-                      />
+              legendItems.map((item) => {
+                const colorKey = getColorOverrideKey(item.mode, item.value ?? item.label);
+                const isPaletteOpen = openColorKey === colorKey;
+
+                return (
+                  <div key={item.label} className="space-y-1">
+                    <div
+                      role="button"
+                      tabIndex={0}
+                      onClick={() => handleItemClick(item)}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter" || event.key === " ") {
+                          event.preventDefault();
+                          handleItemClick(item);
+                        }
+                      }}
+                      className={`w-full flex items-center justify-between gap-2.5 rounded px-1.5 py-1 text-left transition-colors ${
+                        String(activeFilter?.mode || "").toLowerCase() === String(item.mode || "").toLowerCase() &&
+                        String(activeFilter?.value || "").toLowerCase() === String(item.value ?? item.label).toLowerCase()
+                          ? "bg-blue-500/20 ring-1 ring-blue-400/40"
+                          : "hover:bg-white/5"
+                      }`}
+                    >
+                      <div className="flex items-center gap-2.5">
+                        <button
+                          type="button"
+                          aria-label={`Change ${item.label} color`}
+                          title={`Change ${item.label} color`}
+                          className="flex h-5 w-5 items-center justify-center rounded hover:bg-white/10"
+                          onClick={(event) => toggleColorPalette(event, item)}
+                        >
+                          <div
+                            className="w-0 h-0 border-l-[6px] border-r-[6px] border-b-[10px] border-l-transparent border-r-transparent"
+                            style={{ borderBottomColor: item.color }}
+                          />
+                        </button>
+                        <span className="text-xs text-gray-300 font-medium">{item.label}</span>
+                      </div>
+                      <span className="text-[10px] text-gray-600 bg-gray-800 px-1.5 py-0.5 rounded-full">
+                        {item.count}
+                      </span>
                     </div>
-                    <span className="text-xs text-gray-300 font-medium">{item.label}</span>
+
+                    {isPaletteOpen && (
+                      <div
+                        className="rounded-md border border-gray-700 bg-gray-950/95 p-2"
+                        onClick={(event) => event.stopPropagation()}
+                      >
+                        <div className="grid grid-cols-6 gap-1.5">
+                          {SITE_COLOR_PRESETS.map((color) => (
+                            <button
+                              key={color}
+                              type="button"
+                              aria-label={`Use ${color}`}
+                              className={`h-5 w-5 rounded border ${
+                                color.toLowerCase() === item.color.toLowerCase()
+                                  ? "border-white"
+                                  : "border-gray-700"
+                              }`}
+                              style={{ backgroundColor: color }}
+                              onClick={() => handleColorInputChange(item, color)}
+                            />
+                          ))}
+                        </div>
+                        <input
+                          type="text"
+                          value={customColorValue}
+                          placeholder="#facc15"
+                          className="mt-2 h-7 w-full rounded border border-gray-700 bg-gray-900 px-2 text-[11px] text-gray-100 outline-none focus:border-blue-400"
+                          onChange={(event) => {
+                            const value = event.target.value;
+                            setCustomColorValue(value);
+                            if (/^#[0-9a-f]{6}$/i.test(value)) {
+                              handleColorInputChange(item, value);
+                            }
+                          }}
+                        />
+                      </div>
+                    )}
                   </div>
-                  <span className="text-[10px] text-gray-600 bg-gray-800 px-1.5 py-0.5 rounded-full">
-                    {item.count}
-                  </span>
-                </button>
-              ))
+                );
+              })
             ) : (
               <div className="py-2 text-[10px] text-gray-500 italic text-center">
                 {isLoading ? "Fetching site data..." : "No sites in view"}

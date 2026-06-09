@@ -47,6 +47,7 @@ const dynamicColorCache = {
   technology: {},
   band: {},
   nodebid: {},
+  cell_id: {},
   pci: {},
 };
 
@@ -291,6 +292,9 @@ export const COLOR_SCHEMES = {
   nodebid: {
     Unknown: "#a8a6a2",
   },
+  cell_id: {
+    Unknown: "#a8a6a2",
+  },
   pci: {
     Unknown: "#a8a6a2",
   },
@@ -368,6 +372,7 @@ export const clearDynamicColorCache = () => {
   dynamicColorCache.technology = {};
   dynamicColorCache.band = {};
   dynamicColorCache.nodebid = {};
+  dynamicColorCache.cell_id = {};
   dynamicColorCache.pci = {};
 };
 

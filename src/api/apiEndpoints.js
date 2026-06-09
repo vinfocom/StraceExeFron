@@ -67,6 +67,27 @@ const downloadUrlAsBlob = async (url, filename, headers = {}) => {
   return { success: true };
 };
 
+const TEMPLATE_DOWNLOAD_FILENAMES = {
+  1: "Session_Template.zip",
+  2: "Template_NetworkLog.csv",
+  3: "Site_Prediction_Data.csv",
+  4: "python-runtime-v4-win-x64.zip",
+};
+
+const downloadTemplateFromCsharpApi = async (fileType) => {
+  const normalizedFileType = Number(fileType);
+  const filename =
+    TEMPLATE_DOWNLOAD_FILENAMES[normalizedFileType] || "template_download";
+  const blob = await api.get("/ExcelUpload/DownloadExcel", {
+    params: { fileType: normalizedFileType },
+    responseType: "blob",
+    headers: getPublicApiHeaders(),
+    dedupe: false,
+  });
+  triggerBrowserDownload(blob instanceof Blob ? blob : new Blob([blob ?? ""]), filename);
+  return { success: true };
+};
+
 const postWithRouteFallback = async (paths, payload, config = {}) => {
   let lastError = null;
   for (const path of paths) {
@@ -1779,11 +1800,7 @@ export const excelApi = {
     }
   },
 
-  downloadTemplate: (fileType) => {
-    const url = `https://s-traccceer.vinfocom.co.in/ExcelUpload/DownloadExcel?fileType=${fileType}`;
-    const filename = fileType === 3 ? "project_template.xlsx" : "upload_template.xlsx";
-    return downloadUrlAsBlob(url, filename, getPublicApiHeaders());
-  },
+  downloadTemplate: (fileType) => downloadTemplateFromCsharpApi(fileType),
 
   getUploadedFiles: async (type) => {
     try {
