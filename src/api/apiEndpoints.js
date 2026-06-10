@@ -42,6 +42,17 @@ const getPublicApiHeaders = () => {
   return key ? { "X-Public-Api-Key": key } : {};
 };
 
+const LTE_RECOMMENDATION_OPTIMIZED_DEFAULTS = Object.freeze({
+  region: "india",
+  radius: 500,
+  grid_resolution: 25,
+  n_workers: 3,
+  impact_radius_m: 500,
+  neighbor_site_count: 2,
+  max_neighbors_per_update_cell: 2,
+  max_interference_sites: 10,
+});
+
 const triggerBrowserDownload = (blob, filename) => {
   const blobUrl = window.URL.createObjectURL(blob);
   const link = document.createElement("a");
@@ -657,6 +668,83 @@ export const predictionApi = {
     }
   },
 
+  runLteRecommendationOptimisedPrediction: async (params) => {
+    try {
+      if (!params.project_id) throw new Error("project_id is required");
+
+      const operatorValue = String(params.operator ?? "Airtel").trim();
+      const radius = Number(
+        params.radius ??
+        params.radius_m ??
+        LTE_RECOMMENDATION_OPTIMIZED_DEFAULTS.radius,
+      );
+      const gridResolution = Number(
+        params.grid_resolution ??
+        params.grid_resolution_m ??
+        LTE_RECOMMENDATION_OPTIMIZED_DEFAULTS.grid_resolution,
+      );
+      if (!Number.isFinite(radius) || radius <= 0) {
+        throw new Error("radius must be a positive number");
+      }
+      if (!Number.isFinite(gridResolution) || gridResolution <= 0) {
+        throw new Error("grid_resolution must be a positive number");
+      }
+
+      const payload = {
+        project_id: params.project_id,
+        region: params.region || LTE_RECOMMENDATION_OPTIMIZED_DEFAULTS.region,
+        radius,
+        grid_resolution: gridResolution,
+        n_workers: params.n_workers ?? LTE_RECOMMENDATION_OPTIMIZED_DEFAULTS.n_workers,
+        impact_radius_m:
+          params.impact_radius_m ??
+          params.radius ??
+          params.radius_m ??
+          LTE_RECOMMENDATION_OPTIMIZED_DEFAULTS.impact_radius_m,
+        neighbor_site_count:
+          params.neighbor_site_count ??
+          LTE_RECOMMENDATION_OPTIMIZED_DEFAULTS.neighbor_site_count,
+        max_neighbors_per_update_cell:
+          params.max_neighbors_per_update_cell ??
+          LTE_RECOMMENDATION_OPTIMIZED_DEFAULTS.max_neighbors_per_update_cell,
+        max_interference_sites:
+          params.max_interference_sites ??
+          LTE_RECOMMENDATION_OPTIMIZED_DEFAULTS.max_interference_sites,
+      };
+
+      if (operatorValue && operatorValue.toLowerCase() !== "all") {
+        payload.operator = operatorValue;
+      }
+
+      const recommendationScenarioId = Number(params.recommendation_scenario_id);
+      if (Number.isFinite(recommendationScenarioId) && recommendationScenarioId > 0) {
+        payload.recommendation_scenario_id = recommendationScenarioId;
+      }
+
+      console.info("[LTE_OPT_RECOMMENDATION] POST /api/lte-prediction-optimised/recommendation-optimized", payload);
+      return await postWithRouteFallback(
+        [
+          "/api/lte-prediction-optimised/recommendation-optimized",
+          "/api/lte-prediction-optimized/recommendation-optimized",
+        ],
+        payload,
+        { timeout: 600000 },
+      );
+    } catch (error) {
+      console.error("LTE recommendation optimized prediction run error:", error);
+      if (error.code === "ECONNABORTED") {
+        throw new Error("LTE recommendation optimized prediction timed out.");
+      }
+      if (error.response?.data?.detail) {
+        throw new Error(`LTE recommendation optimized prediction failed: ${error.response.data.detail}`);
+      }
+      if (error.response?.data?.error) {
+        throw new Error(`LTE recommendation optimized prediction failed: ${error.response.data.error}`);
+      }
+      throw error;
+    }
+  },
+
   runLteTiltRecommendation: async (params) => {
     try {
       if (!params.project_id) throw new Error("project_id is required");
@@ -668,6 +756,11 @@ export const predictionApi = {
             .filter((value) => Number.isFinite(value) && value > 0)
         : [];
       const hasFile = params.threshold_file instanceof File;
+      const optionalNumericFields = [
+        "rsrp_weight",
+        "rsrq_weight",
+        "sinr_weight",
+      ];
 
       if (hasFile) {
         const formData = new FormData();
@@ -687,6 +780,11 @@ export const predictionApi = {
         if (params.sinr !== undefined && params.sinr !== null && params.sinr !== "") {
           formData.append("sinr", String(Number(params.sinr)));
         }
+        optionalNumericFields.forEach((key) => {
+          if (params[key] !== undefined && params[key] !== null && params[key] !== "") {
+            formData.append(key, String(Number(params[key])));
+          }
+        });
         formData.append("threshold_file", params.threshold_file);
 
         return await postWithRouteFallback(
@@ -718,6 +816,11 @@ export const predictionApi = {
       if (params.sinr !== undefined && params.sinr !== null && params.sinr !== "") {
         payload.sinr = Number(params.sinr);
       }
+      optionalNumericFields.forEach((key) => {
+        if (params[key] !== undefined && params[key] !== null && params[key] !== "") {
+          payload[key] = Number(params[key]);
+        }
+      });
 
       return await postWithRouteFallback(
         [

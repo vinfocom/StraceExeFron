@@ -34,6 +34,16 @@ import {
 } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
 
+const LTE_RECOMMENDATION_OPTIMIZED_DEFAULTS = Object.freeze({
+  operator: "Airtel",
+  radiusMeters: 500,
+  gridResolutionMeters: 25,
+  workers: 3,
+  neighborSiteCount: 2,
+  maxInterferenceSites: 10,
+  maxNeighborsPerUpdateCell: 2,
+});
+
 const Checkbox = memo(
   ({ checked, onChange, disabled = false, className = "" }) => (
     <button
@@ -781,10 +791,15 @@ const UnifiedMapSidebar = ({
   const ltePredictionToastIdRef = useRef(null);
   const ltePredictionJobIdRef = useRef(null);
   const [isRunningLteTiltRecommendation, setIsRunningLteTiltRecommendation] = useState(false);
-  const [lteTiltRecommendationOperator, setLteTiltRecommendationOperator] = useState("all");
-  const [lteTiltRecommendationRsrp, setLteTiltRecommendationRsrp] = useState(-105);
-  const [lteTiltRecommendationRsrq, setLteTiltRecommendationRsrq] = useState(-15);
+  const [lteTiltRecommendationOperator, setLteTiltRecommendationOperator] = useState(LTE_RECOMMENDATION_OPTIMIZED_DEFAULTS.operator);
+  const [lteTiltRecommendationRsrp, setLteTiltRecommendationRsrp] = useState(-90);
+  const [lteTiltRecommendationRsrq, setLteTiltRecommendationRsrq] = useState(-14);
   const [lteTiltRecommendationSinr, setLteTiltRecommendationSinr] = useState(0);
+  const [lteTiltRecommendationRsrpWeight, setLteTiltRecommendationRsrpWeight] = useState(20);
+  const [lteTiltRecommendationRsrqWeight, setLteTiltRecommendationRsrqWeight] = useState(20);
+  const [lteTiltRecommendationSinrWeight, setLteTiltRecommendationSinrWeight] = useState(60);
+  const [lteTiltRecommendationRadiusMeters, setLteTiltRecommendationRadiusMeters] = useState(LTE_RECOMMENDATION_OPTIMIZED_DEFAULTS.radiusMeters);
+  const [lteTiltRecommendationGridResolutionMeters, setLteTiltRecommendationGridResolutionMeters] = useState(LTE_RECOMMENDATION_OPTIMIZED_DEFAULTS.gridResolutionMeters);
   const [lteTiltRecommendationFile, setLteTiltRecommendationFile] = useState(null);
   const lteTiltFileInputRef = useRef(null);
   const lteTiltRecommendationPollingRef = useRef(null);
@@ -1106,10 +1121,24 @@ const UnifiedMapSidebar = ({
       if (status === "done") {
         stopLteOptimisedPredictionMonitoring(false);
         setIsRunningLteOptimisedPrediction(false);
-        const insertedRows = Number(statusResponse?.inserted);
-        const suffix = Number.isFinite(insertedRows) ? ` (${insertedRows} rows)` : "";
+        const rowCount = [
+          statusResponse?.inserted,
+          statusResponse?.rows,
+          statusResponse?.merged_rows,
+          statusResponse?.optimized_rows,
+        ]
+          .map((value) => Number(value))
+          .find((value) => Number.isFinite(value));
+        const recommendationScenarioId = Number(statusResponse?.recommendation_scenario_id);
+        const appliedRows = Number(statusResponse?.applied_recommendation_rows);
+        const details = [
+          Number.isFinite(rowCount) ? `${rowCount} rows` : "",
+          Number.isFinite(recommendationScenarioId) ? `RF scenario ${recommendationScenarioId}` : "",
+          Number.isFinite(appliedRows) ? `${appliedRows} recommendations applied` : "",
+        ].filter(Boolean);
+        const suffix = details.length > 0 ? ` (${details.join(", ")})` : "";
         toast.update(toastId, {
-          render: `LTE optimized prediction completed${suffix}.`,
+          render: `LTE prediction optimized completed${suffix}.`,
           type: "success",
           isLoading: false,
           autoClose: 5000,
@@ -1126,7 +1155,7 @@ const UnifiedMapSidebar = ({
         const errorMessage =
           statusResponse?.error || "Optimized prediction failed in Python service.";
         toast.update(toastId, {
-          render: `LTE optimized prediction failed: ${errorMessage}`,
+          render: `LTE prediction optimized failed: ${errorMessage}`,
           type: "error",
           isLoading: false,
           autoClose: 7000,
@@ -1139,8 +1168,8 @@ const UnifiedMapSidebar = ({
 
       const statusLabel = status ? status.toUpperCase() : "RUNNING";
       const liveMessage = progressText
-        ? `LTE optimized ${statusLabel}: ${progressText}`
-        : `LTE optimized ${statusLabel}...`;
+        ? `LTE prediction optimized ${statusLabel}: ${progressText}`
+        : `LTE prediction optimized ${statusLabel}...`;
 
       toast.update(toastId, {
         render: liveMessage,
@@ -1154,6 +1183,113 @@ const UnifiedMapSidebar = ({
       console.error("LTE optimized status polling failed:", msg);
     }
   }, [stopLteOptimisedPredictionMonitoring]);
+
+  const startLteRecommendationOptimisedPrediction = useCallback(
+    async (options = {}) => {
+      if (!canRunPrediction) {
+        toast.error("Prediction is disabled for your license.");
+        return;
+      }
+
+      const numericProjectId = Number(projectId);
+      if (!Number.isFinite(numericProjectId) || numericProjectId <= 0) {
+        toast.error("Please select a valid project before running LTE prediction optimized.");
+        return;
+      }
+
+      if (isRunningLteOptimisedPrediction) {
+        toast.info("LTE prediction optimized is already running.");
+        return;
+      }
+
+      const runRadiusMeters =
+        Number(options.radiusMeters ?? lteTiltRecommendationRadiusMeters) ||
+        LTE_RECOMMENDATION_OPTIMIZED_DEFAULTS.radiusMeters;
+      const runGridResolutionMeters =
+        Number(options.gridResolutionMeters ?? lteTiltRecommendationGridResolutionMeters) ||
+        LTE_RECOMMENDATION_OPTIMIZED_DEFAULTS.gridResolutionMeters;
+
+      setIsRunningLteOptimisedPrediction(true);
+      stopLteOptimisedPredictionMonitoring(true);
+      const loadingToastId = toast.loading("Starting LTE prediction optimized from recommendation...", {
+        autoClose: false,
+        closeOnClick: false,
+        draggable: false,
+      });
+      lteOptimisedPredictionToastIdRef.current = loadingToastId;
+
+      try {
+        const response = await predictionApi.runLteRecommendationOptimisedPrediction({
+          project_id: numericProjectId,
+          region: "india",
+          operator: String(lteTiltRecommendationOperator || "").trim() || LTE_RECOMMENDATION_OPTIMIZED_DEFAULTS.operator,
+          radius: runRadiusMeters,
+          grid_resolution: runGridResolutionMeters,
+          n_workers: LTE_RECOMMENDATION_OPTIMIZED_DEFAULTS.workers,
+          impact_radius_m: runRadiusMeters,
+          neighbor_site_count: LTE_RECOMMENDATION_OPTIMIZED_DEFAULTS.neighborSiteCount,
+          max_interference_sites: LTE_RECOMMENDATION_OPTIMIZED_DEFAULTS.maxInterferenceSites,
+          max_neighbors_per_update_cell: LTE_RECOMMENDATION_OPTIMIZED_DEFAULTS.maxNeighborsPerUpdateCell,
+        });
+
+        const jobId = response?.job_id || response?.jobId || response?.id;
+        if (!jobId) {
+          setIsRunningLteOptimisedPrediction(false);
+          toast.update(loadingToastId, {
+            render: "LTE prediction optimized started, but no job id was returned.",
+            type: "warning",
+            isLoading: false,
+            autoClose: 6000,
+            closeOnClick: true,
+            draggable: true,
+          });
+          lteOptimisedPredictionToastIdRef.current = null;
+          return;
+        }
+
+        lteOptimisedPredictionJobIdRef.current = jobId;
+        toast.update(loadingToastId, {
+          render: `LTE prediction optimized running. Job: ${jobId}. Monitoring progress...`,
+          isLoading: true,
+          autoClose: false,
+          closeOnClick: false,
+          draggable: false,
+        });
+
+        await pollLteOptimisedPredictionStatus();
+        lteOptimisedPredictionPollingRef.current = setInterval(() => {
+          pollLteOptimisedPredictionStatus();
+        }, 3000);
+      } catch (error) {
+        setIsRunningLteOptimisedPrediction(false);
+        const failureMessage = error?.message || "Failed to start LTE prediction optimized.";
+        if (lteOptimisedPredictionToastIdRef.current) {
+          toast.update(lteOptimisedPredictionToastIdRef.current, {
+            render: failureMessage,
+            type: "error",
+            isLoading: false,
+            autoClose: 7000,
+            closeOnClick: true,
+            draggable: true,
+          });
+        } else {
+          toast.error(failureMessage);
+        }
+        stopLteOptimisedPredictionMonitoring(false);
+        lteOptimisedPredictionToastIdRef.current = null;
+      }
+    },
+    [
+      canRunPrediction,
+      projectId,
+      isRunningLteOptimisedPrediction,
+      lteTiltRecommendationOperator,
+      lteTiltRecommendationRadiusMeters,
+      lteTiltRecommendationGridResolutionMeters,
+      stopLteOptimisedPredictionMonitoring,
+      pollLteOptimisedPredictionStatus,
+    ],
+  );
 
   const pollLteTiltRecommendationStatus = useCallback(async () => {
     const jobId = lteTiltRecommendationJobIdRef.current;
@@ -1187,12 +1323,84 @@ const UnifiedMapSidebar = ({
         });
 
         if (outputFile) {
-          predictionApi.downloadLteTiltRecommendation(outputFile).catch((error) => {
+          await predictionApi.downloadLteTiltRecommendation(outputFile).catch((error) => {
             toast.error(error?.message || "LTE recommendation file download failed.");
           });
         }
 
         lteTiltRecommendationToastIdRef.current = null;
+
+        const runRecommendationOptimizedFromPrompt = () => {
+          const defaultRadius =
+            Number(lteTiltRecommendationRadiusMeters) ||
+            LTE_RECOMMENDATION_OPTIMIZED_DEFAULTS.radiusMeters;
+          const radiusInput = window.prompt(
+            "Enter radius for LTE prediction optimized (meters)",
+            String(defaultRadius),
+          );
+          if (radiusInput === null) {
+            return;
+          }
+          const parsedRadius = Number(radiusInput);
+          if (!Number.isFinite(parsedRadius) || parsedRadius <= 0) {
+            toast.error("LTE prediction optimized radius must be a positive number.");
+            return;
+          }
+
+          const defaultGrid =
+            Number(lteTiltRecommendationGridResolutionMeters) ||
+            LTE_RECOMMENDATION_OPTIMIZED_DEFAULTS.gridResolutionMeters;
+          const gridInput = window.prompt(
+            "Enter grid resolution for LTE prediction optimized (meters)",
+            String(defaultGrid),
+          );
+          if (gridInput === null) {
+            return;
+          }
+          const parsedGrid = Number(gridInput);
+          if (!Number.isFinite(parsedGrid) || parsedGrid <= 0) {
+            toast.error("LTE prediction optimized grid resolution must be a positive number.");
+            return;
+          }
+
+          startLteRecommendationOptimisedPrediction({
+            radiusMeters: parsedRadius,
+            gridResolutionMeters: parsedGrid,
+          });
+        };
+
+        let actionToastId;
+        actionToastId = toast.info(
+          <div className="space-y-2">
+            <div>
+              LTE tilt recommendation is saved. Run LTE prediction optimized now?
+            </div>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  toast.dismiss(actionToastId);
+                  runRecommendationOptimizedFromPrompt();
+                }}
+                className="rounded bg-cyan-600 px-2 py-1 text-xs font-semibold text-white hover:bg-cyan-500"
+              >
+                Run
+              </button>
+              <button
+                type="button"
+                onClick={() => toast.dismiss(actionToastId)}
+                className="rounded bg-slate-700 px-2 py-1 text-xs font-semibold text-white hover:bg-slate-600"
+              >
+                Dismiss
+              </button>
+            </div>
+          </div>,
+          {
+            autoClose: false,
+            closeOnClick: false,
+            draggable: false,
+          },
+        );
         return;
       }
 
@@ -1229,7 +1437,12 @@ const UnifiedMapSidebar = ({
       const msg = statusError?.message || "Unable to fetch LTE tilt recommendation status.";
       console.error("LTE tilt recommendation polling failed:", msg);
     }
-  }, [stopLteTiltRecommendationMonitoring]);
+  }, [
+    stopLteTiltRecommendationMonitoring,
+    startLteRecommendationOptimisedPrediction,
+    lteTiltRecommendationRadiusMeters,
+    lteTiltRecommendationGridResolutionMeters,
+  ]);
 
   const handleRunLtePrediction = useCallback(async () => {
     if (!canRunPrediction) {
@@ -1461,6 +1674,15 @@ const UnifiedMapSidebar = ({
         rsrp: lteTiltRecommendationRsrp,
         rsrq: lteTiltRecommendationRsrq,
         sinr: lteTiltRecommendationSinr,
+        rsrp_weight: Number.isFinite(Number(lteTiltRecommendationRsrpWeight))
+          ? Number(lteTiltRecommendationRsrpWeight)
+          : 20,
+        rsrq_weight: Number.isFinite(Number(lteTiltRecommendationRsrqWeight))
+          ? Number(lteTiltRecommendationRsrqWeight)
+          : 20,
+        sinr_weight: Number.isFinite(Number(lteTiltRecommendationSinrWeight))
+          ? Number(lteTiltRecommendationSinrWeight)
+          : 60,
         threshold_file: lteTiltRecommendationFile || undefined,
       });
 
@@ -1518,6 +1740,9 @@ const UnifiedMapSidebar = ({
     lteTiltRecommendationRsrp,
     lteTiltRecommendationRsrq,
     lteTiltRecommendationSinr,
+    lteTiltRecommendationRsrpWeight,
+    lteTiltRecommendationRsrqWeight,
+    lteTiltRecommendationSinrWeight,
     lteTiltRecommendationFile,
     stopLteTiltRecommendationMonitoring,
     pollLteTiltRecommendationStatus,
@@ -3024,6 +3249,62 @@ const UnifiedMapSidebar = ({
                             max={40}
                             step={1}
                             unit="dB"
+                            showButtons={false}
+                          />
+                        </div>
+                      </div>
+                      <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+                        <div className="rounded-lg bg-slate-800/60 p-2">
+                          <div className="flex items-center justify-between text-xs mb-2">
+                            <span className="text-slate-400">RSRP Weight</span>
+                          </div>
+                          <ThresholdInput
+                            value={
+                              Number.isFinite(Number(lteTiltRecommendationRsrpWeight))
+                                ? Number(lteTiltRecommendationRsrpWeight)
+                                : 20
+                            }
+                            onChange={(next) => setLteTiltRecommendationRsrpWeight(Number(next))}
+                            min={0}
+                            max={100}
+                            step={5}
+                            unit="%"
+                            showButtons={false}
+                          />
+                        </div>
+                        <div className="rounded-lg bg-slate-800/60 p-2">
+                          <div className="flex items-center justify-between text-xs mb-2">
+                            <span className="text-slate-400">RSRQ Weight</span>
+                          </div>
+                          <ThresholdInput
+                            value={
+                              Number.isFinite(Number(lteTiltRecommendationRsrqWeight))
+                                ? Number(lteTiltRecommendationRsrqWeight)
+                                : 20
+                            }
+                            onChange={(next) => setLteTiltRecommendationRsrqWeight(Number(next))}
+                            min={0}
+                            max={100}
+                            step={5}
+                            unit="%"
+                            showButtons={false}
+                          />
+                        </div>
+                        <div className="rounded-lg bg-slate-800/60 p-2">
+                          <div className="flex items-center justify-between text-xs mb-2">
+                            <span className="text-slate-400">SINR Weight</span>
+                          </div>
+                          <ThresholdInput
+                            value={
+                              Number.isFinite(Number(lteTiltRecommendationSinrWeight))
+                                ? Number(lteTiltRecommendationSinrWeight)
+                                : 60
+                            }
+                            onChange={(next) => setLteTiltRecommendationSinrWeight(Number(next))}
+                            min={0}
+                            max={100}
+                            step={5}
+                            unit="%"
                             showButtons={false}
                           />
                         </div>
