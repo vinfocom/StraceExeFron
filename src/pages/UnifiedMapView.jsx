@@ -14,7 +14,7 @@ import { useSearchParams, useNavigate, useLocation } from "react-router-dom";
 import { useJsApiLoader, Polygon, Polyline } from "@react-google-maps/api";
 import { toast } from "react-toastify";
 
-import { mapViewApi, gridAnalyticsApi } from "../api/apiEndpoints";
+import { mapViewApi, gridAnalyticsApi, sitePredictionApi } from "../api/apiEndpoints";
 
 // Components
 import Spinner from "../components/common/Spinner";
@@ -2356,7 +2356,7 @@ const UnifiedMapView = () => {
     let cancelled = false;
     (async () => {
       try {
-        const response = await mapViewApi.getSitePredictionScenarios({ projectId: numericProjectId });
+        const response = await sitePredictionApi.getScenarios({ projectId: numericProjectId });
         const root =
           response?.data && typeof response.data === "object" ? response.data : response || {};
         const rows = Array.isArray(root?.Data)
@@ -2940,13 +2940,13 @@ const UnifiedMapView = () => {
     if (!confirmed) return;
 
     try {
-      await mapViewApi.deleteSitePredictionScenario({
+      await sitePredictionApi.deleteScenario({
         ProjectId: numericProjectId,
         Scenario: numericScenario,
       });
       toast.success(`Scenario ${numericScenario} deleted.`);
 
-      const response = await mapViewApi.getSitePredictionScenarios({ projectId: numericProjectId });
+      const response = await sitePredictionApi.getScenarios({ projectId: numericProjectId });
       const root = response?.data && typeof response.data === "object" ? response.data : response || {};
       const rows = Array.isArray(root?.Data)
         ? root.Data

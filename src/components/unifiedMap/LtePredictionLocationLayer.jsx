@@ -1,6 +1,6 @@
 import React, { useMemo, useEffect, useRef, useState, useCallback } from "react";
 import { GoogleMapsOverlay } from "@deck.gl/google-maps";
-import { IconLayer, PolygonLayer } from "@deck.gl/layers";
+import { PolygonLayer, ScatterplotLayer } from "@deck.gl/layers";
 import {
   normalizeBandName,
   normalizeProviderName,
@@ -293,17 +293,6 @@ const isPointInPolygon = (point, path) => {
   return inside;
 };
 
-const makeSquareAtlas = () => {
-  const canvas = document.createElement("canvas");
-  canvas.width = 64;
-  canvas.height = 64;
-  const ctx = canvas.getContext("2d");
-  if (!ctx) return null;
-  ctx.fillStyle = "#ffffff";
-  ctx.fillRect(0, 0, 64, 64);
-  return canvas.toDataURL("image/png");
-};
-
 const LtePredictionLocationLayer = ({
   enabled = false,
   map = null,
@@ -328,14 +317,6 @@ const LtePredictionLocationLayer = ({
   const overlayRef = useRef(null);
   const [zoomLevel, setZoomLevel] = useState(13);
   const [hovered, setHovered] = useState(null);
-
-  const squareAtlas = useMemo(() => makeSquareAtlas(), []);
-  const squareIconMapping = useMemo(
-    () => ({
-      square: { x: 0, y: 0, width: 64, height: 64, mask: true },
-    }),
-    [],
-  );
 
   const polygonPaths = useMemo(() => {
     if (!Array.isArray(filterPolygons) || filterPolygons.length === 0) return [];
@@ -862,27 +843,26 @@ const LtePredictionLocationLayer = ({
       }
     }
 
-    if (!isGridMode && (!mlGridEnabled || layers.length === 0) && squareAtlas) {
+    if (!isGridMode && (!mlGridEnabled || layers.length === 0)) {
       layers.push(
-        new IconLayer({
+        new ScatterplotLayer({
             id: "lte-prediction-square-layer",
             data: pointLayerData,
             pickable: true,
             autoHighlight: true,
             getPosition: (d) => d.position,
-            iconAtlas: squareAtlas,
-            iconMapping: squareIconMapping,
-            getIcon: () => "square",
-            sizeUnits: "pixels",
-            sizeScale,
-            sizeMinPixels: 3,
-            sizeMaxPixels: 42,
-            getSize: (d) => d.size,
-            getColor: (d) => d.color,
+            radiusUnits: "pixels",
+            radiusScale: sizeScale,
+            radiusMinPixels: 2,
+            radiusMaxPixels: 22,
+            getRadius: (d) => d.size,
+            getFillColor: (d) => d.color,
+            stroked: false,
+            filled: true,
             onHover: handleHover,
             updateTriggers: {
-              getColor: [selectedMetric, thresholds],
-              getSize: [zoomLevel],
+              getFillColor: [selectedMetric, thresholds],
+              getRadius: [zoomLevel],
             },
           }),
       );
@@ -903,8 +883,6 @@ const LtePredictionLocationLayer = ({
     mlGridAggregation,
     sizeScale,
     zoomLevel,
-    squareAtlas,
-    squareIconMapping,
     handleHover,
   ]);
 

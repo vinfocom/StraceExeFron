@@ -904,7 +904,7 @@ const NeighborInfoWindow = React.memo(({ neighbor, onClose, resolveColor, select
 
         {(neighbor.neighbourRsrp !== null || neighbor.neighbourBand) && (
           <div className="space-y-1.5 mt-3 pt-2 border-t border-gray-100">
-            <div className="text-[10px] font-semibold text-purple-600 uppercase tracking-wide">📶 Neighbour Cell</div>
+            <div className="text-[10px] font-semibold text-purple-600 uppercase tracking-wide">Neighbour Cell</div>
             <div className="grid grid-cols-2 gap-x-4 gap-y-1">
               {neighbor.neighbourBand && <div className="flex justify-between text-xs"><span className="text-gray-500">Band</span><span className="font-semibold text-purple-600">{neighbor.neighbourBand}</span></div>}
               {neighbor.neighbourPci && <div className="flex justify-between text-xs"><span className="text-gray-500">PCI</span><span className="font-medium">{neighbor.neighbourPci}</span></div>}
@@ -916,7 +916,7 @@ const NeighborInfoWindow = React.memo(({ neighbor, onClose, resolveColor, select
         )}
         <div className="mt-2 pt-2 border-t border-gray-100 space-y-1">
           {neighbor.sessionId && <div className="flex justify-between text-xs"><span className="text-gray-500">Session</span><span className="font-medium">{neighbor.sessionId}</span></div>}
-          <div className="text-[10px] text-gray-400 font-mono text-center">📍 {neighbor.lat.toFixed(6)}, {neighbor.lng.toFixed(6)}</div>
+          <div className="text-[10px] text-gray-400 font-mono text-center"> {neighbor.lat.toFixed(6)}, {neighbor.lng.toFixed(6)}</div>
         </div>
       </div>
     </InfoWindow>
@@ -1211,7 +1211,6 @@ const MapWithMultipleCircles = ({
     };
   }, []);
 
-  // ✅ Unified Color Resolver - UPDATED TO SUPPORT TAC
   const resolvedPolygonOpacity = Math.max(
     0,
     Math.min(1, Number.isFinite(Number(polygonOpacity)) ? Number(polygonOpacity) : 0.35),
@@ -1226,17 +1225,14 @@ const MapWithMultipleCircles = ({
       return getPciColor(value);
     }
     
-    // ✅ 1. Explicitly handle TAC (Tracking Area Code) to use dynamic hashing
     if (typeKey === 'tac') {
       return generateColorFromHash(String(value));
     }
     
-    // ✅ 2. Categorical Coloring
     if (['provider', 'technology', 'band', 'operator', 'cell_id'].includes(typeKey)) {
         return getLogColor(typeKey, value);
     }
     
-    // ✅ 3. Threshold-based Coloring
     const metricKey =
       typeKey === 'dl_tpt' || typeKey === 'dl_rpt' ? 'dl_thpt' :
       typeKey === 'ul_tpt' || typeKey === 'ul_rpt' ? 'ul_thpt' : typeKey;
@@ -1414,13 +1410,11 @@ const MapWithMultipleCircles = ({
     ? !externalPolygonsLoading
     : externalPolygonData.length > 0 || polygonsFetched;
 
-  // Filter primary locations by polygon & Legend
   const locationsToRender = useMemo(() => {
     if (!locations?.length) return EMPTY_ARRAY;
     
     let filtered = locations;
 
-    // A. Apply Polygon Filter — only when filtering is explicitly requested
     if (filterInsidePolygons && enablePolygonFilter) {
       // Wait for polygons to be ready before filtering — prevents flash of all points
       if (!activePolygonsReady) return EMPTY_ARRAY;

@@ -1,6 +1,6 @@
 // src/hooks/useSiteData.js
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { mapViewApi } from '@/api/apiEndpoints';
+import { sitePredictionApi } from '@/api/apiEndpoints';
 import {
   makeProjectCacheKey,
   readProjectSessionCacheEntry,
@@ -143,7 +143,7 @@ const fetchAllSitePredictionRows = async (params = {}) => {
 
   while (page <= MAX_SITE_PREDICTION_PAGES) {
     const offset = (page - 1) * SITE_PREDICTION_PAGE_SIZE;
-    const response = await mapViewApi.getSitePrediction({
+    const response = await sitePredictionApi.get({
       ...params,
       offset,
       limit: SITE_PREDICTION_PAGE_SIZE,
@@ -419,7 +419,7 @@ export const useSiteData = ({
       switch (siteToggle) {
         case 'Cell':
           if (normalizedVersion === "delta") {
-            response = await mapViewApi.compareSitePrediction({
+            response = await sitePredictionApi.compare({
               ...params,
               limit: SITE_PREDICTION_PAGE_SIZE,
             });
@@ -436,8 +436,8 @@ export const useSiteData = ({
             });
           }
           break;
-        case 'NoML': response = await mapViewApi.getSiteNoMl(params); break;
-        case 'ML': response = await mapViewApi.getSiteMl(params); break;
+        case 'NoML': response = await sitePredictionApi.getNoMl(params); break;
+        case 'ML': response = await sitePredictionApi.getMl(params); break;
         default: response = { data: [] };
       }
 

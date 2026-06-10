@@ -1,4 +1,3 @@
-// src/components/map/MapLegend.jsx
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { ChevronDown, Layers, Settings2, X } from "lucide-react";
 import { Rnd } from "react-rnd";
@@ -236,8 +235,8 @@ const ColorSchemeLegend = ({ colorBy, logs, activeFilter, onFilterChange }) => {
   }
 
   return (
-    <div className="flex flex-col h-full">
-      <div className="flex-1 min-h-0 overflow-y-auto space-y-0.5 pr-1 custom-scrollbar">
+    <div className="flex flex-col">
+      <div className="max-h-64 overflow-y-auto space-y-0.5 pr-1 custom-scrollbar">
         {usedEntries.map(([key, color]) => {
           const isActive =
             activeFilter?.type === "category" && activeFilter?.value === key;
@@ -340,8 +339,8 @@ const TacLegend = ({ logs, activeFilter, onFilterChange }) => {
     }
 
     return (
-      <div className="flex flex-col h-full">
-        <div className="flex-1 min-h-0 overflow-y-auto space-y-0.5 pr-1 custom-scrollbar">
+      <div className="flex flex-col">
+        <div className="max-h-64 overflow-y-auto space-y-0.5 pr-1 custom-scrollbar">
           {stats.sorted.map(({ label, count, color }) => {
             const isActive =
               activeFilter?.type === "tac" && activeFilter?.value === label;
@@ -415,8 +414,8 @@ const PciLegend = ({ logs, activeFilter, onFilterChange }) => {
   }
 
   return (
-    <div className="flex flex-col h-full">
-      <div className="flex-1 min-h-0 overflow-y-auto space-y-0.5 pr-1 custom-scrollbar">
+    <div className="flex flex-col">
+      <div className="max-h-64 overflow-y-auto space-y-0.5 pr-1 custom-scrollbar">
         {pciStats.allPcis.map(([pci, count]) => {
           const isActive =
             activeFilter?.type === "pci" && activeFilter?.value === pci;
@@ -550,8 +549,8 @@ const MetricThresholdLegend = ({
   }
 
   return (
-    <div className="flex flex-col h-full">
-      <div className="flex-1 min-h-0 overflow-y-auto space-y-0.5 pr-1 custom-scrollbar">
+    <div className="flex flex-col">
+      <div className="max-h-64 overflow-y-auto space-y-0.5 pr-1 custom-scrollbar">
         {usedThresholds.map((t) => {
           const id = `metric-${t.min}-${t.max}`;
           const isActive = activeFilter?.id === id;
@@ -818,20 +817,32 @@ export default function MapLegend({
         .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.25); }
       `}</style>
 
-      {/* Full-window layer keeps the draggable legend recoverable inside the viewport. */}
       <div className={className || "fixed inset-0 z-10 pointer-events-none"}>
         <Rnd
           position={legendPosition}
           size={
             collapsed
               ? { width: legendSize.width, height: "auto" }
-              : legendSize
+              : { width: legendSize.width, height: "auto" }
           }
           minWidth={240}
-          minHeight={160}
+          minHeight={collapsed ? COLLAPSED_LEGEND_HEIGHT : 0}
           bounds="parent"
           dragHandleClassName="map-legend-drag-handle"
-          enableResizing={!collapsed}
+          enableResizing={
+            collapsed
+              ? false
+              : {
+                  top: false,
+                  right: true,
+                  bottom: false,
+                  left: true,
+                  topRight: false,
+                  bottomRight: false,
+                  bottomLeft: false,
+                  topLeft: false,
+                }
+          }
           onDragStop={(event, data) => {
             setLegendPosition(
               clampLegendPosition({ x: data.x, y: data.y }, visibleLegendSize),
@@ -840,7 +851,7 @@ export default function MapLegend({
           onResize={(event, direction, ref, delta, position) => {
             const nextSize = {
               width: ref.offsetWidth,
-              height: ref.offsetHeight,
+              height: legendSize.height,
             };
             setLegendSize(nextSize);
             setLegendPosition(clampLegendPosition(position, nextSize));
@@ -848,7 +859,7 @@ export default function MapLegend({
           onResizeStop={(event, direction, ref, delta, position) => {
             const nextSize = {
               width: ref.offsetWidth,
-              height: ref.offsetHeight,
+              height: legendSize.height,
             };
             setLegendSize(nextSize);
             setLegendPosition(clampLegendPosition(position, nextSize));
@@ -865,7 +876,7 @@ export default function MapLegend({
           }}
         >
           <div
-            className={`flex h-full min-h-0 flex-col bg-gray-900/95 backdrop-blur-lg border border-gray-700/40 rounded-lg shadow-xl shadow-black/20 transition-all duration-200 ${
+            className={`flex flex-col bg-gray-900/95 backdrop-blur-lg border border-gray-700/40 rounded-lg shadow-xl shadow-black/20 transition-all duration-200 ${
               collapsed ? "" : "min-w-[240px]"
             }`}
           >
@@ -907,8 +918,8 @@ export default function MapLegend({
             </button>
 
             {!collapsed && (
-              <div className="min-h-0 flex-1 px-2 pb-2">
-                <div className="flex h-full min-h-0 flex-col pt-1 border-t border-gray-700/40">{content}</div>
+              <div className="px-2 pb-2">
+                <div className="flex flex-col pt-1 border-t border-gray-700/40">{content}</div>
               </div>
             )}
           </div>

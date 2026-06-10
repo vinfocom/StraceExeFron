@@ -88,11 +88,11 @@ const downloadTemplateFromCsharpApi = async (fileType) => {
   return { success: true };
 };
 
-const postWithRouteFallback = async (paths, payload, config = {}) => {
+const postWithRouteFallback = async (paths, payload, config = {}, client = pythonApi) => {
   let lastError = null;
   for (const path of paths) {
     try {
-      return await pythonApi.post(path, payload, config);
+      return await client.post(path, payload, config);
     } catch (error) {
       lastError = error;
       const status = error?.response?.status;
@@ -1175,8 +1175,89 @@ const resolveProjectApiCall = async ({ csharpCall, localPythonCall }) => {
   }
 };
 
+export const sitePredictionApi = {
+  add: (payload) => api.post("/api/Mapview/AddSitePrediction", payload),
+  uploadCsv: (formData) =>
+    api.post("/api/MapView/UploadSitePredictionCsv", formData),
+  get: (params) =>
+    api.get("/api/MapView/GetSitePrediction", {
+      params: { ...params, _ts: Date.now() },
+      dedupe: false,
+    }),
+  getBase: (params, config = {}) =>
+    api.get("/api/MapView/GetSitePredictionBase", {
+      ...config,
+      params: { ...params, _ts: Date.now() },
+      dedupe: false,
+    }),
+  getOptimised: (params, config = {}) =>
+    api.get("/api/MapView/GetSitePredictionOptimised", {
+      ...config,
+      params: { ...params, _ts: Date.now() },
+      dedupe: false,
+    }),
+  getOptimized: (params, config = {}) =>
+    api.get("/api/MapView/GetSitePredictionOptimised", {
+      ...config,
+      params: { ...params, _ts: Date.now() },
+      dedupe: false,
+    }),
+  compare: (params, config = {}) =>
+    api.get("/api/MapView/CompareSitePrediction", {
+      ...config,
+      params: { ...params, _ts: Date.now() },
+      dedupe: false,
+    }),
+  update: (payload) =>
+    api.post("/api/MapView/UpdateSitePrediction", payload),
+  getScenarios: async (params, config = {}) => {
+    const requestConfig = {
+      ...config,
+      params: { ...params, _ts: Date.now() },
+      dedupe: false,
+    };
+    try {
+      return await api.get("/api/SitePrediction/GetScenarios", requestConfig);
+    } catch (error) {
+      const status = Number(error?.status ?? error?.response?.status ?? error?.data?.Status);
+      if (status !== 404) throw error;
+      return api.get("/api/MapView/GetSitePredictionScenarios", requestConfig);
+    }
+  },
+  deleteScenario: (payload, config = {}) =>
+    postWithRouteFallback(
+      [
+        "/api/SitePrediction/DeleteScenario",
+        "/api/MapView/DeleteSitePredictionScenario",
+      ],
+      payload,
+      config,
+      api,
+    ),
+  delete: (payload) =>
+    postWithRouteFallback(
+      [
+        "/api/SitePrediction/Delete",
+        "/api/MapView/DeleteSitePrediction",
+      ],
+      payload,
+      {},
+      api,
+    ),
+  assignToProject: (projectId, siteIds) => {
+    const params = new URLSearchParams();
+    params.append("projectId", projectId);
+    siteIds.forEach((id) => params.append("siteIds", id));
+    return api.post(
+      `/api/MapView/AssignExistingSitePredictionToProject?${params.toString()}`
+    );
+  },
+  getNoMl: (params) => api.get("/api/MapView/GetSiteNoMl", { params }),
+  getMl: (params) => api.get("/api/MapView/GetSiteMl", { params }),
+};
+
 export const mapViewApi = {
-  addSitePrediction: (payload) => api.post("/api/Mapview/AddSitePrediction", payload),
+  addSitePrediction: sitePredictionApi.add,
   getLtePfrection: (params, config = {}) =>
     api.get("/api/MapView/GetLtePredictionLocationStats", { params, ...config }),
   getLtePredictionLocationStatsRefined: (params, config = {}) =>
@@ -1591,66 +1672,24 @@ export const mapViewApi = {
     }),
 
   // ==================== Site Prediction ====================
-  uploadSitePredictionCsv: (formData) =>
-    api.post("/api/MapView/UploadSitePredictionCsv", formData),
-
-  getSitePrediction: (params) =>
-    api.get("/api/MapView/GetSitePrediction", {
-      params: { ...params, _ts: Date.now() },
-      dedupe: false,
-    }),
-  getSitePredictionBase: (params, config = {}) =>
-    api.get("/api/MapView/GetSitePredictionBase", {
-      ...config,
-      params: { ...params, _ts: Date.now() },
-      dedupe: false,
-    }),
-  getSitePredictionOptimised: (params, config = {}) =>
-    api.get("/api/MapView/GetSitePredictionOptimised", {
-      ...config,
-      params: { ...params, _ts: Date.now() },
-      dedupe: false,
-    }),
+  uploadSitePredictionCsv: sitePredictionApi.uploadCsv,
+  getSitePrediction: sitePredictionApi.get,
+  getSitePredictionBase: sitePredictionApi.getBase,
+  getSitePredictionOptimised: sitePredictionApi.getOptimised,
   // Keep US spelling alias for callers while backend route remains "Optimised".
-  getSitePredictionOptimized: (params, config = {}) =>
-    api.get("/api/MapView/GetSitePredictionOptimised", {
-      ...config,
-      params: { ...params, _ts: Date.now() },
-      dedupe: false,
-    }),
-  compareSitePrediction: (params, config = {}) =>
-    api.get("/api/MapView/CompareSitePrediction", {
-      ...config,
-      params: { ...params, _ts: Date.now() },
-      dedupe: false,
-    }),
-  updateSitePrediction: (payload) =>
-    api.post("/api/MapView/UpdateSitePrediction", payload),
-  getSitePredictionScenarios: (params, config = {}) =>
-    api.get("/api/MapView/GetSitePredictionScenarios", {
-      ...config,
-      params: { ...params, _ts: Date.now() },
-      dedupe: false,
-    }),
-  deleteSitePredictionScenario: (payload, config = {}) =>
-    api.post("/api/MapView/DeleteSitePredictionScenario", payload, config),
+  getSitePredictionOptimized: sitePredictionApi.getOptimized,
+  compareSitePrediction: sitePredictionApi.compare,
+  updateSitePrediction: sitePredictionApi.update,
+  getSitePredictionScenarios: sitePredictionApi.getScenarios,
+  deleteSitePredictionScenario: sitePredictionApi.deleteScenario,
   deleteLtePredictionOptimisedScenario: (payload, config = {}) =>
     api.post("/api/MapView/DeleteLtePredictionOptimisedScenario", payload, config),
-  deleteSitePrediction: (payload) =>
-    api.post("/api/MapView/DeleteSitePrediction", payload),
-
-  assignSitePredictionToProject: (projectId, siteIds) => {
-    const params = new URLSearchParams();
-    params.append("projectId", projectId);
-    siteIds.forEach((id) => params.append("siteIds", id));
-    return api.post(
-      `/api/MapView/AssignExistingSitePredictionToProject?${params.toString()}`
-    );
-  },
+  deleteSitePrediction: sitePredictionApi.delete,
+  assignSitePredictionToProject: sitePredictionApi.assignToProject,
 
   // ==================== ML Site Data ====================
-  getSiteNoMl: (params) => api.get("/api/MapView/GetSiteNoMl", { params }),
-  getSiteMl: (params) => api.get("/api/MapView/GetSiteMl", { params }),
+  getSiteNoMl: sitePredictionApi.getNoMl,
+  getSiteMl: sitePredictionApi.getMl,
 
   // ==================== Image Upload ====================
   uploadImage: (formData) =>

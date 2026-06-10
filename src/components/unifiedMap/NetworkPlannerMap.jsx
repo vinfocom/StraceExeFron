@@ -12,7 +12,7 @@ import {
 } from "@/utils/colorUtils";
 import { getPciColor } from "@/utils/metrics";
 import { useSiteData } from "@/hooks/useSiteData";
-import { mapViewApi } from "@/api/apiEndpoints";
+import { mapViewApi, sitePredictionApi } from "@/api/apiEndpoints";
 import { clearProjectSessionCacheByProjectResource } from "@/utils/projectSessionCache";
 import { toast } from "react-toastify";
 import EditSiteFormDialog from "@/components/unifiedMap/EditSiteFormDialog";
@@ -1404,7 +1404,7 @@ const NetworkPlannerMap = ({
 
     setIsSavingScenarioUpdates(true);
     try {
-      const response = await mapViewApi.updateSitePrediction(pendingScenarioUpdates);
+      const response = await sitePredictionApi.update(pendingScenarioUpdates);
       const rowsAffected = extractRowsAffected(response);
       const scenario = Number(response?.Scenario ?? response?.scenario ?? NaN);
       const scenarioLabel = Number.isFinite(scenario) && scenario > 0 ? `Scenario ${scenario}` : "new scenario";
@@ -1755,7 +1755,7 @@ const NetworkPlannerMap = ({
       if (shouldUseLegacySitePredictionApi) {
         for (const params of candidateParams) {
           try {
-            const res = await mapViewApi.getSitePrediction(params);
+            const res = await sitePredictionApi.get(params);
             const rawRows = res?.Data || res?.data?.Data || res?.data || [];
             const normalizedAll = normalizeSiteRows(rawRows, {
               defaultBeamwidth,
@@ -2557,7 +2557,7 @@ const NetworkPlannerMap = ({
         // Primary path: query by project_id + combined cell_id (node_b_cell_id format),
         // using optimised endpoint that reads from two tables.
         for (const candidate of lookupCandidates) {
-          const response = await mapViewApi.getSitePredictionOptimised({
+          const response = await sitePredictionApi.getOptimised({
             project_id: projectId,
             cell_id: candidate || undefined,
           });
@@ -2572,7 +2572,7 @@ const NetworkPlannerMap = ({
         // Compatibility fallback for original mode: baseline table endpoint by cell id only.
         if (rows.length === 0 && !shouldUseOptimizedApi) {
           for (const candidate of lookupCandidates) {
-            const response = await mapViewApi.getSitePredictionBase({
+            const response = await sitePredictionApi.getBase({
               project_id: projectId,
               cell_id: candidate || undefined,
             });
@@ -3319,21 +3319,31 @@ const NetworkPlannerMap = ({
     const sectorForDelete = String(
       selectedSectorInfo.sector ?? selectedSectorInfo?.rawSite?.sector ?? "",
     ).trim();
+    const cellIdForDelete = String(
+      selectedSectorInfo?.rawSite?.cell_id ??
+        selectedSectorInfo?.rawSite?.cellId ??
+        selectedSectorInfo?.rawSite?.cell_id_representative ??
+        selectedSectorInfo?.rawSite?.cellIdRepresentative ??
+        selectedSectorInfo.cellId ??
+        selectedSectorInfo.cellIdRepresentative ??
+        "",
+    ).trim();
 
-    if ((!Number.isFinite(sourceRowId) || sourceRowId <= 0) && (!siteIdForDelete || !sectorForDelete)) {
+    if (!cellIdForDelete && (!Number.isFinite(sourceRowId) || sourceRowId <= 0) && (!siteIdForDelete || !sectorForDelete)) {
       toast.error("Unable to identify sector row to delete.");
       return;
     }
 
     const confirmed = window.confirm(
-      `Delete sector ${sectorForDelete || "selected"} for site ${siteIdForDelete || "selected"}?`,
+      `Delete cell ${cellIdForDelete || sectorForDelete || "selected"} for project ${projectIdNumeric}?`,
     );
     if (!confirmed) return;
 
     try {
-      const response = await mapViewApi.deleteSitePrediction({
+      const response = await sitePredictionApi.delete({
         projectId: projectIdNumeric,
         sourceId: Number.isFinite(sourceRowId) && sourceRowId > 0 ? sourceRowId : null,
+        cellId: cellIdForDelete || null,
         site: siteIdForDelete || null,
         sector: sectorForDelete || null,
         deleteEntireSite: false,
@@ -3397,7 +3407,7 @@ const NetworkPlannerMap = ({
     if (!confirmed) return;
 
     try {
-      const response = await mapViewApi.deleteSitePrediction({
+      const response = await sitePredictionApi.delete({
         projectId: projectIdNumeric,
         site: siteIdForDelete,
         deleteEntireSite: true,
@@ -3467,7 +3477,7 @@ const NetworkPlannerMap = ({
     if (!confirmed) return;
 
     try {
-      const response = await mapViewApi.deleteSitePrediction({
+      const response = await sitePredictionApi.delete({
         projectId: projectIdNumeric,
         site: siteIdForRevert,
         deleteEntireSite: true,
@@ -3653,7 +3663,7 @@ const NetworkPlannerMap = ({
     };
 
     try {
-      await mapViewApi.addSitePrediction(payload);
+      await sitePredictionApi.add(payload);
       toast.success(`Added sector ${Math.round(nextSectorId)} to site ${siteIdValue}.`);
 
       clearUnifiedSiteDataCache();
