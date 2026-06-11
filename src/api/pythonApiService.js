@@ -35,7 +35,6 @@ const PYTHON_BASE_URL = String(
 let activePythonBaseUrl = PYTHON_BASE_URL;
 let discoveryPromise = null;
 const isVerboseApiLoggingEnabled =
-  import.meta.env.DEV ||
   String(import.meta.env.VITE_ENABLE_API_LOGS || "").toLowerCase() === "true";
 
 const logApiDebug = (...args) => {

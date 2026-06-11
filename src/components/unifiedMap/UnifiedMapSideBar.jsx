@@ -21,7 +21,7 @@ import {
   Trash2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { predictionApi } from "@/api/apiEndpoints";
+import { mapViewApi, predictionApi } from "@/api/apiEndpoints";
 import { Label } from "@/components/ui/label";
 import { useAuth } from "@/hooks/useAuth";
 import { FEATURE_KEYS, hasFeatureAccess } from "@/utils/featureAccess";
@@ -404,6 +404,7 @@ const UnifiedMapSidebar = ({
   setLtePredictionUseBuildings,
   onlyInsidePolygons,
   polygonCount,
+  filterPolygons = [],
   loading,
   reloadData,
   isZoomLocked = false,
@@ -458,6 +459,7 @@ const UnifiedMapSidebar = ({
   setCoverageViolationThreshold,
   onAddSiteClick,
   onSessionIdsChange,
+  getCachedNetworkLogsForPrediction,
 }) => {
   const { user, refreshUser } = useAuth();
   const [siteScenarioMenuOpen, setSiteScenarioMenuOpen] = useState(false);
@@ -787,6 +789,7 @@ const UnifiedMapSidebar = ({
   );
   const [isRunningLtePrediction, setIsRunningLtePrediction] = useState(false);
   const [ltePredictionRadiusMeters, setLtePredictionRadiusMeters] = useState(5000);
+  const [ltePredictionOperator, setLtePredictionOperator] = useState("auto");
   const ltePredictionPollingRef = useRef(null);
   const ltePredictionToastIdRef = useRef(null);
   const ltePredictionJobIdRef = useRef(null);
@@ -852,6 +855,14 @@ const UnifiedMapSidebar = ({
     );
   }, [canRunPrediction, isRunningLteTiltRecommendation, projectId]);
 
+  const activePolygonIdsParam = useMemo(() => {
+    if (!onlyInsidePolygons || !Array.isArray(filterPolygons)) return undefined;
+    const ids = filterPolygons
+      .map((poly) => Number(poly?.id ?? poly?.polygon_id ?? poly?.polygonId))
+      .filter((id) => Number.isFinite(id) && id > 0);
+    return ids.length > 0 ? Array.from(new Set(ids)).join(",") : undefined;
+  }, [filterPolygons, onlyInsidePolygons]);
+
   const lteOptimisedOperatorOptions = useMemo(() => {
     const preferredProviders = Array.isArray(siteOperatorOptions) && siteOperatorOptions.length > 0
       ? siteOperatorOptions
@@ -868,6 +879,23 @@ const UnifiedMapSidebar = ({
       label: name,
     }));
   }, [availableFilterOptions?.providers, siteOperatorOptions]);
+
+  const ltePredictionOperatorOptions = useMemo(
+    () => [
+      { value: "auto", label: "Select Provider" },
+      ...lteOptimisedOperatorOptions,
+    ],
+    [lteOptimisedOperatorOptions],
+  );
+
+  useEffect(() => {
+    if (
+      ltePredictionOperator !== "auto" &&
+      !ltePredictionOperatorOptions.some((opt) => opt.value === ltePredictionOperator)
+    ) {
+      setLtePredictionOperator("auto");
+    }
+  }, [ltePredictionOperator, ltePredictionOperatorOptions]);
 
   useEffect(() => {
     setLteOptimisedSelectedOperators((prev) =>
@@ -1223,6 +1251,7 @@ const UnifiedMapSidebar = ({
           project_id: numericProjectId,
           region: "india",
           operator: String(lteTiltRecommendationOperator || "").trim() || LTE_RECOMMENDATION_OPTIMIZED_DEFAULTS.operator,
+          recommendation_scenario_id: options.recommendationScenarioId,
           radius: runRadiusMeters,
           grid_resolution: runGridResolutionMeters,
           n_workers: LTE_RECOMMENDATION_OPTIMIZED_DEFAULTS.workers,
@@ -1230,6 +1259,7 @@ const UnifiedMapSidebar = ({
           neighbor_site_count: LTE_RECOMMENDATION_OPTIMIZED_DEFAULTS.neighborSiteCount,
           max_interference_sites: LTE_RECOMMENDATION_OPTIMIZED_DEFAULTS.maxInterferenceSites,
           max_neighbors_per_update_cell: LTE_RECOMMENDATION_OPTIMIZED_DEFAULTS.maxNeighborsPerUpdateCell,
+          polygon_ids: activePolygonIdsParam,
         });
 
         const jobId = response?.job_id || response?.jobId || response?.id;
@@ -1288,8 +1318,53 @@ const UnifiedMapSidebar = ({
       lteTiltRecommendationGridResolutionMeters,
       stopLteOptimisedPredictionMonitoring,
       pollLteOptimisedPredictionStatus,
+      activePolygonIdsParam,
     ],
   );
+  const getStoredGridPublicScenarioId = useCallback((item) => {
+    const publicScenarioId = Number(
+      item?.public_scenario_id ??
+        item?.publicScenarioId ??
+        item?.display_scenario_id ??
+        item?.displayScenarioId,
+    );
+    if (Number.isFinite(publicScenarioId) && publicScenarioId > 0) return publicScenarioId;
+
+    const scenarioId = Number(item?.scenario_id ?? item?.scenarioId);
+    return Number.isFinite(scenarioId) && scenarioId > 0 ? scenarioId : null;
+  }, []);
+
+  useEffect(() => {
+    if (normalizedStoredGridVersion !== "updated" && normalizedStoredGridVersion !== "delta") return;
+
+    const validScenarioIds = Array.isArray(storedGridScenarioOptions)
+      ? storedGridScenarioOptions
+          .map(getStoredGridPublicScenarioId)
+          .filter((scenarioId) => Number.isFinite(scenarioId) && scenarioId > 0)
+      : [];
+    const currentScenarioId = Number(storedGridScenarioId);
+
+    if (validScenarioIds.length === 0) {
+      if (Number.isFinite(currentScenarioId) && currentScenarioId > 0) {
+        setStoredGridScenarioId?.(null);
+      }
+      return;
+    }
+
+    if (
+      !Number.isFinite(currentScenarioId) ||
+      currentScenarioId <= 0 ||
+      !validScenarioIds.includes(currentScenarioId)
+    ) {
+      setStoredGridScenarioId?.(validScenarioIds[0]);
+    }
+  }, [
+    getStoredGridPublicScenarioId,
+    normalizedStoredGridVersion,
+    setStoredGridScenarioId,
+    storedGridScenarioId,
+    storedGridScenarioOptions,
+  ]);
 
   const pollLteTiltRecommendationStatus = useCallback(async () => {
     const jobId = lteTiltRecommendationJobIdRef.current;
@@ -1308,11 +1383,18 @@ const UnifiedMapSidebar = ({
         stopLteTiltRecommendationMonitoring(false);
         setIsRunningLteTiltRecommendation(false);
 
-        const scenario = statusResponse?.scenario;
+        const scenario = Number(statusResponse?.scenario);
         const outputFile = statusResponse?.output;
+        const savedRecommendationRows = [
+          statusResponse?.inserted,
+          statusResponse?.recommendation_rows,
+          statusResponse?.rows,
+        ]
+          .map((value) => Number(value))
+          .find((value) => Number.isFinite(value));
 
         toast.update(toastId, {
-          render: scenario
+          render: Number.isFinite(scenario) && scenario > 0
             ? `LTE tilt recommendation completed. Scenario ${scenario} saved.`
             : "LTE tilt recommendation completed.",
           type: "success",
@@ -1330,40 +1412,29 @@ const UnifiedMapSidebar = ({
 
         lteTiltRecommendationToastIdRef.current = null;
 
-        const runRecommendationOptimizedFromPrompt = () => {
-          const defaultRadius =
+        if (!Number.isFinite(scenario) || scenario <= 0 || !Number.isFinite(savedRecommendationRows) || savedRecommendationRows <= 0) {
+          return;
+        }
+
+        const runRecommendationOptimizedFromCurrentInputs = () => {
+          const parsedRadius =
             Number(lteTiltRecommendationRadiusMeters) ||
             LTE_RECOMMENDATION_OPTIMIZED_DEFAULTS.radiusMeters;
-          const radiusInput = window.prompt(
-            "Enter radius for LTE prediction optimized (meters)",
-            String(defaultRadius),
-          );
-          if (radiusInput === null) {
-            return;
-          }
-          const parsedRadius = Number(radiusInput);
           if (!Number.isFinite(parsedRadius) || parsedRadius <= 0) {
             toast.error("LTE prediction optimized radius must be a positive number.");
             return;
           }
 
-          const defaultGrid =
+          const parsedGrid =
             Number(lteTiltRecommendationGridResolutionMeters) ||
             LTE_RECOMMENDATION_OPTIMIZED_DEFAULTS.gridResolutionMeters;
-          const gridInput = window.prompt(
-            "Enter grid resolution for LTE prediction optimized (meters)",
-            String(defaultGrid),
-          );
-          if (gridInput === null) {
-            return;
-          }
-          const parsedGrid = Number(gridInput);
           if (!Number.isFinite(parsedGrid) || parsedGrid <= 0) {
             toast.error("LTE prediction optimized grid resolution must be a positive number.");
             return;
           }
 
           startLteRecommendationOptimisedPrediction({
+            recommendationScenarioId: scenario,
             radiusMeters: parsedRadius,
             gridResolutionMeters: parsedGrid,
           });
@@ -1380,7 +1451,7 @@ const UnifiedMapSidebar = ({
                 type="button"
                 onClick={() => {
                   toast.dismiss(actionToastId);
-                  runRecommendationOptimizedFromPrompt();
+                  runRecommendationOptimizedFromCurrentInputs();
                 }}
                 className="rounded bg-cyan-600 px-2 py-1 text-xs font-semibold text-white hover:bg-cyan-500"
               >
@@ -1444,6 +1515,93 @@ const UnifiedMapSidebar = ({
     lteTiltRecommendationGridResolutionMeters,
   ]);
 
+  const compactDriveRowsForPython = useCallback((rows = []) => {
+    if (!Array.isArray(rows)) return [];
+    return rows
+      .map((row) => {
+        if (!row || typeof row !== "object") return null;
+        const lat = Number(row.lat ?? row.latitude ?? row.Lat ?? row.Latitude);
+        const lon = Number(row.lon ?? row.lng ?? row.longitude ?? row.Lng ?? row.Longitude);
+        if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
+        return {
+          lat,
+          lon,
+          latitude: lat,
+          longitude: lon,
+          rsrp: row.rsrp ?? row.RSRP ?? row.Rsrp ?? row.lte_rsrp ?? null,
+          rsrq: row.rsrq ?? row.RSRQ ?? row.Rsrq ?? row.lte_rsrq ?? null,
+          sinr: row.sinr ?? row.SINR ?? row.Sinr ?? row.snr ?? row.SNR ?? row.lte_sinr ?? null,
+          cell_id: row.cell_id ?? row.cellId ?? row.CellId ?? row["Cell ID"] ?? "",
+          nodeb_id: row.nodeb_id ?? row.node_b_id ?? row.NodeBId ?? row.NodebId ?? "",
+          pci: row.pci ?? row.PCI ?? row.Pci ?? "",
+          earfcn: row.earfcn ?? row.EARFCN ?? row.Earfcn ?? "",
+          session_id: row.session_id ?? row.sessionId ?? row.SessionId ?? "",
+          network: row.network ?? row.technology ?? row.Technology ?? "",
+          provider: row.provider ?? row.m_alpha_long ?? row.m_alpha_short ?? row.operator ?? "",
+          primary: row.primary ?? row.Primary ?? row.is_primary ?? "",
+        };
+      })
+      .filter(Boolean);
+  }, []);
+
+  const extractNetworkLogRows = useCallback((response) => {
+    const body = response?.data ?? response ?? {};
+    if (Array.isArray(body)) return body;
+    if (Array.isArray(body?.data)) return body.data;
+    if (Array.isArray(body?.Data)) return body.Data;
+    if (Array.isArray(body?.logs)) return body.logs;
+    if (body?.data && typeof body.data === "object") {
+      if (Array.isArray(body.data.data)) return body.data.data;
+      if (Array.isArray(body.data.Data)) return body.data.Data;
+    }
+    return [];
+  }, []);
+
+  const resolveNetworkLogsForPython = useCallback(async (validSessionIds, numericProjectId) => {
+    const cachedRows = compactDriveRowsForPython(
+      typeof getCachedNetworkLogsForPrediction === "function"
+        ? getCachedNetworkLogsForPrediction({
+            projectId: numericProjectId,
+            sessionIds: validSessionIds,
+          })
+        : [],
+    );
+    if (cachedRows.length > 0) {
+      console.info("[LTE_PREDICTION_INPUT] source=frontend_memory_cache rows=", cachedRows.length);
+      return { rows: cachedRows, source: "frontend_memory_cache" };
+    }
+
+    console.info("[LTE_PREDICTION_INPUT] source=frontend_memory_cache rows=0 fallback=MapView/GetNetworkLog");
+    const PAGE_SIZE = 50000;
+    const MAX_PAGES = 100;
+    const fallbackRows = [];
+    let totalCount = 0;
+    for (let page = 1; page <= MAX_PAGES; page += 1) {
+      const response = await mapViewApi.getNetworkLog({
+        session_ids: validSessionIds,
+        project_id: numericProjectId,
+        page,
+        limit: PAGE_SIZE,
+      });
+      const rows = extractNetworkLogRows(response);
+      if (page === 1) {
+        const body = response?.data ?? response ?? {};
+        totalCount = Number(body?.total_count ?? body?.totalCount ?? body?.TotalCount ?? rows.length) || rows.length;
+      }
+      fallbackRows.push(...rows);
+      if (rows.length < PAGE_SIZE || (totalCount > 0 && fallbackRows.length >= totalCount)) break;
+    }
+
+    const compactRows = compactDriveRowsForPython(fallbackRows);
+    console.info(
+      "[LTE_PREDICTION_INPUT] source=mapview_get_network_log rows=",
+      compactRows.length,
+      "raw_rows=",
+      fallbackRows.length,
+    );
+    return { rows: compactRows, source: "mapview_get_network_log" };
+  }, [compactDriveRowsForPython, extractNetworkLogRows, getCachedNetworkLogsForPrediction]);
+
   const handleRunLtePrediction = useCallback(async () => {
     if (!canRunPrediction) {
       toast.error("Prediction is disabled for your license.");
@@ -1475,6 +1633,19 @@ const UnifiedMapSidebar = ({
     ltePredictionToastIdRef.current = loadingToastId;
 
     try {
+      let driveRowsPayload = [];
+      let driveRowsSource = "python_backend_fallback";
+      try {
+        const resolvedDriveRows = await resolveNetworkLogsForPython(validSessionIds, numericProjectId);
+        driveRowsPayload = resolvedDriveRows.rows;
+        driveRowsSource = resolvedDriveRows.source;
+      } catch (logError) {
+        console.warn(
+          "[LTE_PREDICTION_INPUT] frontend log resolve failed; Python will use backend fallback",
+          logError,
+        );
+      }
+
       const response = await predictionApi.runLtePrediction({
         user_id: Number(user?.id) || 0,
         project_id: numericProjectId,
@@ -1482,6 +1653,10 @@ const UnifiedMapSidebar = ({
         grid_value: Number(lteGridSizeMeters) || 25,
         radius_m: Number(ltePredictionRadiusMeters) || 5000,
         building: Boolean(ltePredictionUseBuildings),
+        operator: ltePredictionOperator,
+        drive_rows: driveRowsPayload,
+        drive_rows_source: driveRowsSource,
+        polygon_ids: activePolygonIdsParam,
       });
 
       const jobId = response?.job_id || response?.jobId;
@@ -1537,8 +1712,11 @@ const UnifiedMapSidebar = ({
     lteGridSizeMeters,
     ltePredictionRadiusMeters,
     ltePredictionUseBuildings,
+    ltePredictionOperator,
+    resolveNetworkLogsForPython,
     stopLtePredictionMonitoring,
     pollLtePredictionStatus,
+    activePolygonIdsParam,
   ]);
 
   const handleRunLteOptimisedPrediction = useCallback(async () => {
@@ -1575,6 +1753,7 @@ const UnifiedMapSidebar = ({
         .filter((value) => value && value !== "all");
       const effectiveOperators =
         selectedOperators.length > 0 ? selectedOperators : fallbackOperators;
+      const selectedSitePredictionScenarioId = Number(sitePredictionScenarioId);
       const response = await predictionApi.runLteOptimisedPrediction({
         user_id: Number(user?.id) || 0,
         project_id: numericProjectId,
@@ -1582,6 +1761,11 @@ const UnifiedMapSidebar = ({
         radius: Number(ltePredictionRadiusMeters) || 5000,
         operator: effectiveOperators.length > 0 ? effectiveOperators.join(",") : "all",
         operators: effectiveOperators,
+        site_prediction_scenario_id:
+          Number.isFinite(selectedSitePredictionScenarioId) && selectedSitePredictionScenarioId > 0
+            ? selectedSitePredictionScenarioId
+            : undefined,
+        polygon_ids: activePolygonIdsParam,
       });
 
       const jobId = response?.job_id || response?.jobId;
@@ -1637,8 +1821,10 @@ const UnifiedMapSidebar = ({
     ltePredictionRadiusMeters,
     lteOptimisedSelectedOperators,
     lteOptimisedOperatorOptions,
+    sitePredictionScenarioId,
     stopLteOptimisedPredictionMonitoring,
     pollLteOptimisedPredictionStatus,
+    activePolygonIdsParam,
   ]);
 
   const handleRunLteTiltRecommendation = useCallback(async () => {
@@ -1683,6 +1869,24 @@ const UnifiedMapSidebar = ({
         sinr_weight: Number.isFinite(Number(lteTiltRecommendationSinrWeight))
           ? Number(lteTiltRecommendationSinrWeight)
           : 60,
+        validate_candidates: true,
+        radius_m:
+          Number(lteTiltRecommendationRadiusMeters) ||
+          LTE_RECOMMENDATION_OPTIMIZED_DEFAULTS.radiusMeters,
+        grid_resolution_m:
+          Number(lteTiltRecommendationGridResolutionMeters) ||
+          LTE_RECOMMENDATION_OPTIMIZED_DEFAULTS.gridResolutionMeters,
+        n_workers: 3,
+        impact_radius_m:
+          Number(lteTiltRecommendationRadiusMeters) ||
+          LTE_RECOMMENDATION_OPTIMIZED_DEFAULTS.radiusMeters,
+        neighbor_site_count: 2,
+        max_interference_sites: 10,
+        candidate_workers: 2,
+        coordinate_passes: 2,
+        bad_grid_coverage_pct: 60,
+        max_group_cells: 0,
+        max_neighbors_per_update_cell: 2,
         threshold_file: lteTiltRecommendationFile || undefined,
       });
 
@@ -1743,6 +1947,8 @@ const UnifiedMapSidebar = ({
     lteTiltRecommendationRsrpWeight,
     lteTiltRecommendationRsrqWeight,
     lteTiltRecommendationSinrWeight,
+    lteTiltRecommendationRadiusMeters,
+    lteTiltRecommendationGridResolutionMeters,
     lteTiltRecommendationFile,
     stopLteTiltRecommendationMonitoring,
     pollLteTiltRecommendationStatus,
@@ -2528,21 +2734,7 @@ const UnifiedMapSidebar = ({
           <CollapsibleSection title="Site & Prediction" icon={Radio}>
             {enableSiteToggle && (
               <>
-                <div className="pt-2">
-                  <Button
-                    type="button"
-                    onClick={handleFetchSiteLayerData}
-                    disabled={loading}
-                    className="w-full h-8 text-xs font-semibold bg-cyan-600 hover:bg-cyan-500"
-                  >
-                    <RefreshCw className={`h-3.5 w-3.5 mr-2 ${loading ? "animate-spin" : ""}`} />
-                    {loading
-                      ? "Fetching..."
-                      : String(siteToggle || "").trim().toLowerCase() === "cell"
-                        ? "Fetch Triangle Data"
-                        : "Fetch Site Data"}
-                  </Button>
-                </div>
+                
                 <div className="grid grid-cols-3 gap-2">
                   <SelectRow
                     className="pt-2"
@@ -2703,6 +2895,15 @@ const UnifiedMapSidebar = ({
                           <Label className="text-xs font-semibold text-blue-400 flex items-center gap-1">
                             <Radio className="w-3 h-3" /> Baseline LTE Prediction
                           </Label>
+
+                          <SelectRow
+                            label="Provider"
+                            value={ltePredictionOperator}
+                            onChange={setLtePredictionOperator}
+                            options={ltePredictionOperatorOptions}
+                            placeholder="Select provider"
+                            disabled={!canRunPrediction || isRunningLtePrediction}
+                          />
                         
                           <div className="pt-1 bg-slate-800/60 rounded-lg p-2">
                             <div className="flex items-center justify-between text-xs mb-2">
@@ -2985,7 +3186,10 @@ const UnifiedMapSidebar = ({
                           {Array.isArray(storedGridScenarioOptions) &&
                           storedGridScenarioOptions.length > 0 ? (
                             storedGridScenarioOptions.map((item) => {
-                              const scenarioId = Number(item?.scenario_id);
+                              const scenarioId = getStoredGridPublicScenarioId(item);
+                              const internalScenarioId = Number(
+                                item?.internal_scenario_id ?? item?.internalScenarioId,
+                              );
                               const isSelected =
                                 Number.isFinite(scenarioId) &&
                                 Number(storedGridScenarioId) === scenarioId;
@@ -3008,7 +3212,11 @@ const UnifiedMapSidebar = ({
                                     type="button"
                                     onClick={() => onDeleteStoredGridScenario?.(scenarioId)}
                                     className="h-6 w-6 rounded bg-red-600/90 hover:bg-red-500 text-white inline-flex items-center justify-center"
-                                    title={`Delete Scenario ${scenarioId}`}
+                                    title={
+                                      Number.isFinite(internalScenarioId) && internalScenarioId > 0
+                                        ? `Delete Scenario ${scenarioId}`
+                                        : `Delete Scenario ${scenarioId}`
+                                    }
                                   >
                                     <Trash2 className="h-3.5 w-3.5" />
                                   </button>

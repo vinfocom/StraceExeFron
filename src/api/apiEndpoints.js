@@ -595,8 +595,30 @@ export const predictionApi = {
         building: params.building ?? true
       };
 
+      const operatorValue = String(params.operator || "").trim();
+      if (operatorValue && operatorValue.toLowerCase() !== "auto" && operatorValue.toLowerCase() !== "all") {
+        payload.operator = operatorValue;
+      }
+
+      if (Array.isArray(params.drive_rows) && params.drive_rows.length > 0) {
+        payload.drive_rows = params.drive_rows;
+        payload.drive_rows_source = params.drive_rows_source || "frontend_memory_cache";
+        console.info("[LTE_PREDICTION_INPUT] sending drive_rows to Python", {
+          source: payload.drive_rows_source,
+          rows: payload.drive_rows.length,
+        });
+      } else {
+        payload.drive_rows_source = params.drive_rows_source || "python_backend_fallback";
+        console.info("[LTE_PREDICTION_INPUT] no frontend drive_rows; Python fallback will be used", {
+          source: payload.drive_rows_source,
+        });
+      }
+
       if (Array.isArray(params.polygon_area) && params.polygon_area.length >= 3) {
         payload.polygon_area = params.polygon_area;
+      }
+      if (params.polygon_ids) {
+        payload.polygon_ids = params.polygon_ids;
       }
 
       const response = await pythonApi.post("/api/lte-prediction/run", payload, {
@@ -641,6 +663,16 @@ export const predictionApi = {
         operator: operatorValue,
         operators: operatorValue ? [operatorValue] : [],
       };
+      if (params.polygon_ids) {
+        payload.polygon_ids = params.polygon_ids;
+      }
+      const sitePredictionScenarioId = Number(
+        params.site_prediction_scenario_id ?? params.sitePredictionScenarioId ?? params.scenario,
+      );
+      if (Number.isFinite(sitePredictionScenarioId) && sitePredictionScenarioId > 0) {
+        payload.site_prediction_scenario_id = sitePredictionScenarioId;
+        payload.scenario = sitePredictionScenarioId;
+      }
 
       const response = await postWithRouteFallback(
         [
@@ -715,6 +747,9 @@ export const predictionApi = {
       if (operatorValue && operatorValue.toLowerCase() !== "all") {
         payload.operator = operatorValue;
       }
+      if (params.polygon_ids) {
+        payload.polygon_ids = params.polygon_ids;
+      }
 
       const recommendationScenarioId = Number(params.recommendation_scenario_id);
       if (Number.isFinite(recommendationScenarioId) && recommendationScenarioId > 0) {
@@ -756,11 +791,32 @@ export const predictionApi = {
             .filter((value) => Number.isFinite(value) && value > 0)
         : [];
       const hasFile = params.threshold_file instanceof File;
-      const optionalNumericFields = [
+      const optionalFieldKeys = [
+        "region",
         "rsrp_weight",
         "rsrq_weight",
         "sinr_weight",
+        "validate_candidates",
+        "radius_m",
+        "grid_resolution_m",
+        "n_workers",
+        "impact_radius_m",
+        "neighbor_site_count",
+        "max_interference_sites",
+        "candidate_workers",
+        "coordinate_passes",
+        "bad_grid_coverage_pct",
+        "max_group_cells",
+        "max_neighbors_per_update_cell",
+        "threshold_file_path",
       ];
+      const copyOptionalFields = (target) => {
+        optionalFieldKeys.forEach((key) => {
+          if (params[key] !== undefined && params[key] !== null && params[key] !== "") {
+            target[key] = params[key];
+          }
+        });
+      };
 
       if (hasFile) {
         const formData = new FormData();
@@ -780,12 +836,24 @@ export const predictionApi = {
         if (params.sinr !== undefined && params.sinr !== null && params.sinr !== "") {
           formData.append("sinr", String(Number(params.sinr)));
         }
-        optionalNumericFields.forEach((key) => {
+        optionalFieldKeys.forEach((key) => {
           if (params[key] !== undefined && params[key] !== null && params[key] !== "") {
-            formData.append(key, String(Number(params[key])));
+            formData.append(key, String(params[key]));
           }
         });
         formData.append("threshold_file", params.threshold_file);
+
+        const debugPayload = {
+          project_id: params.project_id,
+          operator: operator || undefined,
+          session_ids: validSessionIds,
+          rsrp: params.rsrp,
+          rsrq: params.rsrq,
+          sinr: params.sinr,
+          threshold_file: params.threshold_file?.name,
+        };
+        copyOptionalFields(debugPayload);
+        console.info("[LTE_TILT_RECOMMENDATION] POST /api/lte-tilt-recommandation/optimize", debugPayload);
 
         return await postWithRouteFallback(
           [
@@ -816,11 +884,9 @@ export const predictionApi = {
       if (params.sinr !== undefined && params.sinr !== null && params.sinr !== "") {
         payload.sinr = Number(params.sinr);
       }
-      optionalNumericFields.forEach((key) => {
-        if (params[key] !== undefined && params[key] !== null && params[key] !== "") {
-          payload[key] = Number(params[key]);
-        }
-      });
+      copyOptionalFields(payload);
+
+      console.info("[LTE_TILT_RECOMMENDATION] POST /api/lte-tilt-recommandation/optimize", payload);
 
       return await postWithRouteFallback(
         [

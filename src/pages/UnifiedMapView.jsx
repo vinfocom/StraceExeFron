@@ -371,6 +371,92 @@ const buildIndoorOutdoorFromLogs = (logs = []) => {
   return { indoor, outdoor };
 };
 
+const readLogTimestampMs = (loc) => {
+  const raw =
+    loc?.timestamp ??
+    loc?.Timestamp ??
+    loc?.time_stamp ??
+    loc?.timeStamp ??
+    loc?.log_time ??
+    loc?.logTime;
+  if (!raw) return null;
+  const parsed = new Date(raw).getTime();
+  return Number.isFinite(parsed) ? parsed : null;
+};
+
+const readLogSessionKey = (loc) => {
+  const value = loc?.session_id ?? loc?.sessionId ?? loc?.SessionId ?? loc?.sessionID;
+  const key = String(value ?? "").trim();
+  return key || null;
+};
+
+const formatDurationClock = (seconds) => {
+  const total = Math.max(0, Math.floor(Number(seconds) || 0));
+  const hours = Math.floor(total / 3600);
+  const minutes = Math.floor((total % 3600) / 60);
+  const secs = total % 60;
+  return [hours, minutes, secs]
+    .map((part) => String(part).padStart(2, "0"))
+    .join(":");
+};
+
+const buildDurationRowsFromNetworkLogs = (logs = []) => {
+  if (!Array.isArray(logs) || logs.length < 2) return [];
+
+  const orderedLogs = logs
+    .map((loc, index) => ({
+      loc,
+      index,
+      sessionKey: readLogSessionKey(loc),
+      timestampMs: readLogTimestampMs(loc),
+    }))
+    .filter((entry) => entry.sessionKey && Number.isFinite(entry.timestampMs))
+    .sort((a, b) => {
+      const sessionDiff = String(a.sessionKey).localeCompare(String(b.sessionKey));
+      if (sessionDiff !== 0) return sessionDiff;
+      if (a.timestampMs !== b.timestampMs) return a.timestampMs - b.timestampMs;
+      return a.index - b.index;
+    });
+
+  const totals = new Map();
+
+  for (let i = 0; i < orderedLogs.length - 1; i += 1) {
+    const current = orderedLogs[i];
+    const next = orderedLogs[i + 1];
+    if (current.sessionKey !== next.sessionKey) continue;
+
+    const diffSeconds = (next.timestampMs - current.timestampMs) / 1000;
+    if (diffSeconds <= 0 || diffSeconds > 3600) continue;
+
+    const row = current.loc || {};
+    const provider = normalizeProviderName(
+      row?.provider ?? row?.Provider ?? row?.m_alpha_long ?? row?.operator ?? row?.Operator ?? "",
+    );
+    const networkType = normalizeTechName(
+      row?.technology ?? row?.Technology ?? row?.networkType ?? row?.network ?? row?.Network ?? "",
+      row?.band ?? row?.Band ?? row?.primaryBand,
+    );
+
+    if (!provider || String(provider).trim().toLowerCase() === "unknown") continue;
+    if (!networkType || String(networkType).trim().toLowerCase() === "unknown") continue;
+
+    const key = `${provider}|${networkType}`;
+    totals.set(key, (totals.get(key) || 0) + diffSeconds);
+  }
+
+  return Array.from(totals.entries())
+    .map(([key, seconds]) => {
+      const [provider, networkType] = key.split("|");
+      return {
+        provider,
+        networkType,
+        timeSeconds: Math.round(seconds * 100) / 100,
+        totaltime: formatDurationClock(seconds),
+      };
+    })
+    .sort((a, b) => b.timeSeconds - a.timeSeconds);
+};
+
 const areCentersEqual = (a, b, tolerance = 1e-7) => {
   if (!a || !b) return false;
   return (
@@ -1591,6 +1677,39 @@ const UnifiedMapView = () => {
     setManualSiteDataReady(true);
   }, []);
 
+  const handleSitePredictionScenarioSaved = useCallback((scenario) => {
+    const scenarioId = Number(scenario);
+    if (!Number.isFinite(scenarioId) || scenarioId <= 0) return;
+
+    setSitePredictionVersion("updated");
+    setSitePredictionScenarioId(scenarioId);
+    setSitePredictionScenarioOptions((prev) => {
+      const current = Array.isArray(prev) ? prev : [];
+      const exists = current.some((item) => Number(item?.scenario_id) === scenarioId);
+      const next = exists
+        ? current.map((item) =>
+            Number(item?.scenario_id) === scenarioId
+              ? {
+                  ...item,
+                  scenario_id: scenarioId,
+                  scenario_name: item?.scenario_name || `Scenario ${scenarioId}`,
+                  status: item?.status || "updated",
+                }
+              : item,
+          )
+        : [
+            ...current,
+            {
+              scenario_id: scenarioId,
+              scenario_name: `Scenario ${scenarioId}`,
+              status: "updated",
+            },
+          ];
+
+      return next.sort((a, b) => Number(a?.scenario_id) - Number(b?.scenario_id));
+    });
+  }, []);
+
   const handleSiteLegendColorChange = useCallback((item, color) => {
     const mode = String(item?.mode || "").trim().toLowerCase();
     const value = String(item?.value ?? item?.label ?? "").trim().toLowerCase();
@@ -2050,6 +2169,40 @@ const UnifiedMapView = () => {
     ? fetchedSamples
     : (hasPassedLocations ? passedLocations : fetchedSamples);
 
+  const getCachedNetworkLogsForPrediction = useCallback(
+    ({ projectId: requestedProjectId, sessionIds: requestedSessionIds } = {}) => {
+      const requestedKey = (Array.isArray(requestedSessionIds) ? requestedSessionIds : [])
+        .map((value) => Number(value))
+        .filter((value) => Number.isFinite(value) && value > 0)
+        .sort((a, b) => a - b)
+        .join(",");
+      const currentKey = (Array.isArray(sessionIds) ? sessionIds : [])
+        .map((value) => Number(value))
+        .filter((value) => Number.isFinite(value) && value > 0)
+        .sort((a, b) => a - b)
+        .join(",");
+      const sameProject = String(requestedProjectId ?? "") === String(projectId ?? "");
+      const cacheRows = Array.isArray(fetchedSamples) ? fetchedSamples : [];
+      if (sameProject && requestedKey && requestedKey === currentKey && cacheRows.length > 0) {
+        console.info("[LTE_PREDICTION_INPUT] UnifiedMapView memory cache hit", {
+          projectId: requestedProjectId,
+          sessionIds: requestedKey,
+          rows: cacheRows.length,
+        });
+        return cacheRows;
+      }
+      console.info("[LTE_PREDICTION_INPUT] UnifiedMapView memory cache miss", {
+        requestedProjectId,
+        currentProjectId: projectId,
+        requestedSessionIds: requestedKey,
+        currentSessionIds: currentKey,
+        rows: cacheRows.length,
+      });
+      return [];
+    },
+    [fetchedSamples, projectId, sessionIds],
+  );
+
   const isDataPredictionMode = enableDataToggle && dataToggle === "prediction";
   const isSitePredictionMode =
     enableSiteToggle && siteToggle === "sites-prediction";
@@ -2217,7 +2370,7 @@ const UnifiedMapView = () => {
               : [];
         const options = rows
           .map((row) => ({
-            scenario_id: Number(row?.scenario_id ?? row?.id ?? 0),
+            scenario_id: Number(row?.public_scenario_id ?? row?.publicScenarioId ?? row?.scenario_id ?? row?.id ?? 0),
             scenario_name: String(row?.scenario_name ?? row?.name ?? "").trim(),
             status: String(row?.status || "").trim(),
             created_at: row?.created_at || null,
@@ -2280,7 +2433,7 @@ const UnifiedMapView = () => {
             : [];
       const options = rows
         .map((row) => ({
-          scenario_id: Number(row?.scenario_id ?? row?.id ?? 0),
+          scenario_id: Number(row?.public_scenario_id ?? row?.publicScenarioId ?? row?.scenario_id ?? row?.id ?? 0),
           scenario_name: String(row?.scenario_name ?? row?.name ?? "").trim(),
           status: String(row?.status || "").trim(),
           created_at: row?.created_at || null,
@@ -2919,8 +3072,8 @@ const UnifiedMapView = () => {
     projectId,
     sessionIds,
     autoFetch: true,
-    filterEnabled: false,
-    polygons: EMPTY_POLYGONS,
+    filterEnabled: siteLayerPolygonFiltering,
+    polygons: siteLayerPolygonFiltering ? rawFilteringPolygons : EMPTY_POLYGONS,
   });
   const handleDeleteSitePredictionScenario = useCallback(async (scenarioIdFromRow = null) => {
     const numericProjectId = Number(projectId);
@@ -3004,36 +3157,7 @@ const UnifiedMapView = () => {
 
   const allNeighbors = rawAllNeighbors || [];
 
-  // Effect hooks for duration, distance, and IO — each with active guards to prevent stale state updates
-  useEffect(() => {
-    if (!sessionIds?.length) return;
-    let active = true;
-    const fetchDuration = async () => {
-      try {
-        const res = await mapViewApi.getDuration({
-          sessionIds: sessionIds.join(","),
-        });
-        if (!active) return;
-        const dataArray = res?.Data || res?.data?.data || res?.data || [];
-        if (Array.isArray(dataArray)) {
-          setDurationTime(
-            dataArray.map((item) => ({
-              provider: normalizeProviderName(item.Provider || item.provider || ""),
-              networkType: normalizeTechName(item.Network || item.network || ""),
-              totaltime: item.TotalDurationHours
-                ? `${item.TotalDurationHours.toFixed(2)} hrs`
-                : item.timeReadable || "0s",
-            })),
-          );
-        }
-      } catch (err) {
-        if (active) console.error("Failed to fetch duration data", err);
-      }
-    };
-    fetchDuration();
-    return () => { active = false; };
-  }, [sessionIds]);
-
+  // Effect hooks for distance and IO — each with active guards to prevent stale state updates
   useEffect(() => {
     if (!sessionIds?.length) return;
     let active = true;
@@ -3270,6 +3394,14 @@ const UnifiedMapView = () => {
     filteringPolygonChecker,
   ]);
 
+  useEffect(() => {
+    if (!sessionIds?.length || !Array.isArray(locations) || locations.length < 2) {
+      setDurationTime([]);
+      return;
+    }
+    setDurationTime(buildDurationRowsFromNetworkLogs(locations));
+  }, [locations, sessionIds]);
+
  
   const isLoading =
     (shouldFetchSamples && sampleLoading) ||
@@ -3387,15 +3519,6 @@ const UnifiedMapView = () => {
       if (providerName && !isUnknownOption(providerName)) {
         providers.add(providerName);
       }
-      if (n.networkType) {
-        const technologyName = normalizeTechName(
-          n.networkType,
-          n.neighbourBand,
-        );
-        if (technologyName && !isUnknownOption(technologyName)) {
-          technologies.add(technologyName);
-        }
-      }
     });
 
     return {
@@ -3508,7 +3631,12 @@ const UnifiedMapView = () => {
       result = result.filter((l) => bands.includes(String(l.band)));
     if (technologies?.length)
       result = result.filter((l) =>
-        technologies.includes(normalizeTechName(l.technology)),
+        technologies.includes(
+          normalizeTechName(
+            l?.technology ?? l?.networkType ?? l?.network ?? "",
+            l?.band ?? l?.Band,
+          ),
+        ),
       );
     if (cellIds?.length)
       result = result.filter((l) =>
@@ -5246,7 +5374,9 @@ const UnifiedMapView = () => {
           return false;
         if (
           hasTechFilter &&
-          !technologies.includes(normalizeTechName(item.networkType))
+          !technologies.includes(
+            normalizeTechName(item?.networkType ?? item?.network ?? "", item?.neighbourBand ?? item?.primaryBand),
+          )
         )
           return false;
         if (hasBandFilter) {
@@ -5730,6 +5860,7 @@ const UnifiedMapView = () => {
         setSiteToggle={setSiteToggle}
         projectId={projectId}
         sessionIds={sessionIds}
+        getCachedNetworkLogsForPrediction={getCachedNetworkLogsForPrediction}
         metric={selectedMetric}
         setMetric={setSelectedMetric}
         coverageHoleFilters={coverageHoleFilters}
@@ -5761,6 +5892,7 @@ const UnifiedMapView = () => {
         setLtePredictionUseBuildings={setLtePredictionUseBuildings}
         onlyInsidePolygons={onlyInsidePolygons}
         polygonCount={polygons?.length || 0}
+        filterPolygons={rawFilteringPolygons}
         showSiteMarkers={showSiteMarkers}
         setShowSiteMarkers={setShowSiteMarkers}
         showSiteSectors={showSiteSectors}
@@ -6089,6 +6221,7 @@ const UnifiedMapView = () => {
                   hoveredLog={hoveredLog}
                   locations={finalDisplayLocations}
                   onDataLoaded={handleSitesLoaded}
+                  onSitePredictionScenarioSaved={handleSitePredictionScenarioSaved}
                   colorMode={siteLegendColorMode}
                   siteLabelField={siteLabelField}
                   viewport={viewport}

@@ -8,7 +8,7 @@ import {
   writeProjectSessionCache,
 } from '@/utils/projectSessionCache';
 
-const SITE_PREDICTION_PAGE_SIZE = 2000;
+const SITE_PREDICTION_PAGE_SIZE = 50000;
 const MAX_SITE_PREDICTION_PAGES = 200;
 const SITE_DATA_CACHE_MAX_AGE_MS = 2 * 60 * 1000;
 const CACHEABLE_SITE_TOGGLES = new Set(["NoML", "ML"]);
@@ -133,9 +133,15 @@ const getSitePredictionRowKey = (row = {}, index = 0) =>
     index,
   ].join("|");
 
+const nowMs = () =>
+  typeof performance !== "undefined" && typeof performance.now === "function"
+    ? performance.now()
+    : Date.now();
+
 const fetchAllSitePredictionRows = async (params = {}) => {
   const aggregatedRows = [];
   const seenRows = new Set();
+  const totalStartMs = nowMs();
 
   let page = 1;
   let totalPagesHint = null;
@@ -143,14 +149,32 @@ const fetchAllSitePredictionRows = async (params = {}) => {
 
   while (page <= MAX_SITE_PREDICTION_PAGES) {
     const offset = (page - 1) * SITE_PREDICTION_PAGE_SIZE;
-    const response = await sitePredictionApi.get({
+    const requestParams = {
       ...params,
       offset,
       limit: SITE_PREDICTION_PAGE_SIZE,
       simple: 1,
-    });
+    };
+    const pageStartMs = nowMs();
+    const response = await sitePredictionApi.get(requestParams);
+    const pageElapsedMs = nowMs() - pageStartMs;
 
     const pageRows = extractRowsFromResponse(response);
+    console.info(
+      "[SITE_PREDICTION_TIMING]",
+      {
+        endpoint: "GetSitePrediction",
+        projectId: requestParams.projectId,
+        version: requestParams.version,
+        page,
+        offset,
+        limit: SITE_PREDICTION_PAGE_SIZE,
+        rows: pageRows.length,
+        accumulatedRows: aggregatedRows.length + pageRows.length,
+        elapsedMs: Math.round(pageElapsedMs),
+        polygonIds: requestParams.polygon_ids || "all",
+      },
+    );
     if (pageRows.length === 0) break;
 
     let addedThisPage = 0;
@@ -175,6 +199,19 @@ const fetchAllSitePredictionRows = async (params = {}) => {
 
     page += 1;
   }
+
+  console.info(
+    "[SITE_PREDICTION_TIMING_TOTAL]",
+    {
+      endpoint: "GetSitePrediction",
+      projectId: params.projectId,
+      version: params.version,
+      rows: aggregatedRows.length,
+      pages: page,
+      elapsedMs: Math.round(nowMs() - totalStartMs),
+      polygonIds: params.polygon_ids || "all",
+    },
+  );
 
   return aggregatedRows;
 };

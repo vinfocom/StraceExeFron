@@ -239,6 +239,36 @@ function extractNodebId(source) {
   ]);
 }
 
+function extractStrictNodebId(source) {
+  return extractMatchValue(source, [
+    "node_id",
+    "nodeId",
+    "nodeID",
+    "node",
+    "Node",
+    "NodeID",
+    "NodeId",
+    "node_b",
+    "nodeB",
+    "nodeb_id",
+    "nodebId",
+    "nodeb",
+    "NodeB",
+    "NodeBId",
+    "NodeB_ID",
+    "Node_B",
+    "Node_B_ID",
+    "eNodeB",
+    "enodeb",
+    "enodeb_id",
+    "e_nodeb",
+    "gNodeB",
+    "gnodeb",
+    "gnodeb_id",
+    "g_nodeb",
+  ]);
+}
+
 function extractPciValue(source) {
   return extractMatchValue(source, [
     "pci",
@@ -1265,6 +1295,7 @@ const NetworkPlannerMap = ({
   siteToggle = "NoML",
   sitePredictionVersion = "original",
   sitePredictionScenarioId = null,
+  onSitePredictionScenarioSaved = null,
   defaultBeamwidth = 30,
   enableSiteToggle = true,
   showSiteMarkers = true,
@@ -1302,6 +1333,19 @@ const NetworkPlannerMap = ({
     polygons: filterPolygons,
   });
 
+  const activePolygonIdsParam = useMemo(() => {
+    if (!onlyInsidePolygons || !Array.isArray(filterPolygons)) return undefined;
+    const ids = filterPolygons
+      .map((poly) => Number(poly?.id ?? poly?.polygon_id ?? poly?.polygonId))
+      .filter((id) => Number.isFinite(id) && id > 0);
+    return ids.length > 0 ? Array.from(new Set(ids)).join(",") : undefined;
+  }, [filterPolygons, onlyInsidePolygons]);
+
+  const activeSitePredictionScenarioId = useMemo(() => {
+    const scenarioId = Number(sitePredictionScenarioId);
+    return Number.isFinite(scenarioId) && scenarioId > 0 ? scenarioId : null;
+  }, [sitePredictionScenarioId]);
+
   const polygonRefs = useRef(new Set());
   const markerRefs = useRef(new Set());
   const polylineRefs = useRef(new Set());
@@ -1327,6 +1371,18 @@ const NetworkPlannerMap = ({
     const zoom = map?.getZoom?.();
     return Number.isFinite(zoom) ? zoom : 13;
   });
+
+  useEffect(() => {
+    setSelectedSectorInfo(null);
+    setLoadingSectorDetailsKey(null);
+    setSectorOverridesByRenderKey({});
+    setSectorPredictionRowsByRenderKey({});
+    setSelectedSiteIds([]);
+    setSelectedSiteDataById({});
+    siteFetchTokenRef.current = {};
+    if (onSiteSelect) onSiteSelect([]);
+  }, [activeSitePredictionScenarioId, onSiteSelect, projectId, sitePredictionVersion]);
+
   const effectiveSectorScale = useMemo(() => {
     const baseScaleRaw = Number(options?.scale);
     const baseScale =
@@ -1415,6 +1471,10 @@ const NetworkPlannerMap = ({
           : `${scenarioLabel} saved.`,
       );
 
+      if (Number.isFinite(scenario) && scenario > 0) {
+        onSitePredictionScenarioSaved?.(scenario);
+      }
+
       setPendingScenarioUpdatesByKey({});
       clearUnifiedSiteDataCache();
       await fetchSiteData(true);
@@ -1423,7 +1483,7 @@ const NetworkPlannerMap = ({
     } finally {
       setIsSavingScenarioUpdates(false);
     }
-  }, [pendingScenarioUpdates, clearUnifiedSiteDataCache, fetchSiteData]);
+  }, [pendingScenarioUpdates, clearUnifiedSiteDataCache, fetchSiteData, onSitePredictionScenarioSaved]);
 
   const normalizedPolygonPaths = useMemo(() => {
     if (!Array.isArray(filterPolygons) || filterPolygons.length === 0) return [];
@@ -1585,7 +1645,7 @@ const NetworkPlannerMap = ({
     setSectorOverridesByRenderKey({});
     setLoadingSectorDetailsKey(null);
     setSectorPredictionRowsByRenderKey({});
-  }, [projectId, siteToggle, sitePredictionVersion]);
+  }, [activePolygonIdsParam, projectId, siteToggle, sitePredictionVersion]);
 
   useEffect(() => {
     return () => {
@@ -1740,7 +1800,16 @@ const NetworkPlannerMap = ({
           finalRows: 0,
         },
       };
-      const baseParams = { projectId: projectId || "", version: normalizedVersion };
+      const baseParams = {
+        projectId: projectId || "",
+        version: normalizedVersion,
+        polygon_ids: activePolygonIdsParam,
+      };
+      if (activeSitePredictionScenarioId && normalizedVersion !== "original") {
+        baseParams.scenario = activeSitePredictionScenarioId;
+        baseParams.scenario_id = activeSitePredictionScenarioId;
+        baseParams.site_prediction_scenario_id = activeSitePredictionScenarioId;
+      }
       const candidateParams = [
         { ...baseParams, siteId: siteMarker.siteId },
         { ...baseParams, site_id: siteMarker.siteId },
@@ -1755,8 +1824,27 @@ const NetworkPlannerMap = ({
       if (shouldUseLegacySitePredictionApi) {
         for (const params of candidateParams) {
           try {
+            const requestStartMs =
+              typeof performance !== "undefined" && typeof performance.now === "function"
+                ? performance.now()
+                : Date.now();
             const res = await sitePredictionApi.get(params);
             const rawRows = res?.Data || res?.data?.Data || res?.data || [];
+            const elapsedMs =
+              (typeof performance !== "undefined" && typeof performance.now === "function"
+                ? performance.now()
+                : Date.now()) - requestStartMs;
+            console.info("[SITE_PREDICTION_TIMING]", {
+              endpoint: "GetSitePrediction",
+              scope: "site-detail",
+              projectId: params.projectId,
+              version: params.version,
+              siteId: siteMarker?.siteId,
+              rows: Array.isArray(rawRows) ? rawRows.length : 0,
+              elapsedMs: Math.round(elapsedMs),
+              polygonIds: params.polygon_ids || "all",
+              scenario: params.scenario || "none",
+            });
             const normalizedAll = normalizeSiteRows(rawRows, {
               defaultBeamwidth,
             });
@@ -1904,6 +1992,8 @@ const NetworkPlannerMap = ({
       return { sectors, lteRows, debug };
     },
     [
+      activePolygonIdsParam,
+      activeSitePredictionScenarioId,
       projectId,
       sitePredictionVersion,
       defaultBeamwidth,
@@ -1928,6 +2018,8 @@ const NetworkPlannerMap = ({
       const versionKey =
         rawVersion === "updated" ? "updated" : rawVersion === "delta" ? "delta" : "original";
       const overlayKey = enableSiteLteOverlay ? "site-lte-on" : "site-lte-off";
+      const polygonKey = activePolygonIdsParam || "all-polygons";
+      const scenarioKey = activeSitePredictionScenarioId || "no-scenario";
       const cached = selectedSiteDataById[siteId];
       if (
         !forceRefresh &&
@@ -1936,7 +2028,9 @@ const NetworkPlannerMap = ({
         cached.colorMode === colorMode &&
         cached.siteSectorColorField === siteSectorColorField &&
         cached.versionKey === versionKey &&
-        cached.overlayKey === overlayKey
+        cached.overlayKey === overlayKey &&
+        cached.polygonKey === polygonKey &&
+        cached.scenarioKey === scenarioKey
       ) {
         return;
       }
@@ -1965,6 +2059,8 @@ const NetworkPlannerMap = ({
             siteSectorColorField,
             versionKey,
             overlayKey,
+            polygonKey,
+            scenarioKey,
             hydrated: true,
             debug,
           },
@@ -1990,6 +2086,8 @@ const NetworkPlannerMap = ({
       selectedSiteDataById,
       sitePredictionVersion,
       enableSiteLteOverlay,
+      activePolygonIdsParam,
+      activeSitePredictionScenarioId,
     ],
   );
 
@@ -2493,13 +2591,11 @@ const NetworkPlannerMap = ({
           "",
       ).trim();
       const optimizedNodeBId = String(
-        nextSector.siteId ??
-          nextSector.rawSite?.site_id ??
-          nextSector.rawSite?.siteId ??
-          nextSector.nodebId ??
+        nextSector.nodebId ??
+          extractStrictNodebId(nextSector) ??
+          extractStrictNodebId(nextSector.rawSite) ??
           nextSector.rawSite?.node_b_id ??
           nextSector.rawSite?.nodeb_id ??
-          extractNodebId(nextSector.rawSite) ??
           "",
       ).trim();
       const optimizedCellId = String(sectorValueForLookup || fallbackCellId || "").trim();
@@ -2543,7 +2639,8 @@ const NetworkPlannerMap = ({
       const shouldUseOptimizedApi =
         normalizedVersion === "updated" ||
         (normalizedVersion === "delta" &&
-          (deltaVariant === "optimized" || deltaVariant === "optimised"));
+          (deltaVariant === "optimized" || deltaVariant === "optimised")) ||
+        (activeSitePredictionScenarioId && (nextSector.isUpdated || deltaVariant === "updated"));
 
       setLoadingSectorDetailsKey(nextSector.renderKey || null);
       try {
@@ -2557,11 +2654,35 @@ const NetworkPlannerMap = ({
         // Primary path: query by project_id + combined cell_id (node_b_cell_id format),
         // using optimised endpoint that reads from two tables.
         for (const candidate of lookupCandidates) {
+          const requestStartMs =
+            typeof performance !== "undefined" && typeof performance.now === "function"
+              ? performance.now()
+              : Date.now();
           const response = await sitePredictionApi.getOptimised({
             project_id: projectId,
+            node_b_id: optimizedNodeBId || undefined,
             cell_id: candidate || undefined,
+            polygon_ids: activePolygonIdsParam,
+            scenario: activeSitePredictionScenarioId || undefined,
+            scenario_id: activeSitePredictionScenarioId || undefined,
+            site_prediction_scenario_id: activeSitePredictionScenarioId || undefined,
           });
           const extractedRows = extractRowsFromApiResponse(response);
+          const elapsedMs =
+            (typeof performance !== "undefined" && typeof performance.now === "function"
+              ? performance.now()
+              : Date.now()) - requestStartMs;
+          console.info("[SITE_PREDICTION_TIMING]", {
+            endpoint: "GetSitePredictionOptimised",
+            scope: "sector-detail",
+            projectId,
+            cellId: candidate,
+            rows: Array.isArray(extractedRows) ? extractedRows.length : 0,
+            elapsedMs: Math.round(elapsedMs),
+            polygonIds: activePolygonIdsParam || "all",
+            scenario: activeSitePredictionScenarioId || "none",
+            allowBaselineFallback: shouldUseOptimizedApi,
+          });
           if (Array.isArray(extractedRows) && extractedRows.length > 0) {
             rows = extractedRows;
             resolvedLookupValue = candidate;
@@ -2572,11 +2693,30 @@ const NetworkPlannerMap = ({
         // Compatibility fallback for original mode: baseline table endpoint by cell id only.
         if (rows.length === 0 && !shouldUseOptimizedApi) {
           for (const candidate of lookupCandidates) {
+            const requestStartMs =
+              typeof performance !== "undefined" && typeof performance.now === "function"
+                ? performance.now()
+                : Date.now();
             const response = await sitePredictionApi.getBase({
               project_id: projectId,
+              node_b_id: optimizedNodeBId || undefined,
               cell_id: candidate || undefined,
+              polygon_ids: activePolygonIdsParam,
             });
             const extractedRows = extractRowsFromApiResponse(response);
+            const elapsedMs =
+              (typeof performance !== "undefined" && typeof performance.now === "function"
+                ? performance.now()
+                : Date.now()) - requestStartMs;
+            console.info("[SITE_PREDICTION_TIMING]", {
+              endpoint: "GetSitePredictionBase",
+              scope: "sector-detail",
+              projectId,
+              cellId: candidate,
+              rows: Array.isArray(extractedRows) ? extractedRows.length : 0,
+              elapsedMs: Math.round(elapsedMs),
+              polygonIds: activePolygonIdsParam || "all",
+            });
             if (Array.isArray(extractedRows) && extractedRows.length > 0) {
               rows = extractedRows;
               resolvedLookupValue = candidate;
@@ -2659,7 +2799,14 @@ const NetworkPlannerMap = ({
         );
       }
     },
-    [openSectorInfo, projectId, selectedMetric, sitePredictionVersion],
+    [
+      activePolygonIdsParam,
+      activeSitePredictionScenarioId,
+      openSectorInfo,
+      projectId,
+      selectedMetric,
+      sitePredictionVersion,
+    ],
   );
 
   const handleSelectAllSectors = useCallback(async () => {
