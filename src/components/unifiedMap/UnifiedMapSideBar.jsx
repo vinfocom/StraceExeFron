@@ -400,6 +400,10 @@ const UnifiedMapSidebar = ({
   setNewProjectPolygonName,
   isSavingProjectPolygon = false,
   onSaveDrawnPolygonToProject,
+  editedProjectPolygonCount = 0,
+  isSavingEditedProjectPolygons = false,
+  onSaveEditedProjectPolygons,
+  onDiscardEditedProjectPolygons,
   ltePredictionUseBuildings = true,
   setLtePredictionUseBuildings,
   onlyInsidePolygons,
@@ -422,9 +426,13 @@ const UnifiedMapSidebar = ({
   gridCellStats = { total: 0, populated: 0 },
   subSessionMarkerCount = 0,
   subSessionLoading = false,
+  subSessionError = null,
   neighborStats,
   areaEnabled,
   setAreaEnabled,
+  areaZoneCount = 0,
+  areaZoneLoading = false,
+  areaZoneError = null,
   enableGrid,
   setEnableGrid,
   gridSizeMeters,
@@ -704,6 +712,75 @@ const UnifiedMapSidebar = ({
     pciThreshold,
     setPciThreshold,
     supportsSessionFilters,
+  ]);
+
+  const areaZoneAvailabilityToastPendingRef = useRef(false);
+
+  useEffect(() => {
+    if (!areaEnabled) {
+      areaZoneAvailabilityToastPendingRef.current = false;
+      return undefined;
+    }
+
+    if (!areaZoneAvailabilityToastPendingRef.current || areaZoneLoading) {
+      return undefined;
+    }
+
+    const timer = window.setTimeout(() => {
+      if (!areaZoneAvailabilityToastPendingRef.current) return;
+      areaZoneAvailabilityToastPendingRef.current = false;
+
+      if (areaZoneError) {
+        toast.error("Could not check area zone availability.");
+        return;
+      }
+
+      const count = Number(areaZoneCount) || 0;
+      if (count > 0) {
+        toast.success(`${count} area zone${count === 1 ? "" : "s"} available.`);
+      } else {
+        toast.info("No area zones available for this project.");
+      }
+    }, 250);
+
+    return () => window.clearTimeout(timer);
+  }, [areaEnabled, areaZoneCount, areaZoneError, areaZoneLoading]);
+
+  const subSessionAvailabilityToastPendingRef = useRef(false);
+
+  useEffect(() => {
+    if (!showSubSession) {
+      subSessionAvailabilityToastPendingRef.current = false;
+      return undefined;
+    }
+
+    if (!subSessionAvailabilityToastPendingRef.current || subSessionLoading) {
+      return undefined;
+    }
+
+    const timer = window.setTimeout(() => {
+      if (!subSessionAvailabilityToastPendingRef.current) return;
+      subSessionAvailabilityToastPendingRef.current = false;
+
+      if (subSessionError) {
+        toast.error("Could not check sub-session availability.");
+        return;
+      }
+
+      const count = Number(subSessionMarkerCount) || 0;
+      if (count > 0) {
+        toast.success(`${count} sub-session marker${count === 1 ? "" : "s"} available.`);
+      } else {
+        toast.info("No sub sessions available for the selected sessions.");
+      }
+    }, 250);
+
+    return () => window.clearTimeout(timer);
+  }, [
+    showSubSession,
+    subSessionError,
+    subSessionLoading,
+    subSessionMarkerCount,
   ]);
 
   const shouldShowMetricSelector = useMemo(
@@ -2253,17 +2330,63 @@ const UnifiedMapSidebar = ({
               useSwitch={true}
             />
 
+            {Boolean(projectPolygonEditEnabled && editedProjectPolygonCount > 0) && (
+              <div className="mt-2 rounded-lg border border-blue-500/30 bg-blue-950/25 p-2">
+                <div className="text-xs font-medium text-blue-100">
+                  {editedProjectPolygonCount} polygon{editedProjectPolygonCount === 1 ? "" : "s"} edited
+                </div>
+                <div className="mt-2 grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={onSaveEditedProjectPolygons}
+                    disabled={isSavingEditedProjectPolygons}
+                    className="inline-flex h-8 items-center justify-center gap-1 rounded-md bg-blue-600 px-2 text-xs font-semibold text-white transition hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    <Check className="h-3.5 w-3.5" />
+                    {isSavingEditedProjectPolygons ? "Saving" : "Save"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={onDiscardEditedProjectPolygons}
+                    disabled={isSavingEditedProjectPolygons}
+                    className="inline-flex h-8 items-center justify-center gap-1 rounded-md border border-slate-600 bg-slate-900 px-2 text-xs font-semibold text-slate-200 transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    <X className="h-3.5 w-3.5" />
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            )}
+
             <ToggleRow
               label="Area Zone"
               checked={Boolean(areaEnabled)}
-              onChange={setAreaEnabled}
+              onChange={(checked) => {
+                if (checked) {
+                  areaZoneAvailabilityToastPendingRef.current = true;
+                  toast.info("Checking area zone availability...");
+                } else {
+                  areaZoneAvailabilityToastPendingRef.current = false;
+                  toast.info("Area zones hidden.");
+                }
+                setAreaEnabled?.(checked);
+              }}
               useSwitch={true}
             />
             {/*  yaha pe hum sub session ko toggle kar rahe hai */}
             <ToggleRow    
                   label="Sub Sessions"
                   checked={Boolean(showSubSession)}
-                  onChange={setShowSubSession}
+                  onChange={(checked) => {
+                    if (checked) {
+                      subSessionAvailabilityToastPendingRef.current = true;
+                      toast.info("Checking sub-session availability...");
+                    } else {
+                      subSessionAvailabilityToastPendingRef.current = false;
+                      toast.info("Sub sessions hidden.");
+                    }
+                    setShowSubSession?.(checked);
+                  }}
                   useSwitch={true}
                 />
 

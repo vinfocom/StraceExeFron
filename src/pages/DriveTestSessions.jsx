@@ -87,7 +87,7 @@ const DriveTestSessionsPage = () => {
   const [selectedSessions, setSelectedSessions] = useState([]);
   const navigate = useNavigate();
   const [searchTerm, setSearchTerm] = useState("");
-
+const [selectedType, setSelectedType] = useState("all");
   const [columnFilters, setColumnFilters] = useState({
     sessionId: "",
     userDetails: "",
@@ -100,10 +100,13 @@ const DriveTestSessionsPage = () => {
     distance: "",
     captureFrequency: "",
     sessionRemarks: "",
+    Type:"",
   });
 
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
+  const [networkSessions, setNetworkSessions] = useState([]);
+const [wifiSessions, setWifiSessions] = useState([]);
 
   const [currentPage, setCurrentPage] = useState(1);
   const [sessionsPerPage, setSessionsPerPage] = useState(10); 
@@ -126,6 +129,7 @@ const DriveTestSessionsPage = () => {
     distance: false,
     captureFrequency: false,
     sessionRemarks: false,
+    
   });
 
   const allColumns = {
@@ -188,7 +192,7 @@ const DriveTestSessionsPage = () => {
 
       try {
         const data = await adminApi.getSessions();
-        cloudRows = extractSessionRows(data);
+        cloudRows = data?.Data || [];
       } catch (error) {
         cloudError = error;
       }
@@ -212,7 +216,20 @@ const DriveTestSessionsPage = () => {
       const rowsToShow = useLocalFallback
         ? mergeSessionsById(cloudRows, localPendingRows)
         : cloudRows;
-      setSessions(sortSessionsByIdDescending(rowsToShow));
+
+        const sortedRows = sortSessionsByIdDescending(rowsToShow);
+
+        const networkData = sortedRows.filter(
+  (session) => session.type?.toLowerCase() === "network"
+);
+
+const wifiData = sortedRows.filter(
+  (session) => session.type?.toLowerCase() === "wifi"
+);
+
+setNetworkSessions(networkData);
+setWifiSessions(wifiData);
+      setSessions(sortedRows);
 
       if (cloudError && localRows.length > 0) {
         toast.info("Cloud sessions are unavailable. Showing local cached sessions.");
@@ -254,10 +271,17 @@ const DriveTestSessionsPage = () => {
     const date = new Date(dateString);
     return date.toLocaleTimeString();
   };
+  const typeFilteredSessions =
+  selectedType === "all"
+    ? sessions
+    : sessions.filter(
+        (session) =>
+          session.type?.toLowerCase() === selectedType.toLowerCase()
+      );
 
  
 
-  const filteredSessions = sessions.filter((session) => {
+  const filteredSessions = typeFilteredSessions.filter((session) => {
     const lowerCaseSearchTerm = searchTerm.toLowerCase();
 
     const matchesGlobalSearch =
@@ -605,6 +629,27 @@ const DriveTestSessionsPage = () => {
     <div className="p-6 h-full flex flex-col bg-white">
       <div className="flex items-center justify-between mb-4 gap-4">
         <div className="flex items-center gap-3 w-full justify-end flex-wrap">
+        <DropdownMenu>
+  <DropdownMenuTrigger asChild>
+    <Button variant="outline" size="sm" className="h-9">
+      {selectedType}
+    </Button>
+  </DropdownMenuTrigger>
+
+  <DropdownMenuContent>
+    <DropdownMenuItem onClick={() => setSelectedType("all")}>
+      All
+    </DropdownMenuItem>
+
+    <DropdownMenuItem onClick={() => setSelectedType("network")}>
+      Network
+    </DropdownMenuItem>
+
+    <DropdownMenuItem onClick={() => setSelectedType("wifi")}>
+      WiFi
+    </DropdownMenuItem>
+  </DropdownMenuContent>
+</DropdownMenu>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button variant="outline" size="sm" className="h-9">

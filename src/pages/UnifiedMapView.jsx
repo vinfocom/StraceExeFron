@@ -1501,6 +1501,8 @@ const UnifiedMapView = () => {
   const [projectPolygonEditEnabled, setProjectPolygonEditEnabled] =
     useState(false);
   const [editedProjectPolygons, setEditedProjectPolygons] = useState({});
+  const [isSavingEditedProjectPolygons, setIsSavingEditedProjectPolygons] =
+    useState(false);
   const polygonOpacity = 1;
   const [onlyInsidePolygons] = useState(true);
   const [areaEnabled, setAreaEnabled] = useState(false);
@@ -2104,6 +2106,7 @@ const UnifiedMapView = () => {
   const {
     areaData, // The hook now returns data from areaBreakdownApi
     loading: areaLoading,
+    error: areaError,
     refetch: refetchAreaPolygons,
   } = useAreaPolygons(projectId, areaEnabled);
 
@@ -3031,6 +3034,7 @@ const UnifiedMapView = () => {
     requestedSessionIds: subSessionRequestedIds,
     markers: subSessionMarkers,
     loading: subSessionLoading,
+    error: subSessionError,
     refetch: refetchSubSessionAnalytics,
   } = useSubSessionAnalytics(sessionIds, showSubSession);
 
@@ -4382,15 +4386,91 @@ const UnifiedMapView = () => {
     [buildPolygonBBoxFromPaths],
   );
 
+  const editedProjectPolygonEntries = useMemo(
+    () => Object.entries(editedProjectPolygons),
+    [editedProjectPolygons],
+  );
+
+  const editedProjectPolygonCount = editedProjectPolygonEntries.length;
+
+  const handleDiscardEditedProjectPolygons = useCallback(() => {
+    setEditedProjectPolygons({});
+  }, []);
+
+  const handleSaveEditedProjectPolygons = useCallback(async () => {
+    const numericProjectId = Number(projectId);
+    if (!Number.isFinite(numericProjectId) || numericProjectId <= 0) {
+      toast.warn("Open a valid project before saving polygon edits.");
+      return;
+    }
+
+    if (!editedProjectPolygonEntries.length) {
+      toast.info("No polygon edits to save.");
+      return;
+    }
+
+    const polygonsByUid = new Map(
+      effectiveProjectPolygons.map((poly) => [poly.uid, poly]),
+    );
+
+    const updates = editedProjectPolygonEntries.map(([uid, edit]) => {
+      const polygon = polygonsByUid.get(uid);
+      const polygonId = Number(polygon?.id);
+      const wkt = coordinatesToWktPolygon(edit?.paths?.[0]);
+
+      if (!Number.isFinite(polygonId) || polygonId <= 0 || !wkt) {
+        return null;
+      }
+
+      return {
+        PolygonId: polygonId,
+        ProjectId: numericProjectId,
+        Name: polygon?.name || "",
+        WKT: wkt,
+        Area: Number.isFinite(Number(polygon?.area)) ? Number(polygon.area) : null,
+      };
+    });
+
+    if (updates.some((payload) => !payload)) {
+      toast.error("One or more edited polygons could not be prepared for saving.");
+      return;
+    }
+
+    setIsSavingEditedProjectPolygons(true);
+    try {
+      for (const payload of updates) {
+        const response = await mapViewApi.updateProjectPolygon(payload);
+        if (!(response?.Status === 1 || response?.status === 1)) {
+          throw new Error(response?.Message || response?.message || "Failed to save polygon edits.");
+        }
+      }
+
+      toast.success(
+        `${updates.length} polygon${updates.length === 1 ? "" : "s"} updated successfully.`,
+      );
+      setEditedProjectPolygons({});
+      await refetchPolygons?.();
+    } catch (error) {
+      toast.error(error?.message || "Failed to save polygon edits.");
+    } finally {
+      setIsSavingEditedProjectPolygons(false);
+    }
+  }, [
+    editedProjectPolygonEntries,
+    effectiveProjectPolygons,
+    projectId,
+    refetchPolygons,
+  ]);
+
   useEffect(() => {
     setEditedProjectPolygons({});
   }, [projectId, polygonSource]);
 
   useEffect(() => {
-    if (!showPolygons || polygonSource !== "map") {
+    if (polygonSource !== "map") {
       setProjectPolygonEditEnabled(false);
     }
-  }, [showPolygons, polygonSource]);
+  }, [polygonSource]);
 
   const displayPolygons = useMemo(
     () => polygonsWithColors,
@@ -5888,6 +5968,10 @@ const UnifiedMapView = () => {
         setNewProjectPolygonName={setNewProjectPolygonName}
         isSavingProjectPolygon={isSavingProjectPolygon}
         onSaveDrawnPolygonToProject={handleSaveDrawnPolygonToProject}
+        editedProjectPolygonCount={editedProjectPolygonCount}
+        isSavingEditedProjectPolygons={isSavingEditedProjectPolygons}
+        onSaveEditedProjectPolygons={handleSaveEditedProjectPolygons}
+        onDiscardEditedProjectPolygons={handleDiscardEditedProjectPolygons}
         ltePredictionUseBuildings={ltePredictionUseBuildings}
         setLtePredictionUseBuildings={setLtePredictionUseBuildings}
         onlyInsidePolygons={onlyInsidePolygons}
@@ -5909,9 +5993,13 @@ const UnifiedMapView = () => {
         setShowSubSession={setShowSubSession}
         subSessionMarkerCount={subSessionMarkers?.length || 0}
         subSessionLoading={subSessionLoading}
+        subSessionError={subSessionError}
         neighborStats={neighborStats}
         areaEnabled={areaEnabled}
         setAreaEnabled={setAreaEnabled}
+        areaZoneCount={areaData?.length || 0}
+        areaZoneLoading={areaLoading}
+        areaZoneError={areaError}
         enableGrid={enableGrid}
         setEnableGrid={setEnableGrid}
         gridSizeMeters={gridSizeMeters}

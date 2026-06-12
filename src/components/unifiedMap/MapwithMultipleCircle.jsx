@@ -2067,7 +2067,7 @@ const MapWithMultipleCircles = ({
           const shouldFillFromGrid = enableGrid && hasActivePolygons;
           return (
             <PolygonF
-              key={polygonKey}
+              key={`${polygonKey}-${isEditableBoundary ? "editable" : "readonly"}`}
               paths={path}
               options={{
                 fillColor: shouldFillFromGrid ? fillColor : "transparent",

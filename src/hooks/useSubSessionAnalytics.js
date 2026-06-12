@@ -114,7 +114,14 @@ const normalizeSubSessionItem = (item = {}) => {
     subSessionType: subSessionType == null ? null : String(subSessionType).trim(),
     start,
     end,
-    resultStatus: normalizeSubSessionResultStatus(item.result_status ?? "failed"),
+    resultStatus: normalizeSubSessionResultStatus(
+      item.result_status ??
+        item.resultStatus ??
+        item.status ??
+        item.connection_status ??
+        item.connectionStatus ??
+        "failed",
+    ),
     duration: toFiniteNumber(item.duration_ms),
 
     rawCoordinates: coordinates,

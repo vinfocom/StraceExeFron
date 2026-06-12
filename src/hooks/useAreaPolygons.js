@@ -1,6 +1,5 @@
 // src/hooks/useAreaPolygons.js
 import { useState, useCallback, useEffect, useRef } from 'react';
-import { toast } from 'react-toastify';
 import { areaBreakdownApi } from '@/api/apiEndpoints';
 import { parseWKTToPolygons, computeBbox } from '@/utils/wkt.js';
 import {
@@ -66,9 +65,6 @@ export const useAreaPolygons = (projectId, areaEnabled) => {
 
       setPolygons(parsed);
       writeProjectSessionCache(cacheKey, parsed);
-      if (parsed.length > 0) {
-        toast.success(`${parsed.length} area zone(s) loaded`);
-      }
     } catch (err) {
       if (err.name === "AbortError") return;
       console.error("Area Polygons Fetch Error:", err);

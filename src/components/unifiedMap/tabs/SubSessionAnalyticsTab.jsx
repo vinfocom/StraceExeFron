@@ -64,8 +64,8 @@ const formatLatLng = (position) => {
 const normalizeSubSessionResultStatus = (statusRaw) => {
   const numeric = Number(statusRaw);
   if (Number.isFinite(numeric)) {
-    if (numeric === 1) return "Connected";
-    if (numeric === 2) return "Not Connected";
+    if (numeric === 1) return "success";
+    if (numeric === 2) return "failed";
   }
 
   const raw = String(statusRaw ?? "").trim().toLowerCase().replace(/[_\s-]+/g, " ");
@@ -182,7 +182,14 @@ export default function SubSessionAnalyticsTab({
           subSessionId: sub.subSessionId,
           subSessionType: sub.subSessionType,
           subSessionTypeNormalized: normalizeSubSessionType(sub.subSessionType),
-          status: normalizeSubSessionResultStatus(sub.resultStatus ?? sub.result_status ?? "Not Connected"),
+          status: normalizeSubSessionResultStatus(
+            sub.resultStatus ??
+              sub.result_status ??
+              sub.status ??
+              sub.connection_status ??
+              sub.connectionStatus ??
+              "Not Connected",
+          ),
           markerId: sub.markerId ?? null,
           position: sub.markerPosition ?? sub.start ?? session.start ?? null,
           start: sub.start ?? null,
