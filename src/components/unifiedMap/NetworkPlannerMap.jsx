@@ -916,6 +916,8 @@ function getSitePredictionSourceRowId(source) {
     source?.originalId ??
     source?.site_prediction_id ??
     source?.sitePredictionId ??
+    source?.id ??
+    raw?.id ??
     raw.sourceRowId ??
     raw.source_id ??
     raw.sourceId ??
