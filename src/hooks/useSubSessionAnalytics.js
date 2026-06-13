@@ -15,12 +15,20 @@ const EMPTY_ANALYTICS = Object.freeze({
   rawResponse: null,
 });
 
+const SUB_SESSION_CACHE_RESOURCE = "unified-sub-session-analytics-v5";
+const CALL_SUCCESS_DURATION_MS = 90 * 1000;
+
 const toFiniteNumber = (value) => {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : null;
 };
 
-const normalizeSubSessionResultStatus = (statusRaw) => {
+const normalizeSubSessionResultStatus = (statusRaw, durationMs = null) => {
+  const duration = toFiniteNumber(durationMs);
+  if (duration != null && duration > CALL_SUCCESS_DURATION_MS) {
+    return "success";
+  }
+
   const numeric = Number(statusRaw);
   if (Number.isFinite(numeric)) {
     if (numeric === 1) return "success";
@@ -104,25 +112,34 @@ const normalizeSubSessionItem = (item = {}) => {
     item.sub_session_id ?? item.subSessionId ?? item.subsession_id ?? null;
   const subSessionType =
     item.sub_session_type ?? item.subSessionType ?? item.subsession_type ?? null;
+  const number = item.number ?? item.phone_number ?? item.phoneNumber ?? item.msisdn ?? null;
+  const direction = item.direction ?? item.call_direction ?? item.callDirection ?? null;
+  const resultStatusRaw =
+    item.result_status_raw ??
+    item.resultStatusRaw ??
+    item.result_status ??
+    item.resultStatus ??
+    item.status ??
+    item.connection_status ??
+    item.connectionStatus ??
+    null;
 
   const coordinates = item.coordinates || {};
   const start = normalizeLatLng(coordinates.start_lat, coordinates.start_lon);
   const end = normalizeLatLng(coordinates.end_lat, coordinates.end_lon);
 
+  const duration = toFiniteNumber(item.duration_ms);
+
   return {
     subSessionId,
     subSessionType: subSessionType == null ? null : String(subSessionType).trim(),
+    number: number == null ? null : String(number).trim(),
+    direction: direction == null ? null : String(direction).trim(),
     start,
     end,
-    resultStatus: normalizeSubSessionResultStatus(
-      item.result_status ??
-        item.resultStatus ??
-        item.status ??
-        item.connection_status ??
-        item.connectionStatus ??
-        "failed",
-    ),
-    duration: toFiniteNumber(item.duration_ms),
+    resultStatusRaw,
+    resultStatus: normalizeSubSessionResultStatus(resultStatusRaw ?? "failed", duration),
+    duration,
 
     rawCoordinates: coordinates,
     markerId: null,
@@ -177,6 +194,9 @@ const normalizeSessionItem = (item = {}, index = 0) => {
         duration: sub.duration,
         subSessionId: sub.subSessionId,
         subSessionType: sub.subSessionType,
+        number: sub.number,
+        direction: sub.direction,
+        resultStatusRaw: sub.resultStatusRaw,
         resultStatus: sub.resultStatus,
         position: position,
         start: position,
@@ -363,20 +383,22 @@ export const useSubSessionAnalytics = (sessionIds, enabled = false) => {
       }
 
       const cacheKey = makeProjectCacheKey({
-        resource: "unified-sub-session-analytics-v4",
+        resource: SUB_SESSION_CACHE_RESOURCE,
         sessionIds: sessionIds || [],
       });
+
+      let hasCachedData = false;
 
       if (!force) {
         const cached = readProjectSessionCache(cacheKey);
         if (cached && Array.isArray(cached?.sessions)) {
+          hasCachedData = true;
           if (mountedRef.current) {
             setAnalytics(cached);
-            setLoading(false);
             setError(null);
-            lastFetchKeyRef.current = fetchKey;
           }
-          return;
+        } else if (mountedRef.current) {
+          setAnalytics(EMPTY_ANALYTICS);
         }
       }
 
@@ -409,7 +431,9 @@ export const useSubSessionAnalytics = (sessionIds, enabled = false) => {
 
         if (mountedRef.current) {
           setError(err?.message || "Failed to fetch sub-session analytics");
-          setAnalytics(EMPTY_ANALYTICS);
+          if (!hasCachedData && !force) {
+            setAnalytics(EMPTY_ANALYTICS);
+          }
         }
       } finally {
         isFetchingRef.current = false;

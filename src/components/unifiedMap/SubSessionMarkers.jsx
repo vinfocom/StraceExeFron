@@ -6,6 +6,19 @@ const formatMetric = (value, suffix = "") => {
   return `${Number(value).toLocaleString(undefined, { maximumFractionDigits: 2 })}${suffix}`;
 };
 
+const formatDuration = (value) => {
+  if (value == null || Number.isNaN(Number(value))) return "N/A";
+  const totalSeconds = Math.floor(Number(value) / 1000);
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return minutes > 0 ? `${minutes}m ${seconds}s` : `${seconds}s`;
+};
+
+const formatText = (value) => {
+  const text = String(value ?? "").trim();
+  return text || "N/A";
+};
+
 const getNormalizedStatus = (statusRaw) => {
   const numeric = Number(statusRaw);
   if (Number.isFinite(numeric)) {
@@ -162,6 +175,22 @@ const SubSessionMarkers = ({
                   {formatSubSessionStatus(selectedMarker.resultStatus, selectedMarker.subSessionType)}
                 </span>
               </div>
+              {formatSubSessionType(selectedMarker.subSessionType) === "CS" && (
+                <>
+                  <div className="flex justify-between gap-3">
+                    <span className="text-slate-500">Number</span>
+                    <span className="font-medium">{formatText(selectedMarker.number)}</span>
+                  </div>
+                  <div className="flex justify-between gap-3">
+                    <span className="text-slate-500">Direction</span>
+                    <span className="font-medium capitalize">{formatText(selectedMarker.direction)}</span>
+                  </div>
+                  <div className="flex justify-between gap-3">
+                    <span className="text-slate-500">Duration</span>
+                    <span className="font-medium">{formatDuration(selectedMarker.duration)}</span>
+                  </div>
+                </>
+              )}
               <div className="flex justify-between gap-3">
                 <span className="text-slate-500">Success</span>
                 <span className="font-medium">{selectedMarker.metrics?.status_counts?.success ?? 0}</span>

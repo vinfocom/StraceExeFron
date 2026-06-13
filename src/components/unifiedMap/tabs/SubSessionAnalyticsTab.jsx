@@ -40,12 +40,21 @@ const formatPercent = (value) => {
   return `${Number(value).toFixed(1)}%`;
 };
 
+const formatText = (value) => {
+  const text = String(value ?? "").trim();
+  return text || "N/A";
+};
+
 const toMetric = (value) => {
   if (value == null) return null;
   if (typeof value === "string" && value.trim() === "") return null;
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : null;
 };
+
+const CALL_SUCCESS_DURATION_MS = 90 * 1000;
+const CALL_DROP_MIN_DURATION_SECONDS = 15;
+const CALL_SUCCESS_DURATION_SECONDS = 90;
 
 const toPositiveMetric = (value) => {
   const parsed = toMetric(value);
@@ -61,7 +70,12 @@ const formatLatLng = (position) => {
   return `${lat.toFixed(6)}, ${lng.toFixed(6)}`;
 };
 
-const normalizeSubSessionResultStatus = (statusRaw) => {
+const normalizeSubSessionResultStatus = (statusRaw, durationMs = null) => {
+  const duration = toMetric(durationMs);
+  if (duration != null && duration > CALL_SUCCESS_DURATION_MS) {
+    return "success";
+  }
+
   const numeric = Number(statusRaw);
   if (Number.isFinite(numeric)) {
     if (numeric === 1) return "success";
@@ -176,19 +190,32 @@ export default function SubSessionAnalyticsTab({
     return subSessionData.flatMap((session, sessionIndex) =>
       (session.subSessions || []).map((sub, subIndex) => {
         const subMetrics = sub.metrics || {};
+        const duration = toMetric(
+          sub.duration_ms ??
+            sub.durationMs ??
+            sub.duration ??
+            sub.total_duration ??
+            subMetrics.total_duration,
+        );
+
         return {
           rowKey: `sub-row-${session.sessionId ?? sessionIndex}-${sub.subSessionId ?? subIndex}-${subIndex}`,
           sessionId: session.sessionId,
           subSessionId: sub.subSessionId,
           subSessionType: sub.subSessionType,
           subSessionTypeNormalized: normalizeSubSessionType(sub.subSessionType),
+          number: sub.number ?? sub.phone_number ?? sub.phoneNumber ?? null,
+          direction: sub.direction ?? sub.call_direction ?? sub.callDirection ?? null,
           status: normalizeSubSessionResultStatus(
+            sub.resultStatusRaw ??
+              sub.result_status_raw ??
             sub.resultStatus ??
               sub.result_status ??
               sub.status ??
               sub.connection_status ??
               sub.connectionStatus ??
               "Not Connected",
+            duration,
           ),
           markerId: sub.markerId ?? null,
           position: sub.markerPosition ?? sub.start ?? session.start ?? null,
@@ -213,13 +240,7 @@ export default function SubSessionAnalyticsTab({
               subMetrics.total_file_size ??
               session.metrics?.total_file_size,
           ),
-          duration: toMetric(
-            sub.duration_ms ??
-              sub.durationMs ??
-              sub.duration ??
-              sub.total_duration ??
-              subMetrics.total_duration,
-          ),
+          duration,
         };
       }),
     );
@@ -296,49 +317,49 @@ export default function SubSessionAnalyticsTab({
     const callRows = filteredRows.filter((row) => getSubSessionTypeLabel(row.subSessionTypeNormalized) === CALL_TYPE_TAB);
     const totalCalls = callRows.length;
 
-    let successStatusCalls = 0; 
-    let failedStatusCalls = 0;  
-
-    let dropCalls = 0;         
-    let otherFailedCalls = 0;   
+    let connectedCalls = 0;
+    let notConnectedCalls = 0;
+    let dropCalls = 0;
+    let successCalls = 0;
 
     callRows.forEach((row) => {
       const isCallType = getSubSessionTypeLabel(row.subSessionTypeNormalized) === CALL_TYPE_TAB;
       if (!isCallType) return;
 
-      const status = normalizeSubSessionResultStatus(row.status);
+      const status = normalizeSubSessionResultStatus(row.status, row.duration);
       const durationMs = toPositiveMetric(row.duration);
-
       const durationSec = durationMs != null ? durationMs / 1000 : null;
+      const isSuccessCall = durationSec != null && durationSec > CALL_SUCCESS_DURATION_SECONDS;
 
-      // Success call now depends only on duration range, not result status.
-      if (durationSec != null && durationSec >= 90 && durationSec <= 120) {
-        successStatusCalls += 1;
+      if (isSuccessCall || status === "success") {
+        connectedCalls += 1;
+      } else {
+        notConnectedCalls += 1;
       }
 
-      if (status === "failed") {
-        failedStatusCalls += 1;
+      if (isSuccessCall) {
+        successCalls += 1;
       }
 
-      if (durationSec == null) {
-        otherFailedCalls += 1;
-      } else if (durationSec >= 15 && durationSec < 90) {
+      if (
+        durationSec != null &&
+        durationSec >= CALL_DROP_MIN_DURATION_SECONDS &&
+        durationSec <= CALL_SUCCESS_DURATION_SECONDS
+      ) {
         dropCalls += 1;
-      } else { 
-        otherFailedCalls += 1;
       }
     });
 
-    const successRate = totalCalls > 0 ? (successStatusCalls / totalCalls) * 100 : 0;
+    const callSetupRate = totalCalls > 0 ? (connectedCalls / totalCalls) * 100 : 0;
     const dropCallRate = totalCalls > 0 ? (dropCalls / totalCalls) * 100 : 0;
 
     return {
       totalCalls,
-      successStatusCalls,
-      failedStatusCalls,
+      connectedCalls,
+      notConnectedCalls,
       dropCalls,
-      otherFailedCalls,
-      successRate,
+      successCalls,
+      callSetupRate,
       dropCallRate,
     };
   }, [filteredRows]);
@@ -418,7 +439,7 @@ export default function SubSessionAnalyticsTab({
         </div>
         {activeTypeTab === CALL_TYPE_TAB && info && (
           <div className="rounded-md border border-slate-700 bg-slate-800/60 px-3 py-2 text-[11px] text-slate-200">
-            Call Success: 120 sec to 90 sec | Call Drop: 90 sec to 15 sec | Less than 15 sec: Not Connected
+            Call Success: Above 90 sec | Call Drop: 15 sec to 90 sec | Less than 15 sec: Not Connected
           </div>
         )}
         <div className="flex items-center justify-between">
@@ -446,15 +467,21 @@ export default function SubSessionAnalyticsTab({
           </div>
         </div>
         <div className="bg-slate-900/70 border border-slate-700 rounded-lg p-3">
-          <div className="text-[11px] text-slate-400">Success Calls</div>
+          <div className="text-[11px] text-slate-400">Connected Calls</div>
           <div className="text-sm font-semibold text-emerald-300 mt-1">
-            {formatNumber(callKpis.successStatusCalls, 0)} ({formatPercent(callKpis.successRate)})
+            {formatNumber(callKpis.connectedCalls, 0)}
           </div>
         </div>
         <div className="bg-slate-900/70 border border-slate-700 rounded-lg p-3">
-          <div className="text-[11px] text-slate-400">Failed Calls </div>
+          <div className="text-[11px] text-slate-400">Not Connected</div>
           <div className="text-sm font-semibold text-rose-300 mt-1">
-            {formatNumber(callKpis.failedStatusCalls, 0)}
+            {formatNumber(callKpis.notConnectedCalls, 0)}
+          </div>
+        </div>
+        <div className="bg-slate-900/70 border border-slate-700 rounded-lg p-3">
+          <div className="text-[11px] text-slate-400">Call Setup Rate</div>
+          <div className="text-sm font-semibold text-cyan-200 mt-1">
+            {formatPercent(callKpis.callSetupRate)}
           </div>
         </div>
         <div className="bg-slate-900/70 border border-slate-700 rounded-lg p-3">
@@ -464,9 +491,9 @@ export default function SubSessionAnalyticsTab({
           </div>
         </div>
         <div className="bg-slate-900/70 border border-slate-700 rounded-lg p-3">
-          <div className="text-[11px] text-slate-400">Not Connected</div>
-          <div className="text-sm font-semibold text-slate-200 mt-1">
-            {formatNumber(callKpis.otherFailedCalls, 0)}
+          <div className="text-[11px] text-slate-400">Success Call</div>
+          <div className="text-sm font-semibold text-emerald-300 mt-1">
+            {formatNumber(callKpis.successCalls, 0)}
           </div>
         </div>
       </div>
@@ -554,15 +581,32 @@ export default function SubSessionAnalyticsTab({
 
         <div
           className={`grid ${
-            activeTypeTab === CALL_TYPE_TAB ? "grid-cols-5" : "grid-cols-6"
+            activeTypeTab === CALL_TYPE_TAB ? "" : "grid-cols-6"
           } bg-slate-800 px-2 py-1.5 text-[11px] font-semibold text-slate-300`}
+          style={
+            activeTypeTab === CALL_TYPE_TAB
+              ? { gridTemplateColumns: "0.8fr 0.95fr 1.15fr 0.8fr 0.8fr 1fr 0.8fr" }
+              : undefined
+          }
         >
           <span>Session ID</span>
           <span>Sub Session ID</span>
-          <span>Type</span>
-          <span>Status</span>
-          <span>Map</span>
-          {activeTypeTab !== CALL_TYPE_TAB && <span>Details</span>}
+          {activeTypeTab === CALL_TYPE_TAB ? (
+            <>
+              <span>Number</span>
+              <span>Direction</span>
+              <span>Duration</span>
+              <span>Status</span>
+              <span>Map</span>
+            </>
+          ) : (
+            <>
+              <span>Type</span>
+              <span>Status</span>
+              <span>Map</span>
+              <span>Details</span>
+            </>
+          )}
         </div>
 
         {filteredRows.map((row) => {
@@ -580,14 +624,27 @@ export default function SubSessionAnalyticsTab({
             <React.Fragment key={row.rowKey}>
               <div
                 className={`grid ${
-                  activeTypeTab === CALL_TYPE_TAB ? "grid-cols-5" : "grid-cols-6"
+                  activeTypeTab === CALL_TYPE_TAB ? "" : "grid-cols-6"
                 } px-2 py-1.5 text-xs border-t border-slate-700 ${
                   isSelected ? "bg-cyan-900/20 text-cyan-100" : "text-slate-200"
                 }`}
+                style={
+                  activeTypeTab === CALL_TYPE_TAB
+                    ? { gridTemplateColumns: "0.8fr 0.95fr 1.15fr 0.8fr 0.8fr 1fr 0.8fr" }
+                    : undefined
+                }
               >
                 <span>{row.sessionId}</span>
                 <span>{row.subSessionId}</span>
-                <span>{getSubSessionTypeLabel(row.subSessionTypeNormalized)}</span>
+                {activeTypeTab === CALL_TYPE_TAB ? (
+                  <>
+                    <span className="truncate" title={formatText(row.number)}>{formatText(row.number)}</span>
+                    <span className="capitalize">{formatText(row.direction)}</span>
+                    <span>{formatDuration(row.duration)}</span>
+                  </>
+                ) : (
+                  <span>{getSubSessionTypeLabel(row.subSessionTypeNormalized)}</span>
+                )}
                 <span>
                   <span
                     className={`inline-flex items-center rounded-md px-2 py-0.5 text-[11px] border ${
