@@ -16,6 +16,7 @@ import {
   getLogColor,
   registerColor,
 } from "@/utils/colorUtils";
+import { useSettingsDialog } from "@/context/SettingsDialogContext";
 
 const MAP_COLOR_PRESETS = [
   "#facc15",
@@ -719,6 +720,7 @@ export default function MapLegend({
   onFilterChange = () => {},
   className, // Added className prop
 }) {
+  const { openSettings: openSettingsDialog } = useSettingsDialog();
   const [collapsed, setCollapsed] = useState(false);
   const [legendSize, setLegendSize] = useState(DEFAULT_LEGEND_SIZE);
   const [legendPosition, setLegendPosition] = useState(getInitialLegendPosition);
@@ -756,12 +758,17 @@ export default function MapLegend({
 
   const openSettings = (e) => {
     e.stopPropagation();
-    if (typeof window === "undefined") return;
-    window.dispatchEvent(
-      new CustomEvent("stracer:utility-action", {
-        detail: { action: "settings" },
-      }),
-    );
+    if (openSettingsDialog) {
+      openSettingsDialog();
+      return;
+    }
+    if (typeof window !== "undefined") {
+      window.dispatchEvent(
+        new CustomEvent("stracer:utility-action", {
+          detail: { action: "settings" },
+        }),
+      );
+    }
   };
 
   const { content, title } = useMemo(() => {

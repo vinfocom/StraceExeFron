@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useMemo } from "react";
-import { X, Download, Clock, BarChart3 } from "lucide-react";
+import { Rnd } from "react-rnd";
+import { X, Download, Clock, BarChart3, Database } from "lucide-react";
 import Spinner from "@/components/common/Spinner";
 import { adminApi } from "@/api/apiEndpoints";
 import { 
@@ -219,49 +220,84 @@ const buildOperatorNetworkCombo = (logs, topN = 10) => {
   });
 };
 
-const exportCsv = ({ logs, field, filename = "logs_metric.csv" }) => {
+const PRIORITY_COLUMNS = [
+  "id",
+  "session_id",
+  "timestamp",
+  "provider",
+  "network",
+  "radio",
+  "mode",
+  "band",
+  "pci",
+  "nodeb_id",
+  "cell_id",
+  "lat",
+  "lon",
+  "rsrp",
+  "rsrq",
+  "sinr",
+  "dl_tpt",
+  "ul_tpt",
+  "Speed",
+  "mos",
+  "apps",
+  "app_name",
+  "neighbour_count",
+  "source",
+  "isSecondary",
+];
+
+const getColumnValue = (log, column) => {
+  if (column === "isSecondary") return log?.isNeighbour ? "Yes" : "No";
+  if (column === "lon") return log?.lon ?? log?.lng ?? "";
+  if (column === "provider") return log?.provider ?? log?.Provider ?? log?.m_alpha_long ?? "";
+  if (column === "network") return log?.network ?? log?.Network ?? log?.technology ?? "";
+  return log?.[column] ?? "";
+};
+
+const getAllLogColumns = (logs = []) => {
+  const keys = new Set();
+  logs.forEach((log) => {
+    Object.keys(log || {}).forEach((key) => keys.add(key));
+  });
+
+  keys.delete("metricValue");
+  keys.delete("color");
+  keys.delete("lng");
+  keys.add("isSecondary");
+
+  const priority = PRIORITY_COLUMNS.filter((key) => keys.has(key) || key === "isSecondary");
+  const rest = Array.from(keys)
+    .filter((key) => !priority.includes(key) && key !== "isNeighbour")
+    .sort((a, b) => a.localeCompare(b));
+
+  return [...priority, ...rest];
+};
+
+const formatCellValue = (value) => {
+  if (value === null || value === undefined || value === "") return "N/A";
+  if (typeof value === "boolean") return value ? "Yes" : "No";
+  if (typeof value === "number") return Number.isInteger(value) ? String(value) : value.toFixed(2);
+  return String(value);
+};
+
+const exportCsv = ({ logs, filename = "logs_metric.csv" }) => {
   if (!Array.isArray(logs) || !logs.length) return;
 
-  const header = ["session_id", "log_type", "lat", "lon", "rssi", "rsrp",
-    "rsrq",
-    "sinr",
-    "bler",
-    "mos",
-
-    // Throughput
-    "dl_tpt",
-    "ul_tpt",
-
-    // Network Info
-    "provider",
-    "network",
-    "band",
-    
-    "timestamp"
-  ];
+  const header = getAllLogColumns(logs);
   const lines = [header.join(",")];
 
   logs.forEach((log) => {
-    lines.push([
-      log.session_id ?? log.id ?? "",
-      log.log_type ?? log.connection_type ?? (isWifiLog(log) ? "wifi" : "network"),
-      log.lat ?? "",
-      log.lon ?? log.lng ?? "",
-      log.rssi ?? "",
-      isWifiLog(log) ? "" : (log.rsrp ?? ""),
-      log.rsrq ?? "",
-      log.sinr ?? "",
-      log.bler ?? "",
-      log.mos ?? "",
-
-      // Throughput
-      log.dl_tpt ?? "",
-      log.ul_tpt ?? "",
-      normalizeOperator(log.provider ?? log.m_alpha_long) ?? "",
-      log.network ?? log.technology ?? "",
-      log.band ?? "",
-      log.timestamp ?? log.time ?? log.created_at ?? "",
-    ].map((v) => String(v ?? "").replace(/,/g, " ")).join(","));
+    lines.push(
+      header
+        .map((column) => {
+          const value = formatCellValue(getColumnValue(log, column));
+          const cell = String(value ?? "");
+          return /[",\n]/.test(cell) ? `"${cell.replace(/"/g, '""')}"` : cell;
+        })
+        .join(","),
+    );
   });
 
   const blob = new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8;" });
@@ -313,6 +349,69 @@ const ProgressBar = ({ name, count, percent, colorType, colorValue }) => (
   </div>
 );
 
+const getInitialPanelFrame = () => {
+  if (typeof window === "undefined") {
+    return { x: 0, y: 64, width: 720, height: 720 };
+  }
+
+  const width = Math.min(760, Math.max(420, window.innerWidth - 32));
+  const height = Math.min(Math.max(420, window.innerHeight - 96), window.innerHeight - 32);
+
+  return {
+    x: Math.max(16, window.innerWidth - width - 16),
+    y: 64,
+    width,
+    height,
+  };
+};
+
+const TabButton = ({ active, icon: Icon, children, onClick }) => (
+  <button
+    type="button"
+    onClick={onClick}
+    className={`inline-flex items-center justify-center gap-1.5 rounded-md px-3 py-2 text-xs font-semibold transition ${
+      active
+        ? "bg-blue-600 text-white"
+        : "bg-slate-800 text-slate-300 hover:bg-slate-700 hover:text-white"
+    }`}
+  >
+    {Icon && <Icon className="h-3.5 w-3.5" />}
+    {children}
+  </button>
+);
+
+const MiniTable = ({ columns, rows, maxRows = 100 }) => (
+  <div className="overflow-auto rounded-lg border border-slate-700">
+    <table className="min-w-full text-xs">
+      <thead className="sticky top-0 bg-slate-950 text-slate-300">
+        <tr>
+          {columns.map((column) => (
+            <th key={column} className="whitespace-nowrap px-3 py-2 text-left font-semibold">
+              {column}
+            </th>
+          ))}
+        </tr>
+      </thead>
+      <tbody>
+        {rows.slice(0, maxRows).map((row, rowIndex) => (
+          <tr key={row?.id ?? `${row?.session_id ?? "row"}-${rowIndex}`} className="border-t border-slate-800 hover:bg-slate-800/60">
+            {columns.map((column) => (
+              <td key={column} className="max-w-[180px] truncate px-3 py-2 text-slate-200" title={formatCellValue(getColumnValue(row, column))}>
+                {formatCellValue(getColumnValue(row, column))}
+              </td>
+            ))}
+          </tr>
+        ))}
+      </tbody>
+    </table>
+    {rows.length > maxRows && (
+      <div className="border-t border-slate-800 bg-slate-950 px-3 py-2 text-xs text-slate-400">
+        Showing first {maxRows.toLocaleString()} of {rows.length.toLocaleString()} rows. Export CSV for full data.
+      </div>
+    )}
+  </div>
+);
+
 const AllLogsDetailPanel = ({
   logs = [],
   thresholds = {},
@@ -325,6 +424,8 @@ const AllLogsDetailPanel = ({
 }) => {
   const [networkDurations, setNetworkDurations] = useState([]);
   const [isDurationsLoading, setIsDurationsLoading] = useState(false);
+  const [activeTab, setActiveTab] = useState("overview");
+  const [panelFrame, setPanelFrame] = useState(getInitialPanelFrame);
 
   const safeLogsList = useMemo(() => (Array.isArray(logs) ? logs : []), [logs]);
   const cfg = useMemo(() => resolveMetricConfig(selectedMetric), [selectedMetric]);
@@ -431,6 +532,75 @@ const AllLogsDetailPanel = ({
     [safeLogsList]
   );
 
+  const allColumns = useMemo(() => getAllLogColumns(safeLogsList), [safeLogsList]);
+
+  const sessionSummary = useMemo(() => {
+    const bySession = new Map();
+    safeLogsList.forEach((log) => {
+      const sessionId = log.session_id ?? log.sessionId ?? log.SessionId ?? "Unknown";
+      const current = bySession.get(sessionId) || {
+        sessionId,
+        count: 0,
+        providers: new Set(),
+        bands: new Set(),
+        technologies: new Set(),
+        apps: new Set(),
+        firstTimestamp: null,
+        lastTimestamp: null,
+      };
+
+      current.count += 1;
+      const provider = normalizeOperator(log.provider ?? log.Provider ?? log.m_alpha_long);
+      const band = normalizeBand(log.band ?? log.Band);
+      const network = normalizeNetwork(log.network ?? log.Network ?? log.technology, log.band);
+      if (provider) current.providers.add(provider);
+      if (band) current.bands.add(band);
+      if (network) current.technologies.add(network);
+      String(log.apps ?? log.app_name ?? "")
+        .split(/[,;|]/)
+        .map((app) => app.trim())
+        .filter(Boolean)
+        .forEach((app) => current.apps.add(app));
+
+      const ts = log.timestamp ?? log.time ?? log.created_at;
+      if (ts) {
+        const date = new Date(ts);
+        if (!Number.isNaN(date.getTime())) {
+          if (!current.firstTimestamp || date < current.firstTimestamp) current.firstTimestamp = date;
+          if (!current.lastTimestamp || date > current.lastTimestamp) current.lastTimestamp = date;
+        }
+      }
+
+      bySession.set(sessionId, current);
+    });
+
+    return Array.from(bySession.values())
+      .map((row) => ({
+        ...row,
+        providersText: Array.from(row.providers).join(", ") || "N/A",
+        bandsText: Array.from(row.bands).join(", ") || "N/A",
+        technologiesText: Array.from(row.technologies).join(", ") || "N/A",
+        appsText: Array.from(row.apps).join(", ") || "N/A",
+        rangeText:
+          row.firstTimestamp && row.lastTimestamp
+            ? `${row.firstTimestamp.toLocaleString()} - ${row.lastTimestamp.toLocaleString()}`
+            : "N/A",
+      }))
+      .sort((a, b) => b.count - a.count);
+  }, [safeLogsList]);
+
+  const responseStats = useMemo(() => {
+    const secondary = safeLogsList.filter((log) => log.isNeighbour || log.source === "secondary").length;
+    const withImages = safeLogsList.filter((log) => log.image_path || log.imagePath).length;
+    const withApps = safeLogsList.filter((log) => log.apps || log.app_name).length;
+    return {
+      sessions: sessionSummary.length,
+      secondary,
+      withImages,
+      withApps,
+    };
+  }, [safeLogsList, sessionSummary.length]);
+
   const safeNum = (val, suffix = "") => {
     if (val === null || val === undefined) return "N/A";
     const num = typeof val === "string" ? parseFloat(val) : val;
@@ -446,10 +616,30 @@ const AllLogsDetailPanel = ({
   };
 
   return (
-    <div className="fixed top-16 right-0 h-[calc(100vh-4rem)] w-[24rem] max-w-[100vw] text-white bg-slate-900 shadow-2xl z-50 flex flex-col">
+    <Rnd
+      size={{ width: panelFrame.width, height: panelFrame.height }}
+      position={{ x: panelFrame.x, y: panelFrame.y }}
+      minWidth={384}
+      minHeight={360}
+      bounds="window"
+      dragHandleClassName="logs-summary-drag-handle"
+      className="z-50"
+      onDragStop={(event, data) => {
+        setPanelFrame((current) => ({ ...current, x: data.x, y: data.y }));
+      }}
+      onResizeStop={(event, direction, ref, delta, position) => {
+        setPanelFrame({
+          x: position.x,
+          y: position.y,
+          width: ref.offsetWidth,
+          height: ref.offsetHeight,
+        });
+      }}
+    >
+    <div className="h-full w-full text-white bg-slate-900 shadow-2xl flex flex-col rounded-lg border border-slate-700/70 overflow-hidden">
       <div className="flex-shrink-0 p-4 border-b border-slate-800 flex justify-between items-center bg-slate-900">
-        <div>
-          <h3 className="text-lg font-bold">All Logs Metric Summary</h3>
+        <div className="logs-summary-drag-handle cursor-move select-none">
+          <h3 className="text-lg font-bold">Log Summary</h3>
           <div className="text-xs text-slate-400">Metric: {metricLabel}{unit}</div>
           {dateRange && <div className="text-xs text-slate-500 mt-1">Date Range: {dateRange}</div>}
         </div>
@@ -467,6 +657,17 @@ const AllLogsDetailPanel = ({
         </div>
       </div>
 
+      <div className="flex-shrink-0 border-b border-slate-800 bg-slate-900 px-4 py-3">
+        <div className="flex flex-wrap gap-2">
+          <TabButton active={activeTab === "overview"} icon={BarChart3} onClick={() => setActiveTab("overview")}>
+            Overview
+          </TabButton>
+          <TabButton active={activeTab === "sessions"} icon={Database} onClick={() => setActiveTab("sessions")}>
+            Sessions
+          </TabButton>
+        </div>
+      </div>
+
       <div className="flex-1 overflow-y-auto p-4 space-y-4">
         {isLoading ? (
           <div className="flex justify-center items-center h-full">
@@ -474,6 +675,15 @@ const AllLogsDetailPanel = ({
           </div>
         ) : (
           <>
+            {activeTab === "overview" && (
+              <>
+            <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+              <StatCard label="Sessions" value={responseStats.sessions} />
+              <StatCard label="Secondary" value={responseStats.secondary} />
+              <StatCard label="With Apps" value={responseStats.withApps} />
+              <StatCard label="With Images" value={responseStats.withImages} />
+            </div>
+
             <div className="bg-slate-800/60 rounded-lg p-3">
               <div className="flex items-center gap-2 mb-2">
                 <BarChart3 className="h-4 w-4 text-blue-400" />
@@ -651,10 +861,29 @@ const AllLogsDetailPanel = ({
                 </div>
               </div>
             )}
+              </>
+            )}
+
+            {activeTab === "sessions" && (
+              <div className="bg-slate-800/60 rounded-lg p-3">
+                <div className="mb-3">
+                  <div className="font-semibold">Session Breakdown</div>
+                  <div className="text-xs text-slate-400">
+                    Grouped from the loaded date-range rows.
+                  </div>
+                </div>
+                <MiniTable
+                  columns={["sessionId", "count", "providersText", "technologiesText", "bandsText", "appsText", "rangeText"]}
+                  rows={sessionSummary}
+                  maxRows={200}
+                />
+              </div>
+            )}
           </>
         )}
       </div>
     </div>
+    </Rnd>
   );
 };
 

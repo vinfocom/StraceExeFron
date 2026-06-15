@@ -27,6 +27,7 @@ export default function MapHeader({
   onFetchLogs,
   availableFilterOptions = { providers: [], technologies: [], bands: [] },
   rawLogsCount = 0,
+  neighbourLogsCount = 0,
   isLoading = false,
 }) {
   const { user, logout } = useAuth();
@@ -118,6 +119,7 @@ export default function MapHeader({
         logs={logs}
         availableFilterOptions={availableFilterOptions}
         rawLogsCount={rawLogsCount}
+        secondaryLogsCount={neighbourLogsCount}
         isLoading={isLoading}
       />
     </header>

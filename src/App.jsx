@@ -14,6 +14,7 @@ import { ToastContainer } from "react-toastify";
 import "react-toastify/dist/ReactToastify.css";
 
 import AuthProvider, { useAuth } from "./context/AuthContext";
+import { SettingsDialogProvider } from "./context/SettingsDialogContext";
 import { indexedDBProvider } from "./utils/indexedDBProvider";
 import Spinner from "./components/common/Spinner";
 import { MapProvider } from './context/MapContext';
@@ -179,7 +180,9 @@ function App() {
       <AuthProvider>
         <MapProvider>
           <SWRConfig value={swrConfig}>
-            <AppShell isElectronRuntime={isElectronRuntime} />
+            <SettingsDialogProvider>
+              <AppShell isElectronRuntime={isElectronRuntime} />
+            </SettingsDialogProvider>
           </SWRConfig>
         </MapProvider>
       </AuthProvider>

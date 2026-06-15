@@ -38,14 +38,14 @@ const isObjectNonEmpty = (obj) =>
 const PanelSection = ({ title, children, badge }) => (
   <div className="space-y-2">
     <div className="flex items-center justify-between">
-      <div className="text-sm font-medium text-slate-800">{title}</div>
+      <div className="text-sm font-medium text-white">{title}</div>
       {badge && (
         <span className="text-xs bg-blue-600 text-white px-2 py-0.5 rounded-full">
           {badge}
         </span>
       )}
     </div>
-    <div className="rounded-lg border border-slate-200 p-3 bg-white">
+    <div className="rounded-lg border border-slate-200 p-3 bg-slate-700">
       {children}
     </div>
   </div>
@@ -58,7 +58,7 @@ const ColorLegend = ({ colorBy }) => {
 
   return (
     <div className="mt-2 p-2 bg-slate-50 rounded-md border border-slate-200">
-      <div className="text-xs font-medium mb-2 text-slate-700">
+      <div className="text-xs font-medium mb-2 text-white">
         Color Legend ({colorBy})
       </div>
       <div className="space-y-1">
@@ -68,7 +68,7 @@ const ColorLegend = ({ colorBy }) => {
               className="w-3 h-3 rounded-full border border-slate-300"
               style={{ backgroundColor: color }}
             />
-            <span className="text-xs text-slate-700">{key}</span>
+            <span className="text-xs text-white">{key}</span>
           </div>
         ))}
       </div>
@@ -91,6 +91,7 @@ export default function MapSidebarFloating({
   logs = [],
   availableFilterOptions = { providers: [], technologies: [], bands: [] },
   rawLogsCount = 0,
+  secondaryLogsCount = 0,
   isLoading = false,
 }) {
   const [internalOpen, setInternalOpen] = useState(false);
@@ -116,7 +117,12 @@ export default function MapSidebarFloating({
   const handleFilterChange = (key, value) =>
     setFilters((prev) => ({ ...prev, [key]: value }));
 
-  const handleNeighChange = (event) => {
+  const handlePrimaryLogsChange = (event) => {
+    const checked = event.target.checked;
+    onUIChange?.({ showPrimaryLogs: checked });
+  };
+
+  const handleSecondaryLogsChange = (event) => {
     const checked = event.target.checked;
     onUIChange?.({ showNeighbours: checked });
   };
@@ -130,7 +136,7 @@ export default function MapSidebarFloating({
 
   const sideClasses = useMemo(() => {
     const base =
-      "fixed top-16 h-[calc(100vh-4rem)] z-50 w-[90vw] sm:w-[320px] bg-white text-slate-900 border-r border-slate-200 shadow-2xl transition-transform duration-200 ease-out flex flex-col";
+      "fixed top-16 h-[calc(100vh-4rem)] z-50 w-[90vw] sm:w-[320px] bg-slate-900 text-white border-r border-slate-200 shadow-2xl transition-transform duration-200 ease-out flex flex-col";
     if (position === "right") {
       return isOpen
         ? `${base} right-0 translate-x-0`
@@ -160,6 +166,7 @@ export default function MapSidebarFloating({
   };
 
   const hasLoadedLogs = rawLogsCount > 0;
+  const totalLoadedLogs = rawLogsCount + secondaryLogsCount;
 
   return (
     <>
@@ -185,7 +192,7 @@ export default function MapSidebarFloating({
 
       <div className={sideClasses}>
         {/* Header - Fixed */}
-        <div className="flex-shrink-0 flex items-center justify-between p-3 border-b border-slate-200 bg-white">
+        <div className="flex-shrink-0 flex items-center justify-between p-3 border-b border-slate-200 bg-slate-900">
           <div className="flex items-center gap-2">
             <SlidersHorizontal className="h-4 w-4" />
             <h3 className="text-base font-semibold">Map Filters</h3>
@@ -207,10 +214,15 @@ export default function MapSidebarFloating({
                 <span className="text-green-400 font-medium">
                   {rawLogsCount.toLocaleString()}
                 </span>{" "}
-                logs loaded
+                primary logs loaded
               </span>
             </div>
-            {logs.length !== rawLogsCount && logs.length > 0 && (
+            {secondaryLogsCount > 0 && (
+              <div className="text-xs text-slate-500 mt-1">
+                {secondaryLogsCount.toLocaleString()} secondary logs loaded
+              </div>
+            )}
+            {logs.length !== totalLoadedLogs && logs.length > 0 && (
               <div className="text-xs text-slate-500 mt-1">
                 Showing {logs.length.toLocaleString()} after filters
               </div>
@@ -224,7 +236,7 @@ export default function MapSidebarFloating({
           <PanelSection title="Date Filter">
             <div className="space-y-3">
               <div>
-                <Label className="text-xs text-slate-700 mb-1 block">
+                <Label className="text-xs text-white mb-1 block">
                   Start Date
                 </Label>
                 <DatePicker
@@ -234,7 +246,7 @@ export default function MapSidebarFloating({
                 />
               </div>
               <div>
-                <Label className="text-xs text-slate-700 mb-1 block">
+                <Label className="text-xs text-white mb-1 block">
                   Start Time
                 </Label>
                 <TimePicker
@@ -244,7 +256,7 @@ export default function MapSidebarFloating({
                 />
               </div>
               <div>
-                <Label className="text-xs text-slate-700 mb-1 block">
+                <Label className="text-xs text-white mb-1 block">
                   End Date
                 </Label>
                 <DatePicker
@@ -254,7 +266,7 @@ export default function MapSidebarFloating({
                 />
               </div>
               <div>
-                <Label className="text-xs text-slate-700 mb-1 block">
+                <Label className="text-xs text-white mb-1 block">
                   End Time
                 </Label>
                 <TimePicker
@@ -274,7 +286,7 @@ export default function MapSidebarFloating({
             <div className="space-y-3">
               {/* Provider */}
               <div>
-                <Label className="text-xs text-slate-700 mb-1 flex items-center gap-2">
+                <Label className="text-xs text-white mb-1 flex items-center gap-2">
                   Provider
                   {providers.length > 0 && (
                     <span className="text-xs text-slate-500">
@@ -309,7 +321,7 @@ export default function MapSidebarFloating({
 
               {/* Technology */}
               <div>
-                <Label className="text-xs text-slate-700 mb-1 flex items-center gap-2">
+                <Label className="text-xs text-white mb-1 flex items-center gap-2">
                   Technology
                   {technologies.length > 0 && (
                     <span className="text-xs text-slate-500">
@@ -344,7 +356,7 @@ export default function MapSidebarFloating({
 
               {/* Band */}
               <div>
-                <Label className="text-xs text-slate-700 mb-1 flex items-center gap-2">
+                <Label className="text-xs text-white mb-1 flex items-center gap-2">
                   Band / Frequency
                   {bands.length > 0 && (
                     <span className="text-xs text-slate-500">
@@ -377,7 +389,7 @@ export default function MapSidebarFloating({
 
               {/* Metric */}
               <div>
-                <Label className="text-xs text-slate-700 mb-1 block">
+                <Label className="text-xs text-white mb-1 block">
                   Visualize Metric
                 </Label>
                 <Select
@@ -404,7 +416,7 @@ export default function MapSidebarFloating({
           {/* Layers */}
           <PanelSection title="Layers & Display">
             <div className="space-y-2.5 text-sm">
-              <label className="flex items-start gap-2 cursor-pointer hover:bg-slate-50 p-2 rounded transition-colors">
+              <label className="flex items-start gap-2 cursor-pointer hover:bg-slate-400 p-2 rounded transition-colors">
                 <input
                   type="checkbox"
                   checked={filters.coverageHoleOnly || false}
@@ -414,7 +426,7 @@ export default function MapSidebarFloating({
                   className="w-4 h-4 mt-0.5 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
                 />
                 <div className="flex-1">
-                  <div className="text-sm font-medium text-slate-800">
+                  <div className="text-sm font-medium text-white">
                     Coverage Holes
                   </div>
                   <div className="text-xs text-slate-500">
@@ -423,43 +435,43 @@ export default function MapSidebarFloating({
                 </div>
               </label>
 
-              <label className="flex items-center gap-2 cursor-pointer hover:bg-slate-50 p-2 rounded transition-colors">
+              <label className="flex items-center gap-2 cursor-pointer hover:bg-slate-400 p-2 rounded transition-colors">
                 <input
                   type="checkbox"
                   checked={filters.colorBy === "provider"}
                   onChange={() => handleColorByChange("provider")}
                   className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
                 />
-                <div className="text-sm font-medium text-slate-800">
+                <div className="text-sm font-medium text-white">
                   Color by Provider
                 </div>
               </label>
 
-              <label className="flex items-center gap-2 cursor-pointer hover:bg-slate-50 p-2 rounded transition-colors">
+              <label className="flex items-center gap-2 cursor-pointer hover:bg-slate-400 p-2 rounded transition-colors">
                 <input
                   type="checkbox"
                   checked={filters.colorBy === "technology"}
                   onChange={() => handleColorByChange("technology")}
                   className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
                 />
-                <div className="text-sm font-medium text-slate-800">
+                <div className="text-sm font-medium text-white">
                   Color by Technology
                 </div>
               </label>
 
-              <label className="flex items-center gap-2 cursor-pointer hover:bg-slate-50 p-2 rounded transition-colors">
+              <label className="flex items-center gap-2 cursor-pointer hover:bg-slate-400 p-2 rounded transition-colors">
                 <input
                   type="checkbox"
                   checked={filters.colorBy === "band"}
                   onChange={() => handleColorByChange("band")}
                   className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
                 />
-                <div className="text-sm font-medium text-slate-800">
+                <div className="text-sm font-medium text-white">
                   Color by Band
                 </div>
               </label>
 
-              <label className="flex items-center gap-2 cursor-pointer hover:bg-slate-50 p-2 rounded transition-colors">
+              <label className="flex items-center gap-2 cursor-pointer hover:bg-slate-400 p-2 rounded transition-colors">
                 <input
                   type="checkbox"
                   checked={ui?.clusterSessions || false}
@@ -469,20 +481,132 @@ export default function MapSidebarFloating({
                   disabled={!ui?.showSessions || hasActiveFilters}
                   className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500 disabled:opacity-50"
                 />
-                <div className="text-sm text-slate-800">Cluster Sessions</div>
+                <div className="text-sm text-white">Cluster Sessions</div>
               </label>
 
-              <label className="flex items-center gap-2 cursor-pointer hover:bg-slate-50 p-2 rounded transition-colors">
+              <label className="flex items-center gap-2 cursor-pointer hover:bg-slate-400 p-2 rounded transition-colors">
+                <input
+                  type="checkbox"
+                  checked={ui?.showPrimaryLogs !== false}
+                  onChange={handlePrimaryLogsChange}
+                  disabled={!hasActiveFilters}
+                  className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                />
+                <div className="flex-1">
+                  <div className="text-sm font-medium text-white">
+                    Primary Logs
+                  </div>
+                  <div className="text-xs text-slate-500">
+                    Fetched by default when filters are applied
+                  </div>
+                </div>
+              </label>
+
+              <label className="flex items-center gap-2 cursor-pointer hover:bg-slate-400 p-2 rounded transition-colors">
                 <input
                   type="checkbox"
                   checked={ui?.showNeighbours || false}
-                  onChange={handleNeighChange}
-                  className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                  onChange={handleSecondaryLogsChange}
+                  disabled={!hasActiveFilters || isLoading}
+                  className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500 disabled:opacity-50"
                 />
-                <div className="text-sm text-slate-800">Show Neighbours</div>
+                <div className="flex-1">
+                  <div className="text-sm font-medium text-white">
+                    Secondary Logs
+                  </div>
+                  <div className="text-xs text-slate-500">
+                    Fetch and show only when needed
+                  </div>
+                </div>
               </label>
 
-              <label className="flex items-center gap-2 cursor-pointer hover:bg-slate-50 p-2 rounded transition-colors">
+              <label className="flex items-center gap-2 cursor-pointer hover:bg-slate-400 p-2 rounded transition-colors">
+                <input
+                  type="checkbox"
+                  checked={ui?.showMetricLabels || false}
+                  onChange={(e) =>
+                    onUIChange?.({ showMetricLabels: e.target.checked })
+                  }
+                  disabled={!hasActiveFilters}
+                  className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500 disabled:opacity-50"
+                />
+                <div className="flex-1">
+                  <div className="text-sm font-medium text-white">
+                    Metric Labels
+                  </div>
+                  <div className="text-xs text-slate-500">
+                    Show selected KPI beside each log
+                  </div>
+                </div>
+              </label>
+
+              <div className="space-y-2 rounded-md bg-slate-800/70 p-2">
+                <div className="flex items-center justify-between gap-3">
+                  <Label className="text-xs text-white">Log Radius</Label>
+                  <span className="text-xs text-slate-400">
+                    {ui?.logRadius || 10}px
+                  </span>
+                </div>
+                <input
+                  type="range"
+                  min="4"
+                  max="40"
+                  step="1"
+                  value={ui?.logRadius || 10}
+                  onChange={(e) =>
+                    onUIChange?.({ logRadius: Number(e.target.value) })
+                  }
+                  disabled={!hasActiveFilters}
+                  className="w-full accent-blue-600 disabled:opacity-50"
+                />
+              </div>
+
+              <div className="space-y-2 rounded-md bg-slate-800/70 p-2">
+                <div className="flex items-center justify-between gap-3">
+                  <Label className="text-xs text-white">Opacity</Label>
+                  <span className="text-xs text-slate-400">
+                    {Math.round((ui?.opacity ?? 0.9) * 100)}%
+                  </span>
+                </div>
+                <input
+                  type="range"
+                  min="0.15"
+                  max="1"
+                  step="0.05"
+                  value={ui?.opacity ?? 0.9}
+                  onChange={(e) =>
+                    onUIChange?.({ opacity: Number(e.target.value) })
+                  }
+                  disabled={!hasActiveFilters}
+                  className="w-full accent-blue-600 disabled:opacity-50"
+                />
+              </div>
+
+              <div>
+                <Label className="text-xs text-white mb-1 block">
+                  Overlapping Logs
+                </Label>
+                <Select
+                  value={ui?.overlapDrawOrder || "original"}
+                  onValueChange={(v) =>
+                    onUIChange?.({ overlapDrawOrder: v })
+                  }
+                  disabled={!hasActiveFilters}
+                >
+                  <SelectTrigger className="w-full">
+                    <SelectValue placeholder="Choose top log..." />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="original">Original order</SelectItem>
+                    <SelectItem value="latest">Latest on top</SelectItem>
+                    <SelectItem value="earliest">Earliest on top</SelectItem>
+                    <SelectItem value="highest_metric">Highest KPI on top</SelectItem>
+                    <SelectItem value="lowest_metric">Lowest KPI on top</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <label className="flex items-center gap-2 cursor-pointer hover:bg-slate-400 p-2 rounded transition-colors">
                 <input
                   type="checkbox"
                   checked={ui?.showHeatmap || false}
@@ -492,7 +616,7 @@ export default function MapSidebarFloating({
                   disabled={!hasActiveFilters}
                   className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500 disabled:opacity-50"
                 />
-                <div className="text-sm text-slate-800">Heatmap</div>
+                <div className="text-sm text-white">Heatmap</div>
               </label>
             </div>
           </PanelSection>

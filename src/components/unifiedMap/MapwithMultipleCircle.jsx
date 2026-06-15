@@ -1175,6 +1175,7 @@ const MapWithMultipleCircles = ({
   defaultZoom = 14,
   fitToLocations = true,
   onLoad: onLoadProp,
+  onUnmount: onUnmountProp,
   pointRadius = 10,
   children,
   projectId = null,
@@ -1981,7 +1982,8 @@ const MapWithMultipleCircles = ({
 
   const handleMapUnmount = useCallback(() => {
     setMap(null);
-  }, []);
+    onUnmountProp?.();
+  }, [onUnmountProp]);
 
   const resolvedNeighborSquareSize = useMemo(() => {
     const base = Number(neighborSquareSize);

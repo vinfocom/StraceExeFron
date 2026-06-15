@@ -32,7 +32,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import SettingsPage from "@/pages/Setting";
+import { useSettingsDialog } from "@/context/SettingsDialogContext";
 import {
   findProjectInProjectsCache,
   upsertProjectInProjectsCache,
@@ -449,6 +449,7 @@ function UnifiedHeader({
   onMapSnapshot,
 }) {
   const { user, logout } = useAuth();
+  const { openSettings } = useSettingsDialog();
   const location = useLocation();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -471,7 +472,6 @@ function UnifiedHeader({
   const [isUploading, setIsUploading] = useState(false);
   const [selectedFile, setSelectedFile] = useState(null);
   const [activeQuickControl, setActiveQuickControl] = useState(null);
-  const [openSettingsDialog, setOpenSettingsDialog] = useState(false);
   const [openImportDialog, setOpenImportDialog] = useState(false);
 
   // Prediction Prompt State
@@ -769,8 +769,15 @@ function UnifiedHeader({
       action: () => toggleQuickControl("triangle"),
       disabled: !triangleSizeAvailable,
     },
-    { label: "Beamwidth", action: () => toggleQuickControl("beamwidth"), disabled: !triangleSizeAvailable,},
-    { label: "Settings", action: () => setOpenSettingsDialog(true) },
+    {
+      label: "Beamwidth",
+      action: () => toggleQuickControl("beamwidth"),
+      disabled: !triangleSizeAvailable,
+    },
+    {
+      label: "Settings",
+      action: () => openSettings({ onSaveSuccess: onSettingsSaved }),
+    },
   ];
 
   useEffect(() => {
@@ -788,6 +795,13 @@ function UnifiedHeader({
   useEffect(() => {
     const handleUtilityAction = (event) => {
       const action = event?.detail?.action;
+
+      if (!action) return;
+
+      if (action === "settings") {
+        openSettings({ onSaveSuccess: onSettingsSaved });
+        return;
+      }
       if (!isMapPage || !action) return;
 
       if (action === "opacity") {
@@ -814,10 +828,6 @@ function UnifiedHeader({
         toggleQuickControl("beamwidth");
         return;
       }
-      if (action === "settings") {
-        setOpenSettingsDialog(true);
-        return;
-      }
       if (action === "import") {
         setOpenImportDialog(true);
       }
@@ -829,6 +839,8 @@ function UnifiedHeader({
   }, [
     isMapPage,
     neighborLogsAvailable,
+    onSettingsSaved,
+    openSettings,
     triangleSizeAvailable,
     toggleQuickControl,
   ]);
@@ -1255,15 +1267,6 @@ function UnifiedHeader({
             </div>
           </DialogContent>
         </Dialog>
-
-        <Dialog open={openSettingsDialog} onOpenChange={setOpenSettingsDialog}>
-          <DialogContent className="max-w-5xl max-h-[90vh] overflow-hidden p-0">
-            <SettingsPage onSaveSuccess={onSettingsSaved} />
-          </DialogContent>
-        </Dialog>
-        
-
-        
 
         {/* LTE Prediction Prompt Dialog */}
         <Dialog
