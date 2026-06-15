@@ -318,12 +318,12 @@ const StatCard = ({ label, value, unit = "", colorClass = "" }) => (
 
 const DistributionBar = ({ label, count, percent, total, color }) => (
   <div className="mb-1">
-    <div className="flex items-center justify-between">
-      <div className="flex items-center gap-2">
-        <div className="w-4 h-4 rounded" style={{ backgroundColor: color }} />
-        <span className="text-xs text-slate-300">{label}</span>
+    <div className="flex min-w-0 items-center justify-between gap-3">
+      <div className="flex min-w-0 items-center gap-2">
+        <div className="h-4 w-4 flex-shrink-0 rounded" style={{ backgroundColor: color }} />
+        <span className="min-w-0 truncate text-xs text-slate-300">{label}</span>
       </div>
-      <span className="text-xs text-slate-200">{count} ({percent}%)</span>
+      <span className="flex-shrink-0 text-xs text-slate-200">{count} ({percent}%)</span>
     </div>
     <div className="h-2 bg-slate-700 rounded mt-1">
       <div className="h-2 rounded" style={{ width: `${percent}%`, backgroundColor: color }} />
@@ -349,20 +349,45 @@ const ProgressBar = ({ name, count, percent, colorType, colorValue }) => (
   </div>
 );
 
-const getInitialPanelFrame = () => {
-  if (typeof window === "undefined") {
-    return { x: 0, y: 64, width: 720, height: 720 };
-  }
+const PANEL_MARGIN = 16;
+const PANEL_TOP = 64;
+const PANEL_MIN_WIDTH = 320;
+const PANEL_MIN_HEIGHT = 300;
 
-  const width = Math.min(760, Math.max(420, window.innerWidth - 32));
-  const height = Math.min(Math.max(420, window.innerHeight - 96), window.innerHeight - 32);
+const clampPanelFrame = (frame) => {
+  if (typeof window === "undefined") return frame;
+
+  const maxWidth = Math.max(PANEL_MIN_WIDTH, window.innerWidth - PANEL_MARGIN * 2);
+  const maxHeight = Math.max(PANEL_MIN_HEIGHT, window.innerHeight - PANEL_MARGIN * 2);
+  const width = Math.min(Math.max(frame.width, PANEL_MIN_WIDTH), maxWidth);
+  const height = Math.min(Math.max(frame.height, PANEL_MIN_HEIGHT), maxHeight);
+  const maxX = Math.max(PANEL_MARGIN, window.innerWidth - width - PANEL_MARGIN);
+  const maxY = Math.max(PANEL_MARGIN, window.innerHeight - height - PANEL_MARGIN);
 
   return {
-    x: Math.max(16, window.innerWidth - width - 16),
-    y: 64,
+    x: Math.min(Math.max(PANEL_MARGIN, frame.x), maxX),
+    y: Math.min(Math.max(PANEL_MARGIN, frame.y), maxY),
     width,
     height,
   };
+};
+
+const getInitialPanelFrame = () => {
+  if (typeof window === "undefined") {
+    return { x: PANEL_MARGIN, y: PANEL_TOP, width: 720, height: 640 };
+  }
+
+  const availableWidth = Math.max(PANEL_MIN_WIDTH, window.innerWidth - PANEL_MARGIN * 2);
+  const availableHeight = Math.max(PANEL_MIN_HEIGHT, window.innerHeight - PANEL_TOP - PANEL_MARGIN);
+  const width = Math.min(560, availableWidth);
+  const height = availableHeight;
+
+  return clampPanelFrame({
+    x: Math.max(PANEL_MARGIN, window.innerWidth - width - PANEL_MARGIN),
+    y: PANEL_TOP,
+    width,
+    height,
+  });
 };
 
 const TabButton = ({ active, icon: Icon, children, onClick }) => (
@@ -426,6 +451,16 @@ const AllLogsDetailPanel = ({
   const [isDurationsLoading, setIsDurationsLoading] = useState(false);
   const [activeTab, setActiveTab] = useState("overview");
   const [panelFrame, setPanelFrame] = useState(getInitialPanelFrame);
+
+  useEffect(() => {
+    const handleResize = () => {
+      setPanelFrame((current) => clampPanelFrame(current));
+    };
+
+    handleResize();
+    window.addEventListener("resize", handleResize);
+    return () => window.removeEventListener("resize", handleResize);
+  }, []);
 
   const safeLogsList = useMemo(() => (Array.isArray(logs) ? logs : []), [logs]);
   const cfg = useMemo(() => resolveMetricConfig(selectedMetric), [selectedMetric]);
@@ -619,21 +654,21 @@ const AllLogsDetailPanel = ({
     <Rnd
       size={{ width: panelFrame.width, height: panelFrame.height }}
       position={{ x: panelFrame.x, y: panelFrame.y }}
-      minWidth={384}
-      minHeight={360}
+      minWidth={PANEL_MIN_WIDTH}
+      minHeight={PANEL_MIN_HEIGHT}
       bounds="window"
       dragHandleClassName="logs-summary-drag-handle"
       className="z-50"
       onDragStop={(event, data) => {
-        setPanelFrame((current) => ({ ...current, x: data.x, y: data.y }));
+        setPanelFrame((current) => clampPanelFrame({ ...current, x: data.x, y: data.y }));
       }}
       onResizeStop={(event, direction, ref, delta, position) => {
-        setPanelFrame({
+        setPanelFrame(clampPanelFrame({
           x: position.x,
           y: position.y,
           width: ref.offsetWidth,
           height: ref.offsetHeight,
-        });
+        }));
       }}
     >
     <div className="h-full w-full text-white bg-slate-900 shadow-2xl flex flex-col rounded-lg border border-slate-700/70 overflow-hidden">
