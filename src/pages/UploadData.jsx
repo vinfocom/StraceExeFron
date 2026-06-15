@@ -6,14 +6,14 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { UploadCloud, File, X, Download } from "lucide-react";
-import { Label } from "@/components/ui/label";
+import { UploadCloud, File, X, Download, MapPinned, RefreshCw } from "lucide-react";
 
 
 import Spinner from "../components/common/Spinner";
 
-import { excelApi } from "../api/apiEndpoints";
+import { excelApi, mapViewApi } from "../api/apiEndpoints";
 import { useFileUpload } from "../hooks/useFileUpload";
+import { useAuth } from "@/context/AuthContext";
 
 const MAX_FILE_SIZE = 500 * 1024 * 1024; // 100MB
 
@@ -24,15 +24,6 @@ const FILE_TYPES = [
   "application/x-zip-compressed",   // ✅ added
   "application/octet-stream",
   "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-];
-
-const POLYGON_TYPES = [
-  "application/zip",
-  "application/geo+json",
-  "application/x-zip-compressed",   // ✅ added
-  "application/octet-stream",
-  "application/json",
-  "text/csv",
 ];
 
 const toSafeArray = (value) => {
@@ -65,6 +56,150 @@ const formatSessionCell = (sessionValue) => {
 const normalizeStatus = (status) => String(status ?? "").trim().toLowerCase();
 const isProcessingStatus = (status) => normalizeStatus(status) === "processing";
 
+const extractResponseData = (response) => response?.data || response;
+
+const resolveCompanyId = (user) => {
+  const directCompanyId = Number(user?.company_id ?? user?.CompanyId ?? user?.companyId ?? 0);
+  if (Number.isFinite(directCompanyId) && directCompanyId > 0) return directCompanyId;
+
+  if (typeof window === "undefined") return 0;
+
+  try {
+    const cachedUser = JSON.parse(sessionStorage.getItem("user") || "null");
+    const cachedCompanyId = Number(
+      cachedUser?.company_id ?? cachedUser?.CompanyId ?? cachedUser?.companyId ?? 0,
+    );
+    return Number.isFinite(cachedCompanyId) && cachedCompanyId > 0 ? cachedCompanyId : 0;
+  } catch {
+    return 0;
+  }
+};
+
+const closeLinearRing = (ring) => {
+  if (!Array.isArray(ring) || ring.length < 3) return ring || [];
+  const first = ring[0];
+  const last = ring[ring.length - 1];
+  if (first?.[0] === last?.[0] && first?.[1] === last?.[1]) return ring;
+  return [...ring, first];
+};
+
+const ringToWkt = (ring) =>
+  `(${closeLinearRing(ring)
+    .map((point) => {
+      const lon = Number(point?.[0]);
+      const lat = Number(point?.[1]);
+      if (!Number.isFinite(lon) || !Number.isFinite(lat)) {
+        throw new Error("GeoJSON coordinates must be numeric [longitude, latitude] pairs.");
+      }
+      return `${lon} ${lat}`;
+    })
+    .join(", ")})`;
+
+const geometryToWkt = (geometry) => {
+  const geom = geometry?.type === "Feature" ? geometry.geometry : geometry;
+  if (!geom?.type) throw new Error("GeoJSON must contain a Polygon or MultiPolygon geometry.");
+
+  if (geom.type === "Polygon") {
+    return `POLYGON(${geom.coordinates.map(ringToWkt).join(", ")})`;
+  }
+
+  if (geom.type === "MultiPolygon") {
+    return `MULTIPOLYGON(${geom.coordinates
+      .map((polygon) => `(${polygon.map(ringToWkt).join(", ")})`)
+      .join(", ")})`;
+  }
+
+  throw new Error("Only Polygon and MultiPolygon imports are supported.");
+};
+
+const parseMapInfoRegionToWkt = (raw) => {
+  const lines = String(raw || "")
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  const polygons = [];
+
+  for (let i = 0; i < lines.length; i++) {
+    const regionMatch = lines[i].match(/^Region\s+(\d+)/i);
+    if (!regionMatch) continue;
+
+    const ringCount = Number.parseInt(regionMatch[1], 10);
+    if (!Number.isInteger(ringCount) || ringCount <= 0) continue;
+
+    const rings = [];
+    i++;
+
+    for (let ringIndex = 0; ringIndex < ringCount && i < lines.length; ringIndex++) {
+      const pointCount = Number.parseInt(lines[i], 10);
+      if (!Number.isInteger(pointCount) || pointCount < 3) {
+        throw new Error("Invalid MapInfo MIF Region point count.");
+      }
+
+      const ring = [];
+      i++;
+
+      for (let pointIndex = 0; pointIndex < pointCount && i < lines.length; pointIndex++, i++) {
+        const parts = lines[i].split(/\s+/);
+        const lon = Number.parseFloat(parts[0]);
+        const lat = Number.parseFloat(parts[1]);
+
+        if (!Number.isFinite(lon) || !Number.isFinite(lat)) {
+          throw new Error("Invalid MapInfo MIF coordinate pair.");
+        }
+
+        ring.push([lon, lat]);
+      }
+
+      rings.push(closeLinearRing(ring));
+    }
+
+    i--;
+    if (rings.length) polygons.push(rings);
+  }
+
+  if (!polygons.length) {
+    throw new Error(
+      "MapInfo file does not contain inline Region polygon coordinates. For TAB/MID imports, export the layer as MIF/MIFF first if the file only references .DAT/.MAP data.",
+    );
+  }
+
+  if (polygons.length === 1) {
+    return `POLYGON(${polygons[0].map(ringToWkt).join(", ")})`;
+  }
+
+  return `MULTIPOLYGON(${polygons
+    .map((polygon) => `(${polygon.map(ringToWkt).join(", ")})`)
+    .join(", ")})`;
+};
+
+const normalizePolygonInput = (raw) => {
+  const text = String(raw || "").trim();
+  if (!text) throw new Error("Paste a WKT polygon or upload a GeoJSON/WKT/MIF/TAB file.");
+
+  if (/^(POLYGON|MULTIPOLYGON)\s*\(/i.test(text)) return text;
+  if (/^Region\s+\d+/im.test(text)) return parseMapInfoRegionToWkt(text);
+  if (/^(Version|Charset|Delimiter|CoordSys|Columns|Data|!table|Definition\s+Table|Type\s+NATIVE)\b/im.test(text)) {
+    return parseMapInfoRegionToWkt(text);
+  }
+
+  const parsed = JSON.parse(text);
+  if (parsed?.type === "FeatureCollection") {
+    const feature = parsed.features?.find((item) =>
+      ["Polygon", "MultiPolygon"].includes(item?.geometry?.type),
+    );
+    if (!feature) throw new Error("FeatureCollection does not contain a polygon geometry.");
+    return geometryToWkt(feature);
+  }
+
+  return geometryToWkt(parsed);
+};
+
+const parsePolygonSessionIds = (value) =>
+  String(value || "")
+    .split(",")
+    .map((item) => Number(item.trim()))
+    .filter((item) => Number.isInteger(item) && item > 0);
+
 const normalizeHistoryItems = (items) =>
   toSafeArray(items).map((item = {}) => ({
     ...item,
@@ -78,49 +213,34 @@ const normalizeHistoryItems = (items) =>
   }));
 
 const UploadDataPage = () => {
+  const { user } = useAuth();
   const [sessionFiles, setSessionFiles] = useState([]);
-  const [predictionFiles, setPredictionFiles] = useState([]);
-  const [polygonFile, setPolygonFile] = useState(null);
   const [remarks, setRemarks] = useState("");
-  const [projectName, setProjectName] = useState("");
-  const [selectedSessions, setSelectedSessions] = useState([]);
+  const [polygonName, setPolygonName] = useState("");
+  const [polygonText, setPolygonText] = useState("");
+  const [polygonSessionIdsText, setPolygonSessionIdsText] = useState("");
+  const [polygonArea, setPolygonArea] = useState("");
+  const [polygonImporting, setPolygonImporting] = useState(false);
   const [uploadedFiles, setUploadedFiles] = useState([]);
   const [activeTab, setActiveTab] = useState("session");
   const [historyLoading, setHistoryLoading] = useState(true);
-
-  const [startDate, setStartDate] = useState("");
-  const [endDate, setEndDate] = useState("");
-  const [sessionsInRange, setSessionsInRange] = useState([]);
-  const [sessionsLoading, setSessionsLoading] = useState(false);
 
   const { loading, errorLog, uploadFile, setErrorLog } = useFileUpload();
 
   // ------------------ FILE UPLOAD LOGIC ------------------
   const handleUpload = async () => {
-    const files = toSafeArray(activeTab === "session" ? sessionFiles : predictionFiles);
+    const files = toSafeArray(sessionFiles);
     if (!files.length) {
       toast.warn("Please select a main data file.");
       return;
     }
 
-    if (activeTab === "prediction") {
-      if (!projectName.trim()) {
-        toast.warn("Please enter a project name.");
-        return;
-      }
-      if (!polygonFile) {
-        toast.warn("Please upload a polygon file.");
-        return;
-      }
-    }
-
     const formData = new FormData();
     formData.append("UploadFile", files[0]);
-    if (polygonFile) formData.append("UploadNoteFile", polygonFile);
-    formData.append("UploadFileType", activeTab === "session" ? "1" : "2");
+    formData.append("UploadFileType", "1");
     formData.append("remarks", remarks);
-    formData.append("ProjectName", projectName);
-    formData.append("SessionIds", normalizeSessionIds(selectedSessions).join(","));
+    formData.append("ProjectName", "");
+    formData.append("SessionIds", "");
 
     const result = await uploadFile(formData);
     if (result.success) {
@@ -138,11 +258,7 @@ const UploadDataPage = () => {
 
   const resetForm = () => {
     setSessionFiles([]);
-    setPredictionFiles([]);
-    setPolygonFile(null);
-    setProjectName("");
     setRemarks("");
-    setSelectedSessions([]);
     setErrorLog("");
   };
 
@@ -163,45 +279,26 @@ const UploadDataPage = () => {
     if (valid.length) setSessionFiles(valid);
   }, []);
 
-  const onDropPrediction = useCallback((files) => {
-    const valid = toSafeArray(files).filter((f) => validateFile(f, FILE_TYPES));
-    if (valid.length) setPredictionFiles(valid);
-  }, []);
-
-  const onDropPolygon = useCallback((files) => {
-    const valid = toSafeArray(files).filter((f) => validateFile(f, POLYGON_TYPES));
-    if (valid.length) setPolygonFile(valid[0]);
-  }, []);
-
   const {
     getRootProps: getRootPropsSession,
     getInputProps: getInputPropsSession,
     isDragActive: isDragActiveSession,
   } = useDropzone({ onDrop: onDropSession, multiple: false });
 
-  const {
-    getRootProps: getRootPropsPrediction,
-    getInputProps: getInputPropsPrediction,
-    isDragActive: isDragActivePrediction,
-  } = useDropzone({ onDrop: onDropPrediction, multiple: false });
-
-  const {
-    getRootProps: getRootPropsPolygon,
-    getInputProps: getInputPropsPolygon,
-    isDragActive: isDragActivePolygon,
-  } = useDropzone({ onDrop: onDropPolygon, multiple: false });
-
   const removeFile = (type) => {
     if (type === "session") setSessionFiles([]);
-    else if (type === "prediction") setPredictionFiles([]);
-    else if (type === "polygon") setPolygonFile(null);
   };
 
   // ------------------ UPLOAD HISTORY FETCH ------------------
   const fetchUploadedFiles = useCallback(async ({ showLoader = true, showError = true } = {}) => {
+    if (activeTab !== "session") {
+      setUploadedFiles([]);
+      setHistoryLoading(false);
+      return;
+    }
     if (showLoader) setHistoryLoading(true);
     try {
-      const response = await excelApi.getUploadedFiles(activeTab === "session" ? 1 : 2);
+      const response = await excelApi.getUploadedFiles(1);
       setUploadedFiles(normalizeHistoryItems(response?.Data ?? response));
     } catch {
       setUploadedFiles([]);
@@ -228,87 +325,70 @@ const UploadDataPage = () => {
     return () => clearInterval(intervalId);
   }, [uploadedFiles, fetchUploadedFiles]);
 
-  // ------------------ FETCH SESSIONS BUTTON ------------------
-  const handleFetchSessions = async () => {
-      if (!startDate || !endDate) {
-        toast.warn("Please select both start and end dates.");
-        return;
-      }
-      if (new Date(startDate) > new Date(endDate)) {
-        toast.error("Start date cannot be after end date.");
-        return;
-      }
-  
-      setSessionsLoading(true);
-      setSelectedSessions([]);
-      const start = new Date(startDate);
-      const end = new Date(endDate);
-      end.setHours(23, 59, 59, 999);
-      try {
-        const response = await excelApi.getSessions(start, end);
-        const fetched = toSafeArray(response?.Data ?? response);
-       
-        setSessionsInRange(
-          fetched.map((s) => ({
-            value: normalizeSessionId(s?.id ?? s?.session_id ?? s?.value),
-            label:
-              s?.label ||
-              s?.name ||
-              `Session ${normalizeSessionId(s?.id ?? s?.session_id ?? s?.value)}`,
-          }))
-        );
-       
-        if (fetched.length === 0) toast.info("No sessions found.");
-      } catch {
-        toast.error("Failed to fetch sessions.");
-      } finally {
-        setSessionsLoading(false);
+  const handlePolygonFileChange = useCallback((event) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      setPolygonText(String(reader.result || ""));
+      if (!polygonName.trim()) {
+        setPolygonName(file.name.replace(/\.(geojson|json|wkt|txt|mif|miff|mid|tab)$/i, ""));
       }
     };
+    reader.onerror = () => toast.error("Failed to read polygon file");
+    reader.readAsText(file);
+  }, [polygonName]);
 
-    // Simple multi-select dropdown component
-const SessionMultiDropdown = ({ sessions, selectedSessions, setSelectedSessions }) => {
-  const toggle = (id) => {
-    const normalizedId = normalizeSessionId(id);
-    if (!normalizedId) return;
+  const handlePolygonImport = useCallback(async () => {
+    if (!polygonName.trim()) {
+      toast.error("Polygon name is required");
+      return;
+    }
 
-    setSelectedSessions((prev) => {
-      const safePrev = normalizeSessionIds(prev);
-      return safePrev.includes(normalizedId)
-        ? safePrev.filter((s) => s !== normalizedId)
-        : [...safePrev, normalizedId];
-    });
-  };
+    setPolygonImporting(true);
+    try {
+      const wkt = normalizePolygonInput(polygonText);
+      const sessionIds = parsePolygonSessionIds(polygonSessionIdsText);
+      const primarySessionId = sessionIds.length > 0 ? String(sessionIds[0]).trim() : undefined;
+      const scopedCompanyId = resolveCompanyId(user);
+      const numericArea = polygonArea === "" ? null : Number(polygonArea);
 
-  const safeSessions = toSafeArray(sessions);
-  const safeSelected = normalizeSessionIds(selectedSessions);
+      if (numericArea !== null && !Number.isFinite(numericArea)) {
+        throw new Error("Area must be a valid number.");
+      }
 
-  if (!safeSessions.length) {
-    return <p className="text-gray-200 mt-2">No sessions loaded yet.</p>;
-  }
+      const response = await mapViewApi.importPolygon({
+        Name: polygonName.trim(),
+        WKT: wkt,
+        Wkt: wkt,
+        SessionIds: sessionIds,
+        session_ids: sessionIds,
+        session_id: primarySessionId,
+        Area: numericArea,
+        company_id: scopedCompanyId || undefined,
+        CompanyId: scopedCompanyId || undefined,
+        CreatedByUserId: user?.id || undefined,
+        created_by_user_id: user?.id || undefined,
+      });
+      const data = extractResponseData(response);
 
-  return (
-    <div className="max-h-60 overflow-y-auto bg-gray-700 rounded p-3 space-y-1">
-      {safeSessions.map((s, index) => {
-        const value = normalizeSessionId(s?.value);
-        if (!value) return null;
-        return (
-        <label
-          key={`${value}-${index}`}
-          className="flex items-center space-x-2 cursor-pointer hover:bg-gray-600 rounded px-2 py-1"
-        >
-          <input
-            type="checkbox"
-            checked={safeSelected.includes(value)}
-            onChange={() => toggle(value)}
-          />
-          <span className="text-white text-sm">{s?.label || `Session ${value}`}</span>
-        </label>
-      );
-      })}
-    </div>
-  );
-};
+      if (data?.Status === 1 || data?.status === 1 || data?.success === true) {
+        toast.success("Polygon imported into map regions");
+        setPolygonName("");
+        setPolygonText("");
+        setPolygonSessionIdsText("");
+        setPolygonArea("");
+      } else {
+        toast.error(data?.Message || data?.message || "Polygon import failed");
+      }
+    } catch (error) {
+      toast.error(error?.message || "Polygon import failed");
+    } finally {
+      setPolygonImporting(false);
+    }
+  }, [polygonArea, polygonName, polygonSessionIdsText, polygonText, user]);
+
   // ------------------ UI HELPERS ------------------
   const renderFileList = (files, type) => {
     const safeFiles = toSafeArray(files);
@@ -358,7 +438,7 @@ const SessionMultiDropdown = ({ sessions, selectedSessions, setSelectedSessions 
         <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
           <TabsList className="grid grid-cols-2 bg-gray-700 text-white rounded">
             <TabsTrigger value="session">Upload Session Data</TabsTrigger>
-            <TabsTrigger value="prediction">Upload Prediction Data</TabsTrigger>
+            <TabsTrigger value="polygon">Import Polygon</TabsTrigger>
           </TabsList>
 
           {/* ---------- SESSION TAB ---------- */}
@@ -379,76 +459,79 @@ const SessionMultiDropdown = ({ sessions, selectedSessions, setSelectedSessions 
             />
           </TabsContent>
 
-          {/* ---------- PREDICTION TAB ---------- */}
-          <TabsContent value="prediction" className="space-y-4 mt-4">
-            {renderFileInput(
-              getRootPropsPrediction,
-              getInputPropsPrediction,
-              isDragActivePrediction,
-              predictionFiles,
-              "prediction",
-              "Prediction Data File (.csv or .zip, max 200 MB)"
-            )}
-
-            <label className="font-semibold">Inbound Polygon File (Required)</label>
-            {renderFileInput(
-              getRootPropsPolygon,
-              getInputPropsPolygon,
-              isDragActivePolygon,
-              polygonFile ? [polygonFile] : [],
-              "polygon",
-              "Polygon File (.zip, .geojson, .json)"
-            )}
-
-            <Input
-              placeholder="Project Name"
-              value={projectName}
-              onChange={(e) => setProjectName(e.target.value)}
-            />
-
-            {/* --- Date range + Fetch button --- */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-3 items-end">
+          {/* ---------- POLYGON TAB ---------- */}
+          <TabsContent value="polygon" className="space-y-4 mt-4">
+            <div className="grid grid-cols-1 md:grid-cols-[1fr_180px] gap-4">
               <div>
-                <label className="text-sm font-semibold">Start Date</label>
+                <label className="text-sm font-semibold">Polygon Name</label>
                 <Input
-                  type="date"
-                  value={startDate}
-                  onChange={(e) => setStartDate(e.target.value)}
+                  value={polygonName}
+                  onChange={(e) => setPolygonName(e.target.value)}
+                  placeholder="Region name"
+                  className="bg-white text-black placeholder:text-gray-500"
                 />
               </div>
               <div>
-                <label className="text-sm font-semibold">End Date</label>
+                <label className="text-sm font-semibold">Area</label>
                 <Input
-                  type="date"
-                  value={endDate}
-                  onChange={(e) => setEndDate(e.target.value)}
+                  type="number"
+                  value={polygonArea}
+                  onChange={(e) => setPolygonArea(e.target.value)}
+                  placeholder="Optional"
+                  className="bg-white text-black placeholder:text-gray-500"
                 />
               </div>
-              <Button
-                onClick={handleFetchSessions}
-                disabled={sessionsLoading}
-                className="bg-white text-gray-700 hover:bg-blue-200"
-              >
-                {sessionsLoading ? <Spinner /> : "Fetch Sessions"}
-              </Button>
             </div>
 
-            {/* --- SessionSelector with fetched list --- */}
-            <div >
-                <Label>Select Sessions</Label>
-                <SessionMultiDropdown
-                  sessions={sessionsInRange}
-                  selectedSessions={selectedSessions}
-                  setSelectedSessions={setSelectedSessions}
-                />
-              </div>
+            <div>
+              <label className="text-sm font-semibold">Polygon Data</label>
+              <Textarea
+                value={polygonText}
+                onChange={(e) => setPolygonText(e.target.value)}
+                placeholder="Paste WKT POLYGON/MULTIPOLYGON, GeoJSON Polygon/MultiPolygon, or MapInfo MIF Region data"
+                className="min-h-[220px] bg-white text-black placeholder:text-gray-500"
+              />
+            </div>
 
-            <Textarea
-              placeholder="Remarks (Optional)"
-              value={remarks}
-              onChange={(e) => setRemarks(e.target.value)}
-              className="bg-white text-black placeholder:text-gray-500"
-            />
+            <div>
+              <label className="text-sm font-semibold">Session IDs</label>
+              <Input
+                value={polygonSessionIdsText}
+                onChange={(e) => setPolygonSessionIdsText(e.target.value)}
+                placeholder="Optional comma-separated session ids"
+                className="bg-white text-black placeholder:text-gray-500"
+              />
+            </div>
+
+            <div className="flex flex-wrap gap-3">
+              <label className="inline-flex cursor-pointer items-center rounded-md bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-blue-200">
+                <UploadCloud className="mr-2 h-4 w-4" />
+                Import File
+                <input
+                  type="file"
+                  accept=".geojson,.json,.wkt,.txt,.mif,.miff,.mid,.tab"
+                  onChange={handlePolygonFileChange}
+                  className="hidden"
+                />
+              </label>
+              <Button
+                onClick={handlePolygonImport}
+                disabled={polygonImporting}
+                className="bg-white text-gray-700 hover:bg-blue-200"
+              >
+                {polygonImporting ? (
+                  <>
+                    <RefreshCw className="mr-2 h-4 w-4 animate-spin" />
+                    Importing...
+                  </>
+                ) : (
+                  <>
+                    <MapPinned className="mr-2 h-4 w-4" />
+                    Save Region
+                  </>
+                )}
+              </Button>
+            </div>
           </TabsContent>
         </Tabs>
 
@@ -460,29 +543,30 @@ const SessionMultiDropdown = ({ sessions, selectedSessions, setSelectedSessions 
           </div>
         )}
 
-        {/* ---------- Upload Buttons ---------- */}
-        <div className="mt-8 flex justify-center gap-4">
-          <Button
-            onClick={handleUpload}
-            disabled={loading}
-            size="lg"
-            className="bg-white text-gray-700 hover:bg-blue-200"
-          >
-            {loading ? <Spinner /> : "Upload & Process"}
-          </Button>
-          <Button
-            onClick={() => excelApi.downloadTemplate(1)}
-            variant="outline"
-            size="lg"
-            className="bg-white text-gray-700 hover:bg-blue-200"
-          >
-            <Download className="mr-2 h-4 w-4" />
-            Download Template
-          </Button>
-        </div>
+        {activeTab === "session" && (
+          <div className="mt-8 flex justify-center gap-4">
+            <Button
+              onClick={handleUpload}
+              disabled={loading}
+              size="lg"
+              className="bg-white text-gray-700 hover:bg-blue-200"
+            >
+              {loading ? <Spinner /> : "Upload & Process"}
+            </Button>
+            <Button
+              onClick={() => excelApi.downloadTemplate(1)}
+              variant="outline"
+              size="lg"
+              className="bg-white text-gray-700 hover:bg-blue-200"
+            >
+              <Download className="mr-2 h-4 w-4" />
+              Download Template
+            </Button>
+          </div>
+        )}
 
         {/* ---------- Upload History ---------- */}
-        <div className="mt-10">
+        {activeTab === "session" && <div className="mt-10">
           <h2 className="text-xl font-semibold mb-4">
             Upload History for '{activeTab}'
           </h2>
@@ -540,7 +624,7 @@ const SessionMultiDropdown = ({ sessions, selectedSessions, setSelectedSessions 
               </TableBody>
             </Table>
           </div>
-        </div>
+        </div>}
       </div>
     </div>
   );

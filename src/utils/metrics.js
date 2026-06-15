@@ -378,6 +378,31 @@ export const getMetricValueFromLog = (log, metric) => {
 
   const config = getMetricConfig(metric);
   if (!config?.fields) return NaN;
+  const metricKey = String(config.key || metric || "").toLowerCase();
+  const isWifiLog =
+    log?.is_wifi === true ||
+    ["wifi", "wi-fi"].includes(
+      String(log?.connection_type ?? log?.connectionType ?? "").trim().toLowerCase(),
+    );
+
+  if (isWifiLog && metricKey === "rsrp") {
+    const wifiSignalCandidates = [
+      log.rssi,
+      log.RSSI,
+      log.Rssi,
+      log.signal_value,
+      log.signalValue,
+      log.level,
+      log.Level,
+    ];
+    for (const candidate of wifiSignalCandidates) {
+      const parsed = parseFloat(candidate);
+      if (Number.isFinite(parsed)) {
+        return parsed;
+      }
+    }
+    return NaN;
+  }
 
   for (const field of config.fields) {
     const val = log[field];
@@ -389,7 +414,6 @@ export const getMetricValueFromLog = (log, metric) => {
     }
   }
 
-  const metricKey = String(config.key || "").toLowerCase();
   if (metricKey !== "pci" && metricKey !== "tac") {
     const genericCandidates = [
       log.value,

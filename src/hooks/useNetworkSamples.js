@@ -55,6 +55,30 @@ const isPointInPolygon = (point, polygon) => {
   return inside;
 };
 
+const isMacAddress = (value) =>
+  /^(?:[0-9a-f]{2}:){5}[0-9a-f]{2}$/i.test(String(value || "").trim());
+
+const cleanDisplayName = (value) => {
+  const text = String(value ?? "").trim().replace(/^["']+|["']+$/g, "");
+  if (!text || isMacAddress(text)) return null;
+  return text;
+};
+
+const isWifiLog = (log) => {
+  const type = String(
+    log?.connection_type ??
+      log?.connectionType ??
+      log?.log_type ??
+      log?.type ??
+      ""
+  ).trim().toLowerCase();
+
+  if (type === "wifi" || type === "wi-fi") return true;
+
+  const primaryInfo = String(log?.primary_cell_info_1 ?? log?.primaryCellInfo1 ?? "");
+  return primaryInfo.includes("SSID:") || primaryInfo.includes("BSSID:");
+};
+
 
 
 const parseLogEntry = (log, sessionId) => {
@@ -141,8 +165,25 @@ const parseLogEntry = (log, sessionId) => {
     "RXLEV",
   ]);
 
-  const parsedRsrp = normalizeSignalToDbm(parsedRsrpRaw);
+  const wifiLog = isWifiLog(log);
+  const parsedRsrp = wifiLog ? null : normalizeSignalToDbm(parsedRsrpRaw);
   const parsedRssi = normalizeSignalToDbm(parsedRssiRaw);
+  const signalValue = wifiLog ? parsedRssi : (parsedRsrp ?? parsedRssi);
+  const provider = wifiLog
+    ? (
+        cleanDisplayName(log.m_alpha_short) ||
+        cleanDisplayName(log.provider) ||
+        cleanDisplayName(log.Provider) ||
+        cleanDisplayName(log.m_alpha_long) ||
+        "Unknown"
+      )
+    : (
+        normalizeProviderName(log.m_alpha_short) ||
+        normalizeProviderName(log.provider) ||
+        normalizeProviderName(log.Provider) ||
+        normalizeProviderName(log.m_alpha_long) ||
+        "Unknown"
+      );
 
   return {
     id: log.id ?? log.Id ?? log.log_id ?? log.LogId ?? null,
@@ -150,8 +191,11 @@ const parseLogEntry = (log, sessionId) => {
     lat, lng, latitude: lat, longitude: lng,
     radius: 18,
     timestamp: log.timestamp,
-    rsrp: parsedRsrp ?? parsedRssi,
+    rsrp: wifiLog ? null : signalValue,
     rssi: parsedRssi,
+    signal_value: signalValue,
+    signal_metric: wifiLog ? "rssi" : "rsrp",
+    signal_label: wifiLog ? "RSSI" : "RSRP",
     rsrq: parseNumFromKeys(["rsrq", "RSRQ", "Rsrq", "lte_rsrq", "nr_rsrq"]),
     sinr: parseNumFromKeys(["sinr", "SINR", "Sinr", "snr", "SNR", "lte_sinr", "nr_sinr"]),
     dl_tpt: dlThroughput,
@@ -166,7 +210,13 @@ const parseLogEntry = (log, sessionId) => {
     latency: parseNum(log.latency),
     tac: parseNum(log.tac),
     packet_loss: parseNum(log.packet_loss),
-    provider: normalizeProviderName(log.m_alpha_long || ''),
+    provider,
+    log_type: wifiLog ? "wifi" : "network",
+    connection_type: wifiLog ? "wifi" : "network",
+    is_wifi: wifiLog,
+    ssid: wifiLog ? provider : "",
+    wifi_rssi: wifiLog ? parsedRssi : null,
+    wifi_frequency: wifiLog ? (log.band || "") : "",
     technology: normalizeTechName(log.network || ''),
     band: log.band || '',
     pci: log.pci ?? log.Pci ?? log.PCI ?? '',
@@ -217,7 +267,7 @@ export const useNetworkSamples = (
     const cacheKey = makeProjectCacheKey({
       resource: 'unified-network-samples',
       sessionIds: sessionIds || [],
-      variant: `${safeMaxRows ? `max-${safeMaxRows}` : 'all'}:project-${projectId || 'none'}`,
+      variant: `typed-network-wifi-v8:${safeMaxRows ? `max-${safeMaxRows}` : 'all'}:project-${projectId || 'none'}`,
     });
 
 

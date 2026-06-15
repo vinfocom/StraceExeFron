@@ -273,13 +273,14 @@ const ExportDropdown = ({
       
       if (locations?.length) {
         const locationHeaders = [
-          "index", "latitude", "longitude", "rsrp", "rsrq", "sinr", 
+          "index", "latitude", "longitude", "rssi", "rsrp", "rsrq", "sinr", 
           "technology", "provider", "band", "pci", "timestamp", "session_id"
         ];
         const locationData = locations.map((loc, idx) => ({
           index: idx + 1,
           latitude: loc.lat?.toFixed(6) || loc.latitude?.toFixed(6) || "",
           longitude: loc.lng?.toFixed(6) || loc.longitude?.toFixed(6) || "",
+          rssi: loc.rssi ?? "",
           rsrp: loc.rsrp ?? "",
           rsrq: loc.rsrq ?? "",
           sinr: loc.sinr ?? "",

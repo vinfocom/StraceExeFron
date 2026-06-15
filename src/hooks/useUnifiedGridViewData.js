@@ -27,6 +27,40 @@ const CATEGORY_GRID_METRICS = new Set([
 ]);
 const CATEGORY_COLOR_MODES = new Set(["provider", "operator", "band", "technology", "nodebid", "pci"]);
 
+const isWifiLogRow = (loc) => {
+  const type = String(
+    loc?.connection_type ?? loc?.connectionType ?? loc?.log_type ?? loc?.type ?? "",
+  ).trim().toLowerCase();
+  if (type === "wifi" || type === "wi-fi" || loc?.is_wifi === true) return true;
+
+  const primaryInfo = String(loc?.primary_cell_info_1 ?? loc?.primaryCellInfo1 ?? "");
+  return primaryInfo.includes("SSID:") || primaryInfo.includes("BSSID:");
+};
+
+const cleanWifiProviderName = (value) => {
+  const text = String(value ?? "").trim().replace(/^["']+|["']+$/g, "");
+  if (!text) return null;
+  if (/^(?:[0-9a-f]{2}:){5}[0-9a-f]{2}$/i.test(text)) return null;
+  return text;
+};
+
+const resolveProviderName = (loc) => {
+  if (isWifiLogRow(loc)) {
+    return (
+      cleanWifiProviderName(loc?.provider) ||
+      cleanWifiProviderName(loc?.operator) ||
+      cleanWifiProviderName(loc?.m_alpha_short) ||
+      cleanWifiProviderName(loc?.m_alpha_long) ||
+      "Unknown"
+    );
+  }
+
+  return (
+    normalizeProviderName(loc?.provider ?? loc?.operator ?? loc?.m_alpha_long ?? loc?.network) ||
+    "Unknown"
+  );
+};
+
 const toFiniteNumber = (value) => {
   const parsed = Number.parseFloat(value);
   return Number.isFinite(parsed) ? parsed : null;
@@ -268,8 +302,8 @@ export const useUnifiedGridViewData = ({
 
       incrementCounter(
         bucket.providers,
-        loc?.provider ?? loc?.operator ?? loc?.m_alpha_long ?? loc?.network,
-        normalizeProviderName,
+        loc,
+        resolveProviderName,
       );
       incrementCounter(
         bucket.bands,
@@ -299,10 +333,7 @@ export const useUnifiedGridViewData = ({
         getMetricValueFromLog(loc, selectedMetricKey),
       );
       if (selectedMetricValue !== null) {
-        const providerName =
-          normalizeProviderName(
-            loc?.provider ?? loc?.operator ?? loc?.m_alpha_long ?? loc?.network,
-          ) || "Unknown";
+        const providerName = resolveProviderName(loc);
         const technologyName =
           normalizeTechName(
             loc?.technology ?? loc?.networkType ?? loc?.network,

@@ -8,6 +8,7 @@ import {
   normalizeTechName,
   normalizeBandName 
 } from "@/utils/colorUtils";
+import { getMetricValueFromLog } from "@/utils/metrics";
 
 const METRIC_CONFIG = {
   rsrp: { field: "rsrp", thresholdKey: "rsrp", label: "RSRP", unit: "dBm" },
@@ -71,6 +72,17 @@ const formatDate = (date) => {
 const normalizeOperator = (raw) => {
   const normalized = normalizeProviderName(raw);
   return normalized === "Unknown" ? null : normalized;
+};
+
+const isWifiLog = (log) => {
+  const type = String(log?.log_type ?? log?.connection_type ?? log?.connectionType ?? "").trim().toLowerCase();
+  return log?.is_wifi === true || type === "wifi" || type === "wi-fi";
+};
+
+const getSignalLabelForLogs = (logs = []) => {
+  const validLogs = (logs || []).filter(Boolean);
+  if (!validLogs.length) return "RSRP/RSSI";
+  return validLogs.every(isWifiLog) ? "RSSI" : validLogs.some(isWifiLog) ? "RSRP/RSSI" : "RSRP";
 };
 
 const normalizeNetwork = (network, band = null) => {
@@ -210,7 +222,7 @@ const buildOperatorNetworkCombo = (logs, topN = 10) => {
 const exportCsv = ({ logs, field, filename = "logs_metric.csv" }) => {
   if (!Array.isArray(logs) || !logs.length) return;
 
-  const header = ["session_id", "lat", "lon",  "rsrp",
+  const header = ["session_id", "log_type", "lat", "lon", "rssi", "rsrp",
     "rsrq",
     "sinr",
     "bler",
@@ -232,9 +244,11 @@ const exportCsv = ({ logs, field, filename = "logs_metric.csv" }) => {
   logs.forEach((log) => {
     lines.push([
       log.session_id ?? log.id ?? "",
+      log.log_type ?? log.connection_type ?? (isWifiLog(log) ? "wifi" : "network"),
       log.lat ?? "",
       log.lon ?? log.lng ?? "",
-     log.rsrp ?? "",
+      log.rssi ?? "",
+      isWifiLog(log) ? "" : (log.rsrp ?? ""),
       log.rsrq ?? "",
       log.sinr ?? "",
       log.bler ?? "",
@@ -316,10 +330,12 @@ const AllLogsDetailPanel = ({
   const cfg = useMemo(() => resolveMetricConfig(selectedMetric), [selectedMetric]);
   const unit = cfg.unit ? ` ${cfg.unit}` : "";
   const ranges = thresholds?.[cfg.thresholdKey] || [];
+  const signalLabel = useMemo(() => getSignalLabelForLogs(safeLogsList), [safeLogsList]);
+  const metricLabel = cfg.field === "rsrp" ? signalLabel : cfg.label;
 
   const numericValues = useMemo(() => {
     return safeLogsList
-      .map((log) => parseFloat(log?.[cfg.field]))
+      .map((log) => cfg.field === "rsrp" ? getMetricValueFromLog(log, "rsrp") : parseFloat(log?.[cfg.field]))
       .filter(Number.isFinite);
   }, [safeLogsList, cfg.field]);
 
@@ -434,7 +450,7 @@ const AllLogsDetailPanel = ({
       <div className="flex-shrink-0 p-4 border-b border-slate-800 flex justify-between items-center bg-slate-900">
         <div>
           <h3 className="text-lg font-bold">All Logs Metric Summary</h3>
-          <div className="text-xs text-slate-400">Metric: {cfg.label}{unit}</div>
+          <div className="text-xs text-slate-400">Metric: {metricLabel}{unit}</div>
           {dateRange && <div className="text-xs text-slate-500 mt-1">Date Range: {dateRange}</div>}
         </div>
         <div className="flex items-center gap-2">
@@ -461,7 +477,7 @@ const AllLogsDetailPanel = ({
             <div className="bg-slate-800/60 rounded-lg p-3">
               <div className="flex items-center gap-2 mb-2">
                 <BarChart3 className="h-4 w-4 text-blue-400" />
-                <span className="font-semibold text-sm">{cfg.label} Statistics</span>
+                <span className="font-semibold text-sm">{metricLabel} Statistics</span>
               </div>
               <div className="grid grid-cols-2 gap-3 text-sm">
                 <StatCard label="Total Logs" value={stats.total} colorClass="text-lg text-blue-400" />
@@ -568,7 +584,7 @@ const AllLogsDetailPanel = ({
                       </div>
                       <div className="grid grid-cols-2 gap-x-3 gap-y-1.5 text-xs">
                         <div className="flex justify-between">
-                          <span className="text-slate-400">RSRP:</span>
+                          <span className="text-slate-400">{signalLabel}:</span>
                           <span className="text-slate-200">{safeNum(app.avgRsrp, " dBm")}</span>
                         </div>
                         <div className="flex justify-between">

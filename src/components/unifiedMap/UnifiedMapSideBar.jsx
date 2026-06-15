@@ -1600,6 +1600,8 @@ const UnifiedMapSidebar = ({
         const lat = Number(row.lat ?? row.latitude ?? row.Lat ?? row.Latitude);
         const lon = Number(row.lon ?? row.lng ?? row.longitude ?? row.Lng ?? row.Longitude);
         if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
+        const rowType = String(row.log_type ?? row.connection_type ?? row.connectionType ?? "").trim().toLowerCase();
+        if (row.is_wifi === true || rowType === "wifi" || rowType === "wi-fi") return null;
         return {
           lat,
           lon,

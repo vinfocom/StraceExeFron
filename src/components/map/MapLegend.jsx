@@ -41,6 +41,37 @@ const LEGEND_VIEWPORT_MARGIN = 16;
 const DEFAULT_LEGEND_TOP = 140;
 const COLLAPSED_LEGEND_HEIGHT = 44;
 
+const isWifiLogRow = (log) => {
+  const type = String(
+    log?.connection_type ?? log?.connectionType ?? log?.log_type ?? log?.type ?? "",
+  ).trim().toLowerCase();
+  if (type === "wifi" || type === "wi-fi" || log?.is_wifi === true) return true;
+
+  const primaryInfo = String(log?.primary_cell_info_1 ?? log?.primaryCellInfo1 ?? "");
+  return primaryInfo.includes("SSID:") || primaryInfo.includes("BSSID:");
+};
+
+const cleanWifiProviderName = (value) => {
+  const text = String(value ?? "").trim().replace(/^["']+|["']+$/g, "");
+  if (!text) return null;
+  if (/^(?:[0-9a-f]{2}:){5}[0-9a-f]{2}$/i.test(text)) return null;
+  return text;
+};
+
+const resolveProviderDisplayName = (log) => {
+  if (isWifiLogRow(log)) {
+    return (
+      cleanWifiProviderName(log?.provider) ||
+      cleanWifiProviderName(log?.Provider) ||
+      cleanWifiProviderName(log?.m_alpha_short) ||
+      cleanWifiProviderName(log?.m_alpha_long) ||
+      "Unknown"
+    );
+  }
+
+  return normalizeProviderName(log.provider || log.Provider || log.carrier) || "Unknown";
+};
+
 const getViewportSize = () => ({
   width: typeof window === "undefined" ? 1024 : window.innerWidth,
   height: typeof window === "undefined" ? 768 : window.innerHeight,
@@ -113,10 +144,7 @@ const isUnknownLegendKey = (value) => {
 const getNormalizedKey = (log, colorBy, scheme) => {
   switch (colorBy) {
     case "provider":
-      return (
-        normalizeProviderName(log.provider || log.Provider || log.carrier) ||
-        "Unknown"
-      );
+      return resolveProviderDisplayName(log);
 
     case "technology":
       const tech =

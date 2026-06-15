@@ -4,8 +4,8 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import Spinner from '../components/common/Spinner';
-import { X, Plus, Save, RefreshCw, ArrowUpDown, Upload, MapPinned } from 'lucide-react';
-import { settingApi, mapViewApi } from '../api/apiEndpoints';
+import { X, Plus, Save, RefreshCw, ArrowUpDown } from 'lucide-react';
+import { settingApi } from '../api/apiEndpoints';
 import { useAuth } from '@/context/AuthContext';
 
 const PARAMETERS = {
@@ -79,156 +79,6 @@ const createNewRow = () => ({
 const extractResponseData = (response) => {
     return response?.data || response;
 };
-
-const resolveCompanyId = (user) => {
-    const directCompanyId = Number(user?.company_id ?? user?.CompanyId ?? user?.companyId ?? 0);
-    if (Number.isFinite(directCompanyId) && directCompanyId > 0) {
-        return directCompanyId;
-    }
-
-    if (typeof window === "undefined") return 0;
-
-    try {
-        const cachedUser = JSON.parse(sessionStorage.getItem("user") || "null");
-        const cachedCompanyId = Number(
-            cachedUser?.company_id ?? cachedUser?.CompanyId ?? cachedUser?.companyId ?? 0
-        );
-        return Number.isFinite(cachedCompanyId) && cachedCompanyId > 0 ? cachedCompanyId : 0;
-    } catch {
-        return 0;
-    }
-};
-
-const closeLinearRing = (ring) => {
-    if (!Array.isArray(ring) || ring.length < 3) return ring || [];
-    const first = ring[0];
-    const last = ring[ring.length - 1];
-    if (first?.[0] === last?.[0] && first?.[1] === last?.[1]) return ring;
-    return [...ring, first];
-};
-
-const ringToWkt = (ring) =>
-    `(${closeLinearRing(ring)
-        .map((point) => {
-            const lon = Number(point?.[0]);
-            const lat = Number(point?.[1]);
-            if (!Number.isFinite(lon) || !Number.isFinite(lat)) {
-                throw new Error("GeoJSON coordinates must be numeric [longitude, latitude] pairs.");
-            }
-            return `${lon} ${lat}`;
-        })
-        .join(", ")})`;
-
-const geometryToWkt = (geometry) => {
-    const geom = geometry?.type === "Feature" ? geometry.geometry : geometry;
-    if (!geom?.type) throw new Error("GeoJSON must contain a Polygon or MultiPolygon geometry.");
-
-    if (geom.type === "Polygon") {
-        return `POLYGON(${geom.coordinates.map(ringToWkt).join(", ")})`;
-    }
-
-    if (geom.type === "MultiPolygon") {
-        return `MULTIPOLYGON(${geom.coordinates
-            .map((polygon) => `(${polygon.map(ringToWkt).join(", ")})`)
-            .join(", ")})`;
-    }
-
-    throw new Error("Only Polygon and MultiPolygon imports are supported.");
-};
-
-const parseMapInfoRegionToWkt = (raw) => {
-    const lines = String(raw || "")
-        .split(/\r?\n/)
-        .map((line) => line.trim())
-        .filter(Boolean);
-    const polygons = [];
-
-    for (let i = 0; i < lines.length; i++) {
-        const regionMatch = lines[i].match(/^Region\s+(\d+)/i);
-        if (!regionMatch) continue;
-
-        const ringCount = Number.parseInt(regionMatch[1], 10);
-        if (!Number.isInteger(ringCount) || ringCount <= 0) continue;
-
-        const rings = [];
-        i++;
-
-        for (let ringIndex = 0; ringIndex < ringCount && i < lines.length; ringIndex++) {
-            const pointCount = Number.parseInt(lines[i], 10);
-            if (!Number.isInteger(pointCount) || pointCount < 3) {
-                throw new Error("Invalid MapInfo MIF Region point count.");
-            }
-
-            const ring = [];
-            i++;
-
-            for (let pointIndex = 0; pointIndex < pointCount && i < lines.length; pointIndex++, i++) {
-                const parts = lines[i].split(/\s+/);
-                const lon = Number.parseFloat(parts[0]);
-                const lat = Number.parseFloat(parts[1]);
-
-                if (!Number.isFinite(lon) || !Number.isFinite(lat)) {
-                    throw new Error("Invalid MapInfo MIF coordinate pair.");
-                }
-
-                ring.push([lon, lat]);
-            }
-
-            rings.push(closeLinearRing(ring));
-        }
-
-        i--;
-        if (rings.length) polygons.push(rings);
-    }
-
-    if (!polygons.length) {
-        throw new Error(
-            "MapInfo file does not contain inline Region polygon coordinates. For TAB/MID imports, export the layer as MIF/MIFF first if the file only references .DAT/.MAP data."
-        );
-    }
-
-    if (polygons.length === 1) {
-        return `POLYGON(${polygons[0].map(ringToWkt).join(", ")})`;
-    }
-
-    return `MULTIPOLYGON(${polygons
-        .map((polygon) => `(${polygon.map(ringToWkt).join(", ")})`)
-        .join(", ")})`;
-};
-
-const normalizePolygonInput = (raw) => {
-    const text = String(raw || "").trim();
-    if (!text) throw new Error("Paste a WKT polygon or upload a GeoJSON/WKT/MIF/TAB file.");
-
-    if (/^(POLYGON|MULTIPOLYGON)\s*\(/i.test(text)) {
-        return text;
-    }
-
-    if (/^Region\s+\d+/im.test(text)) {
-        return parseMapInfoRegionToWkt(text);
-    }
-
-    if (/^(Version|Charset|Delimiter|CoordSys|Columns|Data|!table|Definition\s+Table|Type\s+NATIVE)\b/im.test(text)) {
-        return parseMapInfoRegionToWkt(text);
-    }
-
-    const parsed = JSON.parse(text);
-    if (parsed?.type === "FeatureCollection") {
-        const feature = parsed.features?.find((item) =>
-            ["Polygon", "MultiPolygon"].includes(item?.geometry?.type)
-        );
-        if (!feature) throw new Error("FeatureCollection does not contain a polygon geometry.");
-        return geometryToWkt(feature);
-    }
-
-    return geometryToWkt(parsed);
-};
-
-const parseSessionIds = (value) =>
-    String(value || "")
-        .split(",")
-        .map((item) => Number(item.trim()))
-        .filter((item) => Number.isInteger(item) && item > 0);
 
 const ThresholdRow = memo(({ row, index, onChange, onDelete }) => {
     const [minStr, setMinStr] = useState(String(row.min ?? 0));
@@ -784,170 +634,8 @@ const buildSavePayload = (thresholds, userId) => {
     return payload;
 };
 
-const PolygonImportPanel = ({ user }) => {
-    const [name, setName] = useState("");
-    const [polygonText, setPolygonText] = useState("");
-    const [sessionIdsText, setSessionIdsText] = useState("");
-    const [area, setArea] = useState("");
-    const [importing, setImporting] = useState(false);
-
-    const handleFileChange = useCallback((event) => {
-        const file = event.target.files?.[0];
-        if (!file) return;
-
-        const reader = new FileReader();
-        reader.onload = () => {
-            setPolygonText(String(reader.result || ""));
-            if (!name.trim()) {
-                setName(file.name.replace(/\.(geojson|json|wkt|txt|mif|miff|mid|tab)$/i, ""));
-            }
-        };
-        reader.onerror = () => toast.error("Failed to read polygon file");
-        reader.readAsText(file);
-    }, [name]);
-
-    const handleImport = useCallback(async () => {
-        if (!name.trim()) {
-            toast.error("Polygon name is required");
-            return;
-        }
-
-        setImporting(true);
-        try {
-            const wkt = normalizePolygonInput(polygonText);
-            const sessionIds = parseSessionIds(sessionIdsText);
-            const primarySessionId =
-                sessionIds.length > 0 ? String(sessionIds[0]).trim() : undefined;
-            const scopedCompanyId = resolveCompanyId(user);
-            const numericArea = area === "" ? null : Number(area);
-
-            if (numericArea !== null && !Number.isFinite(numericArea)) {
-                throw new Error("Area must be a valid number.");
-            }
-
-            const response = await mapViewApi.importPolygon({
-                Name: name.trim(),
-                WKT: wkt,
-                Wkt: wkt,
-                SessionIds: sessionIds,
-                session_ids: sessionIds,
-                // Backward-compatible single-value field for legacy backends using a varchar `session_id` column.
-                session_id: primarySessionId,
-                Area: numericArea,
-                company_id: scopedCompanyId || undefined,
-                CompanyId: scopedCompanyId || undefined,
-                CreatedByUserId: user?.id || undefined,
-                created_by_user_id: user?.id || undefined,
-            });
-            const data = extractResponseData(response);
-
-            if (data?.Status === 1 || data?.status === 1 || data?.success === true) {
-                toast.success("Polygon imported into map regions");
-                setName("");
-                setPolygonText("");
-                setSessionIdsText("");
-                setArea("");
-            } else {
-                toast.error(data?.Message || data?.message || "Polygon import failed");
-            }
-        } catch (error) {
-            toast.error(error?.message || "Polygon import failed");
-        } finally {
-            setImporting(false);
-        }
-    }, [area, name, polygonText, sessionIdsText, user]);
-
-    return (
-        <div className="space-y-5">
-            <div className="grid grid-cols-1 lg:grid-cols-[1fr_220px] gap-4">
-                <div className="space-y-2">
-                    <label className="text-xs font-semibold text-slate-300 uppercase tracking-wide">
-                        Polygon Name
-                    </label>
-                    <Input
-                        value={name}
-                        onChange={(event) => setName(event.target.value)}
-                        placeholder="Region name"
-                        className="bg-slate-950/70 border-slate-700 text-white"
-                    />
-                </div>
-
-                <div className="space-y-2">
-                    <label className="text-xs font-semibold text-slate-300 uppercase tracking-wide">
-                        Area
-                    </label>
-                    <Input
-                        type="number"
-                        value={area}
-                        onChange={(event) => setArea(event.target.value)}
-                        placeholder="Optional"
-                        className="bg-slate-950/70 border-slate-700 text-white"
-                    />
-                </div>
-            </div>
-
-            <div className="space-y-2">
-                <label className="text-xs font-semibold text-slate-300 uppercase tracking-wide">
-                    Polygon Data
-                </label>
-                <textarea
-                    value={polygonText}
-                    onChange={(event) => setPolygonText(event.target.value)}
-                    placeholder="Paste WKT POLYGON/MULTIPOLYGON, GeoJSON Polygon/MultiPolygon, or MapInfo MIF Region data"
-                    className="min-h-[220px] w-full rounded-lg border border-slate-700 bg-slate-950/70 px-3 py-2 text-sm text-white outline-none focus:border-blue-500"
-                />
-            </div>
-
-            <div className="grid grid-cols-1 lg:grid-cols-[1fr_auto] gap-4 items-end">
-                <div className="space-y-2">
-                    <label className="text-xs font-semibold text-slate-300 uppercase tracking-wide">
-                        Session IDs
-                    </label>
-                    <Input
-                        value={sessionIdsText}
-                        onChange={(event) => setSessionIdsText(event.target.value)}
-                        placeholder="Optional comma-separated session ids"
-                        className="bg-slate-950/70 border-slate-700 text-white"
-                    />
-                </div>
-
-                <div className="flex flex-wrap gap-2">
-                    <label className="inline-flex cursor-pointer items-center rounded-lg border border-slate-600 bg-slate-800 px-3 py-2 text-sm text-slate-100 hover:bg-slate-700">
-                        <Upload className="h-4 w-4 mr-2" />
-                        Import File
-                        <input
-                            type="file"
-                            accept=".geojson,.json,.wkt,.txt,.mif,.miff,.mid,.tab"
-                            onChange={handleFileChange}
-                            className="hidden"
-                        />
-                    </label>
-                    <Button
-                        onClick={handleImport}
-                        disabled={importing}
-                        className="bg-blue-600 hover:bg-blue-700 rounded-lg"
-                    >
-                        {importing ? (
-                            <>
-                                <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
-                                Importing...
-                            </>
-                        ) : (
-                            <>
-                                <MapPinned className="h-4 w-4 mr-2" />
-                                Save Region
-                            </>
-                        )}
-                    </Button>
-                </div>
-            </div>
-        </div>
-    );
-};
-
 const SettingsPage = ({ onSaveSuccess }) => {
     const { user } = useAuth();
-    const [activeTab, setActiveTab] = useState("thresholds");
     const [thresholds, setThresholds] = useState(null);
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
@@ -1079,38 +767,12 @@ const SettingsPage = ({ onSaveSuccess }) => {
                     <CardHeader className="border-b border-slate-700/70 bg-slate-900/90">
                         <CardTitle className="text-white text-xl tracking-tight">Settings</CardTitle>
                         <CardDescription className="text-slate-400">
-                            Configure map thresholds and imported polygon regions
+                            Configure map thresholds
                         </CardDescription>
-                        <div className="flex flex-wrap gap-2 pt-3">
-                            <Button
-                                type="button"
-                                variant={activeTab === "thresholds" ? "default" : "outline"}
-                                onClick={() => setActiveTab("thresholds")}
-                                className={activeTab === "thresholds"
-                                    ? "bg-blue-600 hover:bg-blue-700 text-white rounded-lg"
-                                    : "border-slate-600 !bg-slate-800 hover:!bg-slate-700 text-slate-100 rounded-lg"
-                                }
-                            >
-                                Thresholds
-                            </Button>
-                            <Button
-                                type="button"
-                                variant={activeTab === "polygon-import" ? "default" : "outline"}
-                                onClick={() => setActiveTab("polygon-import")}
-                                className={activeTab === "polygon-import"
-                                    ? "bg-blue-600 hover:bg-blue-700 text-white rounded-lg"
-                                    : "border-slate-600 !bg-slate-800 hover:!bg-slate-700 text-slate-100 rounded-lg"
-                                }
-                            >
-                                <MapPinned className="h-4 w-4 mr-2" />
-                                Polygon Import
-                            </Button>
-                        </div>
                     </CardHeader>
 
                     <CardContent className="pt-5">
-                        {activeTab === "thresholds" ? (
-                            <>
+                        <>
                                 <div className="flex flex-wrap gap-2.5">
                                     {Object.entries(allParameters).map(([key, name]) => {
                                         const count = getParamCount(key);
@@ -1217,43 +879,32 @@ const SettingsPage = ({ onSaveSuccess }) => {
                                         </div>
                                     </div>
                                 )}
-                            </>
-                        ) : (
-                            <PolygonImportPanel user={user} />
-                        )}
+                        </>
                     </CardContent>
 
                     <CardFooter className="justify-between border-t border-slate-700/70 pt-4 bg-slate-900/90">
                         <div className="text-xs text-slate-400">
                             User: {user?.name || 'Unknown'} (ID: {user?.id || 'N/A'}) | 
-                            {activeTab === "thresholds" ? (
+                            Threshold ID: {thresholds?.id || 'New'}
+                            {thresholds?.isDefault === 1 ? ' (Default)' : ' (Custom)'}
+                        </div>
+                        <Button 
+                            onClick={handleSave} 
+                            disabled={saving}
+                            className="bg-blue-600 hover:bg-blue-700 rounded-lg shadow-md"
+                        >
+                            {saving ? (
                                 <>
-                                    Threshold ID: {thresholds?.id || 'New'}
-                                    {thresholds?.isDefault === 1 ? ' (Default)' : ' (Custom)'}
+                                    <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
+                                    Saving...
                                 </>
                             ) : (
-                                <>Company ID: {resolveCompanyId(user) || 'N/A'}</>
+                                <>
+                                    <Save className="h-4 w-4 mr-2" />
+                                    Save Settings
+                                </>
                             )}
-                        </div>
-                        {activeTab === "thresholds" && (
-                            <Button 
-                                onClick={handleSave} 
-                                disabled={saving}
-                                className="bg-blue-600 hover:bg-blue-700 rounded-lg shadow-md"
-                            >
-                                {saving ? (
-                                    <>
-                                        <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
-                                        Saving...
-                                    </>
-                                ) : (
-                                    <>
-                                        <Save className="h-4 w-4 mr-2" />
-                                        Save Settings
-                                    </>
-                                )}
-                            </Button>
-                        )}
+                        </Button>
                     </CardFooter>
                 </Card>
             </div>
@@ -1262,4 +913,3 @@ const SettingsPage = ({ onSaveSuccess }) => {
 };
 
 export default SettingsPage;
-

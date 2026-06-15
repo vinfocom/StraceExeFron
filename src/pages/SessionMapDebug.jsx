@@ -88,6 +88,17 @@ const getMetricValue = (log, metric) => {
   return Number.isFinite(value) ? value : null;
 };
 
+const isWifiLog = (log) => {
+  const type = String(log?.log_type ?? log?.connection_type ?? log?.connectionType ?? "").trim().toLowerCase();
+  return log?.is_wifi === true || type === "wifi" || type === "wi-fi";
+};
+
+const getSignalMetricLabel = (logs = [], fallback = "RSRP/RSSI") => {
+  const validLogs = (logs || []).filter(Boolean);
+  if (!validLogs.length) return fallback;
+  return validLogs.every(isWifiLog) ? "RSSI" : validLogs.some(isWifiLog) ? "RSRP/RSSI" : "RSRP";
+};
+
 const matchesLegendMetricRange = (value, legendFilter) => {
   const min = Number(legendFilter?.min);
   const max = Number(legendFilter?.max);
@@ -496,6 +507,12 @@ function SessionMapDebug() {
     return filteredLogs.filter((log) => matchesLegendFilter(log, legendFilter));
   }, [filteredLogs, legendFilter]);
 
+  const activeMetricLabel = useMemo(() => {
+    const normalized = normalizeMetric(activeMetric);
+    if (normalized === "rsrp") return getSignalMetricLabel(visibleLogs, "RSRP/RSSI");
+    return activeMetric || normalized.toUpperCase();
+  }, [activeMetric, visibleLogs]);
+
   // Show toast when filtered count changes
   const prevFilteredCountRef = useRef(0);
   useEffect(() => {
@@ -609,21 +626,21 @@ function SessionMapDebug() {
       ["Active Filters", activeFiltersStr],
       ["Polygon WKT", polygonWkt],
       [
-        `${activeMetric || "RSRP/RSSI"} Mean`,
+        `${activeMetricLabel} Mean`,
         values.length > 0
           ? (values.reduce((a, b) => a + b, 0) / values.length).toFixed(2)
           : "N/A",
       ],
       [
-        `${activeMetric || "RSRP/RSSI"} Min`,
+        `${activeMetricLabel} Min`,
         values.length > 0 ? Math.min(...values).toFixed(2) : "N/A",
       ],
       [
-        `${activeMetric || "RSRP/RSSI"} Max`,
+        `${activeMetricLabel} Max`,
         values.length > 0 ? Math.max(...values).toFixed(2) : "N/A",
       ],
       [
-        `${activeMetric || "RSRP/RSSI"} Median`,
+        `${activeMetricLabel} Median`,
         sortedValues[Math.floor(sortedValues.length / 2)]?.toFixed(2) || "N/A",
       ],
       ["Generated At", new Date().toISOString()],
@@ -642,7 +659,7 @@ function SessionMapDebug() {
     a.click();
     URL.revokeObjectURL(url);
     toast.success("Stats CSV downloaded!");
-  }, [visibleLogs, filteredLogs.length, logs.length, sessionIds, filters, analysis, activeMetric]);
+  }, [visibleLogs, filteredLogs.length, logs.length, sessionIds, filters, analysis, activeMetric, activeMetricLabel]);
 
   // Raw logs CSV download
   const handleRawDownload = useCallback(() => {
@@ -653,8 +670,10 @@ function SessionMapDebug() {
 
     const headers = [
       "session_id",
+      "log_type",
       "lat",
       "lng",
+      "rssi",
       "rsrp",
       "rsrq",
       "sinr",
@@ -668,9 +687,11 @@ function SessionMapDebug() {
       ...visibleLogs.map((l) =>
         [
           l.session_id || "",
+          l.log_type ?? l.connection_type ?? (isWifiLog(l) ? "wifi" : "network"),
           l.lat || "",
           l.lng || "",
-          l.rsrp ?? "",
+          l.rssi ?? "",
+          isWifiLog(l) ? "" : (l.rsrp ?? ""),
           l.rsrq ?? "",
           l.sinr ?? "",
           l.technology || "",
@@ -1087,7 +1108,7 @@ function SessionMapDebug() {
                 </div>
                 {analysis.stats?.mean != null && (
                   <div>
-                    Avg {activeMetric || "RSRP/RSSI"}:{" "}
+                    Avg {activeMetricLabel}:{" "}
                     <span className="font-medium">
                       {analysis.stats.mean?.toFixed(1)}{" "}
                       {getMetricUnit(activeMetric)}

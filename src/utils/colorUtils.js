@@ -72,10 +72,17 @@ export const normalizeProviderName = (rawName) => {
   if (!rawName) return null;
 
   const invalidValues = ["000 000", "000000", " 000 000 ", "404440", "404011"];
-  const s = String(rawName).trim();
+  const s = String(rawName).trim().replace(/^["']+|["']+$/g, "");
 
   if (/^\/+$/.test(s)) return null;
+  if (/^(?:[0-9a-f]{2}:){5}[0-9a-f]{2}$/i.test(s)) return null;
   if (invalidValues.includes(s)) return null;
+
+  const looksLikeWifiSsid =
+    /_/.test(s) &&
+    !/^(IND[-_\s]?|IN[-_\s]?)/i.test(s) &&
+    !/\b(4G|5G|LTE|NR|CELL|MOBILE)\b/i.test(s);
+  if (looksLikeWifiSsid) return s;
 
   const cleaned = s.toUpperCase().replace(/[\s\-_]/g, "");
 

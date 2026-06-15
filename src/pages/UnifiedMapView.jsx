@@ -180,6 +180,39 @@ const readLogSessionKey = (loc) => {
   return key || null;
 };
 
+const isWifiLogRow = (row) => {
+  const type = String(
+    row?.connection_type ?? row?.connectionType ?? row?.log_type ?? row?.type ?? "",
+  ).trim().toLowerCase();
+  if (type === "wifi" || type === "wi-fi" || row?.is_wifi === true) return true;
+
+  const primaryInfo = String(row?.primary_cell_info_1 ?? row?.primaryCellInfo1 ?? "");
+  return primaryInfo.includes("SSID:") || primaryInfo.includes("BSSID:");
+};
+
+const cleanWifiProviderName = (value) => {
+  const text = String(value ?? "").trim().replace(/^["']+|["']+$/g, "");
+  if (!text) return null;
+  if (/^(?:[0-9a-f]{2}:){5}[0-9a-f]{2}$/i.test(text)) return null;
+  return text;
+};
+
+const getProviderDisplayName = (row) => {
+  if (isWifiLogRow(row)) {
+    return (
+      cleanWifiProviderName(row?.provider) ||
+      cleanWifiProviderName(row?.Provider) ||
+      cleanWifiProviderName(row?.m_alpha_short) ||
+      cleanWifiProviderName(row?.m_alpha_long) ||
+      null
+    );
+  }
+
+  return normalizeProviderName(
+    row?.provider ?? row?.Provider ?? row?.m_alpha_long ?? row?.operator ?? row?.Operator ?? "",
+  );
+};
+
 const formatDurationClock = (seconds) => {
   const total = Math.max(0, Math.floor(Number(seconds) || 0));
   const hours = Math.floor(total / 3600);
@@ -219,9 +252,7 @@ const buildDurationRowsFromNetworkLogs = (logs = []) => {
     if (diffSeconds <= 0 || diffSeconds > 3600) continue;
 
     const row = current.loc || {};
-    const provider = normalizeProviderName(
-      row?.provider ?? row?.Provider ?? row?.m_alpha_long ?? row?.operator ?? row?.Operator ?? "",
-    );
+    const provider = getProviderDisplayName(row);
     const networkType = normalizeTechName(
       row?.technology ?? row?.Technology ?? row?.networkType ?? row?.network ?? row?.Network ?? "",
       row?.band ?? row?.Band ?? row?.primaryBand,
@@ -3204,9 +3235,7 @@ const UnifiedMapView = () => {
     const apps = new Set();
 
     (locations || []).forEach((loc) => {
-      const providerName = normalizeProviderName(
-        loc?.provider ?? loc?.Provider ?? loc?.network ?? loc?.Network ?? "",
-      );
+      const providerName = getProviderDisplayName(loc);
       if (providerName && !isUnknownOption(providerName)) {
         providers.add(providerName);
       }
@@ -3347,9 +3376,7 @@ const UnifiedMapView = () => {
     const { providers, bands, technologies, cellIds, apps, indoorOutdoor } = dataFilters;
     if (providers?.length)
       result = result.filter((l) => {
-        const providerName = normalizeProviderName(
-          l?.provider ?? l?.Provider ?? l?.network ?? l?.Network ?? "",
-        );
+        const providerName = getProviderDisplayName(l);
         return providerName ? providers.includes(providerName) : false;
       });
     if (bands?.length)
@@ -3454,11 +3481,9 @@ const UnifiedMapView = () => {
     selectedMetric,
   ]);
 
-  const finalDisplayLocations = useMemo(() => {
+  const preDrawingDisplayLocations = useMemo(() => {
     let prioritized = filteredLocations;
-    if (drawnPoints !== null) {
-      prioritized = drawnPoints;
-    } else if (Array.isArray(highlightedLogs)) {
+    if (Array.isArray(highlightedLogs)) {
       if (highlightedLogs.length === 0) {
         prioritized = filteredLocations;
       } else {
@@ -3477,13 +3502,17 @@ const UnifiedMapView = () => {
     if (!filteringPolygonChecker) return prioritized;
     return filterPointsInsidePolygons(prioritized, filteringPolygonChecker);
   }, [
-    drawnPoints,
     highlightedLogs,
     filteredLocations,
     onlyInsidePolygons,
     hasFilteringPolygons,
     filteringPolygonChecker,
   ]);
+
+  const finalDisplayLocations = useMemo(() => {
+    if (drawnPoints !== null) return drawnPoints;
+    return preDrawingDisplayLocations;
+  }, [drawnPoints, preDrawingDisplayLocations]);
   const effectiveGridColorBy = useMemo(() => colorBy, [colorBy]);
 
   const gridDisplayData = useUnifiedGridViewData({
@@ -4899,8 +4928,11 @@ const UnifiedMapView = () => {
     setDrawnPoints((prev) => {
       if (prev === null) return newPoints;
       if (prev.length !== newPoints.length) return newPoints;
-      const prevIds = new Set(prev.map((p) => p.id));
-      const hasDiff = newPoints.some((p) => !prevIds.has(p.id));
+      const prevKeys = new Set(prev.map(getLocationIdentityKey).filter(Boolean));
+      const hasDiff = newPoints.some((p) => {
+        const key = getLocationIdentityKey(p);
+        return key ? !prevKeys.has(key) : true;
+      });
       return hasDiff ? newPoints : prev;
     });
 
@@ -5170,7 +5202,7 @@ const UnifiedMapView = () => {
       data = data.filter((item) => {
         if (
           hasProviderFilter &&
-          !providers.includes(normalizeProviderName(item?.provider ?? ""))
+          !providers.includes(getProviderDisplayName(item))
         )
           return false;
         if (
@@ -5908,7 +5940,7 @@ const UnifiedMapView = () => {
               <DrawingToolsLayer
                 map={mapRef.current}
                 enabled={ui.drawEnabled}
-                logs={finalDisplayLocations}
+                logs={preDrawingDisplayLocations}
                 sessions={EMPTY_LIST}
                 selectedMetric={selectedMetric}
                 thresholds={effectiveThresholds}

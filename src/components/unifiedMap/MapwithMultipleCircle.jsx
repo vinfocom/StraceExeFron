@@ -17,14 +17,45 @@ const EMPTY_ARRAY = [];
 const MAX_IMAGE_LOG_SCAN_POINTS = 12000;
 const GRID_POLYGON_FILL_OPACITY = 0.72;
 
+const isWifiLogRow = (log) => {
+  const type = String(
+    log?.connection_type ?? log?.connectionType ?? log?.log_type ?? log?.type ?? "",
+  ).trim().toLowerCase();
+  if (type === "wifi" || type === "wi-fi" || log?.is_wifi === true) return true;
+
+  const primaryInfo = String(log?.primary_cell_info_1 ?? log?.primaryCellInfo1 ?? "");
+  return primaryInfo.includes("SSID:") || primaryInfo.includes("BSSID:");
+};
+
+const cleanWifiProviderName = (value) => {
+  const text = String(value ?? "").trim().replace(/^["']+|["']+$/g, "");
+  if (!text) return null;
+  if (/^(?:[0-9a-f]{2}:){5}[0-9a-f]{2}$/i.test(text)) return null;
+  return text;
+};
+
+const resolveProviderDisplayName = (log) => {
+  if (isWifiLogRow(log)) {
+    return (
+      cleanWifiProviderName(log?.provider) ||
+      cleanWifiProviderName(log?.Provider) ||
+      cleanWifiProviderName(log?.m_alpha_short) ||
+      cleanWifiProviderName(log?.m_alpha_long) ||
+      "Unknown"
+    );
+  }
+
+  return (
+    normalizeProviderName(log?.provider || log?.Provider || log?.operator || log?.carrier) ||
+    "Unknown"
+  );
+};
+
 const getLegendCategoryKeyFromLog = (log, colorBy) => {
   const key = String(colorBy || "").trim().toLowerCase();
 
   if (key === "provider") {
-    return (
-      normalizeProviderName(log?.provider || log?.Provider || log?.carrier) ||
-      "Unknown"
-    );
+    return resolveProviderDisplayName(log);
   }
 
   if (key === "technology") {
@@ -595,9 +626,7 @@ const generateGridCellsOptimized = (
     return "Category";
   };
   const resolveProviderName = (log) => {
-    const raw = log?.provider ?? log?.Provider ?? log?.operator ?? log?.network ?? "";
-    const normalized = normalizeProviderName(raw);
-    return String(normalized || raw || "").trim() || "Unknown";
+    return resolveProviderDisplayName(log);
   };
   const resolveBandName = (log) => {
     const raw = log?.band ?? log?.primaryBand ?? log?.Band ?? log?.band_name ?? "";
@@ -1032,6 +1061,14 @@ const PrimaryLogInfoWindow = React.memo(({ log, onClose, resolveColor, selectedM
       : resolveColor(metricValue, selectedMetric);
   const dlValue = getThroughputValue(log, "dl");
   const ulValue = getThroughputValue(log, "ul");
+  const isWifiLog =
+    log?.is_wifi === true ||
+    ["wifi", "wi-fi"].includes(
+      String(log?.log_type ?? log?.connection_type ?? log?.connectionType ?? "").trim().toLowerCase()
+    );
+  const signalLabel = isWifiLog ? "RSSI" : "RSRP";
+  const signalValue = isWifiLog ? (log.rssi ?? log.signal_value ?? log.rsrp) : log.rsrp;
+  const logTypeLabel = isWifiLog ? "Wi-Fi Log" : "Network Log";
   const overlapLogs = Array.isArray(log.__overlapLogs) ? log.__overlapLogs : [];
   const hiddenOverlapCount = Math.max(0, overlapLogs.length - 1);
   const overlapPreview = overlapLogs.slice(0, 6);
@@ -1045,15 +1082,28 @@ const PrimaryLogInfoWindow = React.memo(({ log, onClose, resolveColor, selectedM
       <div className="p-2 min-w-[260px] font-sans text-gray-800">
         <div className="flex items-center gap-2 pb-2 mb-2 border-b border-gray-200">
           <Circle className="w-4 h-4" style={{ color: metricColor }} fill={metricColor} />
-          <span className="font-bold text-sm">Primary Log</span>
+          <span className="font-bold text-sm">{logTypeLabel}</span>
         </div>
         <div className="space-y-1.5">
-          {log.provider && <div className="flex justify-between text-xs"><span className="text-gray-500">Provider</span><span className="font-medium">{log.provider}</span></div>}
-          {log.technology && <div className="flex justify-between text-xs"><span className="text-gray-500">Technology</span><span className="font-medium">{log.technology}</span></div>}
-          {log.band && <div className="flex justify-between text-xs"><span className="text-gray-500">Band</span><span className="font-semibold text-blue-600">{log.band}</span></div>}
-          {log.rsrp !== null && log.rsrp !== undefined && <div className="flex justify-between text-xs items-center"><span className="text-gray-500">RSRP</span><span className="font-semibold" style={{ color: resolveColor(log.rsrp, 'rsrp') }}>{log.rsrp?.toFixed?.(1)} dBm</span></div>}
-          {log.rsrq !== null && log.rsrq !== undefined && <div className="flex justify-between text-xs items-center"><span className="text-gray-500">RSRQ</span><span className="font-medium" style={{ color: resolveColor(log.rsrq, 'rsrq') }}>{log.rsrq?.toFixed?.(1)} dB</span></div>}
-          {log.sinr !== null && log.sinr !== undefined && <div className="flex justify-between text-xs items-center"><span className="text-gray-500">SINR</span><span className="font-medium" style={{ color: resolveColor(log.sinr, 'sinr') }}>{log.sinr?.toFixed?.(1)} dB</span></div>}
+          {isWifiLog ? (
+            <>
+              {log.provider && <div className="flex justify-between text-xs"><span className="text-gray-500">SSID</span><span className="font-medium">{log.ssid || log.provider}</span></div>}
+              {signalValue !== null && signalValue !== undefined && <div className="flex justify-between text-xs items-center"><span className="text-gray-500">RSSI</span><span className="font-semibold" style={{ color: resolveColor(signalValue, 'rsrp') }}>{signalValue?.toFixed?.(1)} dBm</span></div>}
+              {log.band && <div className="flex justify-between text-xs"><span className="text-gray-500">Frequency</span><span className="font-semibold text-blue-600">{log.band} MHz</span></div>}
+            </>
+          ) : (
+            <>
+              {log.provider && <div className="flex justify-between text-xs"><span className="text-gray-500">Provider</span><span className="font-medium">{log.provider}</span></div>}
+              {log.technology && <div className="flex justify-between text-xs"><span className="text-gray-500">Technology</span><span className="font-medium">{log.technology}</span></div>}
+              {log.band && <div className="flex justify-between text-xs"><span className="text-gray-500">Band</span><span className="font-semibold text-blue-600">{log.band}</span></div>}
+              {signalValue !== null && signalValue !== undefined && <div className="flex justify-between text-xs items-center"><span className="text-gray-500">RSRP</span><span className="font-semibold" style={{ color: resolveColor(signalValue, 'rsrp') }}>{signalValue?.toFixed?.(1)} dBm</span></div>}
+              {log.rsrq !== null && log.rsrq !== undefined && <div className="flex justify-between text-xs items-center"><span className="text-gray-500">RSRQ</span><span className="font-medium" style={{ color: resolveColor(log.rsrq, 'rsrq') }}>{log.rsrq?.toFixed?.(1)} dB</span></div>}
+              {log.sinr !== null && log.sinr !== undefined && <div className="flex justify-between text-xs items-center"><span className="text-gray-500">SINR</span><span className="font-medium" style={{ color: resolveColor(log.sinr, 'sinr') }}>{log.sinr?.toFixed?.(1)} dB</span></div>}
+              {log.pci && <div className="flex justify-between text-xs"><span className="text-gray-500">PCI</span><span className="font-medium">{log.pci}</span></div>}
+              {log.cell_id && <div className="flex justify-between text-xs"><span className="text-gray-500">Cell ID</span><span className="font-medium">{log.cell_id}</span></div>}
+              {log.nodeb_id && <div className="flex justify-between text-xs"><span className="text-gray-500">NodeB</span><span className="font-medium">{log.nodeb_id}</span></div>}
+            </>
+          )}
           {dlValue !== null && <div className="flex justify-between text-xs"><span className="text-gray-500">DL Throughput</span><span className="font-medium">{dlValue.toFixed(2)} Mbps</span></div>}
           {ulValue !== null && <div className="flex justify-between text-xs"><span className="text-gray-500">UL Throughput</span><span className="font-medium">{ulValue.toFixed(2)} Mbps</span></div>}
         </div>
@@ -1443,7 +1493,7 @@ const MapWithMultipleCircles = ({
         if (legendFilter.type === 'category') {
            let key = "Unknown";
            if (legendFilter.key === 'provider') {
-             key = normalizeProviderName(log.provider || log.Provider || log.carrier) || "Unknown";
+             key = resolveProviderDisplayName(log);
            } else if (legendFilter.key === 'technology') {
              const tech = log.network || log.Network || log.technology || log.networkType;
              const band = log.band || log.Band || log.neighbourBand || log.neighborBand || log.neighbour_band;
@@ -1583,7 +1633,7 @@ const MapWithMultipleCircles = ({
         if (legendFilter.type === 'category') {
            let key = "Unknown";
            if (legendFilter.key === 'provider') {
-             key = normalizeProviderName(n.provider) || "Unknown";
+             key = resolveProviderDisplayName(n);
            } else if (legendFilter.key === 'technology') {
              key = normalizeTechName(n.technology || n.networkType, n.band);
            } else if (legendFilter.key === 'band') {
