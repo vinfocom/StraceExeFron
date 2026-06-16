@@ -861,7 +861,7 @@ function UnifiedHeader({
 
             <h1 className="min-w-[96px] max-w-[min(42vw,420px)] truncate text-base md:text-xl font-semibold">
               <span className="truncate align-bottom">
-                {project?.project_name || "Unified Map"}
+                {project?.project_name || "Drive Session"}
               </span>
               <span className="hidden xl:inline text-sm font-normal text-gray-400 ml-2">
                 {effectiveProjectId && `(Project: ${effectiveProjectId})`}

@@ -601,7 +601,7 @@ setWifiSessions(wifiData);
   };
 
   const handleViewOnMap = (sessionId) => {
-    navigate(`/debug-map?sessionId=${encodeURIComponent(String(sessionId))}`);
+    navigate(`/unified-map?sessionId=${encodeURIComponent(String(sessionId))}&showSecondary=1`);
   };
 
   const handleViewSelectedOnMap = () => {
@@ -610,7 +610,7 @@ setWifiSessions(wifiData);
       return;
     }
     const sessionIdsParam = selectedSessions.join(",");
-    navigate(`/debug-map?sessionId=${encodeURIComponent(sessionIdsParam)}`);
+    navigate(`/unified-map?sessionId=${encodeURIComponent(sessionIdsParam)}&showSecondary=1`);
   };
 
   const hasActiveColumnFilters = Object.values(columnFilters).some(

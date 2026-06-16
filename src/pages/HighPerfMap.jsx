@@ -604,7 +604,7 @@ export default function HighPerfMap() {
     if (analysis.intersectingSessions && analysis.intersectingSessions.length > 0) {
       const sessionIds = analysis.intersectingSessions.map(s => s.id).join(",");
       toast.info(`Navigating to view logs for ${analysis.intersectingSessions.length} sessions...`);
-      navigate(`/debug-map?sessionId=${sessionIds}`);
+      navigate(`/unified-map?sessionId=${encodeURIComponent(sessionIds)}&showSecondary=1`);
       return;
     }
     if (activeFilters) {

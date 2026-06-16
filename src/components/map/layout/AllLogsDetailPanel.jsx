@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useMemo } from "react";
+import { createPortal } from "react-dom";
 import { Rnd } from "react-rnd";
 import { X, Download, Clock, BarChart3, Database } from "lucide-react";
 import Spinner from "@/components/common/Spinner";
@@ -351,8 +352,9 @@ const ProgressBar = ({ name, count, percent, colorType, colorValue }) => (
 
 const PANEL_MARGIN = 16;
 const PANEL_TOP = 64;
-const PANEL_MIN_WIDTH = 320;
+const PANEL_MIN_WIDTH = 200;
 const PANEL_MIN_HEIGHT = 300;
+const PANEL_INITIAL_WIDTH = 420;
 
 const clampPanelFrame = (frame) => {
   if (typeof window === "undefined") return frame;
@@ -374,12 +376,12 @@ const clampPanelFrame = (frame) => {
 
 const getInitialPanelFrame = () => {
   if (typeof window === "undefined") {
-    return { x: PANEL_MARGIN, y: PANEL_TOP, width: 720, height: 640 };
+    return { x: PANEL_MARGIN, y: PANEL_TOP, width: PANEL_INITIAL_WIDTH, height: 640 };
   }
 
   const availableWidth = Math.max(PANEL_MIN_WIDTH, window.innerWidth - PANEL_MARGIN * 2);
   const availableHeight = Math.max(PANEL_MIN_HEIGHT, window.innerHeight - PANEL_TOP - PANEL_MARGIN);
-  const width = Math.min(560, availableWidth);
+  const width = Math.min(PANEL_INITIAL_WIDTH, availableWidth);
   const height = availableHeight;
 
   return clampPanelFrame({
@@ -650,7 +652,7 @@ const AllLogsDetailPanel = ({
     });
   };
 
-  return (
+  const panel = (
     <Rnd
       size={{ width: panelFrame.width, height: panelFrame.height }}
       position={{ x: panelFrame.x, y: panelFrame.y }}
@@ -659,6 +661,7 @@ const AllLogsDetailPanel = ({
       bounds="window"
       dragHandleClassName="logs-summary-drag-handle"
       className="z-50"
+      style={{ position: "fixed" }}
       onDragStop={(event, data) => {
         setPanelFrame((current) => clampPanelFrame({ ...current, x: data.x, y: data.y }));
       }}
@@ -920,6 +923,8 @@ const AllLogsDetailPanel = ({
     </div>
     </Rnd>
   );
+
+  return typeof document === "undefined" ? panel : createPortal(panel, document.body);
 };
 
 export default AllLogsDetailPanel;

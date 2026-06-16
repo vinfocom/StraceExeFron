@@ -25,7 +25,7 @@ export default function Header() {
   const [serverOnline, setServerOnline] = useState(false);
   const normalizedPath = location.pathname.toLowerCase().replace(/\/+$/, '') || '/';
 
-  const isMapPage = normalizedPath === '/debug-map' || normalizedPath === '/mapview';
+  const isMapPage = normalizedPath === '/mapview';
   const routeLabel = PAGE_TITLES[normalizedPath] || normalizedPath
     .replaceAll('-', ' ')
     .replace('/', '')

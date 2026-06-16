@@ -37,7 +37,6 @@ const ProjectsPage = lazy(() => import("./pages/Projects"));
 const PredictionMapPage = lazy(() => import("./pages/PredictionMap"));
 const GetReportPage = lazy(() => import("./pages/GetReport"));
 const ViewProjectsPage = lazy(() => import("./pages/ViewProjects"));
-const SessionMapDebug = lazy(() => import("./pages/SessionMapDebug"));
 const MultiViewPage = lazy(() => import("./pages/MultiViewPage"));
 const SuperAdminCompanies = lazy(() => import("@/pages/SuperAdmin"));
 const CompanyForm = lazy(() => import("./pages/CompanyForm"));  
@@ -108,7 +107,6 @@ function AppShell({ isElectronRuntime }) {
             <Route path="/uSeR-daTa-dEleTion" element={<DataDeletionPage />} />
             <Route path="/company-form" element={<PrivateRoute><CompanyForm /></PrivateRoute>} />
 
-            <Route path="/debug-map" element={<PrivateRoute><SessionMapDebug /></PrivateRoute>} />
             <Route path="/dashboard" element={<PrivateRoute><DashboardPage /></PrivateRoute>} />
             <Route path="/drive-test-sessions" element={<PrivateRoute><DriveTestSessionsPage /></PrivateRoute>} />
             <Route path="/mapview" element={<PrivateRoute><HighPerfMap /></PrivateRoute>} />

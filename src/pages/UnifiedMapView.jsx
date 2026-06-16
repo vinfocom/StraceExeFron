@@ -1296,6 +1296,13 @@ const UnifiedMapView = () => {
   const [triangleScaleMultiplier, setTriangleScaleMultiplier] = useState(1);
   const [defaultSiteBeamwidth, setDefaultSiteBeamwidth] = useState(30);
   const [showSessionNeighbors, setShowSessionNeighbors] = useState(false);
+  const autoShowSessionNeighbors = useMemo(() => {
+    const value =
+      searchParams.get("showSecondary") ||
+      searchParams.get("showSessionNeighbors") ||
+      searchParams.get("secondary");
+    return ["1", "true", "yes"].includes(String(value || "").toLowerCase());
+  }, [searchParams]);
 
   const [bestNetworkEnabled, setBestNetworkEnabled] = useState(false);
   const [bestNetworkWeights, setBestNetworkWeights] = useState(DEFAULT_WEIGHTS);
@@ -5251,6 +5258,12 @@ const UnifiedMapView = () => {
       setShowSessionNeighbors(false);
     }
   }, [neighborLogsAvailable, sessionNeighborLoading, showSessionNeighbors]);
+
+  useEffect(() => {
+    if (autoShowSessionNeighbors && neighborLogsAvailable) {
+      setShowSessionNeighbors(true);
+    }
+  }, [autoShowSessionNeighbors, neighborLogsAvailable]);
 
   const handlePolygonMouseOver = useCallback((poly, e) => {
     setHoveredPolygon(poly);
