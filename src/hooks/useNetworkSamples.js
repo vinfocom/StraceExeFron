@@ -165,25 +165,26 @@ const parseLogEntry = (log, sessionId) => {
     "RXLEV",
   ]);
 
-  const wifiLog = isWifiLog(log);
+  const wifiLog = log?.is_wifi === true || isWifiLog(log);
   const parsedRsrp = wifiLog ? null : normalizeSignalToDbm(parsedRsrpRaw);
   const parsedRssi = normalizeSignalToDbm(parsedRssiRaw);
   const signalValue = wifiLog ? parsedRssi : (parsedRsrp ?? parsedRssi);
+  const canonicalProvider = cleanDisplayName(log.provider ?? log.Provider);
   const provider = wifiLog
     ? (
+        canonicalProvider ||
         cleanDisplayName(log.m_alpha_short) ||
-        cleanDisplayName(log.provider) ||
-        cleanDisplayName(log.Provider) ||
         cleanDisplayName(log.m_alpha_long) ||
         "Unknown"
       )
     : (
+        normalizeProviderName(canonicalProvider) ||
         normalizeProviderName(log.m_alpha_short) ||
-        normalizeProviderName(log.provider) ||
-        normalizeProviderName(log.Provider) ||
         normalizeProviderName(log.m_alpha_long) ||
         "Unknown"
       );
+  const technology = log.technology || log.networkType || normalizeTechName(log.network || '', log.band);
+  const band = log.band || log.Band || "";
 
   return {
     id: log.id ?? log.Id ?? log.log_id ?? log.LogId ?? null,
@@ -217,8 +218,10 @@ const parseLogEntry = (log, sessionId) => {
     ssid: wifiLog ? provider : "",
     wifi_rssi: wifiLog ? parsedRssi : null,
     wifi_frequency: wifiLog ? (log.band || "") : "",
-    technology: normalizeTechName(log.network || ''),
-    band: log.band || '',
+    technology,
+    networkType: technology,
+    network: log.network || technology,
+    band,
     pci: log.pci ?? log.Pci ?? log.PCI ?? '',
     nodeb_id: log.nodeb_id || '',
     cell_id: log.cell_id ?? log.cellId ?? '',
@@ -267,7 +270,7 @@ export const useNetworkSamples = (
     const cacheKey = makeProjectCacheKey({
       resource: 'unified-network-samples',
       sessionIds: sessionIds || [],
-      variant: `typed-network-wifi-v8:${safeMaxRows ? `max-${safeMaxRows}` : 'all'}:project-${projectId || 'none'}`,
+      variant: `typed-network-wifi-v9:${safeMaxRows ? `max-${safeMaxRows}` : 'all'}:project-${projectId || 'none'}`,
     });
 
 
