@@ -490,7 +490,7 @@ export const cellSiteApi = {
         }
       );
 
-      const blob = new Blob([response]);
+      const blob = response instanceof Blob ? response : new Blob([response ?? ""]);
       triggerBrowserDownload(blob, filename);
 
       return blob;
