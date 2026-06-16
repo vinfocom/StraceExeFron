@@ -4,8 +4,12 @@ import App from './App';
 import './index.css';
 
 const enableStrictMode = String(import.meta.env.VITE_ENABLE_STRICT_MODE || '').toLowerCase() === 'true';
+const isElectronRuntime =
+  typeof navigator !== 'undefined' &&
+  /electron/i.test(navigator.userAgent || '');
 const enablePythonProcessLogs =
   import.meta.env.DEV ||
+  isElectronRuntime ||
   String(import.meta.env.VITE_ENABLE_PYTHON_PROCESS_LOGS || '').toLowerCase() === 'true';
 
 const electronWindow = window.electronWindow;

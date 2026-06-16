@@ -10,8 +10,24 @@ import { getMetricValueFromLog, getPciColor } from "@/utils/metrics";
 import { normalizeProviderName, normalizeTechName, normalizeBandName, getLogColor, generateColorFromHash } from "@/utils/colorUtils";
 
 const DEFAULT_CENTER = { lat: 28.64453086, lng: 77.37324242 };
+const isElectronRuntime =
+  typeof navigator !== "undefined" &&
+  /electron/i.test(navigator.userAgent || "");
+const getRuntimeCsharpApiBaseUrl = () => {
+  if (!isElectronRuntime || typeof window === "undefined") return "";
+  try {
+    return String(
+      new URLSearchParams(window.location.search).get("csharpApiBaseUrl") || "",
+    )
+      .trim()
+      .replace(/\/+$/, "");
+  } catch {
+    return "";
+  }
+};
 const CSHARP_API_BASE_URL = (
-  import.meta.env.DEV ? "" : (import.meta.env.VITE_CSHARP_API_URL || "")
+  getRuntimeCsharpApiBaseUrl() ||
+  (import.meta.env.DEV ? "" : (import.meta.env.VITE_CSHARP_API_URL || ""))
 ).replace(/\/+$/, "");
 const EMPTY_ARRAY = [];
 const MAX_IMAGE_LOG_SCAN_POINTS = 12000;

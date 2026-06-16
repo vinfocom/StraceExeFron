@@ -1157,6 +1157,11 @@ const UnifiedMapSidebar = ({
       const progressText = statusResponse?.progress
         ? String(statusResponse.progress).trim()
         : "";
+      console.info("[LTE_PREDICTION_STATUS]", {
+        jobId,
+        status,
+        progress: progressText,
+      });
 
       if (status === "done") {
         stopLtePredictionMonitoring(false);
@@ -1222,6 +1227,11 @@ const UnifiedMapSidebar = ({
       const progressText = statusResponse?.progress
         ? String(statusResponse.progress).trim()
         : "";
+      console.info("[LTE_OPTIMISED_STATUS]", {
+        jobId,
+        status,
+        progress: progressText,
+      });
 
       if (status === "done") {
         stopLteOptimisedPredictionMonitoring(false);
@@ -1754,6 +1764,10 @@ const UnifiedMapSidebar = ({
       }
 
       ltePredictionJobIdRef.current = jobId;
+      console.info("[LTE_PREDICTION_JOB]", {
+        jobId,
+        response,
+      });
       toast.update(loadingToastId, {
         render: `LTE prediction queued. Job: ${jobId}. Monitoring progress...`,
         isLoading: true,
@@ -1863,6 +1877,10 @@ const UnifiedMapSidebar = ({
       }
 
       lteOptimisedPredictionJobIdRef.current = jobId;
+      console.info("[LTE_OPTIMISED_JOB]", {
+        jobId,
+        response,
+      });
       toast.update(loadingToastId, {
         render: `LTE optimized prediction queued. Job: ${jobId}. Monitoring progress...`,
         isLoading: true,

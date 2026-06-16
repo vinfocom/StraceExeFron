@@ -82,7 +82,7 @@ const TEMPLATE_DOWNLOAD_FILENAMES = {
   1: "Session_Template.zip",
   2: "Template_NetworkLog.csv",
   3: "Site_Prediction_Data.csv",
-  4: "python-runtime-v4-win-x64.zip",
+  4: "python-runtime-v5-win-x64.zip",
 };
 
 const downloadTemplateFromCsharpApi = async (fileType) => {
