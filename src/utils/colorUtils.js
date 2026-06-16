@@ -181,18 +181,24 @@ export const normalizeTechName = (tech, band = null) => {
 
   const t = techStr.toUpperCase();
 
+  const has5GSignal =
+    t.includes("5G") ||
+    t.includes("NR") ||
+    t.includes("NSA") ||
+    t.includes("SA") ||
+    t.includes("ENDC") ||
+    t.includes("EN-DC");
+
+  if (has5GSignal) {
+    return "5G";
+  }
+
   if (
     t.includes("LTE ANCHOR") ||
     t.includes("LTE-ANCHOR") ||
-    t.includes("LTE_ANCHOR") ||
-    t.includes("ENDC") ||
-    t.includes("EN-DC")
+    t.includes("LTE_ANCHOR")
   ) {
-    return t.includes("4G") || t.includes("LTE") ? "4G" : "5G";
-  }
-
-  if (t.includes("5G") || t.includes("NR") || t.includes("NSA") || t.includes("SA")) {
-    return "5G";
+    return "4G";
   }
   
   if (t.includes("LTE") || t.includes("4G") ||t.includes("4G+")) {

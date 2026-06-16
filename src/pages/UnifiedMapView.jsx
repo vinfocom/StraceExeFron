@@ -223,6 +223,39 @@ const formatDurationClock = (seconds) => {
     .join(":");
 };
 
+const getNormalizedLocationTechnology = (row = {}) => {
+  const band =
+    row?.band ??
+    row?.Band ??
+    row?.primaryBand ??
+    row?.primary_band ??
+    row?.neighbourBand ??
+    null;
+
+  const candidates = [
+    row?.network,
+    row?.Network,
+    row?.rat,
+    row?.RAT,
+    row?.radio_access_technology,
+    row?.RadioAccessTechnology,
+    row?.technology,
+    row?.Technology,
+    row?.networkType,
+    row?.NetworkType,
+    row?.network_type,
+  ];
+
+  for (const candidate of candidates) {
+    const normalized = normalizeTechName(candidate, band);
+    if (normalized && String(normalized).trim().toLowerCase() !== "unknown") {
+      return normalized;
+    }
+  }
+
+  return "Unknown";
+};
+
 const buildDurationRowsFromNetworkLogs = (logs = []) => {
   if (!Array.isArray(logs) || logs.length < 2) return [];
 
@@ -253,10 +286,7 @@ const buildDurationRowsFromNetworkLogs = (logs = []) => {
 
     const row = current.loc || {};
     const provider = getProviderDisplayName(row);
-    const networkType = normalizeTechName(
-      row?.technology ?? row?.Technology ?? row?.networkType ?? row?.network ?? row?.Network ?? "",
-      row?.band ?? row?.Band ?? row?.primaryBand,
-    );
+    const networkType = getNormalizedLocationTechnology(row);
 
     if (!provider || String(provider).trim().toLowerCase() === "unknown") continue;
     if (!networkType || String(networkType).trim().toLowerCase() === "unknown") continue;

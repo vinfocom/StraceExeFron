@@ -134,8 +134,7 @@ const resolveOperatorName = (loc) => {
   const provider = normalizeProviderName(rawProvider) || rawProvider;
   if (!provider || provider === "Unknown") return "Unknown";
 
-  const rawTech = loc.technology || loc.network || loc.networkType || loc.tech || "";
-  const normalizedTech = normalizeTechName(rawTech);
+  const normalizedTech = getNormalizedLocationTechnology(loc);
 
   const providerToken = rawProvider.toUpperCase();
   const providerTaggedTech = providerToken.includes("5G")
@@ -336,6 +335,41 @@ const TECHNOLOGY_SORT_ORDER = {
 
 const getTechnologyRank = (tech) => TECHNOLOGY_SORT_ORDER[tech] || 99;
 
+const getNormalizedLocationTechnology = (loc = {}) => {
+  const band =
+    loc.band ??
+    loc.Band ??
+    loc.primaryBand ??
+    loc.primary_band ??
+    loc.neighbourBand ??
+    loc.neighborBand ??
+    null;
+
+  const candidates = [
+    loc.network,
+    loc.Network,
+    loc.rat,
+    loc.RAT,
+    loc.radio_access_technology,
+    loc.RadioAccessTechnology,
+    loc.technology,
+    loc.Technology,
+    loc.networkType,
+    loc.NetworkType,
+    loc.network_type,
+    loc.tech,
+  ];
+
+  for (const candidate of candidates) {
+    const normalized = normalizeTechName(candidate, band);
+    if (normalized && normalized !== "Unknown") {
+      return normalized;
+    }
+  }
+
+  return "Unknown";
+};
+
 const normalizeBandForChart = (band) => {
   const rawBand = String(band ?? "").trim();
   if (!rawBand || rawBand === "-1" || rawBand.toLowerCase() === "unknown") {
@@ -425,10 +459,7 @@ export const OperatorComparisonChart = React.forwardRef(
     const availableTechnologies = useMemo(() => {
       const techSet = new Set();
       (locations || []).forEach((loc) => {
-        const tech = normalizeTechName(
-          loc.technology || loc.network || loc.networkType || loc.tech || "",
-          loc.band ?? loc.Band
-        );
+        const tech = getNormalizedLocationTechnology(loc);
         if (tech && tech !== "Unknown") techSet.add(tech);
       });
 
@@ -452,10 +483,7 @@ export const OperatorComparisonChart = React.forwardRef(
     const technologyFilteredLocations = useMemo(() => {
       if (selectedTechnology === "All") return locations || [];
       return (locations || []).filter((loc) => {
-        const tech = normalizeTechName(
-          loc.technology || loc.network || loc.networkType || loc.tech || "",
-          loc.band ?? loc.Band
-        );
+        const tech = getNormalizedLocationTechnology(loc);
         return tech === selectedTechnology;
       });
     }, [locations, selectedTechnology]);
@@ -543,8 +571,7 @@ export const OperatorComparisonChart = React.forwardRef(
         if (latency !== null) operatorStats[provider].latency.push(latency);
         if (jitter !== null) operatorStats[provider].jitter.push(jitter);
 
-        const rawTech = loc.technology || loc.network || "";
-        const tech = normalizeTechName(rawTech);
+        const tech = getNormalizedLocationTechnology(loc);
         if (tech !== "Unknown") {
           operatorStats[provider].technologies[tech] =
             (operatorStats[provider].technologies[tech] || 0) + 1;
@@ -662,10 +689,7 @@ export const OperatorComparisonChart = React.forwardRef(
         const rsrp = safeNumber(loc.rsrp);
         if (rsrp === null) return;
 
-        const technology = normalizeTechName(
-          loc.technology || loc.network || loc.networkType || loc.tech || "",
-          loc.band ?? loc.Band
-        );
+        const technology = getNormalizedLocationTechnology(loc);
         if (!technology || technology === "Unknown") return;
 
         const operator =

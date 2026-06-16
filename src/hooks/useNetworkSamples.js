@@ -79,6 +79,31 @@ const isWifiLog = (log) => {
   return primaryInfo.includes("SSID:") || primaryInfo.includes("BSSID:");
 };
 
+const getNormalizedTechnology = (log, band = null) => {
+  const candidates = [
+    log?.network,
+    log?.Network,
+    log?.rat,
+    log?.RAT,
+    log?.radio_access_technology,
+    log?.RadioAccessTechnology,
+    log?.technology,
+    log?.Technology,
+    log?.networkType,
+    log?.NetworkType,
+    log?.network_type,
+  ];
+
+  for (const candidate of candidates) {
+    const normalized = normalizeTechName(candidate, band);
+    if (normalized && normalized !== "Unknown") {
+      return normalized;
+    }
+  }
+
+  return "Unknown";
+};
+
 
 
 const parseLogEntry = (log, sessionId) => {
@@ -183,8 +208,14 @@ const parseLogEntry = (log, sessionId) => {
         normalizeProviderName(log.m_alpha_long) ||
         "Unknown"
       );
-  const technology = log.technology || log.networkType || normalizeTechName(log.network || '', log.band);
-  const band = log.band || log.Band || "";
+  const band =
+    log.band ??
+    log.Band ??
+    log.primaryBand ??
+    log.primary_band ??
+    log.neighbourBand ??
+    "";
+  const technology = getNormalizedTechnology(log, band);
 
   return {
     id: log.id ?? log.Id ?? log.log_id ?? log.LogId ?? null,
