@@ -1066,6 +1066,12 @@ export const reportApi = {
       responseType: 'blob',
       timeout: 600000,
     }),
+  generateUnifiedMapPdf: (payload) =>
+    api.post("/api/UnifiedMapReport/Generate", payload, {
+      responseType: "blob",
+      timeout: 600000,
+      dedupe: false,
+    }),
 };
 
 export const authApi = {

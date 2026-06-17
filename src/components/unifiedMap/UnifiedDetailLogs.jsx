@@ -192,15 +192,87 @@ const downloadFile = (content, filename, type = "text/csv") => {
   URL.revokeObjectURL(url);
 };
 
+const UNSUPPORTED_CANVAS_COLOR_RE = /\b(oklab|oklch|color-mix)\(/i;
+const EXPORT_CAPTURE_ROOT_ATTR = "data-unified-map-pdf-capture-root";
+const CANVAS_COLOR_PROPS = [
+  "color",
+  "background-color",
+  "border-top-color",
+  "border-right-color",
+  "border-bottom-color",
+  "border-left-color",
+  "outline-color",
+  "text-decoration-color",
+  "column-rule-color",
+  "fill",
+  "stroke",
+  "caret-color",
+];
+const CANVAS_COMPLEX_COLOR_PROPS = [
+  "background-image",
+  "box-shadow",
+  "text-shadow",
+  "border-image-source",
+];
+
+const getCanvasColorFallback = (prop) => {
+  if (prop === "background-color") return "#0f172a";
+  if (prop === "color" || prop === "caret-color" || prop === "text-decoration-color") return "#e5e7eb";
+  if (prop === "fill") return "#38bdf8";
+  if (prop === "stroke") return "#94a3b8";
+  return "rgba(148, 163, 184, 0.35)";
+};
+
+const sanitizeUnsupportedCanvasColors = (clonedDocument, sourceRoot, captureId) => {
+  const clonedRoot = clonedDocument.querySelector(`[${EXPORT_CAPTURE_ROOT_ATTR}="${captureId}"]`);
+  const sourceWindow = sourceRoot?.ownerDocument?.defaultView;
+  if (!clonedRoot || !sourceWindow) return;
+
+  const sourceNodes = [sourceRoot, ...sourceRoot.querySelectorAll("*")];
+  const clonedNodes = [clonedRoot, ...clonedRoot.querySelectorAll("*")];
+  const svgColorAttrs = ["fill", "stroke", "stop-color", "flood-color", "lighting-color"];
+
+  sourceNodes.forEach((sourceNode, index) => {
+    const clonedNode = clonedNodes[index];
+    if (!clonedNode) return;
+
+    const computedStyle = sourceWindow.getComputedStyle(sourceNode);
+    CANVAS_COLOR_PROPS.forEach((prop) => {
+      const value = computedStyle.getPropertyValue(prop);
+      if (UNSUPPORTED_CANVAS_COLOR_RE.test(value)) {
+        clonedNode.style.setProperty(prop, getCanvasColorFallback(prop), "important");
+      }
+    });
+
+    CANVAS_COMPLEX_COLOR_PROPS.forEach((prop) => {
+      const value = computedStyle.getPropertyValue(prop);
+      if (UNSUPPORTED_CANVAS_COLOR_RE.test(value)) {
+        clonedNode.style.setProperty(prop, prop === "background-image" ? "none" : "none", "important");
+      }
+    });
+
+    svgColorAttrs.forEach((attr) => {
+      const value = clonedNode.getAttribute?.(attr);
+      if (value && UNSUPPORTED_CANVAS_COLOR_RE.test(value)) {
+        clonedNode.setAttribute(attr, getCanvasColorFallback(attr));
+      }
+    });
+  });
+};
+
 const captureElementAsImage = async (element, filename) => {
   try {
     const html2canvas = (await import("html2canvas")).default;
+    const captureId = `capture-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    element.setAttribute(EXPORT_CAPTURE_ROOT_ATTR, captureId);
     const canvas = await html2canvas(element, {
       backgroundColor: "#0f172a",
       scale: 2,
       logging: false,
       useCORS: true,
+      onclone: (clonedDocument) => sanitizeUnsupportedCanvasColors(clonedDocument, element, captureId),
     });
+    element.removeAttribute(EXPORT_CAPTURE_ROOT_ATTR);
     
     const link = document.createElement("a");
     link.download = filename;
@@ -209,8 +281,39 @@ const captureElementAsImage = async (element, filename) => {
     
     return true;
   } catch (error) {
+    element.removeAttribute(EXPORT_CAPTURE_ROOT_ATTR);
     return false;
   }
+};
+
+const captureElementAsJpegDataUrl = async (element, { fullHeight = false } = {}) => {
+  const { toJpeg } = await import("html-to-image");
+  const rect = element.getBoundingClientRect();
+  const width = Math.max(Math.ceil(rect.width || element.scrollWidth || 1), 1);
+  const height = fullHeight
+    ? Math.max(Math.ceil(element.scrollHeight || rect.height || 1), 1)
+    : Math.max(Math.ceil(rect.height || element.scrollHeight || 1), 1);
+  const dataUrl = await toJpeg(element, {
+    backgroundColor: "#0f172a",
+    cacheBust: true,
+    width,
+    height,
+    pixelRatio: 2,
+    quality: 0.92,
+    style: fullHeight
+      ? {
+          height: `${height}px`,
+          maxHeight: "none",
+          overflow: "visible",
+        }
+      : undefined,
+  });
+
+  return {
+    dataUrl,
+    width: width * 2,
+    height: height * 2,
+  };
 };
 
 const ExportDropdown = ({
@@ -235,6 +338,7 @@ const ExportDropdown = ({
   activeTab,
   indoor,
   outdoor,
+  onGeneratePdfExport,
 }) => {
   const [isOpen, setIsOpen] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
@@ -687,24 +791,28 @@ Technologies: ${dataFilters.technologies?.join(", ") || "None"}
     setExportType("full");
 
     try {
-      await exportAnalytics({
-        locations,
-        stats,
-        duration,
-        appSummary,
-        ioSummary,
-        projectId,
-        sessionIds,
-        chartRefs,
-        selectedMetric,
-        totalLocations,
-        filteredCount,
-        polygonStats,
-        siteData,
-        appliedFilters: dataFilters,
-        n78NeighborData,
-        n78NeighborStats,
-      });
+      if (onGeneratePdfExport) {
+        await onGeneratePdfExport();
+      } else {
+        await exportAnalytics({
+          locations,
+          stats,
+          duration,
+          appSummary,
+          ioSummary,
+          projectId,
+          sessionIds,
+          chartRefs,
+          selectedMetric,
+          totalLocations,
+          filteredCount,
+          polygonStats,
+          siteData,
+          appliedFilters: dataFilters,
+          n78NeighborData,
+          n78NeighborStats,
+        });
+      }
     } finally {
       setIsExporting(false);
       setExportType(null);
@@ -1142,6 +1250,164 @@ function UnifiedDetailLogs({
     });
   };
 
+  const downloadPdfBlob = (blob, filename) => {
+    const url = window.URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.setAttribute("download", filename);
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    window.URL.revokeObjectURL(url);
+  };
+
+  const buildReportSummary = () => ({
+    "Project ID": projectId || "N/A",
+    Sessions: sessionIds?.length || 0,
+    "Total Locations": totalLocations?.toLocaleString?.() || totalLocations || 0,
+    "Filtered Locations": filteredCount?.toLocaleString?.() || filteredCount || 0,
+    Metric: selectedMetric || "RSRP",
+    Average: stats?.avg != null ? `${stats.avg.toFixed(2)} dBm` : "N/A",
+    Minimum: stats?.min != null ? `${stats.min.toFixed(2)} dBm` : "N/A",
+    Maximum: stats?.max != null ? `${stats.max.toFixed(2)} dBm` : "N/A",
+    "Active Tab": activeTab || "overview",
+  });
+
+  const waitForReportTabRender = async () => {
+    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    await new Promise((resolve) => setTimeout(resolve, 350));
+  };
+
+  const collectCurrentTabReportPages = async (tab) => {
+    const titleMap = {
+      distribution: "Signal Distribution",
+      tech: "Technology Distribution",
+      comparison: "Operator Comparison",
+      radar: "Signal Radar",
+      band: "Band Distribution",
+      operator: "Operator Distribution",
+      pciColorLegend: "PCI Color Legend",
+      providerPerf: "Provider Performance",
+      speed: "Speed",
+      throughputTimeline: "Throughput Timeline",
+      jitterLatency: "Jitter And Latency",
+      mosChart: "MOS",
+      throughputChart: "Throughput",
+      signalChart: "Signal",
+      qoeChart: "QoE",
+    };
+
+    const pages = [];
+    const seen = new Set();
+
+    for (const [key, chartRef] of Object.entries(chartRefs)) {
+      const element = chartRef?.current;
+      if (!element || seen.has(element)) continue;
+      seen.add(element);
+
+      const image = await captureElementAsJpegDataUrl(element);
+      pages.push({
+        title: `${tab.label} - ${titleMap[key] || key}`,
+        imageDataUrl: image.dataUrl,
+        width: image.width,
+        height: image.height,
+      });
+    }
+
+    const shouldCaptureTabBody =
+      pages.length === 0 ||
+      tab.id === "conditionLogs" ||
+      tab.id === "subSession";
+
+    if (shouldCaptureTabBody && contentRef?.current) {
+      const image = await captureElementAsJpegDataUrl(contentRef.current, {
+        fullHeight: pages.length === 0 && tab.id !== "conditionLogs",
+      });
+      pages.push({
+        title: tab.id === "conditionLogs" ? "Drive Logs / Coverage Optimisation" : `${tab.label} View`,
+        imageDataUrl: image.dataUrl,
+        width: image.width,
+        height: image.height,
+      });
+    }
+
+    return pages;
+  };
+
+  const collectAllTabReportPages = async (toastId) => {
+    const originalTab = activeTab;
+    const pages = [];
+
+    try {
+      for (const tab of availableTabs) {
+        toast.update(toastId, {
+          render: `Capturing ${tab.label}...`,
+          type: "info",
+          isLoading: true,
+        });
+
+        setActiveTab(tab.id);
+        await waitForReportTabRender();
+
+        const tabPages = await collectCurrentTabReportPages(tab);
+        pages.push(...tabPages);
+      }
+    } finally {
+      setActiveTab(originalTab);
+      onActiveTabExternalChange?.(originalTab);
+      await waitForReportTabRender();
+    }
+
+    return pages;
+  };
+
+  const handleExportPdfReport = async () => {
+    if (!projectId) {
+      toast.error("Missing Project ID. Please ensure you have a project selected.");
+      return;
+    }
+
+    const toastId = toast.loading("Generating backend PDF report...");
+
+    try {
+      toast.update(toastId, {
+        render: "Backend is preparing charts from raw drive logs...",
+        type: "info",
+        isLoading: true,
+      });
+
+      const pdfBlob = await reportApi.generateUnifiedMapPdf({
+        projectId,
+        sessionIds,
+        title: "Unified Map Detail Report",
+        generatedBy: user?.name || user?.username || user?.email || "",
+        summary: buildReportSummary(),
+      });
+
+      downloadPdfBlob(
+        pdfBlob instanceof Blob ? pdfBlob : new Blob([pdfBlob], { type: "application/pdf" }),
+        `UnifiedMap_Report_${projectId}_${new Date().toISOString().split("T")[0]}.pdf`,
+      );
+
+      toast.update(toastId, { 
+        render: "PDF report downloaded successfully!", 
+        type: "success", 
+        isLoading: false, 
+        autoClose: 3000,
+        closeButton: true
+      });
+
+    } catch (error) {
+      console.error("Export PDF report error:", error);
+      toast.update(toastId, { 
+        render: error.message || "Failed to generate PDF report",
+        type: "error", 
+        isLoading: false,
+        autoClose: 5000 
+      });
+    }
+  };
+
   const handleGenerateReport = async () => {
     if (!canGenerateReport) {
       toast.error("Report generation is disabled for your license.");
@@ -1173,7 +1439,6 @@ function UnifiedDetailLogs({
         user_id: user.id
       });
 
-      // pythonApi returns response.data directly, so genResponse IS the JSON body
       const reportId = genResponse?.report_id;
 
       if (reportId) {
@@ -1223,14 +1488,10 @@ function UnifiedDetailLogs({
 
         const checkResponse = await reportApi.downloadReport(reportId);
 
-        const url = window.URL.createObjectURL(new Blob([checkResponse]));
-        const link = document.createElement('a');
-        link.href = url;
-        link.setAttribute('download', `Report_${projectId}_${new Date().toISOString().split('T')[0]}.pdf`);
-        document.body.appendChild(link);
-        link.click();
-        link.remove();
-        window.URL.revokeObjectURL(url);
+        downloadPdfBlob(
+          checkResponse instanceof Blob ? checkResponse : new Blob([checkResponse], { type: "application/pdf" }),
+          `Report_${projectId}_${new Date().toISOString().split('T')[0]}.pdf`,
+        );
 
         toast.update(toastId, { 
           render: "Report downloaded successfully!", 
@@ -1254,8 +1515,7 @@ function UnifiedDetailLogs({
     } catch (error) {
       console.error("Report generation error:", error);
       toast.update(toastId, { 
-        render: error.message || error
-        , 
+        render: error.message || error, 
         type: "error", 
         isLoading: false,
         autoClose: 5000 
@@ -1370,6 +1630,7 @@ function UnifiedDetailLogs({
             activeTab={activeTab}
             indoor={indoor}
             outdoor={outdoor}
+            onGeneratePdfExport={handleExportPdfReport}
           />
 
           <button
