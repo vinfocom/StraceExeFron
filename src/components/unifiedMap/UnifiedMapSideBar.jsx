@@ -14,7 +14,6 @@ import {
   Radio,
   Grid3X3,
   ArrowLeftRight,
-  PlusCircle,
   Check,
   Smartphone,
   TowerControl,
@@ -470,7 +469,6 @@ const UnifiedMapSidebar = ({
   getCachedNetworkLogsForPrediction,
 }) => {
   const { user, refreshUser } = useAuth();
-  const [siteScenarioMenuOpen, setSiteScenarioMenuOpen] = useState(false);
   const [storedGridScenarioMenuOpen, setStoredGridScenarioMenuOpen] = useState(false);
   const [showCurrentViewInfo, setShowCurrentViewInfo] = useState(false);
   const [sidebarWidth, setSidebarWidth] = useState(340);
@@ -865,7 +863,7 @@ const UnifiedMapSidebar = ({
     [siteToggle, sitePredictionVersion],
   );
   const [isRunningLtePrediction, setIsRunningLtePrediction] = useState(false);
-  const [ltePredictionRadiusMeters, setLtePredictionRadiusMeters] = useState(5000);
+  const [ltePredictionRadiusMeters, setLtePredictionRadiusMeters] = useState(500);
   const [ltePredictionOperator, setLtePredictionOperator] = useState("auto");
   const ltePredictionPollingRef = useRef(null);
   const ltePredictionToastIdRef = useRef(null);
@@ -1740,7 +1738,7 @@ const UnifiedMapSidebar = ({
         project_id: numericProjectId,
         session_ids: validSessionIds,
         grid_value: Number(lteGridSizeMeters) || 25,
-        radius_m: Number(ltePredictionRadiusMeters) || 5000,
+        radius_m: Number(ltePredictionRadiusMeters) || 500,
         building: Boolean(ltePredictionUseBuildings),
         operator: ltePredictionOperator,
         drive_rows: driveRowsPayload,
@@ -2897,119 +2895,12 @@ const UnifiedMapSidebar = ({
           {activeSidebarTab === "optimisation" && (
             <>
           {activeSidebarTab === "optimisation" && (
-          <CollapsibleSection title="Site & Prediction" icon={Radio}>
+          <CollapsibleSection title="Prediction" icon={Radio}>
             {enableSiteToggle && (
               <>
                 
-                <div className="grid grid-cols-3 gap-2">
-                  <SelectRow
-                    className="pt-2"
-                    value={siteToggle}
-                    onChange={setSiteToggle}
-                    options={[
-                      { value: "Cell", label: "Cell" },
-                      { value: "NoML", label: "ML" },
-                    ]}
-                  />
-                  {siteToggle === "Cell" && (
-                    <SelectRow
-                      
-                      value={sitePredictionVersion}
-                      onChange={(nextValue) =>
-                        setSitePredictionVersion?.(nextValue)
-                      }
-                      options={[
-                        { value: "original", label: "Baseline" },
-                        { value: "updated", label: "Optimized" },
-                        { value: "delta", label: "Delta" },
-                      ]}
-                      placeholder="Select cell version"
-                      className="pt-2"
-                    />
-                  )}
-                  
-                  <SelectRow
-                    className="pt-2"
-                    value={siteLabelField || "none"}
-                    onChange={(nextValue) => setSiteLabelField?.(nextValue)}
-                    options={[
-                      { value: "none", label: "Label" },
-                      { value: "site_id", label: "Site ID" },
-                      { value: "cell_id", label: "Cell ID" },
-                      { value: "technology", label: "Technology" },
-                      { value: "nodeb_id", label: "NodeB ID" },
-                      { value: "pci", label: "PCI" },
-                      { value: "band", label: "Band" },
-                    ]}
-                    placeholder="Site label"
-                  />
-                  {siteToggle === "Cell" &&
-                    String(sitePredictionVersion || "").trim().toLowerCase() === "updated" && (
-                      <div className="pt-2 min-w-0 flex-1 space-y-1.5 relative">
-                        <button
-                          type="button"
-                          onClick={() => setSiteScenarioMenuOpen((prev) => !prev)}
-                          className="h-8 w-full min-w-0 bg-slate-800 border border-slate-600 rounded px-2 text-xs text-white flex items-center justify-between"
-                        >
-                          <span className="truncate">
-                            {Number.isFinite(Number(sitePredictionScenarioId)) &&
-                            Number(sitePredictionScenarioId) > 0
-                              ? `Scenario ${sitePredictionScenarioId}`
-                              : "No scenarios"}
-                          </span>
-                          <ChevronDown className="h-3.5 w-3.5 text-slate-300 shrink-0" />
-                        </button>
-                        {siteScenarioMenuOpen && (
-                          <div className="absolute left-0 right-0 z-[2300] mt-1 rounded border border-slate-600 bg-slate-900 shadow-lg max-h-56 overflow-y-auto">
-                            {Array.isArray(sitePredictionScenarioOptions) &&
-                            sitePredictionScenarioOptions.length > 0 ? (
-                              sitePredictionScenarioOptions.map((item) => {
-                                const scenarioId = Number(item?.scenario_id);
-                                const isSelected =
-                                  Number.isFinite(scenarioId) &&
-                                  Number(sitePredictionScenarioId) === scenarioId;
-                                return (
-                                  <div
-                                    key={`site-scenario-${scenarioId}`}
-                                    className="flex items-center gap-1 px-2 py-1.5 border-b border-slate-800 last:border-b-0"
-                                  >
-                                    <button
-                                      type="button"
-                                      onClick={() => {
-                                        setSitePredictionScenarioId?.(
-                                          Number.isFinite(scenarioId) && scenarioId > 0 ? scenarioId : null,
-                                        );
-                                        setSiteScenarioMenuOpen(false);
-                                      }}
-                                      className={`flex-1 text-left text-xs truncate ${isSelected ? "text-cyan-300" : "text-white"}`}
-                                    >
-                                      {`Scenario ${scenarioId}`}
-                                    </button>
-                                    <button
-                                      type="button"
-                                      onClick={() => onDeleteSitePredictionScenario?.(scenarioId)}
-                                      className="h-6 w-6 rounded bg-red-600/90 hover:bg-red-500 text-white inline-flex items-center justify-center"
-                                      title={`Delete Scenario ${scenarioId}`}
-                                    >
-                                      <Trash2 className="h-3.5 w-3.5" />
-                                    </button>
-                                  </div>
-                                );
-                              })
-                            ) : (
-                              <div className="px-2 py-2 text-xs text-slate-400">No scenarios</div>
-                            )}
-                          </div>
-                        )}
-                      </div>
-                    )}
-                </div>
-                
-
                 <div className="mt-3 pt-3 border-t border-slate-700/50 space-y-2">
-                  <Label className="text-xs font-semibold text-blue-400 flex items-center gap-1">
-                    <Grid3X3 className="w-3 h-3" /> Prediction Grid
-                  </Label>
+                  
 
                   {lteGridAvailable ? (
                     <>
@@ -3091,7 +2982,7 @@ const UnifiedMapSidebar = ({
                               <span className="text-slate-400">Radius</span>
                             </div>
                             <ThresholdInput
-                              value={Number(ltePredictionRadiusMeters) || 5000}
+                              value={Number(ltePredictionRadiusMeters) || 500}
                               onChange={(next) =>
                                 setLtePredictionRadiusMeters(Math.round(next))
                               }
@@ -3250,20 +3141,6 @@ const UnifiedMapSidebar = ({
                   )}
                 </div>
 
-                
-                {/* Add Site Button */}
-                <div className="mt-3 pt-3 border-t border-slate-700/50 space-y-2">
-                  <button
-                    onClick={() => onAddSiteClick?.()}
-                    className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-sm font-medium bg-gradient-to-r from-blue-600 to-cyan-600 hover:from-blue-500 hover:to-cyan-500 text-white shadow-lg hover:shadow-blue-500/25 transition-all duration-200"
-                  >
-                    <PlusCircle className="h-4 w-4" />
-                    Add Site
-                  </button>
-
-
-
-                </div>
               </>
             )}
 

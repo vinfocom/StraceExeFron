@@ -7,7 +7,6 @@ import {
   Filter,
   ChartBar,
   LayoutGrid,
-  Camera,
   Plus,
   Minus,
   UploadCloud,
@@ -15,6 +14,7 @@ import {
   ChevronDown,
   SlidersHorizontal,
   Eye,
+  Trash2,
 } from "lucide-react";
 import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { mapViewApi, predictionApi } from "@/api/apiEndpoints";
@@ -32,6 +32,13 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { useSettingsDialog } from "@/context/SettingsDialogContext";
 import {
   findProjectInProjectsCache,
@@ -62,6 +69,34 @@ const DEFAULT_SITE_COLUMN_VALUES = {
   e_tilt: "0",
   height: "30",
 };
+
+const SelectRow = ({
+  value,
+  onChange,
+  options,
+  placeholder,
+  disabled = false,
+  className = "",
+}) => (
+  <div className={`min-w-0 flex-1 space-y-1.5 ${className}`}>
+    <Select value={value} onValueChange={onChange} disabled={disabled}>
+      <SelectTrigger className="h-8 w-full min-w-0 bg-slate-800 border-slate-600 text-xs text-white [&>span]:truncate">
+        <SelectValue placeholder={placeholder} />
+      </SelectTrigger>
+      <SelectContent className="max-w-[340px] min-w-[240px] bg-slate-900 border-slate-700 text-white">
+        {options.map((opt) => (
+          <SelectItem
+            key={opt.value}
+            value={opt.value}
+            className="pr-8 text-xs text-white focus:text-white"
+          >
+            {opt.label}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
+  </div>
+);
 
 const SITE_COLUMN_ALIASES = {
   site: [
@@ -447,6 +482,18 @@ function UnifiedHeader({
   onGridViewToggle,
   canEnableGridView = false,
   onMapSnapshot,
+  onAddSiteClick,
+  enableSiteToggle = false,
+  siteToggle,
+  setSiteToggle,
+  sitePredictionVersion = "original",
+  setSitePredictionVersion,
+  sitePredictionScenarioId = null,
+  setSitePredictionScenarioId,
+  sitePredictionScenarioOptions = [],
+  onDeleteSitePredictionScenario,
+  siteLabelField = "none",
+  setSiteLabelField,
 }) {
   const { user, logout } = useAuth();
   const { openSettings } = useSettingsDialog();
@@ -473,6 +520,7 @@ function UnifiedHeader({
   const [selectedFile, setSelectedFile] = useState(null);
   const [activeQuickControl, setActiveQuickControl] = useState(null);
   const [openImportDialog, setOpenImportDialog] = useState(false);
+  const [siteScenarioMenuOpen, setSiteScenarioMenuOpen] = useState(false);
 
   // Prediction Prompt State
   const [showPredictionPrompt, setShowPredictionPrompt] = useState(false);
@@ -756,7 +804,19 @@ function UnifiedHeader({
   }, []);
 
   const utilityMenuItems = [
-    { label: "Import Site", action: () => setOpenImportDialog(true) },
+    {
+      label: "Snapshot",
+      action: () => onMapSnapshot?.(),
+      disabled: !canEnableGridView,
+    },
+    {
+      label: "Add Site",
+      action: () => onAddSiteClick?.(),
+    },
+    {
+      label: "Import Site",
+      action: () => setOpenImportDialog(true),
+    },
     { label: "Opacity", action: () => toggleQuickControl("opacity") },
     { label: "Log Radius", action: () => toggleQuickControl("radius") },
     {
@@ -830,6 +890,12 @@ function UnifiedHeader({
       }
       if (action === "import") {
         setOpenImportDialog(true);
+        return;
+      }
+      if (action === "snapshot") {
+        if (canEnableGridView) {
+          onMapSnapshot?.();
+        }
       }
     };
 
@@ -840,10 +906,21 @@ function UnifiedHeader({
     isMapPage,
     neighborLogsAvailable,
     onSettingsSaved,
+    onMapSnapshot,
     openSettings,
+    canEnableGridView,
     triangleSizeAvailable,
     toggleQuickControl,
   ]);
+
+  useEffect(() => {
+    if (
+      String(siteToggle || "").trim().toLowerCase() !== "cell" ||
+      String(sitePredictionVersion || "").trim().toLowerCase() !== "updated"
+    ) {
+      setSiteScenarioMenuOpen(false);
+    }
+  }, [sitePredictionVersion, siteToggle]);
 
   return (
     <header className="min-h-14 bg-gray-800 text-white shadow-sm flex flex-wrap xl:flex-nowrap items-center justify-between gap-2 px-3 sm:px-4 xl:px-6 py-2 xl:py-0 flex-shrink-0 relative z-10">
@@ -912,98 +989,64 @@ function UnifiedHeader({
               <span className="hidden xl:inline">Multi Map</span>
             </Button>
 
-            <Button
-              onClick={() => onMapSnapshot?.()}
-              size="sm"
-              title={
-                canEnableGridView
-                  ? "Capture map snapshot with current polygon boundary"
-                  : "Snapshot requires a raw filter polygon"
-              }
-              disabled={!canEnableGridView}
-              className={`h-9 shrink-0 flex gap-1 items-center text-white ${
-                canEnableGridView
-                  ? "bg-sky-600 hover:bg-sky-500"
-                  : "bg-slate-700 opacity-70 cursor-not-allowed"
-              }`}
-            >
-              <Camera className="h-4 w-4" />
-              <span className="hidden xl:inline">Snapshot</span>
-            </Button>
-
             
 
-            {!isElectronRuntime && (
-              <>
+            {isElectronRuntime && (
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    type="button"
+                    size="sm"
+                    title="View"
+                    className="h-9 shrink-0 flex gap-1 items-center bg-slate-700 hover:bg-slate-600 text-white border-slate-600"
+                  >
+                    <Eye className="h-4 w-4" />
+                    <span className="hidden xl:inline">View</span>
+                    <ChevronDown className="h-3.5 w-3.5" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="bg-white text-slate-800">
+                  <DropdownMenuItem onClick={() => navigate("/dashboard")}>
+                    Dashboard
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => navigate("/mapview")}>
+                    Map View
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem onClick={() => window.location.reload()}>
+                    Reload
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            )}
+
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
                 <Button
                   type="button"
-                  onClick={() => setOpenImportDialog(true)}
                   size="sm"
-                  title="Import Site"
-                  className="h-9 shrink-0 flex gap-1 items-center bg-emerald-600 hover:bg-emerald-500 text-white"
+                  title="Utility"
+                  className="h-9 shrink-0 flex gap-1 items-center bg-blue-600 hover:bg-blue-500 text-white"
                 >
-                  <UploadCloud className="h-4 w-4" />
-                  <span className="hidden xl:inline">Import Site</span>
+                  <SlidersHorizontal className="h-4 w-4" />
+                  <span className="hidden xl:inline">Utility</span>
+                  <ChevronDown className="h-3.5 w-3.5" />
                 </Button>
-
-                {isElectronRuntime && (
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <Button
-                        type="button"
-                        size="sm"
-                        title="View"
-                        className="h-9 shrink-0 flex gap-1 items-center bg-slate-700 hover:bg-slate-600 text-white border-slate-600"
-                      >
-                        <Eye className="h-4 w-4" />
-                        <span className="hidden xl:inline">View</span>
-                        <ChevronDown className="h-3.5 w-3.5" />
-                      </Button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end" className="bg-white text-slate-800">
-                      <DropdownMenuItem onClick={() => navigate("/dashboard")}>
-                        Dashboard
-                      </DropdownMenuItem>
-                      <DropdownMenuItem onClick={() => navigate("/mapview")}>
-                        Map View
-                      </DropdownMenuItem>
-                      <DropdownMenuSeparator />
-                      <DropdownMenuItem onClick={() => window.location.reload()}>
-                        Reload
-                      </DropdownMenuItem>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-                )}
-
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <Button
-                      type="button"
-                      size="sm"
-                      title="Utility"
-                      className="h-9 shrink-0 flex gap-1 items-center bg-blue-600 hover:bg-blue-500 text-white"
-                    >
-                      <SlidersHorizontal className="h-4 w-4" />
-                      <span className="hidden xl:inline">Utility</span>
-                      <ChevronDown className="h-3.5 w-3.5" />
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end" className="bg-white text-slate-800">
-                    <DropdownMenuLabel>Utility</DropdownMenuLabel>
-                    <DropdownMenuSeparator />
-                    {utilityMenuItems.map((item) => (
-                      <DropdownMenuItem
-                        key={item.label}
-                        disabled={item.disabled}
-                        onClick={item.action}
-                      >
-                        {item.label}
-                      </DropdownMenuItem>
-                    ))}
-                  </DropdownMenuContent>
-                </DropdownMenu>
-              </>
-            )}
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="bg-white text-slate-800">
+                <DropdownMenuLabel>Utility</DropdownMenuLabel>
+                <DropdownMenuSeparator />
+                {utilityMenuItems.map((item) => (
+                  <DropdownMenuItem
+                    key={item.label}
+                    disabled={item.disabled}
+                    onClick={item.action}
+                  >
+                    {item.label}
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
 
             {activeQuickControl === "opacity" && (
               <div className="flex max-w-full flex-wrap items-center gap-2 bg-gray-700/80 rounded-lg px-3 py-1.5 border border-gray-600">
@@ -1185,6 +1228,113 @@ function UnifiedHeader({
                   <Plus className="h-3 w-3" />
                 </button>
                 <span className="text-xs text-blue-300 font-medium">deg</span>
+              </div>
+            )}
+            {enableSiteToggle && (
+              <div className="grid min-w-[320px] grid-cols-3 gap-2 xl:min-w-[430px]">
+                <SelectRow
+                  className="pt-0"
+                  value={siteToggle}
+                  onChange={setSiteToggle}
+                  options={[
+                    { value: "Cell", label: "Cell" },
+                    { value: "NoML", label: "ML" },
+                  ]}
+                />
+                {siteToggle === "Cell" && (
+                  <SelectRow
+                    value={sitePredictionVersion}
+                    onChange={(nextValue) => setSitePredictionVersion?.(nextValue)}
+                    options={[
+                      { value: "original", label: "Baseline" },
+                      { value: "updated", label: "Optimized" },
+                      { value: "delta", label: "Delta" },
+                    ]}
+                    placeholder="Select cell version"
+                    className="pt-0"
+                  />
+                )}
+                <SelectRow
+                  className="pt-0"
+                  value={siteLabelField || "none"}
+                  onChange={(nextValue) => setSiteLabelField?.(nextValue)}
+                  options={[
+                    { value: "none", label: "Label" },
+                    { value: "site_id", label: "Site ID" },
+                    { value: "cell_id", label: "Cell ID" },
+                    { value: "technology", label: "Technology" },
+                    { value: "nodeb_id", label: "NodeB ID" },
+                    { value: "pci", label: "PCI" },
+                    { value: "band", label: "Band" },
+                  ]}
+                  placeholder="Site label"
+                />
+                {siteToggle === "Cell" &&
+                  String(sitePredictionVersion || "").trim().toLowerCase() === "updated" && (
+                    <div className="min-w-0 flex-1 space-y-1.5 relative xl:col-span-1">
+                      <button
+                        type="button"
+                        onClick={() => setSiteScenarioMenuOpen((prev) => !prev)}
+                        className="h-8 w-full min-w-0 bg-slate-800 border border-slate-600 rounded px-2 text-xs text-white flex items-center justify-between"
+                      >
+                        <span className="truncate">
+                          {Number.isFinite(Number(sitePredictionScenarioId)) &&
+                          Number(sitePredictionScenarioId) > 0
+                            ? `Scenario ${sitePredictionScenarioId}`
+                            : "No scenarios"}
+                        </span>
+                        <ChevronDown className="h-3.5 w-3.5 text-slate-300 shrink-0" />
+                      </button>
+                      {siteScenarioMenuOpen && (
+                        <div className="absolute left-0 right-0 z-[2300] mt-1 rounded border border-slate-600 bg-slate-900 shadow-lg max-h-56 overflow-y-auto">
+                          {Array.isArray(sitePredictionScenarioOptions) &&
+                          sitePredictionScenarioOptions.length > 0 ? (
+                            sitePredictionScenarioOptions.map((item) => {
+                              const scenarioId = Number(item?.scenario_id);
+                              const isSelected =
+                                Number.isFinite(scenarioId) &&
+                                Number(sitePredictionScenarioId) === scenarioId;
+                              return (
+                                <div
+                                  key={`site-scenario-${scenarioId}`}
+                                  className="flex items-center gap-1 px-2 py-1.5 border-b border-slate-800 last:border-b-0"
+                                >
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setSitePredictionScenarioId?.(
+                                        Number.isFinite(scenarioId) && scenarioId > 0
+                                          ? scenarioId
+                                          : null,
+                                      );
+                                      setSiteScenarioMenuOpen(false);
+                                    }}
+                                    className={`flex-1 text-left text-xs truncate ${isSelected ? "text-cyan-300" : "text-white"}`}
+                                  >
+                                    {`Scenario ${scenarioId}`}
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      onDeleteSitePredictionScenario?.(scenarioId)
+                                    }
+                                    className="h-6 w-6 rounded bg-red-600/90 hover:bg-red-500 text-white inline-flex items-center justify-center"
+                                    title={`Delete Scenario ${scenarioId}`}
+                                  >
+                                    <Trash2 className="h-3.5 w-3.5" />
+                                  </button>
+                                </div>
+                              );
+                            })
+                          ) : (
+                            <div className="px-2 py-2 text-xs text-slate-400">
+                              No scenarios
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )}
               </div>
             )}
           </>

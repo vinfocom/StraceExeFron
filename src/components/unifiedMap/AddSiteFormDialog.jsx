@@ -16,6 +16,7 @@ import { mapViewApi } from "@/api/apiEndpoints";
 import { Button } from "@/components/ui/button";
 
 const TECHNOLOGY_OPTIONS = ["2G", "3G", "4G", "5G"];
+const FIXED_ANTENNA_VALUE = "omni/katherine";
 
 const createCell = (overrides = {}) => ({
   technology: "4G",
@@ -40,7 +41,7 @@ const createInitialForm = (projectId, pickedLatLng) => ({
   nodeId: "",
   siteName: "",
   operator: "",
-  antenna: "Omni",
+  antenna: FIXED_ANTENNA_VALUE,
   latitude: pickedLatLng?.lat?.toFixed(6) || "",
   longitude: pickedLatLng?.lng?.toFixed(6) || "",
   sectors: [createSector(1)],
@@ -126,7 +127,7 @@ const getSiteTechnology = (site) => {
   return "4G";
 };
 
-const getSiteAnftenna = (site, sectorCount = 1) => {
+const getSiteAntenna = (site, sectorCount = 1) => {
   const raw = String(
     site?.antenna ??
       site?.Antenna ??
@@ -147,7 +148,7 @@ const getSiteAnftenna = (site, sectorCount = 1) => {
     raw.includes("sector") ||
     raw.includes("panel")
   ) {
-    return "Catherine";
+    return "Katherine";
   }
 
   return sectorCount > 1 ? "Catherine" : "Omni";
@@ -196,7 +197,7 @@ const cloneSiteTemplateToForm = (template, currentForm, pickedLatLng) => {
     nodeId: template.nodeId,
     siteName: template.siteName,
     operator: template.operator,
-    antenna: template.antenna,
+    antenna: FIXED_ANTENNA_VALUE,
     latitude:
       pickedLatLng?.lat != null ? Number(pickedLatLng.lat).toFixed(6) : currentForm.latitude,
     longitude:
@@ -348,7 +349,7 @@ const buildTemplateFromSiteRows = (rows = []) => {
         "",
     ).trim(),
     operator: getSiteOperator(firstRow),
-    antenna: getSiteAntenna(firstRow, sectors.length),
+    antenna: FIXED_ANTENNA_VALUE,
     latitude: getSiteLatitude(firstRow),
     longitude: getSiteLongitude(firstRow),
     sectors: sectors.length > 0 ? sectors : [createSector(1)],
@@ -651,7 +652,7 @@ const SiteForm = ({
           </Field>
           <Field label="Antenna">
             <div className="flex h-10 items-center rounded-md border border-slate-200 bg-slate-50 px-3 text-sm font-medium text-slate-700">
-              {form.antenna || "Omni"}
+              {form.antenna || FIXED_ANTENNA_VALUE}
             </div>
           </Field>
           <Field label="Latitude" required>

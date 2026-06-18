@@ -1253,6 +1253,19 @@ export const offlineApi = {
     writeOfflineJson("stracer.offline.projects", [project, ...projects]);
     return { Status: 1, Data: project, localOnly: true };
   },
+  updateProjectSiteSize: async (payload) => {
+    const projects = readOfflineJson("stracer.offline.projects", []);
+    const nextProjects = projects.map((project) =>
+      String(project?.id) === String(payload?.ProjectId || payload?.projectId)
+        ? { ...project, sitesize: payload?.SiteSize ?? payload?.siteSize ?? 1 }
+        : project,
+    );
+    writeOfflineJson("stracer.offline.projects", nextProjects);
+    const updatedProject = nextProjects.find(
+      (project) => String(project?.id) === String(payload?.ProjectId || payload?.projectId),
+    );
+    return { Status: 1, Data: updatedProject || null, localOnly: true };
+  },
   getNetworkLog: async () =>
     emptyOfflineResponse({ Data: readOfflineJson("stracer.offline.networkLog", []) }),
   prepareSync: async () => ({
@@ -1555,6 +1568,15 @@ export const mapViewApi = {
       localPythonCall: () =>
         pythonApi.get("/api/local-mapview/projects", companyId ? { company_id: companyId } : {}),
     }),
+
+  updateProjectSiteSize: async (payload) => {
+    try {
+      return await api.put("/api/MapView/UpdateProjectSiteSize", payload);
+    } catch (error) {
+      console.error(" Project site size update error:", error);
+      throw error;
+    }
+  },
 
   /**
    * Create project with polygons and sessions

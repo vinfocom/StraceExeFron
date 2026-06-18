@@ -280,7 +280,6 @@ const DrawingControlsPanel = memo(function DrawingControlsPanel({
 
             <div className="w-px h-5 bg-gray-200 mx-1 flex-shrink-0" />
 
-            {/* Clear Button */}
             <ToolButton 
               icon={Trash2} 
               title="Clear All Drawings"

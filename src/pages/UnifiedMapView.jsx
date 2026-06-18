@@ -579,6 +579,12 @@ const normalizeKey = (value) => {
   return raw;
 };
 
+const normalizeProjectSiteSize = (value, fallback = 1) => {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric) || numeric <= 0) return fallback;
+  return Math.max(0.25, Math.min(3, Number(numeric.toFixed(2))));
+};
+
 const getCircleBoundaryPoints = (circle, pointCount = 48) => {
   const centerLat = Number(circle?.center?.lat);
   const centerLng = Number(circle?.center?.lng);
@@ -1509,6 +1515,9 @@ const UnifiedMapView = () => {
   const [buildingBorderEnabled, setBuildingBorderEnabled] = useState(false);
   const [coverageViolationThreshold, setCoverageViolationThreshold] =
     useState(null);
+  const siteSizeHydratedRef = useRef(false);
+  const lastPersistedSiteSizeRef = useRef(1);
+  const siteSizeSaveTimeoutRef = useRef(null);
 
   const [hoveredPolygon, setHoveredPolygon] = useState(null);
   const [hoverPosition, setHoverPosition] = useState(null);
@@ -1937,6 +1946,19 @@ const UnifiedMapView = () => {
   }, [project]);
 
   useEffect(() => {
+    if (!projectId) return;
+    const nextSiteSize = normalizeProjectSiteSize(
+      project?.sitesize ?? project?.site_size ?? project?.siteSize,
+      1,
+    );
+    siteSizeHydratedRef.current = true;
+    lastPersistedSiteSizeRef.current = nextSiteSize;
+    setTriangleScaleMultiplier((prev) =>
+      Math.abs(Number(prev || 0) - nextSiteSize) < 0.001 ? prev : nextSiteSize,
+    );
+  }, [projectId, project?.id, project?.sitesize, project?.site_size, project?.siteSize]);
+
+  useEffect(() => {
     if (
       Number.isFinite(projectAreaGridSizeMeters) &&
       projectAreaGridSizeMeters > 0
@@ -1959,6 +1981,57 @@ const UnifiedMapView = () => {
       );
     }
   }, [projectAreaGridSizeMeters, projectLogGridSizeMeters]);
+
+  const handleTriangleScaleMultiplierChange = useCallback((nextValueOrUpdater) => {
+    setTriangleScaleMultiplier((prev) => {
+      const resolvedValue =
+        typeof nextValueOrUpdater === "function"
+          ? nextValueOrUpdater(prev)
+          : nextValueOrUpdater;
+      return normalizeProjectSiteSize(resolvedValue, prev || 1);
+    });
+  }, []);
+
+  useEffect(() => {
+    if (!siteSizeHydratedRef.current) return;
+    if (!Number.isFinite(Number(projectId)) || Number(projectId) <= 0) return;
+
+    const normalizedSiteSize = normalizeProjectSiteSize(triangleScaleMultiplier, 1);
+    if (Math.abs(normalizedSiteSize - lastPersistedSiteSizeRef.current) < 0.001) {
+      return;
+    }
+
+    if (siteSizeSaveTimeoutRef.current) {
+      window.clearTimeout(siteSizeSaveTimeoutRef.current);
+    }
+
+    siteSizeSaveTimeoutRef.current = window.setTimeout(async () => {
+      try {
+        await mapViewApi.updateProjectSiteSize({
+          ProjectId: Number(projectId),
+          SiteSize: normalizedSiteSize,
+        });
+
+        lastPersistedSiteSizeRef.current = normalizedSiteSize;
+        setProject((prev) => {
+          if (!prev || Number(prev?.id) !== Number(projectId)) return prev;
+          const nextProject = { ...prev, sitesize: normalizedSiteSize };
+          upsertProjectInProjectsCache(nextProject);
+          return nextProject;
+        });
+      } catch (error) {
+        console.error("Failed to update project site size:", error);
+        toast.error("Failed to save site size.");
+      }
+    }, 350);
+
+    return () => {
+      if (siteSizeSaveTimeoutRef.current) {
+        window.clearTimeout(siteSizeSaveTimeoutRef.current);
+        siteSizeSaveTimeoutRef.current = null;
+      }
+    };
+  }, [projectId, triangleScaleMultiplier]);
 
   useEffect(() => {
     if (!projectId || projectSessionParam) return;
@@ -5834,7 +5907,7 @@ const UnifiedMapView = () => {
         setNeighborSquareSize={setNeighborSquareSize}
         triangleSizeAvailable={triangleSizeAvailable}
         triangleScaleMultiplier={triangleScaleMultiplier}
-        setTriangleScaleMultiplier={setTriangleScaleMultiplier}
+        setTriangleScaleMultiplier={handleTriangleScaleMultiplierChange}
         defaultSiteBeamwidth={defaultSiteBeamwidth}
         setDefaultSiteBeamwidth={setDefaultSiteBeamwidth}
         ui={ui}
@@ -5844,6 +5917,18 @@ const UnifiedMapView = () => {
         onGridViewToggle={setEnableGrid}
         canEnableGridView={canEnableUnifiedGridView}
         onMapSnapshot={handleMapSnapshot}
+        onAddSiteClick={handleAddSiteClick}
+        enableSiteToggle={enableSiteToggle}
+        siteToggle={siteToggle}
+        setSiteToggle={setSiteToggle}
+        sitePredictionVersion={sitePredictionVersion}
+        setSitePredictionVersion={setSitePredictionVersion}
+        sitePredictionScenarioId={sitePredictionScenarioId}
+        setSitePredictionScenarioId={setSitePredictionScenarioId}
+        sitePredictionScenarioOptions={sitePredictionScenarioOptions}
+        onDeleteSitePredictionScenario={handleDeleteSitePredictionScenario}
+        siteLabelField={siteLabelField}
+        setSiteLabelField={setSiteLabelField}
       />
 
       {showAnalytics && (
