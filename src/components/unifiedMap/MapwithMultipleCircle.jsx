@@ -2132,14 +2132,13 @@ const MapWithMultipleCircles = ({
           const isEditableBoundary =
             projectPolygonEditEnabled && editableBoundaryPolygonIdSet.has(polygonKey);
           const boundaryStrokeColor = fillColor || "#2563eb";
-          const shouldFillFromGrid = enableGrid && hasActivePolygons;
           return (
             <PolygonF
               key={`${polygonKey}-${isEditableBoundary ? "editable" : "readonly"}`}
               paths={path}
               options={{
-                fillColor: shouldFillFromGrid ? fillColor : "transparent",
-                fillOpacity: shouldFillFromGrid ? GRID_POLYGON_FILL_OPACITY : 0,
+                fillColor: "transparent",
+                fillOpacity: 0,
                 strokeColor: boundaryStrokeColor,
                 strokeWeight: 1,
                 strokeOpacity: resolvedPolygonOpacity,
@@ -2170,7 +2169,7 @@ const MapWithMultipleCircles = ({
          />
        ))}
        
-        {enableGrid && !hasActivePolygons && visibleGridCells.map((cell) => (
+        {enableGrid && visibleGridCells.map((cell) => (
           <RectangleF
             key={`grid-${cell.id}`}
             bounds={cell.bounds}

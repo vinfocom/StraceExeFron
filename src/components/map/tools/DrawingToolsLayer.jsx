@@ -646,7 +646,7 @@ function DrawingToolsLayerComponent({
       return undefined;
     }
 
-    cleanupActiveDrawing(false, { completeIfPossible: true });
+    cleanupActiveDrawing(false);
 
     if (!enabled || !shapeMode) {
       return undefined;
@@ -912,7 +912,7 @@ function DrawingToolsLayerComponent({
     return () => {
       finishActiveDrawingRef.current = null;
       cancelActiveDrawingRef.current = null;
-      cleanupActiveDrawing(false, { completeIfPossible: true });
+      cleanupActiveDrawing(false);
     };
   }, [
     map,
@@ -985,6 +985,7 @@ function DrawingToolsLayerComponent({
   useEffect(() => {
     if (clearSignal === 0 || clearSignal === lastClearSignalRef.current) return;
     lastClearSignalRef.current = clearSignal;
+    cleanupActiveDrawing(false);
     shapesRef.current.forEach(s => {
       s.listeners?.forEach(l => window.google.maps.event.removeListener(l));
       s.overlay?.setMap(null);
@@ -997,7 +998,7 @@ function DrawingToolsLayerComponent({
     callbacksRef.current.onDrawingsChange?.([]);
     callbacksRef.current.onSummary?.(null);
     toast.info("All drawings cleared", { position: "bottom-right", autoClose: 2000 });
-  }, [clearSignal]);
+  }, [clearSignal, cleanupActiveDrawing]);
 
   useEffect(() => {
     if (shapesRef.current.length > 0) {
@@ -1013,7 +1014,7 @@ function DrawingToolsLayerComponent({
       : `${activeDraft.pointCount} segment point${activeDraft.pointCount === 1 ? "" : "s"}`;
 
   return (
-    <div className="absolute bottom-4 left-1/2 z-30 -translate-x-1/2 rounded-md border border-slate-200 bg-white/95 px-3 py-2 shadow-lg backdrop-blur-sm">
+    <div className="absolute bottom-4 left-1/2 z-[700] -translate-x-1/2 rounded-md border border-slate-200 bg-white/95 px-3 py-2 shadow-lg backdrop-blur-sm">
       <div className="flex items-center gap-2 text-xs text-slate-700">
         <span className="font-medium capitalize">{activeDraft.type}</span>
         <span className="text-slate-400">|</span>

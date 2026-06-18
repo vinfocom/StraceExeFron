@@ -183,9 +183,15 @@ export const normalizeTechName = (tech, band = null) => {
 
   const has5GSignal =
     t.includes("5G") ||
-    t.includes("NR") ||
+    t.includes("NR NSA") ||
+    t.includes("NR SA") ||
+    t.includes("NR-CA") ||
+    t.includes("NR-DC") ||
+    t.includes("VONR") ||
+    t.includes("LTE ANCHOR") ||
+    t.includes("LTE-ANCHOR") ||
+    t.includes("LTE_ANCHOR") ||
     t.includes("NSA") ||
-    t.includes("SA") ||
     t.includes("ENDC") ||
     t.includes("EN-DC");
 
@@ -194,18 +200,29 @@ export const normalizeTechName = (tech, band = null) => {
   }
 
   if (
-    t.includes("LTE ANCHOR") ||
-    t.includes("LTE-ANCHOR") ||
-    t.includes("LTE_ANCHOR")
+    t.includes("LTE") ||
+    t.includes("LTE-A") ||
+    t.includes("LTE A") ||
+    t.includes("LTE-A PRO") ||
+    t.includes("LTE A PRO") ||
+    t.includes("LTE CA") ||
+    t.includes("VOLTE") ||
+    t.includes("NB-IOT") ||
+    t.includes("LTE-M") ||
+    t.includes("4G") ||
+    t.includes("4G+")
   ) {
     return "4G";
   }
   
-  if (t.includes("LTE") || t.includes("4G") ||t.includes("4G+")) {
-    return "4G";
-  }
-  
-  if (t.includes("3G") || t.includes("WCDMA") || t.includes("UMTS") || t.includes("HSPA")) {
+  if (
+    t.includes("3G") ||
+    t.includes("WCDMA") ||
+    t.includes("UMTS") ||
+    t.includes("HSPA") ||
+    t.includes("HSPA+") ||
+    t.includes("DC-HSPA+")
+  ) {
     return "3G";
   }
   

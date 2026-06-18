@@ -16,7 +16,7 @@ import {
 import { StatCard } from "../common/StatCard";
 import { PCI_COLOR_PALETTE } from "@/components/map/layers/MultiColorCirclesLayer";
 import { useSearchParams } from "react-router-dom";
-import toast from "react-hot-toast";
+import { toast } from "react-toastify";
 import { mapViewApi } from "@/api/apiEndpoints";
 import {
   normalizeProviderName,
@@ -24,6 +24,18 @@ import {
   COLOR_SCHEMES,
   getLogColor,
 } from "@/utils/colorUtils";
+
+const PROVIDER_VOLUME_CACHE = new Map();
+const PROVIDER_VOLUME_PENDING = new Map();
+const PROVIDER_VOLUME_CACHE_VERSION = "v2";
+
+const getProviderVolumeCacheKey = (projectId, sessionIds = []) => {
+  const normalizedProjectId = String(projectId ?? "").trim() || "no-project";
+  const normalizedSessions = Array.isArray(sessionIds)
+    ? sessionIds.map((id) => String(id ?? "").trim()).filter(Boolean).join(",")
+    : "";
+  return `${PROVIDER_VOLUME_CACHE_VERSION}::${normalizedProjectId}::${normalizedSessions}`;
+};
 
 const formatDuration = (seconds) => {
   if (!seconds || seconds <= 0) return "N/A";
@@ -74,6 +86,7 @@ export const OverviewTab = ({
   distance,
   drawnShapeAnalytics = [],
   sessionIds: sessionIdsProp = [],
+  projectId = null,
   gridViewEnabled = false,
   gridViewSummary = null,
 }) => {
@@ -116,6 +129,17 @@ export const OverviewTab = ({
   const fetchVolumeData = useCallback(async () => {
     if (!sessionIds.length) {
       setProviderVolume({});
+      setLoading(false);
+      setError(null);
+      return;
+    }
+
+    const cacheKey = getProviderVolumeCacheKey(projectId, sessionIds);
+    if (PROVIDER_VOLUME_CACHE.has(cacheKey)) {
+      const cached = PROVIDER_VOLUME_CACHE.get(cacheKey);
+      setProviderVolume(cached || {});
+      setLoading(false);
+      setError(null);
       return;
     }
 
@@ -123,9 +147,15 @@ export const OverviewTab = ({
     setError(null);
 
     try {
-      const response = await mapViewApi.getproviderVolume({
-        session_ids: sessionIds.join(","),
-      });
+      let request = PROVIDER_VOLUME_PENDING.get(cacheKey);
+      if (!request) {
+        request = mapViewApi.getproviderVolume({
+          session_ids: sessionIds.join(","),
+        });
+        PROVIDER_VOLUME_PENDING.set(cacheKey, request);
+      }
+
+      const response = await request;
 
       if (response?.status === 0) {
         throw new Error(response.message || "Failed to fetch volume data");
@@ -137,12 +167,10 @@ export const OverviewTab = ({
         {};
 
       if (Object.keys(volumeData).length > 0) {
-        toast.success(
-          `Volume data loaded for ${Object.keys(volumeData).length} session(s)`
-        );
+        PROVIDER_VOLUME_CACHE.set(cacheKey, volumeData);
         setProviderVolume(volumeData);
       } else {
-        toast.warn("No volume data available");
+        PROVIDER_VOLUME_CACHE.set(cacheKey, {});
         setProviderVolume({});
       }
     } catch (error) {
@@ -154,9 +182,10 @@ export const OverviewTab = ({
       toast.error(errorMessage);
       setProviderVolume({});
     } finally {
+      PROVIDER_VOLUME_PENDING.delete(cacheKey);
       setLoading(false);
     }
-  }, [sessionIds]);
+  }, [projectId, sessionIds]);
 
   useEffect(() => {
     if (sessionIds.length > 0) {

@@ -579,6 +579,79 @@ const normalizeKey = (value) => {
   return raw;
 };
 
+const getCircleBoundaryPoints = (circle, pointCount = 48) => {
+  const centerLat = Number(circle?.center?.lat);
+  const centerLng = Number(circle?.center?.lng);
+  const radiusMeters = Number(circle?.radius);
+  if (
+    !Number.isFinite(centerLat) ||
+    !Number.isFinite(centerLng) ||
+    !Number.isFinite(radiusMeters) ||
+    radiusMeters <= 0
+  ) {
+    return [];
+  }
+
+  const earthRadiusMeters = 6378137;
+  const angularDistance = radiusMeters / earthRadiusMeters;
+  const centerLatRad = (centerLat * Math.PI) / 180;
+  const centerLngRad = (centerLng * Math.PI) / 180;
+
+  return Array.from({ length: pointCount }, (_, index) => {
+    const bearing = (2 * Math.PI * index) / pointCount;
+    const latRad = Math.asin(
+      Math.sin(centerLatRad) * Math.cos(angularDistance) +
+        Math.cos(centerLatRad) * Math.sin(angularDistance) * Math.cos(bearing),
+    );
+    const lngRad =
+      centerLngRad +
+      Math.atan2(
+        Math.sin(bearing) * Math.sin(angularDistance) * Math.cos(centerLatRad),
+        Math.cos(angularDistance) - Math.sin(centerLatRad) * Math.sin(latRad),
+      );
+
+    return {
+      lat: (latRad * 180) / Math.PI,
+      lng: (lngRad * 180) / Math.PI,
+    };
+  });
+};
+
+const getSaveableShapeCoordinates = (shape) => {
+  const geometry = shape?.geometry;
+  if (!geometry) return [];
+
+  if (
+    geometry.type === "polygon" &&
+    Array.isArray(geometry.polygon) &&
+    geometry.polygon.length >= 3
+  ) {
+    return geometry.polygon;
+  }
+
+  const rectangle = geometry.rectangle;
+  if (geometry.type === "rectangle" && rectangle?.sw && rectangle?.ne) {
+    const south = Number(rectangle.sw.lat);
+    const west = Number(rectangle.sw.lng);
+    const north = Number(rectangle.ne.lat);
+    const east = Number(rectangle.ne.lng);
+    if ([south, west, north, east].every(Number.isFinite)) {
+      return [
+        { lat: south, lng: west },
+        { lat: north, lng: west },
+        { lat: north, lng: east },
+        { lat: south, lng: east },
+      ];
+    }
+  }
+
+  if (geometry.type === "circle" && geometry.circle) {
+    return getCircleBoundaryPoints(geometry.circle);
+  }
+
+  return [];
+};
+
 const getLocationIdKey = (loc) =>
   normalizeKey(
     loc?.id ??
@@ -1234,6 +1307,149 @@ const BestNetworkLegend = React.memo(({ stats, providerColors, enabled }) => {
   );
 });
 BestNetworkLegend.displayName = "BestNetworkLegend";
+
+const HANDOVER_LEGEND_META = {
+  technology: { label: "Technology", dotClass: "bg-emerald-500" },
+  band: { label: "Band", dotClass: "bg-violet-500" },
+  pci: { label: "PCI", dotClass: "bg-blue-500" },
+};
+
+const getHandoverPairLabel = (transition = {}) => {
+  const from = String(transition.from ?? "Unknown").trim() || "Unknown";
+  const to = String(transition.to ?? "Unknown").trim() || "Unknown";
+  return `${from} -> ${to}`;
+};
+
+const summarizeHandoverPairsForLegend = (transitions = [], limit = 8) => {
+  const pairCounts = new Map();
+
+  transitions.forEach((transition) => {
+    const pair = getHandoverPairLabel(transition);
+    pairCounts.set(pair, (pairCounts.get(pair) || 0) + 1);
+  });
+
+  const items = Array.from(pairCounts.entries())
+    .map(([pair, count]) => ({ pair, count }))
+    .sort((a, b) => b.count - a.count || a.pair.localeCompare(b.pair));
+
+  return {
+    items: items.slice(0, limit),
+    hiddenCount: Math.max(0, items.length - limit),
+    total: transitions.length,
+  };
+};
+
+const HandoverLegend = React.memo(({
+  techEnabled,
+  bandEnabled,
+  pciEnabled,
+  technologyTransitions = [],
+  bandTransitions = [],
+  pciTransitions = [],
+}) => {
+  const [collapsed, setCollapsed] = useState(false);
+  const sections = useMemo(() => {
+    const nextSections = [];
+    if (techEnabled && technologyTransitions.length > 0) {
+      nextSections.push({
+        type: "technology",
+        ...summarizeHandoverPairsForLegend(technologyTransitions),
+      });
+    }
+    if (bandEnabled && bandTransitions.length > 0) {
+      nextSections.push({
+        type: "band",
+        ...summarizeHandoverPairsForLegend(bandTransitions),
+      });
+    }
+    if (pciEnabled && pciTransitions.length > 0) {
+      nextSections.push({
+        type: "pci",
+        ...summarizeHandoverPairsForLegend(pciTransitions),
+      });
+    }
+    return nextSections;
+  }, [
+    bandEnabled,
+    bandTransitions,
+    pciEnabled,
+    pciTransitions,
+    techEnabled,
+    technologyTransitions,
+  ]);
+
+  const totalHandovers = useMemo(
+    () => sections.reduce((sum, section) => sum + section.total, 0),
+    [sections],
+  );
+
+  if (sections.length === 0) return null;
+
+  return (
+    <div className="absolute bottom-4 left-4 z-[25] w-[min(340px,calc(100vw-32px))] rounded-lg border border-slate-700/70 bg-slate-950/92 shadow-xl backdrop-blur">
+      <button
+        type="button"
+        onClick={() => setCollapsed((current) => !current)}
+        className="flex w-full items-center justify-between gap-3 rounded-t-lg px-3 py-2.5 text-left transition hover:bg-white/5"
+      >
+        <div className="min-w-0">
+          <div className="text-xs font-bold uppercase tracking-wide text-white">Handover Legend</div>
+          <div className="mt-0.5 text-[11px] text-slate-400">{totalHandovers} events by from-to case</div>
+        </div>
+        <span className="shrink-0 rounded bg-slate-800 px-2 py-0.5 text-[11px] font-semibold text-slate-200">
+          {collapsed ? "Show" : "Hide"}
+        </span>
+      </button>
+
+      {!collapsed && (
+        <div className="max-h-[360px] overflow-y-auto border-t border-slate-800 px-3 py-3">
+          <div className="space-y-4">
+            {sections.map((section) => {
+              const meta = HANDOVER_LEGEND_META[section.type] || HANDOVER_LEGEND_META.technology;
+              return (
+                <section key={section.type} className="space-y-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex min-w-0 items-center gap-2">
+                      <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${meta.dotClass}`} />
+                      <span className="truncate text-xs font-semibold text-slate-100">{meta.label}</span>
+                    </div>
+                    <span className="shrink-0 rounded bg-slate-800 px-2 py-0.5 text-[11px] font-semibold text-slate-300">
+                      {section.total}
+                    </span>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    {section.items.map((item) => (
+                      <div
+                        key={`${section.type}-${item.pair}`}
+                        className="flex items-center justify-between gap-2 rounded-md bg-slate-900/80 px-2 py-1.5"
+                        title={`${item.pair}: ${item.count}`}
+                      >
+                        <span className="min-w-0 truncate text-[11px] font-medium text-slate-200">
+                          {item.pair}
+                        </span>
+                        <span className="shrink-0 rounded bg-blue-500/15 px-2 py-0.5 text-[11px] font-bold text-blue-100">
+                          {item.count}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+
+                  {section.hiddenCount > 0 && (
+                    <div className="text-[11px] text-slate-500">
+                      +{section.hiddenCount} more cases
+                    </div>
+                  )}
+                </section>
+              );
+            })}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+});
+HandoverLegend.displayName = "HandoverLegend";
 
 // --- Main Component ---
 
@@ -4274,48 +4490,72 @@ const UnifiedMapView = () => {
     return effectiveProjectPolygons.map((poly) => poly.uid).filter(Boolean);
   }, [effectiveProjectPolygons, projectPolygonEditEnabled, polygonSource]);
 
+  const hasExistingProjectPolygonBoundary = effectiveProjectPolygons.length > 0;
+
   const latestDrawnProjectPolygon = useMemo(() => {
-    const polygonsOnly = (drawnShapeAnalytics || []).filter(
-      (item) =>
-        item?.type === "polygon" &&
-        item?.geometry?.type === "polygon" &&
-        Array.isArray(item?.geometry?.polygon) &&
-        item.geometry.polygon.length >= 3,
+    const saveableShapes = (drawnShapeAnalytics || []).filter(
+      (item) => getSaveableShapeCoordinates(item).length >= 3,
     );
-    return polygonsOnly.length ? polygonsOnly[polygonsOnly.length - 1] : null;
+    return saveableShapes.length ? saveableShapes[saveableShapes.length - 1] : null;
   }, [drawnShapeAnalytics]);
 
   const canSaveDrawnPolygonToProject = useMemo(() => {
-    return !hasFilteringPolygons && Boolean(latestDrawnProjectPolygon);
-  }, [hasFilteringPolygons, latestDrawnProjectPolygon]);
+    return Boolean(latestDrawnProjectPolygon && !hasExistingProjectPolygonBoundary);
+  }, [hasExistingProjectPolygonBoundary, latestDrawnProjectPolygon]);
+
+  const saveDrawnPolygonTargetLabel = useMemo(() => {
+    const numericProjectId = Number(projectId);
+    return Number.isFinite(numericProjectId) && numericProjectId > 0
+      ? "this project and selected session"
+      : "the opened session";
+  }, [projectId]);
 
   const handleSaveDrawnPolygonToProject = useCallback(async () => {
     const numericProjectId = Number(projectId);
-    if (!Number.isFinite(numericProjectId) || numericProjectId <= 0) {
-      toast.warn("Open a valid project before saving a polygon.");
+    const hasProject = Number.isFinite(numericProjectId) && numericProjectId > 0;
+    const activeSessionIds = (Array.isArray(sessionIds) ? sessionIds : [])
+      .map((id) => Number(id))
+      .filter((id) => Number.isFinite(id) && id > 0);
+
+    if (!hasProject && activeSessionIds.length === 0) {
+      toast.warn("Open a valid project or session before saving a shape.");
       return;
     }
-    if (!latestDrawnProjectPolygon?.geometry?.polygon?.length) {
-      toast.warn("Draw a polygon on the map first.");
+    if (hasExistingProjectPolygonBoundary) {
+      toast.info("A project polygon already exists. New drawn shapes are for analysis only.");
+      return;
+    }
+    const saveableShapeCoordinates = getSaveableShapeCoordinates(latestDrawnProjectPolygon);
+    if (saveableShapeCoordinates.length < 3) {
+      toast.warn("Draw a polygon, square, or circle on the map first.");
       return;
     }
     if (!newProjectPolygonName.trim()) {
-      toast.warn("Enter a polygon name first.");
+      toast.warn("Enter a shape name first.");
       return;
     }
 
-    const wkt = coordinatesToWktPolygon(latestDrawnProjectPolygon.geometry.polygon);
+    const wkt = coordinatesToWktPolygon(saveableShapeCoordinates);
     if (!wkt) {
-      toast.error("Could not convert the drawn polygon into a savable boundary.");
+      toast.error("Could not convert the drawn shape into a savable boundary.");
       return;
     }
+
+    const drawnPolygonSessionIds = Array.isArray(latestDrawnProjectPolygon.session)
+      ? latestDrawnProjectPolygon.session
+      : [];
+    const normalizedDrawnSessionIds = drawnPolygonSessionIds
+      .map((id) => Number(id))
+      .filter((id) => Number.isFinite(id) && id > 0);
+    const resolvedSessionIds = normalizedDrawnSessionIds.length
+      ? normalizedDrawnSessionIds
+      : activeSessionIds;
 
     const payload = {
+      ProjectId: hasProject ? numericProjectId : null,
       Name: newProjectPolygonName.trim(),
       WKT: wkt,
-      SessionIds: Array.isArray(latestDrawnProjectPolygon.session)
-        ? latestDrawnProjectPolygon.session
-        : [],
+      SessionIds: resolvedSessionIds,
       Area: Number.isFinite(Number(latestDrawnProjectPolygon.area))
         ? Number(latestDrawnProjectPolygon.area)
         : null,
@@ -4325,13 +4565,19 @@ const UnifiedMapView = () => {
     try {
       const saveResponse = await mapViewApi.savePolygon(payload);
       if (!(saveResponse?.Status === 1 || saveResponse?.status === 1)) {
-        toast.error(saveResponse?.Message || "Failed to save the drawn polygon.");
+        toast.error(saveResponse?.Message || "Failed to save the drawn shape.");
+        return;
+      }
+
+      if (!hasProject) {
+        toast.success(`Shape "${newProjectPolygonName.trim()}" saved to session ${resolvedSessionIds.join(", ")}.`);
+        setNewProjectPolygonName("");
         return;
       }
 
       const polygonId = extractPolygonIdFromSaveResponse(saveResponse);
       if (!polygonId) {
-        toast.warning("Polygon was saved, but assignment to the project could not be confirmed automatically.");
+        toast.warning("Shape was saved, but assignment to the project could not be confirmed automatically.");
         return;
       }
 
@@ -4340,11 +4586,11 @@ const UnifiedMapView = () => {
         numericProjectId,
       );
       if (!(assignResponse?.Status === 1 || assignResponse?.status === 1)) {
-        toast.error(assignResponse?.Message || "Polygon saved, but project assignment failed.");
+        toast.error(assignResponse?.Message || "Shape saved, but project assignment failed.");
         return;
       }
 
-      toast.success(`Polygon "${newProjectPolygonName.trim()}" saved to this project.`);
+      toast.success(`Shape "${newProjectPolygonName.trim()}" saved to this project.`);
       setNewProjectPolygonName("");
       setShowPolygons(true);
       setPolygonSource("map");
@@ -4359,6 +4605,8 @@ const UnifiedMapView = () => {
     newProjectPolygonName,
     projectId,
     refetchPolygons,
+    sessionIds,
+    hasExistingProjectPolygonBoundary,
     setPolygonSource,
     setShowPolygons,
   ]);
@@ -5881,18 +6129,27 @@ const UnifiedMapView = () => {
           enabled={bestNetworkEnabled}
         />
 
+        <HandoverLegend
+          techEnabled={techHandOver}
+          bandEnabled={bandHandover}
+          pciEnabled={pciHandover}
+          technologyTransitions={technologyTransitions}
+          bandTransitions={bandTransitions}
+          pciTransitions={pciTransitions}
+        />
+
         {canSaveDrawnPolygonToProject && (
           <div className="absolute bottom-4 right-4 z-[600] w-[280px] rounded-xl border border-blue-500/30 bg-slate-950/92 p-3 shadow-xl backdrop-blur-sm">
             <div className="text-sm font-semibold text-white">
-              Save Polygon
+              Save Shape
             </div>
             <div className="mt-1 text-xs text-slate-300">
-              No raw filter polygon is available. Save the drawn polygon to this project.
+              Save the drawn shape to {saveDrawnPolygonTargetLabel}.
             </div>
             <input
               value={newProjectPolygonName}
               onChange={(e) => setNewProjectPolygonName(e.target.value)}
-              placeholder="Polygon name"
+              placeholder="Shape name"
               className="mt-3 h-9 w-full rounded-md border border-slate-700 bg-slate-900 px-3 text-sm text-white outline-none transition focus:border-blue-500"
             />
             <button
@@ -5901,7 +6158,7 @@ const UnifiedMapView = () => {
               disabled={isSavingProjectPolygon || !newProjectPolygonName.trim()}
               className="mt-3 h-9 w-full rounded-md bg-blue-600 text-sm font-medium text-white transition hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-60"
             >
-              {isSavingProjectPolygon ? "Saving..." : "Save Polygon To Project"}
+              {isSavingProjectPolygon ? "Saving..." : "Save Shape"}
             </button>
           </div>
         )}
@@ -6201,6 +6458,7 @@ const UnifiedMapView = () => {
         onSuccess={refetchSites}
         availableBands={combinedBands}
         availablePcis={combinedPcis}
+        siteData={effectiveSiteData}
       />
     </div>
   );

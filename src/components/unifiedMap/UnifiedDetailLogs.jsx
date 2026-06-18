@@ -192,6 +192,108 @@ const downloadFile = (content, filename, type = "text/csv") => {
   URL.revokeObjectURL(url);
 };
 
+const downloadBlob = (blob, filename) => {
+  const link = document.createElement("a");
+  const url = URL.createObjectURL(blob);
+
+  link.setAttribute("href", url);
+  link.setAttribute("download", filename);
+  link.style.visibility = "hidden";
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+};
+
+const loadExcelJS = async () => {
+  const module = await import("exceljs");
+  return module.default || module;
+};
+
+const getFirstValueByAliases = (source, aliases = []) => {
+  for (const alias of aliases) {
+    const value = source?.[alias];
+    if (value !== null && value !== undefined && String(value).trim() !== "") {
+      return value;
+    }
+  }
+  return "";
+};
+
+const formatExportCoordinate = (value) => {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric.toFixed(6) : "";
+};
+
+const MAP_LOG_FIELD_RESOLVERS = {
+  latitude: (log) => formatExportCoordinate(getFirstValueByAliases(log, ["lat", "latitude"])),
+  longitude: (log) => formatExportCoordinate(getFirstValueByAliases(log, ["lng", "longitude", "lon"])),
+  rssi: (log) => getFirstValueByAliases(log, ["rssi", "RSSI"]),
+  rsrp: (log) => getFirstValueByAliases(log, ["rsrp", "RSRP", "Rsrp", "lte_rsrp", "nr_rsrp"]),
+  rsrq: (log) => getFirstValueByAliases(log, ["rsrq", "RSRQ", "Rsrq", "lte_rsrq", "nr_rsrq"]),
+  sinr: (log) => getFirstValueByAliases(log, ["sinr", "SINR", "Sinr", "snr", "SNR", "lte_sinr", "nr_sinr"]),
+  dl_tpt: (log) => getFirstValueByAliases(log, ["dl_tpt", "dl_thpt", "dlTpt", "dlThpt"]),
+  ul_tpt: (log) => getFirstValueByAliases(log, ["ul_tpt", "ul_thpt", "ulTpt", "ulThpt"]),
+  technology: (log) => getFirstValueByAliases(log, ["technology", "Technology", "networkType", "network"]),
+  provider: (log) => getFirstValueByAliases(log, ["provider", "operator", "cluster", "Network", "network"]),
+  band: (log) => getFirstValueByAliases(log, ["band", "Band", "primaryBand"]),
+  pci: (log) => getFirstValueByAliases(log, ["pci", "PCI", "Pci", "physical_cell_id", "cell_id", "cellId"]),
+  nodeb_id: (log) => getFirstValueByAliases(log, ["nodeb_id", "nodebId", "node_b_id", "nodeBId", "node_id", "nodeId"]),
+  cell_id: (log) => getFirstValueByAliases(log, ["cell_id", "cellId", "cell_id_representative", "cellIdRepresentative"]),
+  session_id: (log) => getFirstValueByAliases(log, ["session_id", "sessionId", "SessionId"]),
+};
+
+const getNetworkSiteMapLogRows = (logs = [], headers = []) =>
+  (Array.isArray(logs) ? logs : []).map((log) =>
+    Object.fromEntries(
+      headers.map((header) => [
+        header,
+        MAP_LOG_FIELD_RESOLVERS[header]?.(log) ?? "",
+      ]),
+    ),
+  );
+
+const addWorkbookSheet = (workbook, sheetName, rows = [], preferredHeaders = []) => {
+  const worksheet = workbook.addWorksheet(sheetName);
+  const discoveredHeaders = new Set(preferredHeaders);
+  rows.forEach((row) => {
+    Object.keys(row || {}).forEach((key) => discoveredHeaders.add(key));
+  });
+  const headers = Array.from(discoveredHeaders).filter(Boolean);
+
+  worksheet.columns = headers.map((header) => ({
+    header,
+    key: header,
+    width: Math.min(Math.max(String(header).length + 2, 12), 36),
+  }));
+
+  rows.forEach((row) => worksheet.addRow(row));
+
+  const headerRow = worksheet.getRow(1);
+  headerRow.font = { bold: true, color: { argb: "FFFFFFFF" } };
+  headerRow.fill = {
+    type: "pattern",
+    pattern: "solid",
+    fgColor: { argb: "FF1E3A8A" },
+  };
+  headerRow.alignment = { vertical: "middle" };
+  worksheet.views = [{ state: "frozen", ySplit: 1 }];
+  worksheet.autoFilter = {
+    from: { row: 1, column: 1 },
+    to: { row: 1, column: Math.max(headers.length, 1) },
+  };
+
+  worksheet.columns.forEach((column) => {
+    let maxLength = String(column.header || "").length;
+    column.eachCell({ includeEmpty: false }, (cell) => {
+      maxLength = Math.max(maxLength, String(cell.value ?? "").length);
+    });
+    column.width = Math.min(Math.max(maxLength + 2, 12), 42);
+  });
+
+  return worksheet;
+};
+
 const UNSUPPORTED_CANVAS_COLOR_RE = /\b(oklab|oklch|color-mix)\(/i;
 const EXPORT_CAPTURE_ROOT_ATTR = "data-unified-map-pdf-capture-root";
 const CANVAS_COLOR_PROPS = [
@@ -334,6 +436,7 @@ const ExportDropdown = ({
   n78NeighborData,
   n78NeighborStats,
   technologyTransitions,
+  mapLogLocations = [],
   contentRef,
   activeTab,
   indoor,
@@ -522,6 +625,11 @@ const ExportDropdown = ({
     try {
       const timestamp = getTimestamp();
       const networkSiteHeaders = ["band", "operator", "nodeb_id", "cell_id"];
+      const mapLogHeaders = [
+        "latitude", "longitude", "rssi", "rsrp", "rsrq", "sinr", "dl_tpt" ,"ul_tpt",
+        "technology", "provider", "band", "pci", "nodeb_id", "cell_id",
+        "session_id",
+      ];
       const uniqueRows = new Map();
       const sourceRows = siteData?.length ? siteData : locations || [];
 
@@ -547,9 +655,7 @@ const ExportDropdown = ({
             "cellId",
             "cell_id_representative",
             "cellIdRepresentative",
-            "pci",
-            "PCI",
-            "pci_or_psi",
+           
           ]),
         };
 
@@ -567,14 +673,32 @@ const ExportDropdown = ({
         return;
       }
 
-      downloadFile(
-        convertToCSV(Array.from(uniqueRows.values()), networkSiteHeaders),
-        `network_site_${timestamp}.csv`
-      );
+      const ExcelJS = await loadExcelJS();
+      const workbook = new ExcelJS.Workbook();
+      workbook.creator = "Stracer";
+      workbook.created = new Date();
+      workbook.modified = new Date();
 
-      toast.success("NetworkSite CSV exported successfully!");
+      const networkSiteRows = Array.from(uniqueRows.values());
+      const mapLogRows = getNetworkSiteMapLogRows(
+        Array.isArray(mapLogLocations) && mapLogLocations.length > 0
+          ? mapLogLocations
+          : locations || [],
+        mapLogHeaders,
+      );
+      addWorkbookSheet(workbook, "NetworkSite", networkSiteRows, networkSiteHeaders);
+      addWorkbookSheet(workbook, "Map Logs", mapLogRows, mapLogHeaders);
+
+      const buffer = await workbook.xlsx.writeBuffer();
+      const blob = new Blob(
+        [buffer],
+        { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" },
+      );
+      downloadBlob(blob, `network_site_${timestamp}.xlsx`);
+
+      toast.success("NetworkSite Excel exported successfully!");
     } catch (error) {
-      toast.error("Failed to export NetworkSite CSV");
+      toast.error("Failed to export NetworkSite Excel");
     } finally {
       setIsExporting(false);
       setExportType(null);
@@ -833,7 +957,7 @@ Technologies: ${dataFilters.technologies?.join(", ") || "None"}
               : "bg-slate-700 text-slate-400 cursor-not-allowed"
             }
           `}
-          title="Download unique Band, Operator, NodeB ID, and Cell ID rows"
+          title="Download NetworkSite workbook with Map Logs sheet"
         >
           {isExporting && exportType === "network-site" ? (
             <>
@@ -1626,6 +1750,7 @@ function UnifiedDetailLogs({
             n78NeighborData={n78NeighborData}
             n78NeighborStats={n78NeighborStats}
             technologyTransitions={technologyTransitions}
+            mapLogLocations={conditionTabLocations}
             contentRef={contentRef}
             activeTab={activeTab}
             indoor={indoor}
@@ -1712,6 +1837,7 @@ function UnifiedDetailLogs({
               tptVolume={tptVolume}
               drawnShapeAnalytics={drawnShapeAnalytics}
               sessionIds={sessionIds}
+              projectId={projectId}
               gridViewEnabled={gridViewEnabled}
               gridViewSummary={gridViewSummary}
             />

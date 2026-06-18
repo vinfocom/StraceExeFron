@@ -247,6 +247,25 @@ const fitMapToMostlyLogs = (map, points) => {
   }
 };
 
+const normalizeSessionIds = (values = []) => {
+  const ids = new Set();
+
+  (Array.isArray(values) ? values : [values]).forEach((value) => {
+    const raw =
+      value?.id ??
+      value?.session_id ??
+      value?.SessionId ??
+      value?.sessionId ??
+      value;
+    const numericId = Number(raw);
+    if (Number.isFinite(numericId) && numericId > 0) {
+      ids.add(numericId);
+    }
+  });
+
+  return Array.from(ids);
+};
+
 export default function HighPerfMap() {
   const navigate = useNavigate();
   const { isLoaded, loadError } = useJsApiLoader(GOOGLE_MAPS_LOADER_OPTIONS);
@@ -889,10 +908,17 @@ const rectCoords = [
       toast.error("Could not convert the drawn shape to WKT format.");
       return;
     }
+    const selectedSessionIds = normalizeSessionIds([
+      ...(Array.isArray(analysis.session) ? analysis.session : []),
+      ...(Array.isArray(analysis.intersectingSessions) ? analysis.intersectingSessions : []),
+      selectedSessionData?.session,
+      ...(Array.isArray(selectedSessionData?.logs) ? selectedSessionData.logs : []),
+    ]);
+
     const payload = {
       Name: polygonName,
       WKT: wktString,
-      SessionIds: Array.isArray(analysis.session) ? analysis.session : [],
+      SessionIds: selectedSessionIds,
       Area: Number.isFinite(Number(analysis.area)) ? Number(analysis.area) : null,
     };
     setIsLoading(true);

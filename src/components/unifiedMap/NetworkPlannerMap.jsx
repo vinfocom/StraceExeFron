@@ -766,6 +766,7 @@ const NUMERIC_FIELD_HINTS = new Set([
 const EDITABLE_SITE_FIELDS = [
   "site",
   "site_name",
+  "node_id",
   "sector",
   "cell_id",
   "sec_id",
@@ -794,6 +795,26 @@ const EDITABLE_SITE_FIELDS = [
 const EDIT_FIELD_ALIAS_MAP = {
   site: ["site", "site_id", "siteId", "site_key_inferred", "siteKeyInferred"],
   site_name: ["site_name", "siteName"],
+  node_id: [
+    "node_id",
+    "nodeId",
+    "nodeID",
+    "NodeID",
+    "NodeId",
+    "node_b",
+    "nodeB",
+    "node_b_id",
+    "nodeb_id",
+    "nodebId",
+    "NodeBId",
+    "NodeB_ID",
+    "eNodeB",
+    "enodeb",
+    "enodeb_id",
+    "gNodeB",
+    "gnodeb",
+    "gnodeb_id",
+  ],
   sector: ["sector", "sector_id", "sectorId"],
   cell_id: ["cell_id", "cellId", "cell_id_representative", "cellIdRepresentative"],
   sec_id: ["sec_id", "secId"],
@@ -3127,6 +3148,7 @@ const NetworkPlannerMap = ({
 
       if (value === undefined) {
         if (field === "site_name") value = sector.siteNameRaw ?? sector.siteName ?? null;
+        else if (field === "node_id") value = sector.nodebId ?? extractStrictNodebId(sector) ?? null;
         else if (field === "sector") value = sector.sector ?? null;
         else if (field === "cell_id") value = sector.cellId ?? sector.cellIdRepresentative ?? null;
         else if (field === "pci") value = sector.pci ?? null;

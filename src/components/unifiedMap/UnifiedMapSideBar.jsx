@@ -2378,6 +2378,29 @@ const UnifiedMapSidebar = ({
               </div>
             )}
 
+            {Boolean(canSaveDrawnPolygonToProject) && (
+              <div className="mt-2 rounded-lg border border-emerald-500/30 bg-emerald-950/25 p-2">
+                <div className="text-xs font-medium text-emerald-100">
+                  Drawn shape ready
+                </div>
+                <Input
+                  value={newProjectPolygonName}
+                  onChange={(e) => setNewProjectPolygonName?.(e.target.value)}
+                  placeholder="Shape name"
+                  className="mt-2 h-8 border-slate-700 bg-slate-900 text-xs text-white placeholder:text-slate-500"
+                />
+                <button
+                  type="button"
+                  onClick={onSaveDrawnPolygonToProject}
+                  disabled={isSavingProjectPolygon || !newProjectPolygonName.trim()}
+                  className="mt-2 inline-flex h-8 w-full items-center justify-center gap-1 rounded-md bg-emerald-600 px-2 text-xs font-semibold text-white transition hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  <Check className="h-3.5 w-3.5" />
+                  {isSavingProjectPolygon ? "Saving" : "Save Shape"}
+                </button>
+              </div>
+            )}
+
             <ToggleRow
               label="Area Zone"
               checked={Boolean(areaEnabled)}
