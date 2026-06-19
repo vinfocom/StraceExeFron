@@ -3553,72 +3553,6 @@ const UnifiedMapView = () => {
     areaData,
   );
 
-  const availableFilterOptions = useMemo(() => {
-    const providers = new Set();
-    const bands = new Set();
-    const technologies = new Set();
-    const cellIds = new Set();
-    const apps = new Set();
-
-    (locations || []).forEach((loc) => {
-      const providerName = getProviderDisplayName(loc);
-      if (providerName && !isUnknownOption(providerName)) {
-        providers.add(providerName);
-      }
-      if (loc.band) {
-        const norm = normalizeBandName(loc.band);
-        if (norm && norm !== "Unknown") bands.add(norm);
-      }
-      const technologyName = normalizeTechName(
-        loc?.technology ?? loc?.networkType ?? "",
-        loc?.band,
-      );
-      if (technologyName && !isUnknownOption(technologyName)) {
-        technologies.add(technologyName);
-      }
-      const cellId = String(
-        loc?.cell_id ?? loc?.cellId ?? loc?.CellId ?? "",
-      ).trim();
-      if (cellId && !isUnknownOption(cellId)) {
-        cellIds.add(cellId);
-      }
-      splitAppNames(
-        loc?.apps ??
-          loc?.app ??
-          loc?.appName ??
-          loc?.AppName ??
-          loc?.application ??
-          loc?.Application,
-      ).forEach((app) => {
-        if (!isUnknownOption(app)) apps.add(app);
-      });
-    });
-
-    (polygonFilteredNeighborData || []).forEach((n) => {
-      const providerName = normalizeProviderName(n?.provider ?? "");
-      if (providerName && !isUnknownOption(providerName)) {
-        providers.add(providerName);
-      }
-    });
-
-    return {
-      providers: [...providers].sort(),
-      bands: [...bands].sort((a, b) => {
-        const numA = parseInt(a.replace(/\D/g, '')) || 0;
-        const numB = parseInt(b.replace(/\D/g, '')) || 0;
-        return numA - numB;
-      }),
-      technologies: [...technologies].sort(),
-      cellIds: [...cellIds].sort((a, b) => {
-        const numA = Number(a);
-        const numB = Number(b);
-        if (Number.isFinite(numA) && Number.isFinite(numB)) return numA - numB;
-        return a.localeCompare(b);
-      }),
-      apps: [...apps].sort((a, b) => a.localeCompare(b)),
-    };
-  }, [locations, polygonFilteredNeighborData]);
-
   const dominanceByLogId = useMemo(() => {
     if (
       dominanceThreshold === null ||
@@ -3839,6 +3773,152 @@ const UnifiedMapView = () => {
     if (drawnPoints !== null) return drawnPoints;
     return preDrawingDisplayLocations;
   }, [drawnPoints, preDrawingDisplayLocations]);
+
+  const renderedLegendFilteredLocations = useMemo(() => {
+    const baseLocations = Array.isArray(finalDisplayLocations)
+      ? finalDisplayLocations
+      : EMPTY_LIST;
+
+    if (!legendFilter) return baseLocations;
+
+    return baseLocations.filter((log) => {
+      if (legendFilter.type === "metric") {
+        const value = getMetricValueFromLog(log, legendFilter.metric);
+        const min = Number(legendFilter?.min);
+        const max = Number(legendFilter?.max);
+        const includeMax = Boolean(legendFilter?.includeMax);
+
+        if (!Number.isFinite(value)) return false;
+        if (legendFilter?.min === null && Number.isFinite(max)) return value < max;
+        if (Number.isFinite(min) && legendFilter?.max === null) return value >= min;
+        if (![min, max].every(Number.isFinite)) return false;
+
+        const lowerMatch = value >= min;
+        const upperMatch = includeMax ? value <= max : value < max;
+        return lowerMatch && upperMatch;
+      }
+
+      if (legendFilter.type === "pci") {
+        const value = getMetricValueFromLog(log, "pci");
+        return Number.isFinite(value) && Math.floor(value) === Number(legendFilter.value);
+      }
+
+      if (legendFilter.type === "tac") {
+        const value = log?.tac ?? log?.TAC;
+        return String(value ?? "") === String(legendFilter.value ?? "");
+      }
+
+      if (legendFilter.type === "category") {
+        let key = "Unknown";
+
+        if (legendFilter.key === "provider") {
+          key = getProviderDisplayName(log) || "Unknown";
+        } else if (legendFilter.key === "technology") {
+          const tech = log?.network || log?.Network || log?.technology || log?.networkType;
+          const band =
+            log?.band ||
+            log?.Band ||
+            log?.neighbourBand ||
+            log?.neighborBand ||
+            log?.neighbour_band;
+          key = normalizeTechName(tech, band) || "Unknown";
+        } else if (legendFilter.key === "band") {
+          const band = String(
+            log?.neighbourBand ||
+              log?.neighborBand ||
+              log?.neighbour_band ||
+              log?.band ||
+              log?.Band ||
+              "",
+          ).trim();
+          const normalizedBand = normalizeBandName(band);
+          key =
+            normalizedBand && normalizedBand !== "-1" ? normalizedBand : "Unknown";
+        } else if (legendFilter.key === "nodebid") {
+          key =
+            String(log?.nodebid ?? log?.nodeb_id ?? log?.nodebId ?? "").trim() ||
+            "Unknown";
+        } else if (legendFilter.key === "cell_id") {
+          key =
+            String(log?.cell_id ?? log?.cellId ?? log?.CellId ?? "").trim() ||
+            "Unknown";
+        } else if (legendFilter.key === "pci") {
+          const pci = Number.parseInt(log?.pci ?? log?.PCI ?? log?.best_pci, 10);
+          key = Number.isFinite(pci) ? String(pci) : "Unknown";
+        }
+
+        return key === legendFilter.value;
+      }
+
+      return true;
+    });
+  }, [finalDisplayLocations, legendFilter]);
+
+  const availableFilterOptions = useMemo(() => {
+    const providers = new Set();
+    const bands = new Set();
+    const technologies = new Set();
+    const cellIds = new Set();
+    const apps = new Set();
+
+    (renderedLegendFilteredLocations || []).forEach((loc) => {
+      const providerName = getProviderDisplayName(loc);
+      if (providerName && !isUnknownOption(providerName)) {
+        providers.add(providerName);
+      }
+      if (loc.band) {
+        const norm = normalizeBandName(loc.band);
+        if (norm && norm !== "Unknown") bands.add(norm);
+      }
+      const technologyName = normalizeTechName(
+        loc?.technology ?? loc?.networkType ?? "",
+        loc?.band,
+      );
+      if (technologyName && !isUnknownOption(technologyName)) {
+        technologies.add(technologyName);
+      }
+      const cellId = String(
+        loc?.cell_id ?? loc?.cellId ?? loc?.CellId ?? "",
+      ).trim();
+      if (cellId && !isUnknownOption(cellId)) {
+        cellIds.add(cellId);
+      }
+      splitAppNames(
+        loc?.apps ??
+          loc?.app ??
+          loc?.appName ??
+          loc?.AppName ??
+          loc?.application ??
+          loc?.Application,
+      ).forEach((app) => {
+        if (!isUnknownOption(app)) apps.add(app);
+      });
+    });
+
+    (polygonFilteredNeighborData || []).forEach((n) => {
+      const providerName = normalizeProviderName(n?.provider ?? "");
+      if (providerName && !isUnknownOption(providerName)) {
+        providers.add(providerName);
+      }
+    });
+
+    return {
+      providers: [...providers].sort(),
+      bands: [...bands].sort((a, b) => {
+        const numA = parseInt(a.replace(/\D/g, "")) || 0;
+        const numB = parseInt(b.replace(/\D/g, "")) || 0;
+        return numA - numB;
+      }),
+      technologies: [...technologies].sort(),
+      cellIds: [...cellIds].sort((a, b) => {
+        const numA = Number(a);
+        const numB = Number(b);
+        if (Number.isFinite(numA) && Number.isFinite(numB)) return numA - numB;
+        return a.localeCompare(b);
+      }),
+      apps: [...apps].sort((a, b) => a.localeCompare(b)),
+    };
+  }, [renderedLegendFilteredLocations, polygonFilteredNeighborData]);
   const effectiveGridColorBy = useMemo(() => colorBy, [colorBy]);
 
   const gridDisplayData = useUnifiedGridViewData({
