@@ -11,7 +11,8 @@ const PREFERRED_FIELD_ORDER = [
   "node_id",
   "nodeb_id",
   "pci",
-  "cluster",
+  "provider",
+  "operator_name",
   "network",
   "Technology",
   "technology",
@@ -21,6 +22,13 @@ const PREFERRED_FIELD_ORDER = [
   "height",
   "m_tilt",
   "e_tilt",
+  "cellsize",
+  "frequency",
+  "uplink_center_frequency",
+  "downlink_frequency",
+  "real_transmit_power_of_resource",
+  "maximum_transmission_power_of_resource",
+  "reference_signal_power",
   "earfcn",
   "latitude",
   "longitude",
@@ -45,12 +53,18 @@ const EditSiteFormDialog = ({
   onFieldChange,
   onSave,
   submitting = false,
+  scenarioOptions = [],
+  selectedScenarioId = "",
+  onScenarioChange = null,
+  sectorOptions = [],
+  selectedSectorValue = "",
+  onSectorChange = null,
 }) => {
   const orderedFields = useMemo(() => {
     const keys = Object.keys(formValues || {});
     const preferred = PREFERRED_FIELD_ORDER.filter((key) => keys.includes(key));
     const extras = keys.filter((key) => !PREFERRED_FIELD_ORDER.includes(key)).sort((a, b) => a.localeCompare(b));
-    return [...preferred, ...extras];
+    return [...preferred, ...extras].filter((key) => key !== "sec_id");
   }, [formValues]);
 
   if (!open) return null;
@@ -61,7 +75,13 @@ const EditSiteFormDialog = ({
         onClick={() => onOpenChange(false)}
         className="fixed inset-0 bg-black/40 z-[9998]"
       />
-      <div className="fixed top-1/2 left-1/2 z-[9999] w-[860px] max-w-[95vw] max-h-[92vh] -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-xl bg-white shadow-2xl">
+      <form
+        className="fixed top-1/2 left-1/2 z-[9999] w-[860px] max-w-[95vw] max-h-[92vh] -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-xl bg-white shadow-2xl"
+        onSubmit={(event) => {
+          event.preventDefault();
+          onSave?.();
+        }}
+      >
         <div className="sticky top-0 z-10 flex items-center justify-between border-b border-gray-100 bg-gray-50/90 px-6 py-4 backdrop-blur-sm">
           <div className="flex items-center gap-2">
             <div className="rounded-lg bg-blue-100 p-2">
@@ -79,6 +99,46 @@ const EditSiteFormDialog = ({
         </div>
 
         <div className="space-y-5 p-6">
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+            <label className="block">
+              <span className="mb-1 block text-xs font-medium text-slate-600">Save To Scenario</span>
+              <select
+                value={selectedScenarioId ?? ""}
+                onChange={(e) => onScenarioChange?.(e.target.value)}
+                className={inputClass}
+              >
+                <option value="">Create New Scenario</option>
+                {scenarioOptions.map((item) => {
+                  const scenarioId = Number(item?.scenario_id);
+                  if (!Number.isFinite(scenarioId) || scenarioId <= 0) return null;
+                  const label = String(item?.scenario_name || `Scenario ${scenarioId}`).trim();
+                  return (
+                    <option key={`scenario-${scenarioId}`} value={String(scenarioId)}>
+                      {label}
+                    </option>
+                  );
+                })}
+              </select>
+            </label>
+
+            {sectorOptions.length > 0 && (
+              <label className="block">
+                <span className="mb-1 block text-xs font-medium text-slate-600">Sector</span>
+                <select
+                  value={selectedSectorValue ?? ""}
+                  onChange={(e) => onSectorChange?.(e.target.value)}
+                  className={inputClass}
+                >
+                  {sectorOptions.map((item) => (
+                    <option key={item.value} value={item.value}>
+                      {item.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
+          </div>
+
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
             {orderedFields.map((field) => {
               const value = formValues[field];
@@ -124,8 +184,7 @@ const EditSiteFormDialog = ({
             Cancel
           </button>
           <button
-            type="button"
-            onClick={onSave}
+            type="submit"
             disabled={submitting}
             className="min-w-[120px] rounded-md bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-60"
           >
@@ -138,7 +197,7 @@ const EditSiteFormDialog = ({
             )}
           </button>
         </div>
-      </div>
+      </form>
     </>
   );
 };

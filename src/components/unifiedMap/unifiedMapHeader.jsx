@@ -1231,7 +1231,7 @@ function UnifiedHeader({
               </div>
             )}
             {enableSiteToggle && (
-              <div className="grid min-w-[320px] grid-cols-3 gap-2 xl:min-w-[430px]">
+              <div className="grid min-w-[320px] grid-cols-4 gap-2 xl:min-w-[430px]">
                 <SelectRow
                   className="pt-0"
                   value={siteToggle}

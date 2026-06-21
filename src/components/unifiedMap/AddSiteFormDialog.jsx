@@ -14,9 +14,16 @@ import {
 import { toast } from "react-toastify";
 import { mapViewApi } from "@/api/apiEndpoints";
 import { Button } from "@/components/ui/button";
+import {
+  getProviderColor,
+  getBandColor,
+  getTechnologyColor,
+  normalizeBandName,
+} from "@/utils/colorUtils";
+import { getPciColor } from "@/utils/metrics";
 
 const TECHNOLOGY_OPTIONS = ["2G", "3G", "4G", "5G"];
-const FIXED_ANTENNA_VALUE = "omni/katherine";
+const FIXED_ANTENNA_VALUE = "Macro-katherine";
 
 const createCell = (overrides = {}) => ({
   technology: "4G",
@@ -61,6 +68,263 @@ const Field = ({ label, required = false, children }) => (
     {children}
   </div>
 );
+
+const PREVIEW_COLORS = ["#2563eb", "#7c3aed", "#059669", "#ea580c", "#db2777", "#0891b2"];
+
+const getPreviewCellColor = (cell, operator) => {
+  const pci = String(cell?.pci ?? "").trim();
+  if (pci) return getPciColor(pci);
+
+  const band = String(cell?.band ?? "").trim();
+  if (band) return getBandColor(band);
+
+  const technology = String(cell?.technology ?? "").trim();
+  if (technology) return getTechnologyColor(technology);
+
+  return getProviderColor(operator || "Unknown");
+};
+
+const getPreviewPoint = (cx, cy, radius, deg) => {
+  const radians = ((deg - 90) * Math.PI) / 180;
+  return {
+    x: cx + radius * Math.cos(radians),
+    y: cy + radius * Math.sin(radians),
+  };
+};
+
+const normalizeAngle = (deg) => {
+  const normalized = Number(deg) % 360;
+  return normalized < 0 ? normalized + 360 : normalized;
+};
+
+const isAngleWithinSector = (angle, azimuth, beamwidth) => {
+  const normalizedAngle = normalizeAngle(angle);
+  const normalizedAzimuth = normalizeAngle(azimuth);
+  const halfBeam = Math.max(0, Number(beamwidth) || 0) / 2;
+  const delta = ((normalizedAngle - normalizedAzimuth + 540) % 360) - 180;
+  return Math.abs(delta) <= halfBeam;
+};
+
+const getSectorBandNumber = (band) => {
+  const normalized = normalizeBandName(band);
+  const match = String(normalized || "").match(/\d+/);
+  if (!match) return null;
+
+  const numeric = Number(match[0]);
+  return Number.isFinite(numeric) && numeric > 0 ? numeric : null;
+};
+
+const getSectorBandSizeMultiplier = (band) => {
+  const bandNumber = getSectorBandNumber(band);
+  if (!bandNumber) return 1;
+
+  if (bandNumber > 100) {
+    if (bandNumber <= 700) return 2.3;
+    if (bandNumber <= 900) return 2.1;
+    if (bandNumber <= 1200) return 1.8;
+    if (bandNumber <= 1800) return 1.45;
+    if (bandNumber <= 2100) return 1.15;
+    if (bandNumber <= 2300) return 0.95;
+    if (bandNumber <= 2600) return 0.75;
+    if (bandNumber <= 3500) return 0.55;
+    return 0.45;
+  }
+
+  if (bandNumber <= 5) return 1.7;
+  if (bandNumber <= 12) return 1.45;
+  if (bandNumber <= 20) return 1.2;
+  if (bandNumber <= 30) return 1;
+  if (bandNumber <= 50) return 0.75;
+  return 0.5;
+};
+
+const describeSectorTriangle = (cx, cy, radius, azimuth, beamwidth) => {
+  const start = getPreviewPoint(cx, cy, radius, azimuth - beamwidth / 2);
+  const end = getPreviewPoint(cx, cy, radius, azimuth + beamwidth / 2);
+  return `M ${cx} ${cy} L ${start.x} ${start.y} L ${end.x} ${end.y} Z`;
+};
+
+const SiteVisualizationCard = ({ form, activeSectorIndex = null, onSectorSelect }) => {
+  const sectors = Array.isArray(form?.sectors) ? form.sectors : [];
+  const previewSectors = sectors.map((sector, index) => {
+    const azimuth = normalizeNumber(sector?.azimuth, 0);
+    const beamwidth = 60;
+    const cells = Array.isArray(sector?.cells) ? sector.cells : [];
+    const previewCells = cells
+      .map((cell, cellIndex) => {
+        const band = String(cell?.band ?? "").trim();
+        const sizeMultiplier = getSectorBandSizeMultiplier(band);
+        const radius = Math.max(28, Math.min(84, 42 * sizeMultiplier));
+        return {
+          id: `${sector?.sectorNo ?? index + 1}-${index}-cell-${cellIndex}`,
+          color: getPreviewCellColor(cell, form?.operator),
+          radius,
+          bandNumber: getSectorBandNumber(band) ?? Number.MAX_SAFE_INTEGER,
+        };
+      })
+      .sort((a, b) => {
+        if (b.radius !== a.radius) return b.radius - a.radius;
+        return a.bandNumber - b.bandNumber;
+      });
+
+    return {
+      id: `${sector?.sectorNo ?? index + 1}-${index}`,
+      label: `S${sector?.sectorNo ?? index + 1}`,
+      azimuth,
+      beamwidth,
+      previewCells,
+      index,
+      color: PREVIEW_COLORS[index % PREVIEW_COLORS.length],
+    };
+  });
+
+  const handlePreviewClick = (event) => {
+    const svgRect = event.currentTarget.getBoundingClientRect();
+    const scaleX = 220 / svgRect.width;
+    const scaleY = 220 / svgRect.height;
+    const x = (event.clientX - svgRect.left) * scaleX;
+    const y = (event.clientY - svgRect.top) * scaleY;
+    const dx = x - 110;
+    const dy = y - 110;
+    const distanceFromCenter = Math.sqrt(dx * dx + dy * dy);
+
+    if (distanceFromCenter < 18 || distanceFromCenter > 88) return;
+
+    const clickAngle = normalizeAngle((Math.atan2(dy, dx) * 180) / Math.PI + 90);
+    const matchingSectors = previewSectors.filter((sector) =>
+      isAngleWithinSector(clickAngle, sector.azimuth, sector.beamwidth),
+    );
+
+    if (matchingSectors.length === 0) return;
+
+    if (matchingSectors.length === 1) {
+      onSectorSelect?.(matchingSectors[0].index);
+      return;
+    }
+
+    const activeMatchIndex = matchingSectors.findIndex((sector) => sector.index === activeSectorIndex);
+    const nextSector =
+      activeMatchIndex >= 0
+        ? matchingSectors[(activeMatchIndex + 1) % matchingSectors.length]
+        : matchingSectors[0];
+
+    onSectorSelect?.(nextSector.index);
+  };
+
+  return (
+    <section className="rounded-lg border border-slate-200 bg-white shadow-sm">
+      <div className="border-b border-slate-200 px-4 py-3">
+        <h3 className="text-sm font-semibold text-slate-900">Site Visualization</h3>
+        <p className="text-xs text-slate-500">
+          Preview how this site and its sector orientation will look on the map.
+        </p>
+      </div>
+
+      <div className="p-4">
+        <div className="mx-auto flex w-full max-w-[260px] items-center justify-center">
+          <svg
+            viewBox="0 0 220 220"
+            className="h-[220px] w-[220px] cursor-pointer"
+            onClick={handlePreviewClick}
+          >
+            <circle cx="110" cy="110" r="88" fill="#f8fafc" stroke="#cbd5e1" strokeWidth="1.5" />
+            <circle cx="110" cy="110" r="62" fill="none" stroke="#e2e8f0" strokeWidth="1" />
+            <circle cx="110" cy="110" r="36" fill="none" stroke="#e2e8f0" strokeWidth="1" />
+
+            <line x1="110" y1="18" x2="110" y2="202" stroke="#cbd5e1" strokeWidth="1" strokeDasharray="4 4" />
+            <line x1="18" y1="110" x2="202" y2="110" stroke="#cbd5e1" strokeWidth="1" strokeDasharray="4 4" />
+
+            <text x="110" y="14" textAnchor="middle" className="fill-slate-500 text-[10px] font-semibold">N</text>
+            <text x="206" y="114" textAnchor="middle" className="fill-slate-500 text-[10px] font-semibold">E</text>
+            <text x="110" y="214" textAnchor="middle" className="fill-slate-500 text-[10px] font-semibold">S</text>
+            <text x="12" y="114" textAnchor="middle" className="fill-slate-500 text-[10px] font-semibold">W</text>
+
+            {previewSectors.map((sector) => {
+              const start = sector.azimuth - sector.beamwidth / 2;
+              const end = sector.azimuth + sector.beamwidth / 2;
+              const beamEdgeA = getPreviewPoint(110, 110, 70, start);
+              const beamEdgeB = getPreviewPoint(110, 110, 70, end);
+              const sectorLabelPoint = getPreviewPoint(110, 110, 90, sector.azimuth);
+              const isActive = activeSectorIndex === sector.index;
+              return (
+                <g key={sector.id}>
+                  {sector.previewCells.map((cell) => {
+                    return (
+                      <g key={cell.id}>
+                        <path
+                          d={describeSectorTriangle(110, 110, cell.radius, sector.azimuth, sector.beamwidth)}
+                          fill={cell.color}
+                          fillOpacity={isActive ? "0.34" : "0.24"}
+                          stroke={cell.color}
+                          strokeWidth={isActive ? "2.4" : "1.4"}
+                          className="pointer-events-none transition-opacity"
+                        />
+                      </g>
+                    );
+                  })}
+
+                  <path
+                    d={describeSectorTriangle(110, 110, 82, sector.azimuth, sector.beamwidth)}
+                    fill="none"
+                    stroke={sector.color}
+                    strokeOpacity={isActive ? "0.95" : "0.45"}
+                    strokeWidth={isActive ? "2.2" : "1.2"}
+                    className="pointer-events-none"
+                  />
+                  <line
+                    x1="110"
+                    y1="110"
+                    x2={110 + 72 * Math.cos(((sector.azimuth - 90) * Math.PI) / 180)}
+                    y2={110 + 72 * Math.sin(((sector.azimuth - 90) * Math.PI) / 180)}
+                    stroke={sector.color}
+                    strokeWidth={isActive ? "2.5" : "1.8"}
+                    className="pointer-events-none"
+                  />
+                  <line
+                    x1="110"
+                    y1="110"
+                    x2={beamEdgeA.x}
+                    y2={beamEdgeA.y}
+                    stroke={sector.color}
+                    strokeOpacity="0.4"
+                    strokeWidth="1"
+                    strokeDasharray="3 3"
+                    className="pointer-events-none"
+                  />
+                  <line
+                    x1="110"
+                    y1="110"
+                    x2={beamEdgeB.x}
+                    y2={beamEdgeB.y}
+                    stroke={sector.color}
+                    strokeOpacity="0.4"
+                    strokeWidth="1"
+                    strokeDasharray="3 3"
+                    className="pointer-events-none"
+                  />
+                  <text
+                    x={sectorLabelPoint.x}
+                    y={sectorLabelPoint.y}
+                    textAnchor="middle"
+                    className="pointer-events-none fill-slate-700 text-[9px] font-semibold"
+                  >
+                    {sector.label}
+                  </text>
+                </g>
+              );
+            })}
+
+            <circle cx="110" cy="110" r="11" fill="#0f172a" />
+            <circle cx="110" cy="110" r="5" fill="#ffffff" />
+          </svg>
+        </div>
+        <div className="mt-3 text-center text-xs text-slate-500">
+          Click a sector in the preview to bring that sector card to the top. If sectors overlap, click again to cycle through them.
+        </div>
+      </div>
+    </section>
+  );
+};
 
 const numberOrNull = (value) => {
   const nextValue = Number(value);
@@ -108,10 +372,12 @@ const getSiteOperator = (site) =>
   String(
     site?.provider ??
       site?.Provider ??
-      site?.cluster ??
-      site?.Cluster ??
+      site?.operator_name ??
+      site?.operatorName ??
       site?.operator ??
       site?.Operator ??
+      site?.cluster ??
+      site?.Cluster ??
       site?.network ??
       site?.Network ??
       "",
@@ -260,7 +526,6 @@ const buildCellPayload = (form, sector, cell) => ({
   siteName: String(form.siteName || "").trim(),
   operatorName: String(form.operator || "").trim(),
   provider: String(form.operator || "").trim(),
-  cluster: String(form.operator || "").trim(),
   bands: [String(cell.band || "").trim()],
   sectors: [normalizeNumber(sector.sectorNo, 1)],
   azimuths: [normalizeNumber(sector.azimuth, 0)],
@@ -584,6 +849,7 @@ const SiteForm = ({
   form,
   onSubmit,
   onSiteChange,
+  beforeSectorsContent = null,
   onAddSector,
   onSectorChange,
   onRemoveSector,
@@ -594,11 +860,23 @@ const SiteForm = ({
   onToggleSector,
   availableBands,
   availablePcis,
+  activeSectorIndex = null,
 }) => {
   const totalCells = useMemo(
     () => form.sectors.reduce((sum, sector) => sum + sector.cells.length, 0),
     [form.sectors],
   );
+  const orderedSectorIndices = useMemo(() => {
+    const indices = form.sectors.map((_, index) => index);
+    if (
+      activeSectorIndex === null ||
+      activeSectorIndex < 0 ||
+      activeSectorIndex >= indices.length
+    ) {
+      return indices;
+    }
+    return [activeSectorIndex, ...indices.filter((index) => index !== activeSectorIndex)];
+  }, [activeSectorIndex, form.sectors]);
 
   return (
     <form id="add-site-form" onSubmit={onSubmit} className="space-y-5">
@@ -638,7 +916,7 @@ const SiteForm = ({
             <input
               value={form.siteName}
               onChange={(event) => onSiteChange("siteName", event.target.value)}
-              placeholder="Optional"
+              placeholder="eg. Site1"
               className={inputClass}
             />
           </Field>
@@ -676,6 +954,8 @@ const SiteForm = ({
         </div>
       </section>
 
+      {beforeSectorsContent}
+
       <section className="space-y-3">
         <div className="flex items-center justify-between gap-3">
           <div>
@@ -688,23 +968,26 @@ const SiteForm = ({
           </Button>
         </div>
 
-        {form.sectors.map((sector, sectorIndex) => (
-          <SectorCard
-            key={`sector-${sectorIndex}`}
-            sector={sector}
-            sectorIndex={sectorIndex}
-            canRemove={form.sectors.length > 1}
-            expanded={expandedSectors.has(sectorIndex)}
-            onToggle={() => onToggleSector(sectorIndex)}
-            onChange={(field, value) => onSectorChange(sectorIndex, field, value)}
-            onRemove={() => onRemoveSector(sectorIndex)}
-            onAddCell={() => onAddCell(sectorIndex)}
-            onCellChange={(cellIndex, field, value) => onCellChange(sectorIndex, cellIndex, field, value)}
-            onRemoveCell={(cellIndex) => onRemoveCell(sectorIndex, cellIndex)}
-            availableBands={availableBands}
-            availablePcis={availablePcis}
-          />
-        ))}
+        {orderedSectorIndices.map((sectorIndex) => {
+          const sector = form.sectors[sectorIndex];
+          return (
+            <SectorCard
+              key={`sector-${sectorIndex}`}
+              sector={sector}
+              sectorIndex={sectorIndex}
+              canRemove={form.sectors.length > 1}
+              expanded={expandedSectors.has(sectorIndex)}
+              onToggle={() => onToggleSector(sectorIndex)}
+              onChange={(field, value) => onSectorChange(sectorIndex, field, value)}
+              onRemove={() => onRemoveSector(sectorIndex)}
+              onAddCell={() => onAddCell(sectorIndex)}
+              onCellChange={(cellIndex, field, value) => onCellChange(sectorIndex, cellIndex, field, value)}
+              onRemoveCell={(cellIndex) => onRemoveCell(sectorIndex, cellIndex)}
+              availableBands={availableBands}
+              availablePcis={availablePcis}
+            />
+          );
+        })}
       </section>
     </form>
   );
@@ -725,6 +1008,7 @@ const AddSiteFormDialog = ({
   const [submitting, setSubmitting] = useState(false);
   const [copyNearbyDecision, setCopyNearbyDecision] = useState(null);
   const [siteSearch, setSiteSearch] = useState("");
+  const [activeSectorIndex, setActiveSectorIndex] = useState(0);
 
   useEffect(() => {
     if (pickedLatLng) {
@@ -742,6 +1026,7 @@ const AddSiteFormDialog = ({
       setExpandedSectors(new Set([0]));
       setCopyNearbyDecision(null);
       setSiteSearch("");
+      setActiveSectorIndex(0);
     }
   }, [open, pickedLatLng, projectId]);
 
@@ -809,6 +1094,7 @@ const AddSiteFormDialog = ({
     setCopyNearbyDecision("copied");
     setForm((prev) => cloneSiteTemplateToForm(template, prev, pickedLatLng));
     setExpandedSectors(new Set(template.sectors.map((_, index) => index)));
+    setActiveSectorIndex(0);
   };
 
   const handleAddSector = () => {
@@ -819,6 +1105,7 @@ const AddSiteFormDialog = ({
           : 1;
       const nextSectors = [...prev.sectors, createSector(nextSectorNo)];
       setExpandedSectors(new Set([nextSectors.length - 1]));
+      setActiveSectorIndex(nextSectors.length - 1);
       return { ...prev, sectors: nextSectors };
     });
   };
@@ -837,6 +1124,11 @@ const AddSiteFormDialog = ({
       if (next.size === 0) next.add(0);
       return next;
     });
+    setActiveSectorIndex((prev) => {
+      if (prev === sectorIndex) return Math.max(0, sectorIndex - 1);
+      if (prev > sectorIndex) return prev - 1;
+      return prev;
+    });
   };
 
   const handleSectorChange = (sectorIndex, field, value) => {
@@ -849,6 +1141,7 @@ const AddSiteFormDialog = ({
   };
 
   const handleToggleSector = (sectorIndex) => {
+    setActiveSectorIndex(sectorIndex);
     setExpandedSectors((prev) => {
       const next = new Set(prev);
       if (next.has(sectorIndex)) next.delete(sectorIndex);
@@ -865,6 +1158,11 @@ const AddSiteFormDialog = ({
       ),
     }));
     setExpandedSectors((prev) => new Set(prev).add(sectorIndex));
+  };
+
+  const handleSectorPreviewSelect = (sectorIndex) => {
+    setActiveSectorIndex(sectorIndex);
+    setExpandedSectors(new Set([sectorIndex]));
   };
 
   const handleCellChange = (sectorIndex, cellIndex, field, value) => {
@@ -937,6 +1235,90 @@ const AddSiteFormDialog = ({
     }
   };
 
+  const visualizationSection = (
+    <SiteVisualizationCard
+      form={form}
+      activeSectorIndex={activeSectorIndex}
+      onSectorSelect={handleSectorPreviewSelect}
+    />
+  );
+
+  const copyNearbySection =
+    copyNearbyDecision === null ? (
+      <section className="rounded-lg border border-slate-200 bg-white shadow-sm">
+        <div className="border-b border-slate-200 px-4 py-3">
+          <h3 className="text-sm font-semibold text-slate-900">Copy From Nearby Site</h3>
+          <p className="text-xs text-slate-500">
+            Pick any existing site to copy from. The list is sorted by nearest distance first.
+          </p>
+        </div>
+
+        <div className="space-y-3 p-4">
+          <input
+            type="text"
+            value={siteSearch}
+            onChange={(event) => setSiteSearch(event.target.value)}
+            placeholder="Search by site, name, node, operator..."
+            className={inputClass}
+          />
+
+          <div className="max-h-72 overflow-y-auto rounded-md border border-slate-200 bg-slate-50">
+            {filteredSiteTemplates.length > 0 ? (
+              <div className="divide-y divide-slate-200">
+                {filteredSiteTemplates.map((template, index) => (
+                  <button
+                    key={`${template.siteKey || template.siteName || "site"}-${index}`}
+                    type="button"
+                    onClick={() => handleCopySiteSelection(template)}
+                    className="flex w-full items-start justify-between gap-3 px-3 py-3 text-left transition hover:bg-blue-50"
+                  >
+                    <div className="min-w-0">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="text-sm font-semibold text-slate-900">
+                          {template.siteKey || template.siteName || "Unknown site"}
+                        </span>
+                        {index === 0 && (
+                          <span className="rounded-full bg-blue-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-blue-700">
+                            Nearest
+                          </span>
+                        )}
+                      </div>
+                      <div className="mt-1 text-xs text-slate-500">
+                        {template.siteName || "Unnamed site"} · {template.operator || "Unknown operator"}
+                      </div>
+                      <div className="mt-1 text-xs text-slate-500">
+                        Node {template.nodeId || "N/A"} · {template.antenna || "Omni"} · {template.sectors.length} sectors
+                      </div>
+                    </div>
+                    <div className="shrink-0 text-xs font-medium text-slate-600">
+                      {formatDistanceLabel(template.distanceMeters)}
+                    </div>
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <div className="px-3 py-4 text-sm text-slate-500">
+                {nearestSiteTemplate
+                  ? "No sites match your search."
+                  : "No nearby site found from current site data."}
+              </div>
+            )}
+          </div>
+
+          <div className="flex justify-end">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setCopyNearbyDecision("no")}
+              className="h-9 min-w-[88px]"
+            >
+              No
+            </Button>
+          </div>
+        </div>
+      </section>
+    ) : null;
+
   return (
     <>
       <button
@@ -972,6 +1354,12 @@ const AddSiteFormDialog = ({
             form={form}
             onSubmit={handleSubmit}
             onSiteChange={handleSiteChange}
+            beforeSectorsContent={
+              <>
+                {visualizationSection}
+                {copyNearbySection}
+              </>
+            }
             onAddSector={handleAddSector}
             onSectorChange={handleSectorChange}
             onRemoveSector={handleRemoveSector}
@@ -982,82 +1370,8 @@ const AddSiteFormDialog = ({
             onToggleSector={handleToggleSector}
             availableBands={availableBands}
             availablePcis={availablePcis}
+            activeSectorIndex={activeSectorIndex}
           />
-
-          {copyNearbyDecision === null && (
-            <section className="mt-5 rounded-lg border border-slate-200 bg-white shadow-sm">
-              <div className="border-b border-slate-200 px-4 py-3">
-                <h3 className="text-sm font-semibold text-slate-900">Copy From Nearby Site</h3>
-                <p className="text-xs text-slate-500">
-                  Pick any existing site to copy from. The list is sorted by nearest distance first.
-                </p>
-              </div>
-
-              <div className="space-y-3 p-4">
-                <input
-                  type="text"
-                  value={siteSearch}
-                  onChange={(event) => setSiteSearch(event.target.value)}
-                  placeholder="Search by site, name, node, operator..."
-                  className={inputClass}
-                />
-
-                <div className="max-h-72 overflow-y-auto rounded-md border border-slate-200 bg-slate-50">
-                  {filteredSiteTemplates.length > 0 ? (
-                    <div className="divide-y divide-slate-200">
-                      {filteredSiteTemplates.map((template, index) => (
-                        <button
-                          key={`${template.siteKey || template.siteName || "site"}-${index}`}
-                          type="button"
-                          onClick={() => handleCopySiteSelection(template)}
-                          className="flex w-full items-start justify-between gap-3 px-3 py-3 text-left transition hover:bg-blue-50"
-                        >
-                          <div className="min-w-0">
-                            <div className="flex flex-wrap items-center gap-2">
-                              <span className="text-sm font-semibold text-slate-900">
-                                {template.siteKey || template.siteName || "Unknown site"}
-                              </span>
-                              {index === 0 && (
-                                <span className="rounded-full bg-blue-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-blue-700">
-                                  Nearest
-                                </span>
-                              )}
-                            </div>
-                            <div className="mt-1 text-xs text-slate-500">
-                              {template.siteName || "Unnamed site"} · {template.operator || "Unknown operator"}
-                            </div>
-                            <div className="mt-1 text-xs text-slate-500">
-                              Node {template.nodeId || "N/A"} · {template.antenna || "Omni"} · {template.sectors.length} sectors
-                            </div>
-                          </div>
-                          <div className="shrink-0 text-xs font-medium text-slate-600">
-                            {formatDistanceLabel(template.distanceMeters)}
-                          </div>
-                        </button>
-                      ))}
-                    </div>
-                  ) : (
-                    <div className="px-3 py-4 text-sm text-slate-500">
-                      {nearestSiteTemplate
-                        ? "No sites match your search."
-                        : "No nearby site found from current site data."}
-                    </div>
-                  )}
-                </div>
-
-                <div className="flex justify-end">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={() => setCopyNearbyDecision("no")}
-                    className="h-9 min-w-[88px]"
-                  >
-                    No
-                  </Button>
-                </div>
-              </div>
-            </section>
-          )}
         </div>
 
         <div className="flex flex-col-reverse gap-3 border-t border-slate-200 bg-white px-5 py-4 sm:flex-row sm:justify-end">

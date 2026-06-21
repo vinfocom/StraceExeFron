@@ -131,7 +131,7 @@ export const METRIC_CONFIG = {
   level: {
     higherIsBetter: true,
     unit: "dB",
-    label: "SSI",
+    label: "Ping Pong",
     min: -120,
     max: -30,
   },

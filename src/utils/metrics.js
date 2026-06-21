@@ -273,7 +273,7 @@ export const METRIC_CONFIG = {
   },
   level: {
     thresholdKey: 'level',
-    label: 'SSI',
+    label: 'Ping Pong',
     unit: 'dBm',
     fields: ['level', 'ssi', 'ss_rsrp'],
   },

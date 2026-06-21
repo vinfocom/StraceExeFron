@@ -2485,11 +2485,7 @@ const UnifiedMapSidebar = ({
                   useSwitch={true}
                 />
 
-                <ToggleRow
-                  label="Secondary Cell Count"
-                  checked={showNumCells}
-                  onChange={setShowNumCells}
-                />
+                
 
                 <ToggleRow
                   label="Metric Labels"
@@ -2703,27 +2699,7 @@ const UnifiedMapSidebar = ({
                       disabled={!enableDataToggle}
                     />
 
-                    <div className="space-y-1.5">
-                      <Label className="text-sm font-semibold text-white">
-                        Remove KPI Value
-                      </Label>
-                      <Input
-                        type="number"
-                        value={dataFilters?.excludedMetricValue ?? ""}
-                        onChange={(e) =>
-                          setDataFilters?.((prev) => ({
-                            ...prev,
-                            excludedMetricValue: e.target.value,
-                          }))
-                        }
-                        disabled={!enableDataToggle}
-                        placeholder="e.g. -56"
-                        className="h-8 bg-slate-800 border-slate-600 text-xs text-white placeholder:text-slate-500"
-                      />
-                      <div className="text-[10px] text-slate-500">
-                        Removes logs where selected KPI equals this value
-                      </div>
-                    </div>
+                    
 
                   </div>
                 </div>

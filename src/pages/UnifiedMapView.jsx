@@ -2572,11 +2572,9 @@ const UnifiedMapView = () => {
   }, [sitePredictionVersion, sitePredictionScenarioId]);
 
   useEffect(() => {
-    const normalizedSiteVersion = String(sitePredictionVersion || "original").trim().toLowerCase();
     const shouldLoadScenarioOptions =
       enableSiteToggle &&
-      String(siteToggle || "").toLowerCase() === "cell" &&
-      normalizedSiteVersion === "updated";
+      String(siteToggle || "").toLowerCase() === "cell";
 
     if (!shouldLoadScenarioOptions) return;
 
@@ -2634,7 +2632,7 @@ const UnifiedMapView = () => {
     return () => {
       cancelled = true;
     };
-  }, [projectId, enableSiteToggle, siteToggle, sitePredictionVersion]);
+  }, [projectId, enableSiteToggle, siteToggle]);
 
   
 
@@ -6515,6 +6513,7 @@ const UnifiedMapView = () => {
                   siteToggle={siteToggle}
                   sitePredictionVersion={sitePredictionVersion}
                   sitePredictionScenarioId={sitePredictionScenarioId}
+                  sitePredictionScenarioOptions={sitePredictionScenarioOptions}
                   defaultBeamwidth={defaultSiteBeamwidth}
                   enableSiteToggle={enableSiteToggle}
                   showSiteMarkers={showSiteMarkers}

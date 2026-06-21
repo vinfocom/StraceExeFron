@@ -496,7 +496,16 @@ function getSiteLegendFilterValue(row, colorMode = "Operator", sitePredictionVer
 
   return {
     mode: "operator",
-    value: normalizeProviderName(row?.cluster || row?.operator || row?.network || row?.Network || "Unknown") || "Unknown",
+    value:
+      normalizeProviderName(
+        row?.provider ||
+          row?.operator_name ||
+          row?.cluster ||
+          row?.operator ||
+          row?.network ||
+          row?.Network ||
+          "Unknown",
+      ) || "Unknown",
   };
 }
 
@@ -758,6 +767,18 @@ const NUMERIC_FIELD_HINTS = new Set([
   "uplink_center_frequency",
   "downlink_frequency",
   "frequency",
+  "cellsize",
+  "cell_size",
+  "maximum_transmission_power_of_resource",
+  "maximumtransmissionpowerofresource",
+  "tx_power",
+  "txpower",
+  "real_transmit_power_of_resource",
+  "realtransmitpowerofresource",
+  "reference_signal_power",
+  "referencesignalpower",
+  "rs_power",
+  "rspower",
   "bandwidth",
   "beamwidth",
   "range",
@@ -788,7 +809,7 @@ const EDITABLE_SITE_FIELDS = [
   "uplink_center_frequency",
   "downlink_frequency",
   "earfcn",
-  "cluster",
+  "provider",
   "Technology",
 ];
 
@@ -827,16 +848,39 @@ const EDIT_FIELD_ALIAS_MAP = {
   bw: ["bw", "beamwidth", "beamwidth_deg_est"],
   m_tilt: ["m_tilt", "mTilt"],
   e_tilt: ["e_tilt", "eTilt"],
-  maximum_transmission_power_of_resource: ["maximum_transmission_power_of_resource"],
-  real_transmit_power_of_resource: ["real_transmit_power_of_resource"],
-  reference_signal_power: ["reference_signal_power"],
-  cellsize: ["cellsize", "cell_size"],
+  maximum_transmission_power_of_resource: [
+    "maximum_transmission_power_of_resource",
+    "maximumTransmissionPowerOfResource",
+    "tx_power",
+    "txPower",
+  ],
+  real_transmit_power_of_resource: [
+    "real_transmit_power_of_resource",
+    "realTransmitPowerOfResource",
+  ],
+  reference_signal_power: [
+    "reference_signal_power",
+    "referenceSignalPower",
+    "rs_power",
+    "rsPower",
+  ],
+  cellsize: ["cellsize", "cell_size", "cellSize"],
   frequency: ["frequency"],
   band: ["band", "frequency_band"],
-  uplink_center_frequency: ["uplink_center_frequency"],
-  downlink_frequency: ["downlink_frequency"],
+  uplink_center_frequency: [
+    "uplink_center_frequency",
+    "uplinkCenterFrequency",
+    "uplink_frequency",
+    "uplinkFrequency",
+  ],
+  downlink_frequency: [
+    "downlink_frequency",
+    "downlinkFrequency",
+    "download_frequency",
+    "downloadFrequency",
+  ],
   earfcn: ["earfcn", "earfcn_or_narfcn", "earfcnOrNarfcn"],
-  cluster: ["cluster", "operator", "network", "Network"],
+  provider: ["provider", "operator_name", "operatorName", "cluster", "operator", "network", "Network"],
   Technology: ["Technology", "technology", "tech"],
 };
 
@@ -909,6 +953,10 @@ function convertFormValueForApi(key, rawValue, originalValue) {
   const value = String(rawValue ?? "");
   const trimmed = value.trim();
   if (trimmed === "") return null;
+
+  if (String(key || "").trim().toLowerCase() === "band") {
+    return trimmed;
+  }
 
   if (typeof originalValue === "boolean") {
     return trimmed.toLowerCase() === "true";
@@ -988,10 +1036,27 @@ function extractRowsAffected(response) {
 
 function mergeSectorWithFetchedRow(sector, fetchedRow) {
   const row = fetchedRow && typeof fetchedRow === "object" ? fetchedRow : {};
-  const mergedRawSite = {
-    ...(sector?.rawSite && typeof sector.rawSite === "object" ? sector.rawSite : {}),
-    ...row,
-  };
+  const baseRawSite = sector?.rawSite && typeof sector.rawSite === "object" ? sector.rawSite : {};
+  const protectedRawSiteKeys = new Set([
+    "id",
+    "original_id",
+    "originalId",
+    "site_prediction_id",
+    "sitePredictionId",
+    "sourceRowId",
+    "source_id",
+    "sourceId",
+    "tbl_project_id",
+    "project_id",
+    "projectId",
+  ]);
+  const mergedRawSite = { ...baseRawSite };
+  Object.entries(row).forEach(([key, value]) => {
+    if (protectedRawSiteKeys.has(key)) return;
+    if (value === null || value === undefined) return;
+    if (typeof value === "string" && value.trim() === "") return;
+    mergedRawSite[key] = value;
+  });
   // Keep clicked sector/site identity stable; fetched rows may include nearby
   // points from other sites when lookup keys are broad.
   const mergedSiteId = getDisplaySiteId(sector) || getDisplaySiteId(row);
@@ -1019,7 +1084,14 @@ function mergeSectorWithFetchedRow(sector, fetchedRow) {
     row.earfcn_or_narfcn ?? row.earfcnOrNarfcn ?? row.earfcn ?? sector?.earfcnOrNarfcn ?? null,
   );
   const mergedNetwork = String(
-    row.cluster ?? row.network ?? row.Network ?? row.operator ?? sector?.network ?? "",
+    row.provider ??
+      row.operator_name ??
+      row.cluster ??
+      row.network ??
+      row.Network ??
+      row.operator ??
+      sector?.network ??
+      "",
   ).trim();
   const mergedBand = String(
     row.band ?? row.frequency_band ?? row.frequency ?? sector?.band ?? "",
@@ -1070,7 +1142,7 @@ function mergeSectorWithFetchedRow(sector, fetchedRow) {
     azimuth: Number.isFinite(Number(mergedAzimuth)) ? Number(mergedAzimuth) : Number(sector?.azimuth) || 0,
     beamwidth: Number.isFinite(Number(mergedBeamwidth)) ? Number(mergedBeamwidth) : Number(sector?.beamwidth) || 30,
     range: Number.isFinite(Number(mergedRange)) ? Number(mergedRange) : Number(sector?.range) || 220,
-    sourceRowId: getSitePredictionSourceRowId(row) ?? getSitePredictionSourceRowId(sector),
+    sourceRowId: getSitePredictionSourceRowId(sector) ?? getSitePredictionSourceRowId(row),
   };
 }
 
@@ -1125,7 +1197,14 @@ function normalizeSiteRows(rows = [], options = {}) {
         hasBeamwidthValue,
         beamwidthSource: hasBeamwidthValue ? "data" : "default",
         range: normalizeSectorRange(getFirstFiniteNumber([item.range, item.radius], 220), 220),
-        operator: item.cluster || item.network || item.Network || item.operator || "Unknown",
+        operator:
+          item.provider ||
+          item.operator_name ||
+          item.cluster ||
+          item.network ||
+          item.Network ||
+          item.operator ||
+          "Unknown",
         band: resolveSiteBandValue(item) || item.frequency || "Unknown",
         technology: inferTechnologyFromCarrier(
           item.Technology || item.tech || item.technology,
@@ -1212,7 +1291,8 @@ function generateSectorsFromSite(site, siteIndex, colorMode = "Operator", option
   const beamwidth = normalizeBeamwidth(effectiveBeamwidth, defaultBeamwidth);
   const range = normalizeSectorRange(getFirstFiniteNumber([site.range, site.radius], 220), 220);
 
-  const network = site.cluster || site.operator || site.network || "Unknown";
+  const network =
+    site.provider || site.operator_name || site.cluster || site.operator || site.network || "Unknown";
   const band = resolveSiteBandValue(site) || site.frequency || "Unknown";
   const earfcnOrNarfcn = site.earfcn_or_narfcn ?? site.earfcnOrNarfcn ?? site.earfcn ?? null;
   const tech = inferTechnologyFromCarrier(
@@ -1318,6 +1398,7 @@ const NetworkPlannerMap = ({
   siteToggle = "NoML",
   sitePredictionVersion = "original",
   sitePredictionScenarioId = null,
+  sitePredictionScenarioOptions = [],
   onSitePredictionScenarioSaved = null,
   defaultBeamwidth = 30,
   enableSiteToggle = true,
@@ -1385,6 +1466,8 @@ const NetworkPlannerMap = ({
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
   const [sectorEditFormData, setSectorEditFormData] = useState({});
   const [sectorEditOriginalData, setSectorEditOriginalData] = useState({});
+  const [selectedEditScenarioId, setSelectedEditScenarioId] = useState("");
+  const [selectedEditSectorRenderKey, setSelectedEditSectorRenderKey] = useState("");
   const [dragMode, setDragMode] = useState(null); // "sector" | "site" | null
   const [pendingMovePosition, setPendingMovePosition] = useState(null);
   const [isApplyingDraggedMove, setIsApplyingDraggedMove] = useState(false);
@@ -1754,6 +1837,55 @@ const NetworkPlannerMap = ({
     return result;
   }, [allSectors]);
 
+  const editableSectorOptions = useMemo(() => {
+    if (!selectedSectorInfo) return [];
+    const currentSiteId = String(
+      getDisplaySiteId(selectedSectorInfo) || selectedSectorInfo.siteId || "",
+    ).trim();
+    if (!currentSiteId) return [];
+
+    return allSectors
+      .filter((sector, index) => {
+        const sectorSiteId = String(getDisplaySiteId(sector) || sector.siteId || "").trim();
+        if (sectorSiteId !== currentSiteId) return false;
+        return getSitePredictionSourceRowId(sector) !== null || `${sector.id || ""}-${index}` !== "";
+      })
+      .map((sector, index) => {
+        const renderKey = sector.renderKey || buildSectorRenderKey(sector, index);
+        const sectorValue = String(
+          sector.sector ??
+            sector.rawSite?.sector ??
+            sector.rawSite?.sector_id ??
+            "",
+        ).trim();
+        const cellValue = String(
+          sector.cellId ??
+            sector.rawSite?.cell_id ??
+            sector.rawSite?.cellId ??
+            sector.cellIdRepresentative ??
+            "",
+        ).trim();
+        const bandValue = String(
+          sector.band ??
+            sector.rawSite?.band ??
+            sector.rawSite?.frequency_band ??
+            "",
+        ).trim();
+        const labelParts = [`Sector ${sectorValue || index + 1}`];
+        if (cellValue) labelParts.push(`Cell ${cellValue}`);
+        if (bandValue) labelParts.push(`Band ${bandValue}`);
+        return {
+          value: renderKey,
+          label: labelParts.join(" · "),
+          sector: {
+            ...sector,
+            renderKey,
+            infoPos: { lat: Number(sector.lat), lng: Number(sector.lng) },
+          },
+        };
+      });
+  }, [allSectors, selectedSectorInfo]);
+
   const siteMarkers = useMemo(() => {
     const isDeltaMode = String(sitePredictionVersion || "").trim().toLowerCase() === "delta";
     const isCellMode = String(siteToggle || "").trim().toLowerCase() === "cell";
@@ -2117,6 +2249,35 @@ const NetworkPlannerMap = ({
   const handleSiteMarkerClick = useCallback(
     async (siteMarker) => {
       if (!siteMarker?.siteId) return;
+      if (String(siteToggle || "").toLowerCase() === "cell") {
+        const siteId = siteMarker.siteId;
+        const matchingSector =
+          selectedSiteDataById?.[siteId]?.sectors?.[0] ||
+          allSectors.find((sector) => String(sector?.siteId || "").trim() === siteId);
+        if (!matchingSector) {
+          toast.info("No editable sector found for this site.");
+          return;
+        }
+
+        const sectorIndex = allSectors.findIndex(
+          (sector) =>
+            String(sector?.siteId || "").trim() === siteId &&
+            String(sector?.sector ?? "").trim() === String(matchingSector?.sector ?? "").trim() &&
+            Number(sector?.lat) === Number(matchingSector?.lat) &&
+            Number(sector?.lng) === Number(matchingSector?.lng),
+        );
+        const renderKey =
+          matchingSector.renderKey ||
+          buildSectorRenderKey(matchingSector, sectorIndex >= 0 ? sectorIndex : 0);
+
+        openSiteEditDialog({
+          ...matchingSector,
+          renderKey,
+          infoPos: { lat: Number(matchingSector.lat), lng: Number(matchingSector.lng) },
+        });
+        return;
+      }
+
       const siteId = siteMarker.siteId;
       setSelectedSectorInfo(null);
       setLoadingSectorDetailsKey(null);
@@ -2139,7 +2300,17 @@ const NetworkPlannerMap = ({
       if (onSiteSelect) onSiteSelect(nextIds);
       await loadSiteData(siteMarker, Boolean(singleSiteSelection));
     },
-    [loadSiteData, selectedSiteIdSet, selectedSiteIds, onSiteSelect, singleSiteSelection],
+    [
+      allSectors,
+      loadSiteData,
+      onSiteSelect,
+      openSiteEditDialog,
+      selectedSiteDataById,
+      selectedSiteIdSet,
+      selectedSiteIds,
+      singleSiteSelection,
+      siteToggle,
+    ],
   );
 
   const handleSelectAllSites = useCallback(async () => {
@@ -2575,6 +2746,8 @@ const NetworkPlannerMap = ({
     setIsEditDialogOpen(false);
     setSectorEditFormData({});
     setSectorEditOriginalData({});
+    setSelectedEditScenarioId("");
+    setSelectedEditSectorRenderKey("");
   }, [selectedSectorInfo?.renderKey]);
 
   const closeSectorTooltipOnly = useCallback(() => {
@@ -2585,6 +2758,8 @@ const NetworkPlannerMap = ({
     setIsEditDialogOpen(false);
     setSectorEditFormData({});
     setSectorEditOriginalData({});
+    setSelectedEditScenarioId("");
+    setSelectedEditSectorRenderKey("");
   }, []);
 
   const loadSectorPredictionForSector = useCallback(
@@ -2905,67 +3080,23 @@ const NetworkPlannerMap = ({
   const handleSectorLeftClick = useCallback(
     async (sector, infoPos) => {
       if (!sector) return;
-
       const clickedRenderKey = buildSectorRenderKey(sector, 0);
-      const hasRenderedData =
-        Boolean(clickedRenderKey && sectorOverridesByRenderKey?.[clickedRenderKey]) ||
-        Boolean(
-          clickedRenderKey &&
-            Array.isArray(sectorPredictionRowsByRenderKey?.[clickedRenderKey]) &&
-            sectorPredictionRowsByRenderKey[clickedRenderKey].length > 0,
-        );
-      if (clickedRenderKey && hasRenderedData) {
-        clearSelectedSectorConfiguration(clickedRenderKey);
-        return;
-      }
       await loadSectorPredictionForSector(
         { ...sector, renderKey: clickedRenderKey },
         infoPos,
         { showInfo: false, silent: false },
       );
     },
-    [
-      clearSelectedSectorConfiguration,
-      loadSectorPredictionForSector,
-      sectorOverridesByRenderKey,
-      sectorPredictionRowsByRenderKey,
-    ],
+    [],
   );
 
   const handleSectorRightClick = useCallback(
     async (sector, infoPos) => {
       if (!sector) return;
-
       const clickedRenderKey = buildSectorRenderKey(sector, 0);
-      const hasRenderedData =
-        Boolean(clickedRenderKey && sectorOverridesByRenderKey?.[clickedRenderKey]) ||
-        Boolean(
-          clickedRenderKey &&
-            Array.isArray(sectorPredictionRowsByRenderKey?.[clickedRenderKey]) &&
-            sectorPredictionRowsByRenderKey[clickedRenderKey].length > 0,
-        );
-
-      if (clickedRenderKey && hasRenderedData) {
-        const sectorOverride = sectorOverridesByRenderKey?.[clickedRenderKey] || null;
-        const effectiveSector = sectorOverride
-          ? { ...sector, ...sectorOverride, renderKey: clickedRenderKey }
-          : { ...sector, renderKey: clickedRenderKey };
-        openSectorInfo(effectiveSector, infoPos);
-        return;
-      }
-
-      await loadSectorPredictionForSector(
-        { ...sector, renderKey: clickedRenderKey },
-        infoPos,
-        { showInfo: true, silent: false },
-      );
+      openSectorInfo({ ...sector, renderKey: clickedRenderKey }, infoPos);
     },
-    [
-      loadSectorPredictionForSector,
-      openSectorInfo,
-      sectorOverridesByRenderKey,
-      sectorPredictionRowsByRenderKey,
-    ],
+    [openSectorInfo],
   );
 
   const startDragMove = useCallback((mode) => {
@@ -3131,12 +3262,22 @@ const NetworkPlannerMap = ({
     projectId,
   ]);
 
-  const openSiteEditDialog = useCallback((sector) => {
+  function openSiteEditDialog(sector) {
     if (!sector) return;
     if (String(siteToggle || "").toLowerCase() !== "cell") {
       toast.info("Editing is available only for Cell toggle (site_prediction).");
       return;
     }
+
+    setSelectedSectorInfo((prev) => ({
+      ...(prev || {}),
+      ...sector,
+      renderKey: sector.renderKey || prev?.renderKey || null,
+      infoPos: sector.infoPos || prev?.infoPos || null,
+    }));
+    setLoadingSectorDetailsKey(null);
+    setDragMode(null);
+    setPendingMovePosition(null);
 
     const raw = sector.rawSite && typeof sector.rawSite === "object" ? sector.rawSite : {};
     const source = { ...raw };
@@ -3157,7 +3298,7 @@ const NetworkPlannerMap = ({
         else if (field === "azimuth") value = sector.azimuth ?? null;
         else if (field === "latitude") value = sector.lat ?? null;
         else if (field === "longitude") value = sector.lng ?? null;
-        else if (field === "cluster") value = sector.network ?? null;
+        else if (field === "provider") value = sector.network ?? null;
       }
 
       if (isPrimitiveValue(value) || value === null) {
@@ -3174,8 +3315,23 @@ const NetworkPlannerMap = ({
 
     setSectorEditOriginalData(seed);
     setSectorEditFormData(formState);
+    setSelectedEditSectorRenderKey(String(sector.renderKey || ""));
+    setSelectedEditScenarioId(
+      String(sitePredictionVersion || "").trim().toLowerCase() === "updated" &&
+        Number.isFinite(Number(activeSitePredictionScenarioId)) &&
+        Number(activeSitePredictionScenarioId) > 0
+        ? String(activeSitePredictionScenarioId)
+        : "",
+    );
     setIsEditDialogOpen(true);
-  }, [siteToggle]);
+  }
+
+  const handleSelectedEditSectorChange = (renderKey) => {
+    setSelectedEditSectorRenderKey(String(renderKey || ""));
+    const nextSector = editableSectorOptions.find((item) => item.value === renderKey)?.sector;
+    if (!nextSector) return;
+    openSiteEditDialog(nextSector);
+  };
 
   const handleSectorEditFieldChange = useCallback((field, value) => {
     setSectorEditFormData((prev) => ({
@@ -3250,30 +3406,27 @@ const NetworkPlannerMap = ({
       }
     }
 
+    const normalizedFieldValues = {};
+    Object.keys(sectorEditFormData).forEach((key) => {
+      if (key === "id") return;
+      normalizedFieldValues[key] = convertFormValueForApi(
+        key,
+        sectorEditFormData[key],
+        sectorEditOriginalData[key],
+      );
+    });
+
     const payloadItem = {
       project_id: Number(projectId) || undefined,
       ...(rowId ? { id: rowId, source_id: rowId } : {}),
       ...(siteSelector ? { site_id_selector: siteSelector, site_selector: siteSelector } : {}),
       ...(sectorSelector ? { sector_selector: sectorSelector } : {}),
+      ...normalizedFieldValues,
     };
-    Object.keys(sectorEditFormData).forEach((key) => {
-      if (key === "id") return;
-      const originalValue = sectorEditOriginalData[key];
-      const converted = convertFormValueForApi(key, sectorEditFormData[key], originalValue);
-      if (toComparableValue(originalValue) !== toComparableValue(converted)) {
-        payloadItem[key] = converted;
-      }
-    });
 
-    const payloadControlKeys = new Set([
-      "id",
-      "source_id",
-      "site_id_selector",
-      "site_selector",
-      "sector_selector",
-      "project_id",
-    ]);
-    const hasAnyChangedField = Object.keys(payloadItem).some((key) => !payloadControlKeys.has(key));
+    const hasAnyChangedField = Object.keys(normalizedFieldValues).some(
+      (key) => toComparableValue(sectorEditOriginalData[key]) !== toComparableValue(normalizedFieldValues[key]),
+    );
     if (!hasAnyChangedField) {
       toast.info("No changes to save.");
       setIsEditDialogOpen(false);
@@ -3289,182 +3442,43 @@ const NetworkPlannerMap = ({
 
     setIsSavingSectorEdit(true);
     try {
-      queueScenarioUpdateItem(payloadItem);
-
-      const nextRaw = {
-        ...(selectedSectorInfo.rawSite || {}),
-        ...payloadItem,
-        ...(rowId ? { id: rowId, source_id: rowId } : {}),
-        is_updated: 1,
-        status: "updated",
-      };
-      const nextSiteName = String(nextRaw.site_name ?? selectedSectorInfo.siteNameRaw ?? "").trim();
-      const nextSector = String(nextRaw.sector ?? selectedSectorInfo.sector ?? "").trim();
-      const nextAzimuth = Number(nextRaw.azimuth ?? selectedSectorInfo.azimuth ?? 0);
-      const nextBeamwidth = normalizeBeamwidth(
-        getFirstFiniteNumber(
-          [nextRaw.bw, nextRaw.bandwidth, nextRaw.beamwidth, selectedSectorInfo.beamwidth],
-          selectedSectorInfo.beamwidth ?? 30,
-        ),
-        selectedSectorInfo.beamwidth ?? 30,
-      );
-      const nextBand = String(nextRaw.band ?? selectedSectorInfo.band ?? "").trim();
-      const nextPci =
-        nextRaw.pci ?? nextRaw.PCI ?? nextRaw.pci_or_psi ?? nextRaw.cell_id ?? selectedSectorInfo.pci ?? null;
-      const nextTechnology = inferTechnologyFromCarrier(
-        nextRaw.technology ?? nextRaw.Technology ?? nextRaw.tech ?? selectedSectorInfo.technology,
-        nextRaw.earfcn_or_narfcn ?? nextRaw.earfcnOrNarfcn ?? nextRaw.earfcn,
-      );
-      const nextNetwork = String(
-        nextRaw.network ?? nextRaw.Network ?? nextRaw.operator ?? nextRaw.cluster ?? selectedSectorInfo.network ?? "",
-      ).trim();
-      const nextNodeId = extractNodebId(nextRaw) ?? selectedSectorInfo.nodebId ?? null;
-      const nextCellId =
-        nextRaw.cell_id ??
-        nextRaw.cellId ??
-        nextRaw.cell_id_representative ??
-        nextRaw.cellIdRepresentative ??
-        selectedSectorInfo.cellId ??
-        selectedSectorInfo.cellIdRepresentative ??
-        null;
-      const nextLat = Number(nextRaw.latitude ?? nextRaw.lat ?? selectedSectorInfo.lat ?? 0);
-      const nextLng = Number(
-        nextRaw.longitude ?? nextRaw.lng ?? nextRaw.lon ?? selectedSectorInfo.lng ?? 0,
-      );
-
-      setSelectedSiteDataById((prev) => {
-        const next = { ...prev };
-        Object.keys(next).forEach((siteId) => {
-          const existing = next[siteId];
-          if (!existing?.sectors) return;
-          next[siteId] = {
-            ...existing,
-            sectors: existing.sectors.map((sector) => {
-              const sectorRowId = getSitePredictionSourceRowId(sector);
-              const sectorSite = getDisplaySiteId(sector);
-              const sectorSector = String(
-                sector?.sector ??
-                  sector?.rawSite?.sector ??
-                  sector?.rawSite?.sector_id ??
-                  sector?.rawSite?.sectorId ??
-                  "",
-              ).trim();
-              const isSameTarget =
-                (rowId && sectorRowId === rowId) ||
-                (!rowId && siteSelector && sectorSelector && sectorSite === siteSelector && sectorSector === sectorSelector);
-              if (!isSameTarget) return sector;
-              return {
-                ...sector,
-                rawSite: nextRaw,
-                sourceRowId: rowId ?? sector.sourceRowId ?? null,
-                isUpdated: true,
-                deltaVariant: "updated",
-                siteNameRaw: nextSiteName,
-                siteName: nextSiteName || sector.siteName || sector.siteId || "Unknown",
-                sector: nextSector || null,
-                azimuth: Number.isFinite(nextAzimuth) ? nextAzimuth : sector.azimuth,
-                beamwidth: Number.isFinite(nextBeamwidth) ? nextBeamwidth : sector.beamwidth,
-                band: nextBand || sector.band,
-                pci: nextPci !== null && nextPci !== undefined ? String(nextPci).trim() : sector.pci,
-                technology: nextTechnology || sector.technology,
-                network: nextNetwork || sector.network,
-                nodebId: nextNodeId ?? sector.nodebId,
-                cellId: nextCellId !== null && nextCellId !== undefined ? String(nextCellId).trim() : sector.cellId,
-                lat: Number.isFinite(nextLat) ? nextLat : sector.lat,
-                lng: Number.isFinite(nextLng) ? nextLng : sector.lng,
-              };
-            }),
-          };
-        });
-        return next;
-      });
-
-      setSelectedSectorInfo((prev) =>
-        prev &&
-        ((rowId && getSitePredictionSourceRowId(prev) === rowId) ||
-          (!rowId &&
-            siteSelector &&
-            sectorSelector &&
-            getDisplaySiteId(prev) === siteSelector &&
-            String(prev?.sector ?? prev?.rawSite?.sector ?? prev?.rawSite?.sector_id ?? "").trim() === sectorSelector))
-          ? {
-              ...prev,
-              rawSite: nextRaw,
-              sourceRowId: rowId ?? prev.sourceRowId ?? null,
-              isUpdated: true,
-              deltaVariant: "updated",
-              siteNameRaw: nextSiteName,
-              siteName: nextSiteName || prev.siteName || prev.siteId || "Unknown",
-              sector: nextSector || null,
-              azimuth: Number.isFinite(nextAzimuth) ? nextAzimuth : prev.azimuth,
-              beamwidth: Number.isFinite(nextBeamwidth) ? nextBeamwidth : prev.beamwidth,
-              band: nextBand || prev.band,
-              pci: nextPci !== null && nextPci !== undefined ? String(nextPci).trim() : prev.pci,
-              technology: nextTechnology || prev.technology,
-              network: nextNetwork || prev.network,
-              nodebId: nextNodeId ?? prev.nodebId,
-              cellId: nextCellId !== null && nextCellId !== undefined ? String(nextCellId).trim() : prev.cellId,
-              lat: Number.isFinite(nextLat) ? nextLat : prev.lat,
-              lng: Number.isFinite(nextLng) ? nextLng : prev.lng,
-              infoPos:
-                Number.isFinite(nextLat) && Number.isFinite(nextLng)
-                  ? { lat: nextLat, lng: nextLng }
-                  : prev.infoPos,
-            }
-          : prev,
-      );
-
-      setSectorEditOriginalData(nextRaw);
-      setSectorEditFormData(
-        Object.fromEntries(
-          Object.entries(nextRaw).map(([key, value]) => [
-            key,
-            value === null || value === undefined ? "" : String(value),
-          ]),
-        ),
-      );
-      setIsEditDialogOpen(false);
-      toast.success("Sector change staged for scenario.");
-
-      if ("latitude" in payloadItem || "longitude" in payloadItem) {
-        if (Number.isFinite(nextLat) && Number.isFinite(nextLng)) {
-          const movedPoint = { lat: nextLat, lng: nextLng };
-          const outsidePolygonFilter =
-            onlyInsidePolygons && normalizedPolygonPaths.length > 0 && !pointInsideAnyPolygon(movedPoint);
-          const outsideViewport =
-            viewport &&
-            (nextLat < viewport.south ||
-              nextLat > viewport.north ||
-              nextLng < viewport.west ||
-              nextLng > viewport.east);
-
-          if (outsidePolygonFilter) {
-            toast.info("Site moved outside active polygon filter, so it is hidden.");
-          } else if (outsideViewport) {
-            toast.info("Site moved outside current view. Map is panning to new location.");
-          }
-
-          if (map?.panTo) {
-            map.panTo(movedPoint);
-          }
-        }
+      const selectedScenarioNumber = Number(selectedEditScenarioId);
+      if (Number.isFinite(selectedScenarioNumber) && selectedScenarioNumber > 0) {
+        payloadItem.scenario_id = selectedScenarioNumber;
       }
+
+      const response = await sitePredictionApi.update([payloadItem]);
+      const rowsAffected = extractRowsAffected(response);
+      const savedScenario = Number(response?.Scenario ?? response?.scenario ?? NaN);
+
+      if (Number.isFinite(savedScenario) && savedScenario > 0) {
+        onSitePredictionScenarioSaved?.(savedScenario);
+      }
+
+      closeSectorTooltipOnly();
+      toast.success(
+        rowsAffected > 0
+          ? `Saved changes to ${Number.isFinite(savedScenario) && savedScenario > 0 ? `Scenario ${savedScenario}` : "a new scenario"}.`
+          : "No site rows were updated.",
+      );
+
+      clearUnifiedSiteDataCache();
+      await fetchSiteData(true);
     } catch (error) {
       toast.error(extractApiErrorDetails(error) || "Failed to update site.");
     } finally {
       setIsSavingSectorEdit(false);
     }
   }, [
-    selectedSectorInfo,
+    clearUnifiedSiteDataCache,
+    closeSectorTooltipOnly,
+    fetchSiteData,
+    onSitePredictionScenarioSaved,
+    projectId,
     sectorEditFormData,
     sectorEditOriginalData,
-    projectId,
-    queueScenarioUpdateItem,
-    map,
-    onlyInsidePolygons,
-    normalizedPolygonPaths,
-    pointInsideAnyPolygon,
-    viewport,
+    selectedEditScenarioId,
+    selectedSectorInfo,
   ]);
 
   const handleDeleteSectorFromTooltip = useCallback(async () => {
@@ -3798,8 +3812,10 @@ const NetworkPlannerMap = ({
     const height = toFiniteNumberOrNull(selectedSectorInfo?.rawSite?.height) ?? 30;
     const mTilt = toFiniteNumberOrNull(selectedSectorInfo?.rawSite?.m_tilt) ?? 0;
     const eTilt = toFiniteNumberOrNull(selectedSectorInfo?.rawSite?.e_tilt) ?? 0;
-    const cluster = String(
-      selectedSectorInfo?.rawSite?.cluster ??
+    const provider = String(
+      selectedSectorInfo?.rawSite?.provider ??
+        selectedSectorInfo?.rawSite?.operator_name ??
+        selectedSectorInfo?.rawSite?.cluster ??
         selectedSectorInfo?.rawSite?.network ??
         selectedSectorInfo?.network ??
         "",
@@ -3814,7 +3830,7 @@ const NetworkPlannerMap = ({
     const payload = {
       projectId: projectIdNumeric,
       site: siteIdValue,
-      cluster,
+      provider,
       bands: [band],
       sectors: [Math.round(nextSectorId)],
       azimuths: [Math.round(nextAzimuth)],
@@ -4273,7 +4289,7 @@ const NetworkPlannerMap = ({
               />
             )}
 
-            {isSelectedSector && (
+            {isSelectedSector && !isEditDialogOpen && selectedSectorInfo?.infoPos && (
               <InfoWindowF
                 position={selectedSectorInfo.infoPos}
                 onCloseClick={closeSectorTooltipOnly}
@@ -4453,10 +4469,20 @@ const NetworkPlannerMap = ({
       <EditSiteFormDialog
         open={isEditDialogOpen}
         onOpenChange={(open) => {
-          setIsEditDialogOpen(open);
+          if (!open) {
+            closeSectorTooltipOnly();
+            return;
+          }
+          setIsEditDialogOpen(true);
         }}
         formValues={sectorEditFormData}
         onFieldChange={handleSectorEditFieldChange}
+        scenarioOptions={sitePredictionScenarioOptions}
+        selectedScenarioId={selectedEditScenarioId}
+        onScenarioChange={setSelectedEditScenarioId}
+        sectorOptions={editableSectorOptions}
+        selectedSectorValue={selectedEditSectorRenderKey || selectedSectorInfo?.renderKey || ""}
+        onSectorChange={handleSelectedEditSectorChange}
         onSave={() => {
           void handleSectorEditSave();
         }}

@@ -19,7 +19,7 @@ const PARAMETERS = {
     mos: "MOS",
     coveragehole: "Coverage Hole",
     num_cells: "Pilot pollution",
-    level: "SSI",
+    level: "Ping Pong",
     jitter: "Jitter",
     latency: "Latency",
     packet_loss: "Packet Loss",

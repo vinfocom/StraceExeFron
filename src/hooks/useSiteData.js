@@ -133,6 +133,73 @@ const getSitePredictionRowKey = (row = {}, index = 0) =>
     index,
   ].join("|");
 
+const getSitePredictionMergeKey = (row = {}) => {
+  const site = String(
+    row?.site ??
+      row?.site_id ??
+      row?.siteId ??
+      row?.site_key_inferred ??
+      row?.siteKeyInferred ??
+      "",
+  ).trim();
+  const sector = String(row?.sector ?? row?.sector_id ?? row?.sectorId ?? "").trim();
+  const cellId = String(
+    row?.cell_id ??
+      row?.cellId ??
+      row?.cell_id_representative ??
+      row?.cellIdRepresentative ??
+      "",
+  ).trim();
+
+  if (site && cellId) return `site:${site}|cell:${cellId}`;
+  if (site && sector) return `site:${site}|sector:${sector}`;
+  const sourceId = String(row?.original_id ?? row?.site_prediction_id ?? row?.id ?? "").trim();
+  if (sourceId) return `id:${sourceId}`;
+  return `site:${site}|sector:${sector}|cell:${cellId}`;
+};
+
+const isUpdatedScenarioRow = (row = {}) => {
+  if (row?.is_updated === true || row?.is_updated === 1 || row?.is_updated === "1") return true;
+  const status = String(row?.status ?? row?.deltaVariant ?? row?.delta_variant ?? "").trim().toLowerCase();
+  return status === "updated" || status === "optimized" || status === "optimised";
+};
+
+const mergeCombinedSitePredictionRows = (rows = []) => {
+  if (!Array.isArray(rows) || rows.length === 0) return [];
+
+  const mergedByKey = new Map();
+  rows.forEach((row, index) => {
+    const key = getSitePredictionMergeKey(row) || getSitePredictionRowKey(row, index);
+    const existing = mergedByKey.get(key);
+    if (!existing) {
+      mergedByKey.set(key, row);
+      return;
+    }
+
+    const existingUpdated = isUpdatedScenarioRow(existing);
+    const nextUpdated = isUpdatedScenarioRow(row);
+    if (!existingUpdated && nextUpdated) {
+      mergedByKey.set(key, row);
+      return;
+    }
+
+    if (existingUpdated === nextUpdated) {
+      const existingVersion = Number(existing?.version ?? 0);
+      const nextVersion = Number(row?.version ?? 0);
+      const existingOptimizedId = Number(existing?.optimized_id ?? 0);
+      const nextOptimizedId = Number(row?.optimized_id ?? 0);
+      if (
+        nextVersion > existingVersion ||
+        (nextVersion === existingVersion && nextOptimizedId > existingOptimizedId)
+      ) {
+        mergedByKey.set(key, row);
+      }
+    }
+  });
+
+  return Array.from(mergedByKey.values());
+};
+
 const nowMs = () =>
   typeof performance !== "undefined" && typeof performance.now === "function"
     ? performance.now()
@@ -461,15 +528,17 @@ export const useSiteData = ({
               limit: SITE_PREDICTION_PAGE_SIZE,
             });
           } else {
+            const scenarioId =
+              normalizedVersion === "combined" &&
+              Number.isFinite(Number(sitePredictionScenarioId)) &&
+              Number(sitePredictionScenarioId) > 0
+                ? Number(sitePredictionScenarioId)
+                : undefined;
+
             response = await fetchAllSitePredictionRows({
               ...params,
               version: normalizedVersion,
-              scenario:
-                normalizedVersion === "combined" &&
-                Number.isFinite(Number(sitePredictionScenarioId)) &&
-                Number(sitePredictionScenarioId) > 0
-                  ? Number(sitePredictionScenarioId)
-                  : undefined,
+              scenario: scenarioId,
             });
           }
           break;
@@ -492,10 +561,13 @@ export const useSiteData = ({
               defaultBeamwidth: normalizedDefaultBeamwidth,
             });
 
-      let finalData = normalizedData;
+      let finalData =
+        normalizedVersion === "combined"
+          ? mergeCombinedSitePredictionRows(normalizedData)
+          : normalizedData;
       // Fallback to client-side filtering only when polygon IDs are not available for backend filtering.
       if (filterEnabled && polygons?.length > 0 && polygonIds.length === 0) {
-        finalData = normalizedData.filter((site) =>
+        finalData = finalData.filter((site) =>
           polygons.some((poly) => isPointInPolygon(site, poly)),
         );
       }
