@@ -27,6 +27,7 @@ const FIXED_ANTENNA_VALUE = "Macro-katherine";
 
 const createCell = (overrides = {}) => ({
   technology: "4G",
+  cellId: "",
   band: "",
   earfcn: "",
   pci: "",
@@ -507,6 +508,7 @@ const validateForm = (form) => {
     for (let cellIndex = 0; cellIndex < sector.cells.length; cellIndex += 1) {
       const cell = sector.cells[cellIndex];
       if (!TECHNOLOGY_OPTIONS.includes(cell.technology)) return `Cell ${cellIndex + 1} in sector ${sectorNo} needs a technology.`;
+      if (numberOrNull(cell.cellId) === null) return `Cell ${cellIndex + 1} in sector ${sectorNo} needs a valid Cell ID.`;
       if (!String(cell.band || "").trim()) return `Cell ${cellIndex + 1} in sector ${sectorNo} needs a band.`;
       if (numberOrNull(cell.earfcn) === null) return `Cell ${cellIndex + 1} in sector ${sectorNo} needs a valid EARFCN.`;
       if (numberOrNull(cell.pci) === null) return `Cell ${cellIndex + 1} in sector ${sectorNo} needs a valid PCI.`;
@@ -528,6 +530,8 @@ const buildCellPayload = (form, sector, cell) => ({
   provider: String(form.operator || "").trim(),
   bands: [String(cell.band || "").trim()],
   sectors: [normalizeNumber(sector.sectorNo, 1)],
+  cellIds: [normalizeNumber(cell.cellId, 0)],
+  cell_ids: [normalizeNumber(cell.cellId, 0)],
   azimuths: [normalizeNumber(sector.azimuth, 0)],
   heights: [30],
   mechanicalTilts: [normalizeNumber(sector.mechanicalTilt, 0)],
@@ -570,14 +574,16 @@ const buildTemplateFromSiteRows = (rows = []) => {
     const sector = sectorMap.get(sectorKey);
     const cell = createCell({
       technology: getSiteTechnology(row),
+      cellId: String(row?.cell_id ?? row?.cellId ?? row?.CellId ?? "").trim(),
       band: String(row?.Band ?? row?.band ?? row?.frequency_band ?? "").trim(),
       earfcn: String(row?.earfcn ?? row?.earfcn_or_narfcn ?? row?.earfcnOrNarfcn ?? "").trim(),
-      pci: String(row?.pci ?? row?.Pci ?? row?.PCI ?? row?.cell_id ?? "").trim(),
+      pci: String(row?.pci ?? row?.Pci ?? row?.PCI ?? "").trim(),
       power: toFiniteNumber(row?.power ?? row?.tx_power ?? row?.txPower ?? row?.transmit_power, 40),
     });
 
     const cellKey = [
       cell.technology,
+      cell.cellId,
       cell.band,
       cell.earfcn,
       cell.pci,
@@ -658,7 +664,7 @@ const CellCard = ({
         )}
       </div>
 
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-5">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-6">
         <Field label="Technology" required>
           <select
             value={cell.technology}
@@ -671,6 +677,15 @@ const CellCard = ({
               </option>
             ))}
           </select>
+        </Field>
+        <Field label="Cell ID" required>
+          <input
+            type="number"
+            value={cell.cellId}
+            onChange={(event) => onChange("cellId", event.target.value)}
+            placeholder="101"
+            className={inputClass}
+          />
         </Field>
         <Field label="Band" required>
           <input
