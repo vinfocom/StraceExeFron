@@ -3081,13 +3081,20 @@ const NetworkPlannerMap = ({
     async (sector, infoPos) => {
       if (!sector) return;
       const clickedRenderKey = buildSectorRenderKey(sector, 0);
+      const hasLoadedSectorData =
+        Array.isArray(sectorPredictionRowsByRenderKey?.[clickedRenderKey]) &&
+        sectorPredictionRowsByRenderKey[clickedRenderKey].length > 0;
+      if (hasLoadedSectorData) {
+        clearSelectedSectorConfiguration(clickedRenderKey);
+        return;
+      }
       await loadSectorPredictionForSector(
         { ...sector, renderKey: clickedRenderKey },
         infoPos,
         { showInfo: false, silent: false },
       );
     },
-    [],
+    [clearSelectedSectorConfiguration, loadSectorPredictionForSector, sectorPredictionRowsByRenderKey],
   );
 
   const handleSectorRightClick = useCallback(
