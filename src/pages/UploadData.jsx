@@ -236,7 +236,9 @@ const UploadDataPage = () => {
     }
 
     const formData = new FormData();
-    formData.append("UploadFile", files[0]);
+    files.forEach((file) => {
+      formData.append("UploadFile", file);
+    });
     formData.append("UploadFileType", "1");
     formData.append("remarks", remarks);
     formData.append("ProjectName", "");
@@ -276,17 +278,35 @@ const UploadDataPage = () => {
 
   const onDropSession = useCallback((files) => {
     const valid = toSafeArray(files).filter((f) => validateFile(f, FILE_TYPES));
-    if (valid.length) setSessionFiles(valid);
+    if (!valid.length) return;
+    setSessionFiles((prev) => {
+      const next = [...prev];
+      valid.forEach((file) => {
+        const exists = next.some(
+          (item) =>
+            item.name === file.name &&
+            item.size === file.size &&
+            item.lastModified === file.lastModified,
+        );
+        if (!exists) next.push(file);
+      });
+      return next;
+    });
   }, []);
 
   const {
     getRootProps: getRootPropsSession,
     getInputProps: getInputPropsSession,
     isDragActive: isDragActiveSession,
-  } = useDropzone({ onDrop: onDropSession, multiple: false });
+  } = useDropzone({ onDrop: onDropSession, multiple: true });
 
-  const removeFile = (type) => {
-    if (type === "session") setSessionFiles([]);
+  const removeFile = (type, index = null) => {
+    if (type !== "session") return;
+    if (index === null) {
+      setSessionFiles([]);
+      return;
+    }
+    setSessionFiles((prev) => prev.filter((_, itemIndex) => itemIndex !== index));
   };
 
   // ------------------ UPLOAD HISTORY FETCH ------------------
@@ -404,7 +424,7 @@ const UploadDataPage = () => {
             <button
               onClick={(e) => {
                 e.stopPropagation();
-                removeFile(type);
+                removeFile(type, i);
               }}
               className="text-red-200 hover:text-red-400"
             >
@@ -449,7 +469,7 @@ const UploadDataPage = () => {
               isDragActiveSession,
               sessionFiles,
               "session",
-              "Session Data File (.csv or .zip, max 500 MB)"
+              "Session Data Files (.csv or .zip, max 500 MB each)"
             )}
             <Textarea
               placeholder=" Remarks (Required)"
