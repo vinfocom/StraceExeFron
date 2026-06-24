@@ -604,18 +604,14 @@ const MapChild = ({
         </MapwithMultipleCircle>
 
         {!isSiteMode && (
-          <div className="absolute top-14 right-2 z-20 pointer-events-auto">
-            <div className="scale-90 origin-top-right">
-              <MapLegend
-                thresholds={thresholds}
-                selectedMetric={metric}
-                logs={legendData}
-                activeFilter={legendFilter}
-                onFilterChange={setLegendFilter}
-                className="relative" // Added to fix positioning
-              />
-            </div>
-          </div>
+          <MapLegend
+            thresholds={thresholds}
+            selectedMetric={metric}
+            logs={legendData}
+            activeFilter={legendFilter}
+            onFilterChange={setLegendFilter}
+            className="absolute inset-0 z-20 pointer-events-none"
+          />
         )}
 
         {!isSiteMode && (

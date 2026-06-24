@@ -1020,34 +1020,6 @@ function UnifiedHeader({
               </DropdownMenu>
             )}
 
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button
-                  type="button"
-                  size="sm"
-                  title="Utility"
-                  className="h-9 shrink-0 flex gap-1 items-center bg-blue-600 hover:bg-blue-500 text-white"
-                >
-                  <SlidersHorizontal className="h-4 w-4" />
-                  <span className="hidden xl:inline">Utility</span>
-                  <ChevronDown className="h-3.5 w-3.5" />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="bg-white text-slate-800">
-                <DropdownMenuLabel>Utility</DropdownMenuLabel>
-                <DropdownMenuSeparator />
-                {utilityMenuItems.map((item) => (
-                  <DropdownMenuItem
-                    key={item.label}
-                    disabled={item.disabled}
-                    onClick={item.action}
-                  >
-                    {item.label}
-                  </DropdownMenuItem>
-                ))}
-              </DropdownMenuContent>
-            </DropdownMenu>
-
             {activeQuickControl === "opacity" && (
               <div className="flex max-w-full flex-wrap items-center gap-2 bg-gray-700/80 rounded-lg px-3 py-1.5 border border-gray-600">
                 <span className="text-xs text-gray-300 font-medium">
@@ -1112,6 +1084,34 @@ function UnifiedHeader({
                 </button>
               </div>
             )}
+
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  type="button"
+                  size="sm"
+                  title="Utility"
+                  className="h-9 shrink-0 flex gap-1 items-center bg-blue-600 hover:bg-blue-500 text-white"
+                >
+                  <SlidersHorizontal className="h-4 w-4" />
+                  <span className="hidden xl:inline">Utility</span>
+                  <ChevronDown className="h-3.5 w-3.5" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="bg-white text-slate-800">
+                <DropdownMenuLabel>Utility</DropdownMenuLabel>
+                <DropdownMenuSeparator />
+                {utilityMenuItems.map((item) => (
+                  <DropdownMenuItem
+                    key={item.label}
+                    disabled={item.disabled}
+                    onClick={item.action}
+                  >
+                    {item.label}
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
 
             {activeQuickControl === "neighbors" && neighborLogsAvailable && (
               <div className="flex max-w-full flex-wrap items-center gap-2 bg-gray-700/80 rounded-lg px-3 py-1.5 border border-gray-600">
