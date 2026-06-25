@@ -458,6 +458,16 @@ function normalizeDeltaVariant(value) {
   return variant;
 }
 
+function normalizeSitePredictionVersion(value) {
+  const version = String(value ?? "").trim().toLowerCase();
+  if (version === "baseline") return "original";
+  if (version === "updated" || version === "optimized" || version === "optimised") {
+    return "updated";
+  }
+  if (version === "delta") return "delta";
+  return "original";
+}
+
 function getSiteLegendFilterValue(row, colorMode = "Operator", sitePredictionVersion = "original") {
   const isDeltaMode =
     String(sitePredictionVersion || "").trim().toLowerCase() === "delta" ||
@@ -1938,13 +1948,7 @@ const NetworkPlannerMap = ({
 
   const fetchSitePayload = useCallback(
     async (siteMarker) => {
-      const rawVersion = String(sitePredictionVersion || "original").trim().toLowerCase();
-      const normalizedVersion =
-        rawVersion === "updated"
-          ? "combined"
-          : rawVersion === "delta"
-            ? "delta"
-            : "original";
+      const normalizedVersion = normalizeSitePredictionVersion(sitePredictionVersion);
       const normalizedSiteId = normalizeComparableSiteId(siteMarker?.siteId);
       const debug = {
         siteId: String(siteMarker?.siteId || ""),
@@ -1955,50 +1959,62 @@ const NetworkPlannerMap = ({
           finalRows: 0,
         },
       };
-      const baseParams = {
-        projectId: projectId || "",
-        version: normalizedVersion,
-        polygon_ids: activePolygonIdsParam,
-      };
-      if (activeSitePredictionScenarioId && normalizedVersion !== "original") {
-        baseParams.scenario = activeSitePredictionScenarioId;
-        baseParams.scenario_id = activeSitePredictionScenarioId;
-        baseParams.site_prediction_scenario_id = activeSitePredictionScenarioId;
-      }
-      const candidateParams = [
-        { ...baseParams, siteId: siteMarker.siteId },
-        { ...baseParams, site_id: siteMarker.siteId },
-        { ...baseParams, site: siteMarker.siteId },
-        { ...baseParams, siteName: siteMarker.siteName },
-      ];
 
       let rows = [];
       let siteFetchFailed = false;
-      const shouldUseLegacySitePredictionApi = normalizedVersion === "original";
+      const siteLookupCandidates = Array.from(
+        new Set(
+          [
+            String(siteMarker?.siteId || "").trim(),
+            String(siteMarker?.siteName || "").trim(),
+          ].filter(Boolean),
+        ),
+      );
+      const shouldUseBaselineApi = normalizedVersion === "original";
+      const shouldUseOptimizedApi = normalizedVersion === "updated";
 
-      if (shouldUseLegacySitePredictionApi) {
-        for (const params of candidateParams) {
+      if (shouldUseBaselineApi || shouldUseOptimizedApi) {
+        const requestBaseParams = {
+          project_id: Number(projectId) > 0 ? Number(projectId) : undefined,
+          polygon_ids: activePolygonIdsParam,
+        };
+
+        for (const candidate of siteLookupCandidates) {
           try {
             const requestStartMs =
               typeof performance !== "undefined" && typeof performance.now === "function"
                 ? performance.now()
                 : Date.now();
-            const res = await sitePredictionApi.get(params);
+            const params = {
+              ...requestBaseParams,
+              node_b_id: candidate || undefined,
+              cell_id: candidate || undefined,
+            };
+            const res = shouldUseOptimizedApi
+              ? await sitePredictionApi.getOptimised({
+                  ...params,
+                  scenario: activeSitePredictionScenarioId || undefined,
+                  scenario_id: activeSitePredictionScenarioId || undefined,
+                  site_prediction_scenario_id: activeSitePredictionScenarioId || undefined,
+                })
+              : await sitePredictionApi.getBase(params);
             const rawRows = res?.Data || res?.data?.Data || res?.data || [];
             const elapsedMs =
               (typeof performance !== "undefined" && typeof performance.now === "function"
                 ? performance.now()
                 : Date.now()) - requestStartMs;
             console.info("[SITE_PREDICTION_TIMING]", {
-              endpoint: "GetSitePrediction",
+              endpoint: shouldUseOptimizedApi
+                ? "GetSitePredictionOptimised"
+                : "GetSitePredictionBase",
               scope: "site-detail",
-              projectId: params.projectId,
-              version: params.version,
+              projectId: requestBaseParams.project_id,
               siteId: siteMarker?.siteId,
+              lookup: candidate,
               rows: Array.isArray(rawRows) ? rawRows.length : 0,
               elapsedMs: Math.round(elapsedMs),
-              polygonIds: params.polygon_ids || "all",
-              scenario: params.scenario || "none",
+              polygonIds: requestBaseParams.polygon_ids || "all",
+              scenario: activeSitePredictionScenarioId || "none",
             });
             const normalizedAll = normalizeSiteRows(rawRows, {
               defaultBeamwidth,
@@ -2011,7 +2027,7 @@ const NetworkPlannerMap = ({
               rows = normalizedMatch;
               break;
             }
-            if (normalizedAll.length === 1) {
+            if (normalizedAll.length > 0) {
               rows = normalizedAll;
               break;
             }
@@ -2169,9 +2185,7 @@ const NetworkPlannerMap = ({
       const siteId = siteMarker.siteId;
       if (siteFetchTokenRef.current[siteId] && !forceRefresh) return;
       const metricKey = String(selectedMetric || "rsrp").toLowerCase();
-      const rawVersion = String(sitePredictionVersion || "original").trim().toLowerCase();
-      const versionKey =
-        rawVersion === "updated" ? "updated" : rawVersion === "delta" ? "delta" : "original";
+      const versionKey = normalizeSitePredictionVersion(sitePredictionVersion);
       const overlayKey = enableSiteLteOverlay ? "site-lte-on" : "site-lte-off";
       const polygonKey = activePolygonIdsParam || "all-polygons";
       const scenarioKey = activeSitePredictionScenarioId || "no-scenario";
@@ -2355,9 +2369,7 @@ const NetworkPlannerMap = ({
       if (siteFetchTokenRef.current[siteId]) return;
       const cached = selectedSiteDataById[siteId];
       const metricKey = String(selectedMetric || "rsrp").toLowerCase();
-      const rawVersion = String(sitePredictionVersion || "original").trim().toLowerCase();
-      const versionKey =
-        rawVersion === "updated" ? "updated" : rawVersion === "delta" ? "delta" : "original";
+      const versionKey = normalizeSitePredictionVersion(sitePredictionVersion);
       const overlayKey = enableSiteLteOverlay ? "site-lte-on" : "site-lte-off";
       if (
         !cached ||
@@ -2822,9 +2834,7 @@ const NetworkPlannerMap = ({
         return false;
       }
 
-      const rawVersion = String(sitePredictionVersion || "original").trim().toLowerCase();
-      const normalizedVersion =
-        rawVersion === "updated" ? "updated" : rawVersion === "delta" ? "delta" : "original";
+      const normalizedVersion = normalizeSitePredictionVersion(sitePredictionVersion);
       const deltaVariant = String(
         nextSector.deltaVariant ??
           nextSector.delta_variant ??
@@ -2849,77 +2859,66 @@ const NetworkPlannerMap = ({
           return false;
         }
 
-        // Primary path: query by project_id + combined cell_id (node_b_cell_id format),
-        // using optimised endpoint that reads from two tables.
-        for (const candidate of lookupCandidates) {
-          const requestStartMs =
-            typeof performance !== "undefined" && typeof performance.now === "function"
-              ? performance.now()
-              : Date.now();
-          const response = await sitePredictionApi.getOptimised({
-            project_id: projectId,
-            node_b_id: optimizedNodeBId || undefined,
-            cell_id: candidate || undefined,
-            polygon_ids: activePolygonIdsParam,
-            scenario: activeSitePredictionScenarioId || undefined,
-            scenario_id: activeSitePredictionScenarioId || undefined,
-            site_prediction_scenario_id: activeSitePredictionScenarioId || undefined,
-          });
-          const extractedRows = extractRowsFromApiResponse(response);
-          const elapsedMs =
-            (typeof performance !== "undefined" && typeof performance.now === "function"
-              ? performance.now()
-              : Date.now()) - requestStartMs;
-          console.info("[SITE_PREDICTION_TIMING]", {
-            endpoint: "GetSitePredictionOptimised",
-            scope: "sector-detail",
-            projectId,
-            cellId: candidate,
-            rows: Array.isArray(extractedRows) ? extractedRows.length : 0,
-            elapsedMs: Math.round(elapsedMs),
-            polygonIds: activePolygonIdsParam || "all",
-            scenario: activeSitePredictionScenarioId || "none",
-            allowBaselineFallback: shouldUseOptimizedApi,
-          });
-          if (Array.isArray(extractedRows) && extractedRows.length > 0) {
-            rows = extractedRows;
-            resolvedLookupValue = candidate;
-            break;
-          }
-        }
+        const endpointRequests = shouldUseOptimizedApi
+          ? [
+              {
+                endpoint: "GetSitePredictionOptimised",
+                fetcher: (candidate) =>
+                  sitePredictionApi.getOptimised({
+                    project_id: projectId,
+                    node_b_id: optimizedNodeBId || undefined,
+                    cell_id: candidate || undefined,
+                    polygon_ids: activePolygonIdsParam,
+                    scenario: activeSitePredictionScenarioId || undefined,
+                    scenario_id: activeSitePredictionScenarioId || undefined,
+                    site_prediction_scenario_id: activeSitePredictionScenarioId || undefined,
+                  }),
+              },
+            ]
+          : [
+              {
+                endpoint: "GetSitePredictionBase",
+                fetcher: (candidate) =>
+                  sitePredictionApi.getBase({
+                    project_id: projectId,
+                    node_b_id: optimizedNodeBId || undefined,
+                    cell_id: candidate || undefined,
+                    polygon_ids: activePolygonIdsParam,
+                  }),
+              },
+            ];
 
-        // Compatibility fallback for original mode: baseline table endpoint by cell id only.
-        if (rows.length === 0 && !shouldUseOptimizedApi) {
+        for (const { endpoint, fetcher } of endpointRequests) {
           for (const candidate of lookupCandidates) {
             const requestStartMs =
               typeof performance !== "undefined" && typeof performance.now === "function"
                 ? performance.now()
                 : Date.now();
-            const response = await sitePredictionApi.getBase({
-              project_id: projectId,
-              node_b_id: optimizedNodeBId || undefined,
-              cell_id: candidate || undefined,
-              polygon_ids: activePolygonIdsParam,
-            });
+            const response = await fetcher(candidate);
             const extractedRows = extractRowsFromApiResponse(response);
             const elapsedMs =
               (typeof performance !== "undefined" && typeof performance.now === "function"
                 ? performance.now()
                 : Date.now()) - requestStartMs;
             console.info("[SITE_PREDICTION_TIMING]", {
-              endpoint: "GetSitePredictionBase",
+              endpoint,
               scope: "sector-detail",
               projectId,
               cellId: candidate,
               rows: Array.isArray(extractedRows) ? extractedRows.length : 0,
               elapsedMs: Math.round(elapsedMs),
               polygonIds: activePolygonIdsParam || "all",
+              scenario: activeSitePredictionScenarioId || "none",
+              allowBaselineFallback: shouldUseOptimizedApi,
             });
             if (Array.isArray(extractedRows) && extractedRows.length > 0) {
               rows = extractedRows;
               resolvedLookupValue = candidate;
               break;
             }
+          }
+          if (rows.length > 0) {
+            break;
           }
         }
 
