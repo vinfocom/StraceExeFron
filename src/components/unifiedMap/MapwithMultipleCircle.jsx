@@ -206,21 +206,26 @@ class SpatialHashGrid {
 
     for (let i = 0; i < locations.length; i++) {
       const loc = locations[i];
-      if (typeof loc.lat !== 'number' || typeof loc.lng !== 'number') continue;
+      const lat = Number(loc?.lat);
+      const lng = Number(loc?.lng);
+      if (!Number.isFinite(lat) || !Number.isFinite(lng)) continue;
       
-      const key = this.getCellKey(loc.lat, loc.lng);
+      const key = this.getCellKey(lat, lng);
       if (!this.grid.has(key)) {
         this.grid.set(key, []);
       }
       this.grid.get(key).push(i);
 
-      minLat = Math.min(minLat, loc.lat);
-      maxLat = Math.max(maxLat, loc.lat);
-      minLng = Math.min(minLng, loc.lng);
-      maxLng = Math.max(maxLng, loc.lng);
+      minLat = Math.min(minLat, lat);
+      maxLat = Math.max(maxLat, lat);
+      minLng = Math.min(minLng, lng);
+      maxLng = Math.max(maxLng, lng);
     }
 
-    this.bounds = { north: maxLat, south: minLat, east: maxLng, west: minLng };
+    this.bounds =
+      Number.isFinite(minLat) && Number.isFinite(minLng) && Number.isFinite(maxLat) && Number.isFinite(maxLng)
+        ? { north: maxLat, south: minLat, east: maxLng, west: minLng }
+        : null;
     return this;
   }
 
@@ -237,8 +242,11 @@ class SpatialHashGrid {
         if (indices) {
           for (const idx of indices) {
             const loc = locations[idx];
-            if (loc.lat >= bounds.south && loc.lat <= bounds.north &&
-                loc.lng >= bounds.west && loc.lng <= bounds.east) {
+            const lat = Number(loc?.lat);
+            const lng = Number(loc?.lng);
+            if (!Number.isFinite(lat) || !Number.isFinite(lng)) continue;
+            if (lat >= bounds.south && lat <= bounds.north &&
+                lng >= bounds.west && lng <= bounds.east) {
               results.push(idx);
             }
           }
@@ -731,8 +739,11 @@ const generateGridCellsOptimized = (
         cellLocationIndices = [];
         for (let i = 0; i < locations.length; i++) {
           const loc = locations[i];
-          if (loc.lat >= cellBounds.south && loc.lat < cellBounds.north &&
-              loc.lng >= cellBounds.west && loc.lng < cellBounds.east) {
+          const lat = Number(loc?.lat);
+          const lng = Number(loc?.lng);
+          if (!Number.isFinite(lat) || !Number.isFinite(lng)) continue;
+          if (lat >= cellBounds.south && lat < cellBounds.north &&
+              lng >= cellBounds.west && lng < cellBounds.east) {
             cellLocationIndices.push(i);
           }
         }
@@ -985,10 +996,29 @@ const getThroughputValue = (log, direction = "dl") => {
   return null;
 };
 
-const getLogLatLng = (log) => {
-  const lat = Number(log?.lat ?? log?.latitude ?? log?.Lat);
-  const lng = Number(log?.lng ?? log?.longitude ?? log?.lon ?? log?.Lng);
+const getNumericLatLng = (log) => {
+  const lat = Number(log?.lat ?? log?.latitude ?? log?.Lat ?? log?.Latitude ?? log?.LAT);
+  const lng = Number(
+    log?.lng ?? log?.longitude ?? log?.lon ?? log?.Lng ?? log?.Longitude ?? log?.LNG
+  );
   return { lat, lng };
+};
+
+const normalizeRenderableLocation = (log) => {
+  if (!log) return null;
+  const { lat, lng } = getNumericLatLng(log);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+  return {
+    ...log,
+    lat,
+    lng,
+    latitude: lat,
+    longitude: lng,
+  };
+};
+
+const getLogLatLng = (log) => {
+  return getNumericLatLng(log);
 };
 
 const areLogsStacked = (a, b, tolerance = 0.000001) => {
@@ -1480,7 +1510,8 @@ const MapWithMultipleCircles = ({
   const locationsToRender = useMemo(() => {
     if (!locations?.length) return EMPTY_ARRAY;
     
-    let filtered = locations;
+    let filtered = locations.map(normalizeRenderableLocation).filter(Boolean);
+    if (!filtered.length) return EMPTY_ARRAY;
 
     if (filterInsidePolygons && enablePolygonFilter) {
       // Wait for polygons to be ready before filtering — prevents flash of all points

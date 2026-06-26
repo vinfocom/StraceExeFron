@@ -161,6 +161,26 @@ const buildIndoorOutdoorFromLogs = (logs = []) => {
   return { indoor, outdoor };
 };
 
+const sanitizeUnifiedMapError = (value, fallbackMessage) => {
+  const raw = String(value || "").trim();
+  if (!raw) return fallbackMessage;
+
+  const firstLine = raw.split("\n")[0].trim();
+  const withoutHeaders = firstLine.replace(/^site error:\s*/i, "").replace(/^data error:\s*/i, "").trim();
+  const beforeStack = withoutHeaders.split(/\s+at\s+/i)[0].trim();
+  const normalized = beforeStack || withoutHeaders || raw;
+
+  if (/latitude .*out of range/i.test(raw) || /st_geomfromtext/i.test(raw)) {
+    return "Map polygon filtering failed because one location has invalid coordinate order.";
+  }
+
+  if (/http\s*500/i.test(raw)) {
+    return fallbackMessage;
+  }
+
+  return normalized.length > 220 ? fallbackMessage : normalized;
+};
+
 const readLogTimestampMs = (loc) => {
   const raw =
     loc?.timestamp ??
@@ -3493,6 +3513,14 @@ const UnifiedMapView = () => {
     (shouldFetchNeighbors && sessionNeighborLoading);
 
   const error = sampleError || predictionError;
+  const displayDataError = useMemo(
+    () => sanitizeUnifiedMapError(error, "Failed to load map data."),
+    [error],
+  );
+  const displaySiteError = useMemo(
+    () => sanitizeUnifiedMapError(siteError?.message || siteError, "Failed to load site data."),
+    [siteError],
+  );
 
   const polygonFilteredNeighborData = useMemo(() => {
     const data = sessionNeighborData || [];
@@ -6336,10 +6364,10 @@ const UnifiedMapView = () => {
           ) : error || siteError ? (
             <div className="flex items-center justify-center h-full bg-gray-100 dark:bg-gray-700">
               <div className="text-center space-y-2">
-                {error && <p className="text-red-500">Data Error: {error}</p>}
+                {error && <p className="text-red-500">Data Error: {displayDataError}</p>}
                 {siteError && (
                   <p className="text-red-500">
-                    Site Error: {siteError.message}
+                    Site Error: {displaySiteError}
                   </p>
                 )}
               </div>

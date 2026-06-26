@@ -882,16 +882,13 @@ const ProviderVolumeCard = ({
                       Duration
                     </div>
                   </th>
-                  <th className="text-right px-2 py-2 text-white font-medium">
-                    Total
-                  </th>
                 </tr>
               </thead>
               <tbody>
                 {filteredProviderVolume.length === 0 ? (
                   <tr>
                     <td
-                      colSpan="8"
+                      colSpan="7"
                       className="px-2 py-8 text-center text-white text-sm"
                     >
                       No data available for known providers
@@ -936,9 +933,6 @@ const ProviderVolumeCard = ({
                       </td>
                       <td className="px-2 py-2 text-right text-orange-400 font-medium whitespace-nowrap">
                         {item.durationFormatted}
-                      </td>
-                      <td className="px-2 py-2 text-right text-white font-bold">
-                        {item.totalGb}
                       </td>
                     </tr>
                   ))

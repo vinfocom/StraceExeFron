@@ -17,9 +17,8 @@ import {
   Trash2,
 } from "lucide-react";
 import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
-import { mapViewApi, predictionApi } from "@/api/apiEndpoints";
+import { mapViewApi } from "@/api/apiEndpoints";
 import { toast } from "react-toastify";
-import { useMapContext } from "@/context/MapContext";
 import Spinner from "@/components/common/Spinner";
 import ProjectsDropdown from "../project/ProjectsDropdown";
 import DrawingControlsPanel from "../map/layout/DrawingControlsPanel";
@@ -522,16 +521,6 @@ function UnifiedHeader({
   const [openImportDialog, setOpenImportDialog] = useState(false);
   const [siteScenarioMenuOpen, setSiteScenarioMenuOpen] = useState(false);
 
-  // Prediction Prompt State
-  const [showPredictionPrompt, setShowPredictionPrompt] = useState(false);
-  const [gridValue, setGridValue] = useState(25.0);
-  const [radiusM, setRadiusM] = useState(5000.0);
-  const [isPredicting, setIsPredicting] = useState(false);
-
-  // Grab polygonContext to send drawn area to API
-  const mapContext = useMapContext();
-  const polygonStats = mapContext?.polygonStats;
-
   const handleFileChange = (e) => {
     setSelectedFile(e.target.files[0]);
   };
@@ -578,8 +567,7 @@ function UnifiedHeader({
       if (resp?.Status === 1 || resp?.status === 1) {
         toast.success("File uploaded successfully!");
         setSelectedFile(null);
-        // Open the LTE prediction prompt dialog
-        setShowPredictionPrompt(true);
+        setOpenImportDialog(false);
       } else {
         toast.error(resp?.Message || resp?.message || "Upload failed");
       }
@@ -594,66 +582,6 @@ function UnifiedHeader({
       toast.error(errorMsg);
     } finally {
       setIsUploading(false);
-    }
-  };
-
-  const handleRunPrediction = async () => {
-    if (!effectiveProjectId) {
-      toast.error("Project ID is missing.");
-      return;
-    }
-    if (!effectiveSessionIds || effectiveSessionIds.length === 0) {
-      toast.error("No active session IDs selected.");
-      return;
-    }
-
-    let polygonAreaCoords = [];
-    if (
-      polygonStats?.geometry?.type === "polygon" &&
-      polygonStats.geometry.polygon
-    ) {
-      // Map [{lat, lng}] to [[lng, lat], ...] as commonly expected by PostGIS/Python WKT or GeoJSON
-      polygonAreaCoords = polygonStats.geometry.polygon
-        .map((pt) => [Number(pt?.lng), Number(pt?.lat)])
-        .filter(
-          (pair) =>
-            Array.isArray(pair) &&
-            pair.length === 2 &&
-            Number.isFinite(pair[0]) &&
-            Number.isFinite(pair[1]),
-        );
-      // Ensure it's closed (first point == last point) to be a valid coordinate ring
-      if (polygonAreaCoords.length >= 3) {
-        const first = polygonAreaCoords[0];
-        const last = polygonAreaCoords[polygonAreaCoords.length - 1];
-        if (first[0] !== last[0] || first[1] !== last[1]) {
-          polygonAreaCoords.push([first[0], first[1]]);
-        }
-      }
-    }
-
-    setIsPredicting(true);
-    try {
-      const payload = {
-        user_id: Number(user?.id) || 0,
-        project_id: effectiveProjectId,
-        session_ids: effectiveSessionIds,
-        grid_value: parseFloat(gridValue) || 25.0,
-        radius_m: parseFloat(radiusM) || 5000.0,
-        building: true,
-      };
-
-      if (polygonAreaCoords.length >= 3) {
-        payload.polygon_area = polygonAreaCoords;
-      }
-
-      await predictionApi.runLtePrediction(payload);
-      toast.success("LTE Prediction started successfully.");
-      setShowPredictionPrompt(false);
-    } catch (error) {
-      toast.error(error.message || "Failed to start LTE prediction");
-    } finally {
-      setIsPredicting(false);
     }
   };
 
@@ -1380,74 +1308,6 @@ function UnifiedHeader({
                   className="w-full bg-blue-600 hover:bg-blue-500"
                 >
                   {isUploading ? <Spinner /> : "Upload Now"}
-                </Button>
-              </div>
-            </div>
-          </DialogContent>
-        </Dialog>
-
-        {/* LTE Prediction Prompt Dialog */}
-        <Dialog
-          open={showPredictionPrompt}
-          onOpenChange={setShowPredictionPrompt}
-        >
-          <DialogContent className="sm:max-w-md bg-gray-800 text-white border-gray-700">
-            <div className="p-6">
-              <h2 className="text-lg font-semibold mb-2">Run LTE Prediction</h2>
-              <p className="text-sm text-gray-400 mb-6">
-                Do you want to run prediction on the uploaded site data? This
-                will use the drawn polygon area if present.
-              </p>
-
-              <div className="flex flex-col gap-4 mb-6">
-                <div>
-                  <label className="text-sm text-gray-300 font-medium block mb-1">
-                    Grid Value
-                  </label>
-                  <input
-                    type="number"
-                    value={gridValue}
-                    onChange={(e) => setGridValue(e.target.value)}
-                    className="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-blue-500"
-                    placeholder="e.g. 25.0"
-                  />
-                </div>
-                <div>
-                  <label className="text-sm text-gray-300 font-medium block mb-1">
-                    Radius (m)
-                  </label>
-                  <input
-                    type="number"
-                    value={radiusM}
-                    onChange={(e) => setRadiusM(e.target.value)}
-                    className="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-blue-500"
-                    placeholder="e.g. 5000.0"
-                  />
-                </div>
-                {polygonStats?.geometry?.type === "polygon" &&
-                  polygonStats.geometry.polygon?.length > 0 && (
-                    <div className="text-xs text-green-400 font-medium mt-1">
-                      ✓ Using active drawn polygon area (
-                      {polygonStats.geometry.polygon.length} points)
-                    </div>
-                  )}
-              </div>
-
-              <div className="flex gap-3 justify-end">
-                <Button
-                  variant="ghost"
-                  onClick={() => setShowPredictionPrompt(false)}
-                  disabled={isPredicting}
-                  className="hover:bg-gray-700 hover:text-white"
-                >
-                  Cancel
-                </Button>
-                <Button
-                  onClick={handleRunPrediction}
-                  disabled={isPredicting}
-                  className="bg-blue-600 hover:bg-blue-500"
-                >
-                  {isPredicting ? <Spinner /> : "Run Prediction"}
                 </Button>
               </div>
             </div>

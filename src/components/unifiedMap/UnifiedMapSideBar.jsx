@@ -475,6 +475,15 @@ const UnifiedMapSidebar = ({
   const [activeSidebarTab, setActiveSidebarTab] = useState("filter");
   const [isEditingSessions, setIsEditingSessions] = useState(false);
   const [sessionInputValue, setSessionInputValue] = useState("");
+  const normalizedLteGridAggregationMethod =
+    lteGridAggregationMethod === "avg" ? "median" : lteGridAggregationMethod || "median";
+  const handleLteGridAggregationMethodChange = useCallback(
+    (nextValue) => {
+      if (!setLteGridAggregationMethod) return;
+      setLteGridAggregationMethod(nextValue === "avg" ? "median" : nextValue);
+    },
+    [setLteGridAggregationMethod],
+  );
 
   useEffect(() => {
     if (!isEditingSessions) {
@@ -2446,10 +2455,9 @@ const UnifiedMapSidebar = ({
                       <div className="rounded-lg border border-cyan-700/40 bg-cyan-950/20 p-2 text-xs space-y-2">
                         <SelectRow
                           label="Grid Aggregate"
-                          value={lteGridAggregationMethod || "median"}
-                          onChange={setLteGridAggregationMethod}
+                          value={normalizedLteGridAggregationMethod}
+                          onChange={handleLteGridAggregationMethodChange}
                           options={[
-                            { value: "avg", label: "Average" },
                             { value: "median", label: "Median" },
                             { value: "mean", label: "Mean" },
                             { value: "min", label: "Min" },
@@ -2900,10 +2908,9 @@ const UnifiedMapSidebar = ({
 
                           <SelectRow
                             label="Aggregation"
-                            value={lteGridAggregationMethod || "median"}
-                            onChange={setLteGridAggregationMethod}
+                            value={normalizedLteGridAggregationMethod}
+                            onChange={handleLteGridAggregationMethodChange}
                             options={[
-                              { value: "avg", label: "Average" },
                               { value: "median", label: "Median" },
                               { value: "mean", label: "Mean" },
                               { value: "min", label: "Min" },

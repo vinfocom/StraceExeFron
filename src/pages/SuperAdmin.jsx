@@ -57,6 +57,18 @@ const SuperAdminCompanies = () => {
     await handleCompanyStatusUpdate(company.id, 0);
   };
 
+  const handleActivateCompany = async (company) => {
+    const currentStatus = normalizeCompanyStatus(company?.status);
+    if (currentStatus === 1) {
+      toast.info("Company is already active.");
+      return;
+    }
+    const confirmed = window.confirm("Are you sure you want to set this company as active?");
+    if (!confirmed) return;
+
+    await handleCompanyStatusUpdate(company.id, 1);
+  };
+
   const handleDeleteCompany = async (id) => {
     if (!window.confirm('Are you sure you want to delete this company? This action cannot be undone.')) {
       return;
@@ -134,10 +146,18 @@ const SuperAdminCompanies = () => {
                             Manage Licenses
                         </DropdownMenuItem>
                         <DropdownMenuItem
-                            onClick={() => handleInactiveCompany(user)}
-                            className="text-red-600 hover:bg-red-50 cursor-pointer"
+                            onClick={() =>
+                              normalizeCompanyStatus(user?.status) === 1
+                                ? handleInactiveCompany(user)
+                                : handleActivateCompany(user)
+                            }
+                            className={`cursor-pointer ${
+                              normalizeCompanyStatus(user?.status) === 1
+                                ? "text-red-600 hover:bg-red-50"
+                                : "text-emerald-600 hover:bg-emerald-50"
+                            }`}
                         >
-                            Inactive
+                            {normalizeCompanyStatus(user?.status) === 1 ? "Inactive" : "Activate"}
                         </DropdownMenuItem>
                     
                     <DropdownMenuItem
