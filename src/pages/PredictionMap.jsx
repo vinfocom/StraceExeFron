@@ -2,7 +2,11 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef, memo } from "react";
 import { GoogleMap, useJsApiLoader, Circle, Polygon } from "@react-google-maps/api";
 import { toast } from "react-toastify";
-import { GOOGLE_MAPS_LOADER_OPTIONS } from "@/lib/googleMapsLoader";
+import {
+  GOOGLE_MAPS_LOADER_OPTIONS,
+  getGoogleMapsConfigError,
+  getGoogleMapsErrorMessage,
+} from "@/lib/googleMapsLoader";
 import { mapViewApi } from "@/api/apiEndpoints";
 import Spinner from "@/components/common/Spinner";
 import PredictionDetailsPanel from "@/components/prediction/PredictionDetailsPanel";
@@ -205,6 +209,7 @@ PolygonsLayer.displayName = 'PolygonsLayer';
 // ================== MAIN COMPONENT ==================
 export default function PredictionMapPage() {
   const { isLoaded, loadError } = useJsApiLoader(GOOGLE_MAPS_LOADER_OPTIONS);
+  const mapsConfigError = getGoogleMapsConfigError();
   const [searchParams] = useSearchParams();
 
   const [loading, setLoading] = useState(false);
@@ -503,12 +508,23 @@ useEffect(() => {
     };
   }, [uiToggles.basemapStyle]);
 
+  if (mapsConfigError) {
+    return (
+      <div className="flex items-center justify-center h-screen bg-gray-900">
+        <div className="text-center">
+          <p className="text-red-500 text-lg">Error loading maps</p>
+          <p className="text-sm text-gray-400 mt-2">{mapsConfigError}</p>
+        </div>
+      </div>
+    );
+  }
+
   if (loadError) {
     return (
       <div className="flex items-center justify-center h-screen bg-gray-900">
         <div className="text-center">
           <p className="text-red-500 text-lg">Error loading maps</p>
-          <p className="text-sm text-gray-400 mt-2">{loadError.message}</p>
+          <p className="text-sm text-gray-400 mt-2">{getGoogleMapsErrorMessage(loadError)}</p>
         </div>
       </div>
     );

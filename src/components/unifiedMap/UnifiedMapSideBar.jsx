@@ -2509,8 +2509,6 @@ const UnifiedMapSidebar = ({
                   onChange={(value) => onUIChange?.({ overlapDrawOrder: value })}
                   options={[
                     { value: "original", label: "Original order" },
-                    { value: "latest", label: "Latest on top" },
-                    { value: "earliest", label: "Earliest on top" },
                     { value: "highest_metric", label: "Highest KPI on top" },
                     { value: "lowest_metric", label: "Lowest KPI on top" },
                   ]}

@@ -15,7 +15,11 @@ import { Input } from "@/components/ui/input";
 import Spinner from "@/components/common/Spinner";
 import { mapViewApi, offlineApi } from "@/api/apiEndpoints";
 import { parseWKTToPolygons } from "@/utils/wkt";
-import { GOOGLE_MAPS_LOADER_OPTIONS } from "@/lib/googleMapsLoader";
+import {
+  GOOGLE_MAPS_LOADER_OPTIONS,
+  getGoogleMapsConfigError,
+  getGoogleMapsErrorMessage,
+} from "@/lib/googleMapsLoader";
 import {
   isProjectsListCacheFresh,
   readProjectsListCacheEntry,
@@ -212,9 +216,10 @@ const ProjectPolygonPreview = ({ points, mapsReady, mapsError }) => {
 
 const ViewProjectsPage = () => {
   const navigate = useNavigate();
-  const { isLoaded: mapsReady, loadError: mapsError } = useJsApiLoader(
+  const { isLoaded: mapsReady, loadError } = useJsApiLoader(
     GOOGLE_MAPS_LOADER_OPTIONS,
   );
+  const mapsError = getGoogleMapsConfigError() || (loadError ? getGoogleMapsErrorMessage(loadError) : null);
   const [projects, setProjects] = useState([]);
   const [loading, setLoading] = useState(() => {
     const cacheEntry = readProjectsListCacheEntry();

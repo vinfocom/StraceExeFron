@@ -33,32 +33,6 @@ export default defineConfig({
     host: "localhost",
     port: 5173,
     strictPort: true,
-    proxy: {
-      "/api": {
-        target: "http://localhost:5224",
-        changeOrigin: true,
-        secure: false,
-        cookieDomainRewrite: "localhost",
-      },
-      "/Admin": {
-        target: "http://localhost:5224",
-        changeOrigin: true,
-        secure: false,
-        cookieDomainRewrite: "localhost",
-      },
-      "/Home": {
-        target: "http://localhost:5224",
-        changeOrigin: true,
-        secure: false,
-        cookieDomainRewrite: "localhost",
-      },
-      "/ExcelUpload": {
-        target: "http://localhost:5224",
-        changeOrigin: true,
-        secure: false,
-        cookieDomainRewrite: "localhost",
-      },
-    },
   },
   build: {
     outDir: "dist",

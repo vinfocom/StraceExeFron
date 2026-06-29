@@ -1286,6 +1286,9 @@ export const offlineApi = {
 const LOCAL_PROJECT_API_FLAG = String(
   import.meta.env.VITE_USE_LOCAL_PROJECT_API || ""
 ).toLowerCase();
+const LOCAL_PROJECT_API_FALLBACK_FLAG = String(
+  import.meta.env.VITE_ALLOW_LOCAL_PROJECT_API_FALLBACK || ""
+).toLowerCase();
 
 const isElectronRuntime = (() => {
   if (typeof navigator === "undefined") return false;
@@ -1296,6 +1299,15 @@ const preferLocalProjectApi = (() => {
   if (["1", "true", "yes"].includes(LOCAL_PROJECT_API_FLAG)) return true;
   if (["0", "false", "no"].includes(LOCAL_PROJECT_API_FLAG)) return false;
   // Default to C# first for stability. Enable local Python explicitly via VITE_USE_LOCAL_PROJECT_API=true.
+  return false;
+})();
+
+const allowLocalProjectApiFallback = (() => {
+  if (preferLocalProjectApi) return true;
+  if (["1", "true", "yes"].includes(LOCAL_PROJECT_API_FALLBACK_FLAG)) return true;
+  if (["0", "false", "no"].includes(LOCAL_PROJECT_API_FALLBACK_FLAG)) return false;
+  // In the browser app we should not silently depend on a Python process unless explicitly enabled.
+  // Electron/local-packaged flows can opt in via env if needed.
   return false;
 })();
 
@@ -1352,10 +1364,13 @@ const resolveProjectApiCall = async ({ csharpCall, localPythonCall }) => {
     if (!hasLogicalFailure(csharpResult)) {
       return csharpResult;
     }
+    if (!allowLocalProjectApiFallback) {
+      return csharpResult;
+    }
     console.warn("[Project API] C# returned logical failure, trying local Python fallback", csharpResult);
     return localPythonCall();
   } catch (csharpError) {
-    if (!shouldFallbackToLocalProjectApi(csharpError)) {
+    if (!allowLocalProjectApiFallback || !shouldFallbackToLocalProjectApi(csharpError)) {
       throw csharpError;
     }
     console.warn("[Project API] C# call failed, trying local Python fallback", csharpError);
@@ -1562,11 +1577,15 @@ export const mapViewApi = {
   },
 
   // ==================== Project Management ====================
-  getProjects: (companyId) =>
+  getProjects: (companyId, options = {}) =>
     resolveProjectApiCall({
-      csharpCall: () => api.get("/api/MapView/GetProjects"),
+      csharpCall: () => api.get("/api/MapView/GetProjects", options),
       localPythonCall: () =>
-        pythonApi.get("/api/local-mapview/projects", companyId ? { company_id: companyId } : {}),
+        pythonApi.get(
+          "/api/local-mapview/projects",
+          companyId ? { company_id: companyId } : {},
+          options,
+        ),
     }),
 
   updateProjectSiteSize: async (payload) => {

@@ -45,17 +45,12 @@ const API_BASE_URL = (() => {
   const runtimeOverride = getRuntimeCsharpApiBaseUrl();
   if (runtimeOverride) return normalizeLoopbackHost(runtimeOverride);
 
-  // In browser dev mode, prefer relative URLs so Vite proxy keeps auth same-origin.
-  if (import.meta.env.DEV && !isElectronRuntime) {
-    return "";
-  }
-
   return normalizeLoopbackHost(import.meta.env.VITE_CSHARP_API_URL || "");
 })();
 
-if (!import.meta.env.DEV && !API_BASE_URL) {
+if (!API_BASE_URL) {
   console.warn(
-    "VITE_CSHARP_API_URL is not defined. API requests will use relative paths, which can cause 404 errors in dev mode. " +
+    "VITE_CSHARP_API_URL is not defined. API requests will use relative paths, which can call the frontend dev server instead of the backend. " +
       "Create a .env, .env.development, or .env.development.local file with VITE_CSHARP_API_URL set to your backend URL."
   );
 }

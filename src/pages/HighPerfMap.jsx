@@ -38,11 +38,15 @@ import { Button } from "@/components/ui/button";
 
 import { loadSavedViewport, saveViewport } from "@/utils/viewport";
 import { parseWKTToCoordinates } from "@/utils/wkt";
-import { GOOGLE_MAPS_LOADER_OPTIONS } from "@/lib/googleMapsLoader";
+import {
+  GOOGLE_MAPS_LOADER_OPTIONS,
+  getGoogleMapsConfigError,
+  getGoogleMapsErrorMessage,
+} from "@/lib/googleMapsLoader";
 import { normalizeBandName, normalizeProviderName, normalizeTechName } from "@/utils/colorUtils";
 import { COLOR_SCHEMES } from "@/utils/metrics";
 
-const MAP_ID = import.meta.env.VITE_GOOGLE_MAPS_MAP_ID;
+const MAP_ID = "5e49cd40d6e8c2f71b418c9e";
 const DEFAULT_CENTER = { lat: 28.6139, lng: 77.209 };
 
 const toYmdLocal = (d) => {
@@ -269,6 +273,7 @@ const normalizeSessionIds = (values = []) => {
 export default function HighPerfMap() {
   const navigate = useNavigate();
   const { isLoaded, loadError } = useJsApiLoader(GOOGLE_MAPS_LOADER_OPTIONS);
+  const mapsConfigError = getGoogleMapsConfigError();
   const [map, setMap] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
   const [logsLoading, setLogsLoading] = useState(false);
@@ -960,7 +965,12 @@ const rectCoords = [
     return options;
   }, [ui.basemapStyle]);
 
-  if (loadError) return <div className="flex items-center justify-center h-full text-red-600">Error loading Google Maps.</div>;
+  if (mapsConfigError) {
+    return <div className="flex items-center justify-center h-full px-4 text-center text-red-600">{mapsConfigError}</div>;
+  }
+  if (loadError) {
+    return <div className="flex items-center justify-center h-full px-4 text-center text-red-600">{getGoogleMapsErrorMessage(loadError)}</div>;
+  }
   if (!isLoaded) return <div className="flex items-center justify-center h-full text-gray-600">Loading map...</div>;
 
   return (

@@ -16,7 +16,9 @@ import {
 
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-const withTimeout = (promise, timeoutMs = 30000) =>
+const NETWORK_SAMPLES_TIMEOUT_MS = 120000;
+
+const withTimeout = (promise, timeoutMs = NETWORK_SAMPLES_TIMEOUT_MS) =>
   Promise.race([
     promise,
     new Promise((_, reject) => {

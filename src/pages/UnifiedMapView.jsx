@@ -19,7 +19,11 @@ import { mapViewApi, gridAnalyticsApi, sitePredictionApi } from "../api/apiEndpo
 // Components
 import Spinner from "../components/common/Spinner";
 import MapWithMultipleCircles from "@/components/unifiedMap/MapwithMultipleCircle";
-import { GOOGLE_MAPS_LOADER_OPTIONS } from "@/lib/googleMapsLoader";
+import {
+  GOOGLE_MAPS_LOADER_OPTIONS,
+  getGoogleMapsConfigError,
+  getGoogleMapsErrorMessage,
+} from "@/lib/googleMapsLoader";
 import NetworkPlannerMap from "@/components/unifiedMap/NetworkPlannerMap";
 import UnifiedHeader from "@/components/unifiedMap/unifiedMapHeader";
 import MapLegend from "@/components/map/MapLegend";
@@ -2187,6 +2191,7 @@ const UnifiedMapView = () => {
   );
 
   const { isLoaded, loadError } = useJsApiLoader(GOOGLE_MAPS_LOADER_OPTIONS);
+  const mapsConfigError = getGoogleMapsConfigError();
   const {
     thresholds: baseThresholds,
     getMetricColor: getMetricColorForLog,
@@ -5978,16 +5983,22 @@ const UnifiedMapView = () => {
     return Array.from(set).sort();
   }, [siteData]);
 
-  if (!isLoaded)
+  if (mapsConfigError)
     return (
-      <div className="flex items-center justify-center h-screen">
-        <Spinner />
+      <div className="flex items-center justify-center h-screen text-red-500">
+        Map loading error: {mapsConfigError}
       </div>
     );
   if (loadError)
     return (
       <div className="flex items-center justify-center h-screen text-red-500">
-        Map loading error: {loadError.message}
+        Map loading error: {getGoogleMapsErrorMessage(loadError)}
+      </div>
+    );
+  if (!isLoaded)
+    return (
+      <div className="flex items-center justify-center h-screen">
+        <Spinner />
       </div>
     );
 

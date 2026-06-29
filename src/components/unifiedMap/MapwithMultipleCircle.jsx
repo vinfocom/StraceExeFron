@@ -2142,7 +2142,13 @@ const MapWithMultipleCircles = ({
     [options],
   );
 
-  if (loadError) return <div className="flex items-center justify-center w-full h-full text-red-500">Failed to load Google Maps</div>;
+  if (loadError) {
+    return (
+      <div className="flex items-center justify-center w-full h-full px-4 text-center text-red-500">
+        Failed to load Google Maps
+      </div>
+    );
+  }
   if (!isLoaded) return null;
 
   const isLoadingPolygons = enablePolygonFilter && projectId &&

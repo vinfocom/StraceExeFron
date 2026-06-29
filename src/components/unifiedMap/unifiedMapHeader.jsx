@@ -69,6 +69,21 @@ const DEFAULT_SITE_COLUMN_VALUES = {
   height: "30",
 };
 
+const isTimeoutError = (error) => {
+  const message = String(
+    error?.message ||
+      error?.response?.data?.Message ||
+      error?.response?.data?.message ||
+      "",
+  ).toLowerCase();
+
+  return (
+    error?.code === "ECONNABORTED" ||
+    message.includes("timeout") ||
+    message.includes("timed out")
+  );
+};
+
 const SelectRow = ({
   value,
   onChange,
@@ -587,16 +602,29 @@ function UnifiedHeader({
 
   useEffect(() => {
     const fetchProject = async () => {
+      const numericProjectId = Number(effectiveProjectId);
+      const isCurrentProjectLoaded =
+        Number(project?.id) === numericProjectId && Boolean(project?.project_name);
       const cachedProject = findProjectInProjectsCache(effectiveProjectId);
+
+      if (isCurrentProjectLoaded) {
+        upsertProjectInProjectsCache(project);
+        return;
+      }
+
       if (cachedProject) {
         setProject((prev) =>
           prev?.id === cachedProject.id ? prev : cachedProject,
         );
         upsertProjectInProjectsCache(cachedProject);
+        return;
       }
 
       try {
-        const response = await mapViewApi.getProjects();
+        const response = await mapViewApi.getProjects(undefined, {
+          timeout: 30000,
+          dedupe: false,
+        });
         const allProjects = response?.Data || [];
 
         if (!Array.isArray(allProjects)) {
@@ -613,16 +641,24 @@ function UnifiedHeader({
             prev?.id === matchedProject.id ? prev : matchedProject,
           );
           upsertProjectInProjectsCache(matchedProject);
+          return;
         }
+
+        toast.warn(`Project ${effectiveProjectId} was not found.`);
       } catch (error) {
         console.error("Failed to fetch project info", error);
+        if (isTimeoutError(error)) {
+          toast.warn(
+            `Project ${effectiveProjectId} details timed out while loading.`,
+          );
+        }
       }
     };
 
     if (effectiveProjectId) {
       fetchProject();
     }
-  }, [effectiveProjectId]);
+  }, [effectiveProjectId, project, setProject]);
 
   const isMapPage = location.pathname.includes("unified-map");
   const currentOpacityPercent = Math.round((opacity ?? 0.8) * 100);
