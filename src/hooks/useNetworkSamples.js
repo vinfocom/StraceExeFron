@@ -330,8 +330,6 @@ export const useNetworkSamples = (
         setProgress({ current: cached.locations.length, total: cached.locations.length, page: 1, totalPages: 1 });
         setLoading(false);
         setError(null);
-        lastFetchedKeyRef.current = fetchKey;
-        return;
       }
     }
     if (!forceRefresh && isFetchingRef.current && fetchKey === activeFetchKeyRef.current) return;

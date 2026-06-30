@@ -51,6 +51,7 @@ const CompanyLicensesPage = () => {
         nextEdits[row.license_id] = {
           valid_till: toDateInputValue(row.valid_till),
           status: String(row.license_status ?? 0),
+          password: "",
         };
         nextFeatureEdits[row.license_id] = getEnabledFeaturesFromSource(row);
       });
@@ -157,11 +158,16 @@ const CompanyLicensesPage = () => {
 
     try {
       setUpdatingLicenseId(licenseId);
-      await companyApi.updateIssuedLicense(licenseId, {
+      const payload = {
         valid_till: edit.valid_till,
         status,
         ...buildFeaturePayload(selectedFeatures),
-      });
+      };
+
+      const password = String(edit.password || "").trim();
+      if (password) payload.password = password;
+
+      await companyApi.updateIssuedLicense(licenseId, payload);
       toast.success("License updated successfully.");
       await fetchUsers();
     } catch (error) {
@@ -283,6 +289,25 @@ const CompanyLicensesPage = () => {
             </select>
             {getLicenseStatusBadge(row.license_status)}
           </div>
+        );
+      },
+    },
+    {
+      header: "New Password",
+      accessor: "password",
+      render: (row) => {
+        const edit = licenseEdits[row.license_id] || {};
+        return (
+          <input
+            type="password"
+            autoComplete="new-password"
+            value={edit.password || ""}
+            onChange={(e) =>
+              onChangeLicenseField(row.license_id, "password", e.target.value)
+            }
+            placeholder="Leave blank"
+            className="border rounded px-2 py-1 text-sm bg-white min-w-[150px]"
+          />
         );
       },
     },

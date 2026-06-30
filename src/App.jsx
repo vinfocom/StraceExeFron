@@ -32,6 +32,7 @@ const IndoorPlaningPage = lazy(() => import("./pages/IndoorPlaning"));
 const IndoorPlanningProjectsPage = lazy(() => import("./pages/IndoorPlanningProjects"));
 const SettingsPage = lazy(() => import("./pages/Setting"));
 const UnifiedMapView = lazy(() => import("./pages/UnifiedMapView"));
+const RealtimeNetworkMap = lazy(() => import("./pages/RealtimeNetworkMap"));
 const HighPerfMap = lazy(() => import("@/pages/HighPerfMap"));
 const ProjectsPage = lazy(() => import("./pages/Projects"));
 const PredictionMapPage = lazy(() => import("./pages/PredictionMap"));
@@ -120,6 +121,7 @@ function AppShell({ isElectronRuntime }) {
             <Route path="/prediction-map" element={<PrivateRoute><PredictionMapPage /></PrivateRoute>} />
             <Route path="/getreport" element={<PrivateRoute><GetReportPage /></PrivateRoute>} />
             <Route path="/unified-map" element={<PrivateRoute><UnifiedMapView /></PrivateRoute>} />
+            <Route path="/realtime-network-map" element={<PrivateRoute><RealtimeNetworkMap /></PrivateRoute>} />
             <Route path="/viewProject" element={<PrivateRoute><ViewProjectsPage /></PrivateRoute>} />
 
             <Route path="/companies" element={<SuperAdminRoute><SuperAdminCompanies /></SuperAdminRoute>} />
