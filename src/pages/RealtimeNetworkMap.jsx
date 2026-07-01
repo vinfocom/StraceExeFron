@@ -1,5 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { GoogleMap, MarkerF, Polyline, useJsApiLoader } from "@react-google-maps/api";
+import { GoogleMap, MarkerF, useJsApiLoader } from "@react-google-maps/api";
+import { GoogleMapsOverlay } from "@deck.gl/google-maps";
+import { PathLayer, ScatterplotLayer } from "@deck.gl/layers";
 import { RefreshCw, Wifi, WifiOff } from "lucide-react";
 import { useSearchParams } from "react-router-dom";
 import { toast } from "react-toastify";
@@ -14,6 +16,8 @@ import {
 
 const DEFAULT_CENTER = { lat: 25.033, lng: 121.5654 };
 const mapContainerStyle = { width: "100%", height: "100%" };
+const PAGE_SIZE = 20000;
+const MAX_PAGES = 25;
 
 const extractRows = (response) => {
   if (Array.isArray(response)) return response;
@@ -22,6 +26,29 @@ const extractRows = (response) => {
   if (Array.isArray(response?.result)) return response.result;
   if (Array.isArray(response?.rows)) return response.rows;
   return [];
+};
+
+const extractTotalCount = (response, fallback = 0) => {
+  const body = response?.data && typeof response.data === "object" && !Array.isArray(response.data)
+    ? response.data
+    : response;
+
+  const value =
+    body?.total_count ??
+    body?.totalCount ??
+    body?.TotalCount ??
+    body?.count ??
+    body?.Count;
+
+  const total = Number(value);
+  return Number.isFinite(total) && total > 0 ? total : fallback;
+};
+
+const extractCacheState = (response) => {
+  const body = response?.data && typeof response.data === "object" && !Array.isArray(response.data)
+    ? response.data
+    : response;
+  return String(body?.cache_state || body?.cacheState || "").toUpperCase();
 };
 
 const readNumber = (row, keys) => {
@@ -42,6 +69,7 @@ const normalizePoint = (row, index) => {
 
   return {
     id: row?.id ?? row?.Id ?? `${lat}-${lng}-${index}`,
+    sessionId: row?.session_id ?? row?.sessionId ?? row?.SessionId ?? null,
     lat,
     lng,
     timestamp: row?.timestamp ?? row?.Timestamp ?? row?.time ?? row?.created_at ?? null,
@@ -49,6 +77,74 @@ const normalizePoint = (row, index) => {
     rsrq: row?.rsrq ?? row?.RSRQ ?? null,
     sinr: row?.sinr ?? row?.SINR ?? null,
   };
+};
+
+const toTimeMs = (value) => {
+  if (!value) return null;
+  const time = new Date(value).getTime();
+  return Number.isFinite(time) ? time : null;
+};
+
+const distanceMeters = (a, b) => {
+  const toRad = (value) => (value * Math.PI) / 180;
+  const earthRadius = 6371000;
+  const dLat = toRad(b.lat - a.lat);
+  const dLng = toRad(b.lng - a.lng);
+  const lat1 = toRad(a.lat);
+  const lat2 = toRad(b.lat);
+  const x =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) ** 2;
+  return earthRadius * 2 * Math.atan2(Math.sqrt(x), Math.sqrt(1 - x));
+};
+
+const buildPathSegments = (points) => {
+  if (!Array.isArray(points) || points.length < 2) return [];
+
+  const sorted = [...points].sort((a, b) => {
+    const sessionA = Number(a.sessionId) || 0;
+    const sessionB = Number(b.sessionId) || 0;
+    if (sessionA !== sessionB) return sessionA - sessionB;
+
+    const timeA = toTimeMs(a.timestamp) ?? 0;
+    const timeB = toTimeMs(b.timestamp) ?? 0;
+    if (timeA !== timeB) return timeA - timeB;
+
+    return (Number(a.id) || 0) - (Number(b.id) || 0);
+  });
+
+  const segments = [];
+  let current = [];
+
+  const pushCurrent = () => {
+    if (current.length > 1) {
+      segments.push({ path: current.map((point) => [point.lng, point.lat]) });
+    }
+    current = [];
+  };
+
+  sorted.forEach((point) => {
+    const previous = current[current.length - 1];
+    if (!previous) {
+      current.push(point);
+      return;
+    }
+
+    const sameSession = String(previous.sessionId ?? "") === String(point.sessionId ?? "");
+    const timeA = toTimeMs(previous.timestamp);
+    const timeB = toTimeMs(point.timestamp);
+    const timeGapMs = timeA != null && timeB != null ? Math.abs(timeB - timeA) : 0;
+    const isJump = distanceMeters(previous, point) > 750 || timeGapMs > 10 * 60 * 1000;
+
+    if (!sameSession || isJump) {
+      pushCurrent();
+    }
+
+    current.push(point);
+  });
+
+  pushCurrent();
+  return segments;
 };
 
 const parseSessionIds = (value) => {
@@ -78,8 +174,13 @@ export default function RealtimeNetworkMap() {
   const [status, setStatus] = useState("idle");
   const [lastUpdated, setLastUpdated] = useState(null);
   const [refreshCount, setRefreshCount] = useState(0);
+  const [mapInstance, setMapInstance] = useState(null);
   const mapRef = useRef(null);
+  const deckOverlayRef = useRef(null);
   const refreshTimerRef = useRef(null);
+  const staleRetryTimerRef = useRef(null);
+  const fetchInFlightRef = useRef(false);
+  const pendingRefreshRef = useRef(false);
 
   const { isLoaded, loadError } = useJsApiLoader(GOOGLE_MAPS_LOADER_OPTIONS);
   const mapsError = getGoogleMapsConfigError() || (loadError ? getGoogleMapsErrorMessage(loadError) : null);
@@ -96,38 +197,146 @@ export default function RealtimeNetworkMap() {
     mapRef.current.fitBounds(bounds, 70);
   }, []);
 
-  const loadLogs = useCallback(async ({ silent = false } = {}) => {
+  const loadLogs = useCallback(async ({ silent = false, staleRetryCount = 0 } = {}) => {
     if (sessionIds.length === 0) {
       setPoints([]);
       return;
     }
 
+    if (fetchInFlightRef.current) {
+      pendingRefreshRef.current = true;
+      return;
+    }
+
+    fetchInFlightRef.current = true;
     if (!silent) setLoading(true);
     try {
-      const response = await mapViewApi.getNetworkLog({
-        session_ids: sessionIds,
-        project_id: projectId || undefined,
-        page: 1,
-        limit: 20000,
-      });
+      const nextPoints = [];
+      let page = 1;
+      let totalCount = 0;
+      let hasMore = true;
+      let sawStaleCache = false;
 
-      const nextPoints = extractRows(response)
-        .map(normalizePoint)
-        .filter(Boolean);
+      while (hasMore && page <= MAX_PAGES) {
+        const response = await mapViewApi.getNetworkLog({
+          session_ids: sessionIds,
+          project_id: projectId || undefined,
+          page,
+          limit: PAGE_SIZE,
+          force_refresh: silent || staleRetryCount > 0,
+        });
+
+        const rows = extractRows(response);
+        if (extractCacheState(response) === "STALE") sawStaleCache = true;
+        if (page === 1) totalCount = extractTotalCount(response, rows.length);
+
+        rows
+          .map(normalizePoint)
+          .filter(Boolean)
+          .forEach((point) => nextPoints.push(point));
+
+        hasMore = rows.length === PAGE_SIZE && nextPoints.length < totalCount;
+        page += 1;
+      }
 
       setPoints(nextPoints);
       setLastUpdated(new Date());
       window.setTimeout(() => fitPoints(nextPoints), 0);
+
+      if (sawStaleCache && staleRetryCount < 3) {
+        if (staleRetryTimerRef.current) window.clearTimeout(staleRetryTimerRef.current);
+        staleRetryTimerRef.current = window.setTimeout(() => {
+          loadLogs({ silent: true, staleRetryCount: staleRetryCount + 1 });
+        }, 2500 * (staleRetryCount + 1));
+      }
     } catch (error) {
       toast.error(error?.message || "Failed to load realtime network logs.");
     } finally {
+      fetchInFlightRef.current = false;
       if (!silent) setLoading(false);
+      if (pendingRefreshRef.current) {
+        pendingRefreshRef.current = false;
+        window.setTimeout(() => loadLogs({ silent: true }), 250);
+      }
     }
   }, [fitPoints, projectId, sessionIds]);
 
   useEffect(() => {
     loadLogs();
   }, [loadLogs]);
+
+  useEffect(() => {
+    if (!mapInstance || !window.google?.maps) return undefined;
+
+    if (!deckOverlayRef.current) {
+      deckOverlayRef.current = new GoogleMapsOverlay({
+        interleaved: true,
+        glOptions: { preserveDrawingBuffer: false },
+      });
+    }
+
+    try {
+      deckOverlayRef.current.setMap(mapInstance);
+    } catch {
+      return undefined;
+    }
+
+    return () => {
+      if (deckOverlayRef.current) {
+        try {
+          deckOverlayRef.current.setProps({ layers: [] });
+          deckOverlayRef.current.setMap(null);
+        } catch {
+          // Ignore detach errors during fast map unmounts.
+        }
+      }
+      if (staleRetryTimerRef.current) {
+        window.clearTimeout(staleRetryTimerRef.current);
+        staleRetryTimerRef.current = null;
+      }
+    };
+  }, [mapInstance, isLoaded]);
+
+  const deckLayers = useMemo(() => {
+    const pathSegments = buildPathSegments(points);
+    return [
+      new PathLayer({
+        id: "realtime-network-path",
+        data: pathSegments,
+        getPath: (item) => item.path,
+        getColor: [37, 99, 235, 220],
+        getWidth: 3,
+        widthUnits: "pixels",
+        rounded: true,
+        jointRounded: true,
+        capRounded: true,
+        parameters: {
+          depthTest: false,
+        },
+      }),
+      new ScatterplotLayer({
+        id: "realtime-network-points",
+        data: points,
+        getPosition: (point) => [point.lng, point.lat],
+        getFillColor: [14, 165, 233, 220],
+        getLineColor: [255, 255, 255, 210],
+        getRadius: 4,
+        radiusUnits: "pixels",
+        lineWidthMinPixels: 1,
+        stroked: true,
+        filled: true,
+        pickable: false,
+        parameters: {
+          depthTest: false,
+        },
+      }),
+    ];
+  }, [points]);
+
+  useEffect(() => {
+    if (!deckOverlayRef.current) return;
+    deckOverlayRef.current.setProps({ layers: deckLayers });
+  }, [deckLayers]);
 
   useEffect(() => {
     if (sessionIds.length === 0) {
@@ -216,10 +425,20 @@ export default function RealtimeNetworkMap() {
             zoom={points.length ? 15 : 11}
             onLoad={(map) => {
               mapRef.current = map;
+              setMapInstance(map);
               fitPoints(points);
             }}
             onUnmount={() => {
+              if (deckOverlayRef.current) {
+                try {
+                  deckOverlayRef.current.setProps({ layers: [] });
+                  deckOverlayRef.current.setMap(null);
+                } catch {
+                  // Ignore detach errors.
+                }
+              }
               mapRef.current = null;
+              setMapInstance(null);
             }}
             options={{
               streetViewControl: false,
@@ -228,23 +447,13 @@ export default function RealtimeNetworkMap() {
               clickableIcons: false,
             }}
           >
+            {points[0] && <MarkerF position={{ lat: points[0].lat, lng: points[0].lng }} label="S" />}
             {points.length > 1 && (
-              <Polyline
-                path={points.map((point) => ({ lat: point.lat, lng: point.lng }))}
-                options={{
-                  strokeColor: "#2563eb",
-                  strokeOpacity: 0.85,
-                  strokeWeight: 4,
-                }}
+              <MarkerF
+                position={{ lat: points[points.length - 1].lat, lng: points[points.length - 1].lng }}
+                label="E"
               />
             )}
-            {points.slice(0, 500).map((point, index) => (
-              <MarkerF
-                key={point.id}
-                position={{ lat: point.lat, lng: point.lng }}
-                label={index === 0 ? "S" : index === points.length - 1 ? "E" : undefined}
-              />
-            ))}
           </GoogleMap>
         )}
 

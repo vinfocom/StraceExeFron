@@ -15,7 +15,8 @@ import { excelApi, mapViewApi } from "../api/apiEndpoints";
 import { useFileUpload } from "../hooks/useFileUpload";
 import { useAuth } from "@/context/AuthContext";
 
-const MAX_FILE_SIZE = 500 * 1024 * 1024; // 100MB
+const MAX_FILE_SIZE = 500 * 1024 * 1024;
+const MAX_FILE_SIZE_LABEL = "500 MB";
 
 const FILE_TYPES = [
   "text/csv",
@@ -253,7 +254,7 @@ const UploadDataPage = () => {
     }
 
     if (result?.isLikelyProcessing) {
-      toast.info("Upload request ended before final response. History will auto-refresh while processing continues.");
+      toast.info("Upload request ended after a long wait. History will auto-refresh while processing continues.");
       fetchUploadedFiles({ showLoader: false, showError: false });
     }
   };
@@ -270,7 +271,7 @@ const UploadDataPage = () => {
       return false;
     }
     if (file.size > MAX_FILE_SIZE) {
-      toast.error("File is too large. (Max 100MB)");
+      toast.error(`Size limit exceeded. Maximum allowed file size is ${MAX_FILE_SIZE_LABEL}.`);
       return false;
     }
     return true;
@@ -294,11 +295,31 @@ const UploadDataPage = () => {
     });
   }, []);
 
+  const onDropSessionRejected = useCallback((fileRejections) => {
+    toSafeArray(fileRejections).forEach(({ file, errors }) => {
+      const hasSizeError = toSafeArray(errors).some((error) => error?.code === "file-too-large");
+      if (hasSizeError) {
+        toast.error(
+          `Size limit exceeded for ${file?.name || "selected file"}. Maximum allowed file size is ${MAX_FILE_SIZE_LABEL}.`,
+        );
+        return;
+      }
+
+      const message = errors?.[0]?.message || "File rejected.";
+      toast.error(`${file?.name || "Selected file"}: ${message}`);
+    });
+  }, []);
+
   const {
     getRootProps: getRootPropsSession,
     getInputProps: getInputPropsSession,
     isDragActive: isDragActiveSession,
-  } = useDropzone({ onDrop: onDropSession, multiple: true });
+  } = useDropzone({
+    onDrop: onDropSession,
+    onDropRejected: onDropSessionRejected,
+    multiple: true,
+    maxSize: MAX_FILE_SIZE,
+  });
 
   const removeFile = (type, index = null) => {
     if (type !== "session") return;

@@ -1680,10 +1680,10 @@ export const mapViewApi = {
 
   // ==================== Network Logs ====================
   // In apiEndpoints.js
-  getNetworkLog: async ({ session_ids, page = 1, limit = 20000, signal, project_id }) => {
+  getNetworkLog: async ({ session_ids, page = 1, limit = 20000, signal, project_id, force_refresh = false }) => {
     const sid = Array.isArray(session_ids) ? session_ids.join(",") : session_ids;
 
-    debugUnifiedMapApi("getNetworkLog:start", { sid, page, limit });
+    debugUnifiedMapApi("getNetworkLog:start", { sid, page, limit, force_refresh });
 
     const hasLocalSession = String(sid || "")
       .split(",")
@@ -1707,6 +1707,7 @@ export const mapViewApi = {
         project_id: project_id ?? undefined,
         page: page,
         limit: limit,
+        force_refresh: force_refresh ? true : undefined,
       },
       signal: signal,
       dedupe: false,
@@ -2005,7 +2006,7 @@ export const excelApi = {
   uploadFile: async (formData, onUploadProgress = null) => {
     try {
       return await api.post("/ExcelUpload/UploadExcelFile", formData, {
-        timeout: 1800000,
+        timeout: 7200000,
         onUploadProgress:
           onUploadProgress ||
           ((progressEvent) => {

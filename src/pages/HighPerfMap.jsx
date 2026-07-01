@@ -46,7 +46,7 @@ import {
 import { normalizeBandName, normalizeProviderName, normalizeTechName } from "@/utils/colorUtils";
 import { COLOR_SCHEMES } from "@/utils/metrics";
 
-const MAP_ID = "5e49cd40d6e8c2f71b418c9e";
+const MAP_ID = "5e49cd40d6e8c2f7f896f084";
 const DEFAULT_CENTER = { lat: 28.6139, lng: 77.209 };
 
 const toYmdLocal = (d) => {
