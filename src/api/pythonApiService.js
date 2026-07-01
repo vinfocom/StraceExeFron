@@ -5,6 +5,8 @@ const isElectronRuntime =
   typeof navigator !== "undefined" &&
   /electron/i.test(navigator.userAgent || "");
 
+const DEPLOYED_API_BASE_URL = "https://s-traccceer.vinfocom.co.in";
+
 const getRuntimePythonBaseUrl = () => {
   if (!isElectronRuntime) return "";
   if (typeof window === "undefined") return "";
@@ -26,7 +28,7 @@ const PYTHON_BASE_URL = String(
         import.meta.env.VITE_ELECTRON_PYTHON_API_URL ||
         "http://127.0.0.1:8081"
       )
-    : (import.meta.env.VITE_PYTHON_API_URL || "http://127.0.0.1:8081")
+    : (import.meta.env.VITE_PYTHON_API_URL || DEPLOYED_API_BASE_URL)
 )
   .trim()
   .replace(/\/+$/, "");
@@ -100,6 +102,8 @@ const discoverPythonBaseUrl = async () => {
   if (discoveryPromise) return discoveryPromise;
 
   discoveryPromise = (async () => {
+    if (!isElectronRuntime) return "";
+
     const candidates = [];
     const explicitHost = (import.meta.env.VITE_ELECTRON_PYTHON_API_HOST || "127.0.0.1").trim();
     const explicitPort = Number(

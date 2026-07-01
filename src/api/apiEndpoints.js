@@ -471,9 +471,7 @@ export const cellSiteApi = {
    * Download file without opening a new Electron window.
    */
   downloadFile: (outputDir, filename) => {
-    const baseUrl =
-      import.meta.env.VITE_PYTHON_API_URL || "http://localhost:8081";
-    const url = `${baseUrl}/api/cell-site/download/${outputDir}/${filename}`;
+    const url = `${PYTHON_BASE_URL_EXPORT}/api/cell-site/download/${outputDir}/${filename}`;
     return downloadUrlAsBlob(url, filename);
   },
 
