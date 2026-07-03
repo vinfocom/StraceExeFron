@@ -877,14 +877,22 @@ function UnifiedHeader({
     toggleQuickControl,
   ]);
 
+  // Scenario selection applies to the optimized side: both "Optimized" (updated)
+  // and "Delta" (baseline vs. optimized comparison) need a scenario to fetch.
+  const normalizedSiteVersion = String(sitePredictionVersion || "")
+    .trim()
+    .toLowerCase();
+  const scenarioSelectableVersion =
+    normalizedSiteVersion === "updated" || normalizedSiteVersion === "delta";
+
   useEffect(() => {
     if (
       String(siteToggle || "").trim().toLowerCase() !== "cell" ||
-      String(sitePredictionVersion || "").trim().toLowerCase() !== "updated"
+      !scenarioSelectableVersion
     ) {
       setSiteScenarioMenuOpen(false);
     }
-  }, [sitePredictionVersion, siteToggle]);
+  }, [scenarioSelectableVersion, siteToggle]);
 
   return (
     <header className="min-h-14 bg-gray-800 text-white shadow-sm flex flex-wrap xl:flex-nowrap items-center justify-between gap-2 px-3 sm:px-4 xl:px-6 py-2 xl:py-0 flex-shrink-0 relative z-10">
@@ -955,7 +963,7 @@ function UnifiedHeader({
 
             
 
-            {isElectronRuntime && (
+            {!isElectronRuntime && (
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <Button
@@ -1049,33 +1057,35 @@ function UnifiedHeader({
               </div>
             )}
 
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button
-                  type="button"
-                  size="sm"
-                  title="Utility"
-                  className="h-9 shrink-0 flex gap-1 items-center bg-blue-600 hover:bg-blue-500 text-white"
-                >
-                  <SlidersHorizontal className="h-4 w-4" />
-                  <span className="hidden xl:inline">Utility</span>
-                  <ChevronDown className="h-3.5 w-3.5" />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="bg-white text-slate-800">
-                <DropdownMenuLabel>Utility</DropdownMenuLabel>
-                <DropdownMenuSeparator />
-                {utilityMenuItems.map((item) => (
-                  <DropdownMenuItem
-                    key={item.label}
-                    disabled={item.disabled}
-                    onClick={item.action}
+            {(
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    type="button"
+                    size="sm"
+                    title="Utility"
+                    className="h-9 shrink-0 flex gap-1 items-center bg-blue-600 hover:bg-blue-500 text-white"
                   >
-                    {item.label}
-                  </DropdownMenuItem>
-                ))}
-              </DropdownMenuContent>
-            </DropdownMenu>
+                    <SlidersHorizontal className="h-4 w-4" />
+                    <span className="hidden xl:inline">Utility</span>
+                    <ChevronDown className="h-3.5 w-3.5" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="bg-white text-slate-800">
+                  <DropdownMenuLabel>Utility</DropdownMenuLabel>
+                  <DropdownMenuSeparator />
+                  {utilityMenuItems.map((item) => (
+                    <DropdownMenuItem
+                      key={item.label}
+                      disabled={item.disabled}
+                      onClick={item.action}
+                    >
+                      {item.label}
+                    </DropdownMenuItem>
+                  ))}
+                </DropdownMenuContent>
+              </DropdownMenu>
+            )}
 
             {activeQuickControl === "neighbors" && neighborLogsAvailable && (
               <div className="flex max-w-full flex-wrap items-center gap-2 bg-gray-700/80 rounded-lg px-3 py-1.5 border border-gray-600">
@@ -1234,7 +1244,7 @@ function UnifiedHeader({
                   placeholder="Site label"
                 />
                 {siteToggle === "Cell" &&
-                  String(sitePredictionVersion || "").trim().toLowerCase() === "updated" && (
+                  scenarioSelectableVersion && (
                     <div className="min-w-0 flex-1 space-y-1.5 relative xl:col-span-1">
                       <button
                         type="button"

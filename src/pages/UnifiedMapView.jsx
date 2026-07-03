@@ -2590,7 +2590,9 @@ const UnifiedMapView = () => {
 
   useEffect(() => {
     const normalizedSiteVersion = String(sitePredictionVersion || "original").trim().toLowerCase();
-    if (normalizedSiteVersion !== "updated") {
+    // Both "updated" (Optimized) and "delta" fetch an optimized scenario; only
+    // "original" (Baseline, fixed) has no scenario.
+    if (normalizedSiteVersion !== "updated" && normalizedSiteVersion !== "delta") {
       setSitePredictionScenarioId(null);
       return;
     }

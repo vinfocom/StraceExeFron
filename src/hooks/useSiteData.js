@@ -523,8 +523,19 @@ export const useSiteData = ({
       switch (siteToggle) {
         case 'Cell':
           if (normalizedVersion === "delta") {
+            // Delta compares the fixed baseline against a chosen optimized
+            // scenario, so forward the scenario when one is selected.
+            const deltaScenarioId =
+              Number.isFinite(Number(sitePredictionScenarioId)) &&
+              Number(sitePredictionScenarioId) > 0
+                ? Number(sitePredictionScenarioId)
+                : undefined;
+
             response = await sitePredictionApi.compare({
               ...params,
+              scenario: deltaScenarioId,
+              scenario_id: deltaScenarioId,
+              site_prediction_scenario_id: deltaScenarioId,
               limit: SITE_PREDICTION_PAGE_SIZE,
             });
           } else {

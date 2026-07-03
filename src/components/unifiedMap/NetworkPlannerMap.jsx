@@ -2663,6 +2663,92 @@ const NetworkPlannerMap = ({
     });
   }, [movedDeltaLinks, viewport]);
 
+  // Delta mode: pair the fixed baseline against the optimized scenario per
+  // sector and flag where the total tilt (mechanical + electrical) changed, so
+  // an arrow can be drawn on the optimized site to show the direction/amount.
+  const tiltDeltaMarkers = useMemo(() => {
+    if (String(sitePredictionVersion || "").trim().toLowerCase() !== "delta") return [];
+
+    const readMTilt = (row) => toFiniteNumberOrNull(row?.m_tilt ?? row?.mTilt);
+    const readETilt = (row) => toFiniteNumberOrNull(row?.e_tilt ?? row?.eTilt);
+
+    const baselineByKey = new Map();
+    const optimizedByKey = new Map();
+
+    filteredSiteData.forEach((row) => {
+      const variant = normalizeDeltaVariant(
+        row?.deltaVariant ?? row?.delta_variant ?? row?.__deltaVariant ?? "",
+      );
+      if (variant !== "baseline" && variant !== "optimized") return;
+
+      const siteId = getSiteId(row);
+      if (!siteId) return;
+      const sector = String(row?.sector ?? row?.sector_id ?? row?.sectorId ?? "").trim();
+      const cellId = String(
+        row?.cell_id ?? row?.cellId ?? row?.cell_id_representative ?? row?.cellIdRepresentative ?? "",
+      ).trim();
+      const key = [siteId, sector || cellId || "site"].join("|");
+      const lat = Number(row?.lat ?? row?.latitude ?? row?.lat_pred);
+      const lng = Number(row?.lng ?? row?.longitude ?? row?.lon_pred ?? row?.lon);
+      if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
+
+      const entry = { siteId, sector, cellId, lat, lng, mTilt: readMTilt(row), eTilt: readETilt(row) };
+      if (variant === "baseline") baselineByKey.set(key, entry);
+      else optimizedByKey.set(key, entry);
+    });
+
+    const markers = [];
+    optimizedByKey.forEach((optimized, key) => {
+      const baseline = baselineByKey.get(key);
+      if (!baseline) return;
+
+      const baseM = Number.isFinite(baseline.mTilt) ? baseline.mTilt : 0;
+      const baseE = Number.isFinite(baseline.eTilt) ? baseline.eTilt : 0;
+      const optM = Number.isFinite(optimized.mTilt) ? optimized.mTilt : 0;
+      const optE = Number.isFinite(optimized.eTilt) ? optimized.eTilt : 0;
+
+      const dM = optM - baseM;
+      const dE = optE - baseE;
+      const dTotal = optM + optE - (baseM + baseE);
+
+      // Only flag sectors where mechanical or electrical tilt actually changed.
+      const epsilon = 0.05;
+      if (Math.abs(dM) < epsilon && Math.abs(dE) < epsilon) return;
+
+      // Direction from combined total tilt; fall back to whichever changed when
+      // the mechanical/electrical changes cancel out.
+      const direction =
+        Math.abs(dTotal) >= epsilon ? Math.sign(dTotal) : Math.sign(dM || dE);
+      const magnitude = Math.abs(dTotal) >= epsilon ? Math.abs(dTotal) : Math.abs(dM || dE);
+
+      markers.push({
+        key,
+        siteId: optimized.siteId || baseline.siteId,
+        sector: optimized.sector || baseline.sector,
+        lat: optimized.lat,
+        lng: optimized.lng,
+        direction,
+        magnitude: Number(magnitude.toFixed(1)),
+        tooltip:
+          `Tilt change · M ${baseM}°→${optM}° (${dM >= 0 ? "+" : ""}${Number(dM.toFixed(1))}°), ` +
+          `E ${baseE}°→${optE}° (${dE >= 0 ? "+" : ""}${Number(dE.toFixed(1))}°)`,
+      });
+    });
+
+    return markers.slice(0, 1000);
+  }, [filteredSiteData, sitePredictionVersion]);
+
+  const visibleTiltDeltaMarkers = useMemo(() => {
+    if (!viewport) return tiltDeltaMarkers;
+    return tiltDeltaMarkers.filter(
+      (m) =>
+        m.lat >= viewport.south &&
+        m.lat <= viewport.north &&
+        m.lng >= viewport.west &&
+        m.lng <= viewport.east,
+    );
+  }, [tiltDeltaMarkers, viewport]);
+
   const renderedSectors = useMemo(() => {
     const selectedRenderKey = selectedSectorInfo?.renderKey;
     const hoveredPci = extractPciValue(hoveredLog);
@@ -4138,6 +4224,42 @@ const NetworkPlannerMap = ({
           }}
         />
       ))}
+
+      {showSiteMarkers &&
+        visibleTiltDeltaMarkers.map((mark, index) => {
+          const increased = mark.direction > 0;
+          const arrowColor = increased ? "#dc2626" : "#2563eb";
+          return (
+            <MarkerF
+              key={`tilt-delta-${mark.key}-${index}`}
+              position={{ lat: mark.lat, lng: mark.lng }}
+              title={mark.tooltip}
+              icon={{
+                path: window.google.maps.SymbolPath.FORWARD_CLOSED_ARROW,
+                scale: 4.5,
+                rotation: increased ? 0 : 180,
+                fillColor: arrowColor,
+                fillOpacity: 1,
+                strokeColor: "#ffffff",
+                strokeWeight: 1.2,
+                labelOrigin: new window.google.maps.Point(0, increased ? -3.2 : 3.2),
+              }}
+              label={{
+                text: `${increased ? "+" : "-"}${mark.magnitude}°`,
+                color: arrowColor,
+                fontSize: "10px",
+                fontWeight: "700",
+              }}
+              zIndex={4300}
+              onLoad={(marker) => {
+                if (marker) markerRefs.current.add(marker);
+              }}
+              onUnmount={(marker) => {
+                if (marker) markerRefs.current.delete(marker);
+              }}
+            />
+          );
+        })}
 
       {shouldRenderLegacySectorPredictionMarkers &&
         renderedAllSectorPredictionRows.map((point, index) => {
