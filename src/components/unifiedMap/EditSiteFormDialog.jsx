@@ -108,6 +108,7 @@ const EditSiteFormDialog = ({
                 className={inputClass}
               >
                 <option value="">Create New Scenario</option>
+                <option value="baseline">Save in Baseline</option>
                 {scenarioOptions.map((item) => {
                   const scenarioId = Number(item?.scenario_id);
                   if (!Number.isFinite(scenarioId) || scenarioId <= 0) return null;

@@ -9,6 +9,7 @@ import {
   Download, 
   Trash2, 
   Search,
+  PaintBucket,
   PenTool, 
   X
 } from "lucide-react";
@@ -41,6 +42,7 @@ const DrawingControlsPanel = memo(function DrawingControlsPanel({
   onDownloadStatsCsv: propOnDownloadStatsCsv,
   onDownloadRawCsv: propOnDownloadRawCsv,
   onFetchLogs: propOnFetchLogs,
+  onFillWithLogs: propOnFillWithLogs,
   position = "top-right",
 }) {
   const context = useMapContext();
@@ -54,6 +56,10 @@ const DrawingControlsPanel = memo(function DrawingControlsPanel({
   const handleDownloadStatsCsv = propOnDownloadStatsCsv || downloadHandlers.onDownloadStatsCsv;
   const handleDownloadRawCsv = propOnDownloadRawCsv || downloadHandlers.onDownloadRawCsv;
   const handleFetchLogs = propOnFetchLogs || downloadHandlers.onFetchLogs;
+  const handleFillWithLogs =
+    propOnFillWithLogs ||
+    downloadHandlers.onFillWithLogs ||
+    (() => {});
 
   const safeUi = useMemo(() => ({
     drawEnabled: false,
@@ -190,7 +196,7 @@ const DrawingControlsPanel = memo(function DrawingControlsPanel({
             />
             <ToolButton 
               icon={Ruler} 
-              title="Measure Distance"
+              title="Draw Line / Measure Distance"
               active={safeUi.drawEnabled && safeUi.shapeMode === "polyline"}
               onClick={() => activateTool("polyline")}
             />
@@ -225,6 +231,19 @@ const DrawingControlsPanel = memo(function DrawingControlsPanel({
                       <span className="text-sm text-gray-700">Pixelate Grid Analysis</span>
                     </label>
 
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs text-gray-600 w-16">Fill Gap:</span>
+                      <input
+                        type="number"
+                        min={5}
+                        step={5}
+                        value={safeUi.drawCellSizeMeters}
+                        onChange={(e) => updateSetting('drawCellSizeMeters', Number(e.target.value))}
+                        className="flex-1 border rounded px-2 py-1 text-xs"
+                      />
+                      <span className="text-xs text-gray-500">m</span>
+                    </div>
+
                     {safeUi.drawPixelateRect && (
                       <div className="pl-6 space-y-2">
                         <label className="flex items-center gap-2 cursor-pointer">
@@ -236,24 +255,18 @@ const DrawingControlsPanel = memo(function DrawingControlsPanel({
                           />
                           <span className="text-xs text-gray-600">Colorize by Metric</span>
                         </label>
-
-                        <div className="flex items-center gap-2">
-                          <span className="text-xs text-gray-600 w-12">Cell Size:</span>
-                          <input
-                            type="number"
-                            min={10}
-                            step={10}
-                            value={safeUi.drawCellSizeMeters}
-                            onChange={(e) => updateSetting('drawCellSizeMeters', Number(e.target.value))}
-                            className="flex-1 border rounded px-2 py-1 text-xs"
-                          />
-                          <span className="text-xs text-gray-500">m</span>
-                        </div>
                       </div>
                     )}
                 </div>
               </PopoverContent>
             </Popover>
+
+            <ToolButton
+              icon={PaintBucket}
+              title="Fill latest drawing with generated logs"
+              active={false}
+              onClick={handleFillWithLogs}
+            />
 
             {/* Export Popover */}
             <Popover>

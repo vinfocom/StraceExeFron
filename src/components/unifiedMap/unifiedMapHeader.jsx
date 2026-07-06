@@ -489,6 +489,7 @@ function UnifiedHeader({
   defaultSiteBeamwidth = 30,
   setDefaultSiteBeamwidth,
   onUIChange,
+  onFillWithLogs,
   ui,
   onSettingsSaved,
   onOpenMultiView,
@@ -679,7 +680,7 @@ function UnifiedHeader({
     ? Number(defaultSiteBeamwidth)
     : 30;
   const minTriangleScale = 0.25;
-  const maxTriangleScale = 3;
+  const maxTriangleScale = 5;
   const triangleScaleStep = 0.25;
   const minBeamwidth = 5;
   const maxBeamwidth = 180;
@@ -1322,6 +1323,7 @@ function UnifiedHeader({
               position="relative"
               onUIChange={onUIChange}
               ui={ui}
+              onFillWithLogs={onFillWithLogs}
             />
           </div>
         )}

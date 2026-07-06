@@ -367,6 +367,7 @@ export const useNetworkSamples = (
               project_id: projectId,
               page: currentPage,
               limit: PAGE_SIZE,
+              force_refresh: forceRefresh,
               signal: abortControllerRef.current.signal,
             }),
           );

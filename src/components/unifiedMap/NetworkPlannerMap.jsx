@@ -715,7 +715,7 @@ function isSiteLteDebugEnabled() {
 }
 
 const MIN_TRIANGLE_SCALE_MULTIPLIER = 0.25;
-const MAX_TRIANGLE_SCALE_MULTIPLIER = 3;
+const MAX_TRIANGLE_SCALE_MULTIPLIER = 5;
 const SQUARE_MARKER_PATH = "M -1 -1 L 1 -1 L 1 1 L -1 1 Z";
 const MAX_RENDERED_SITE_SECTORS = 4000;
 const MAX_RENDERED_SITE_LABELS = 450;
@@ -1568,18 +1568,29 @@ const NetworkPlannerMap = ({
     });
   }, [buildScenarioUpdateKey]);
 
-  const savePendingScenarioUpdates = useCallback(async () => {
+  const savePendingScenarioUpdates = useCallback(async (saveTarget = "scenario") => {
     if (pendingScenarioUpdates.length === 0) {
       toast.info("No pending changes to save.");
       return;
     }
 
+    const shouldSaveBaseline = String(saveTarget || "").trim().toLowerCase() === "baseline";
     setIsSavingScenarioUpdates(true);
     try {
-      const response = await sitePredictionApi.update(pendingScenarioUpdates);
+      const payload = shouldSaveBaseline
+        ? pendingScenarioUpdates.map((item) => ({
+            ...item,
+            save_target: "baseline",
+          }))
+        : pendingScenarioUpdates;
+      const response = await sitePredictionApi.update(payload);
       const rowsAffected = extractRowsAffected(response);
       const scenario = Number(response?.Scenario ?? response?.scenario ?? NaN);
-      const scenarioLabel = Number.isFinite(scenario) && scenario > 0 ? `Scenario ${scenario}` : "new scenario";
+      const scenarioLabel = shouldSaveBaseline
+        ? "Baseline"
+        : Number.isFinite(scenario) && scenario > 0
+          ? `Scenario ${scenario}`
+          : "new scenario";
 
       toast.success(
         rowsAffected > 0
@@ -1587,7 +1598,7 @@ const NetworkPlannerMap = ({
           : `${scenarioLabel} saved.`,
       );
 
-      if (Number.isFinite(scenario) && scenario > 0) {
+      if (!shouldSaveBaseline && Number.isFinite(scenario) && scenario > 0) {
         onSitePredictionScenarioSaved?.(scenario);
       }
 
@@ -1595,7 +1606,7 @@ const NetworkPlannerMap = ({
       clearUnifiedSiteDataCache();
       await fetchSiteData(true);
     } catch (error) {
-      toast.error(extractApiErrorDetails(error) || "Failed to save scenario updates.");
+      toast.error(extractApiErrorDetails(error) || "Failed to save site updates.");
     } finally {
       setIsSavingScenarioUpdates(false);
     }
@@ -3534,8 +3545,11 @@ const NetworkPlannerMap = ({
 
     setIsSavingSectorEdit(true);
     try {
+      const shouldSaveBaseline = String(selectedEditScenarioId || "").trim().toLowerCase() === "baseline";
       const selectedScenarioNumber = Number(selectedEditScenarioId);
-      if (Number.isFinite(selectedScenarioNumber) && selectedScenarioNumber > 0) {
+      if (shouldSaveBaseline) {
+        payloadItem.save_target = "baseline";
+      } else if (Number.isFinite(selectedScenarioNumber) && selectedScenarioNumber > 0) {
         payloadItem.scenario_id = selectedScenarioNumber;
       }
 
@@ -3543,14 +3557,20 @@ const NetworkPlannerMap = ({
       const rowsAffected = extractRowsAffected(response);
       const savedScenario = Number(response?.Scenario ?? response?.scenario ?? NaN);
 
-      if (Number.isFinite(savedScenario) && savedScenario > 0) {
+      if (!shouldSaveBaseline && Number.isFinite(savedScenario) && savedScenario > 0) {
         onSitePredictionScenarioSaved?.(savedScenario);
       }
 
       closeSectorTooltipOnly();
       toast.success(
         rowsAffected > 0
-          ? `Saved changes to ${Number.isFinite(savedScenario) && savedScenario > 0 ? `Scenario ${savedScenario}` : "a new scenario"}.`
+          ? `Saved changes to ${
+              shouldSaveBaseline
+                ? "Baseline"
+                : Number.isFinite(savedScenario) && savedScenario > 0
+                  ? `Scenario ${savedScenario}`
+                  : "a new scenario"
+            }.`
           : "No site rows were updated.",
       );
 
@@ -4011,6 +4031,16 @@ const NetworkPlannerMap = ({
                 </button>
                 <button
                   type="button"
+                  onClick={() => {
+                    void savePendingScenarioUpdates("baseline");
+                  }}
+                  disabled={isSavingScenarioUpdates}
+                  className="rounded bg-emerald-700 px-2 py-1 text-[11px] font-semibold text-white disabled:opacity-60"
+                >
+                  Save in Baseline
+                </button>
+                <button
+                  type="button"
                   onClick={() => setPendingScenarioUpdatesByKey({})}
                   disabled={isSavingScenarioUpdates}
                   className="rounded bg-slate-100 px-2 py-1 text-[11px] font-semibold text-slate-700 disabled:opacity-60"
@@ -4141,6 +4171,16 @@ const NetworkPlannerMap = ({
               className="rounded bg-cyan-700 px-2 py-1 text-[11px] font-semibold text-white disabled:opacity-60"
             >
               {isSavingScenarioUpdates ? "Saving..." : "Save Scenario"}
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                void savePendingScenarioUpdates("baseline");
+              }}
+              disabled={isSavingScenarioUpdates}
+              className="rounded bg-emerald-700 px-2 py-1 text-[11px] font-semibold text-white disabled:opacity-60"
+            >
+              Save in Baseline
             </button>
             <button
               type="button"
@@ -4469,6 +4509,17 @@ const NetworkPlannerMap = ({
                           {isSavingScenarioUpdates
                             ? "Saving..."
                             : `Save Scenario${pendingScenarioUpdateCount > 0 ? ` (${pendingScenarioUpdateCount})` : ""}`}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            void savePendingScenarioUpdates("baseline");
+                          }}
+                          disabled={isSavingScenarioUpdates || pendingScenarioUpdateCount === 0}
+                          className="rounded bg-emerald-700 px-2 py-1 text-[11px] font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
+                          title="Save staged site edits into baseline"
+                        >
+                          Save in Baseline
                         </button>
                         <button
                           type="button"

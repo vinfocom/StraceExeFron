@@ -295,7 +295,12 @@ const isDuplicateVertex = (points, nextPoint) => {
 
 const isClosingVertex = (points, nextPoint) => {
   const firstPoint = points[0];
-  return points.length >= 3 && firstPoint && getLatLngDistance(firstPoint, nextPoint) < 10;
+  return points.length >= 3 && firstPoint && getLatLngDistance(firstPoint, nextPoint) < 25;
+};
+
+const isEndingPolyline = (points, nextPoint) => {
+  const lastPoint = points[points.length - 1];
+  return points.length >= 2 && lastPoint && getLatLngDistance(lastPoint, nextPoint) < 25;
 };
 
 const getVertexMarkerIcon = (type, isFirst = false) => {
@@ -520,7 +525,7 @@ function DrawingToolsLayerComponent({
     };
     shapesRef.current.push(shapeObj);
     const isMeasurementTool = type === "polyline";
-    const entry = isMeasurementTool ? null : reAnalyzeShapeRef.current?.(shapeObj);
+    const entry = reAnalyzeShapeRef.current?.(shapeObj);
     const listeners = [];
     const update = () => reAnalyzeShapeRef.current?.(shapeObj);
     const rebuildVertexMarkers = () => {
@@ -579,11 +584,13 @@ function DrawingToolsLayerComponent({
         listeners.push(window.google.maps.event.addListener(path, "set_at", () => {
           updateDistanceLabel();
           syncVertexMarkerPositions(shapeObj.vertexMarkers, path);
+          update();
         }));
         ["insert_at", "remove_at"].forEach((ev) =>
           listeners.push(window.google.maps.event.addListener(path, ev, () => {
             updateDistanceLabel();
             rebuildVertexMarkers();
+            update();
           })),
         );
         updateDistanceLabel();
@@ -613,13 +620,6 @@ function DrawingToolsLayerComponent({
     }
 
     shapeObj.listeners = listeners;
-
-    // For non-measurement tools, reAnalyzeShape already fires onDrawingsChange with
-    // full data including logs, geometry, and stats.
-    if (isMeasurementTool) {
-      callbacksRef.current.onSummary?.(null);
-      callbacksRef.current.onDrawingsChange?.([...collectedDrawingRef.current]);
-    }
 
     if (type !== "polyline") {
       const sessionMsg =
@@ -741,8 +741,12 @@ function DrawingToolsLayerComponent({
           index,
           title: index === 0 && type === "polygon"
             ? "Start point - click to finish polygon"
-            : "Vertex",
-          onClick: () => {
+            : type === "polyline" && index > 0
+              ? "End point - click to finish line"
+              : "Vertex",
+          onClick: (event) => {
+            event?.domEvent?.preventDefault?.();
+            event?.domEvent?.stopPropagation?.();
             if (type === "polygon" && index === 0 && committedPoints.length >= 3) {
               finishPathShape();
             } else if (type === "polyline" && index === committedPoints.length - 1 && committedPoints.length >= 2) {
@@ -774,6 +778,11 @@ function DrawingToolsLayerComponent({
             overlay.setPath(committedPoints);
             addDraftVertexMarker(event.latLng, committedPoints.length - 1);
           } else {
+            if (isEndingPolyline(committedPoints, event.latLng)) {
+              finishPathShape();
+              return;
+            }
+
             if (isDuplicateVertex(committedPoints, event.latLng)) {
               return;
             }
@@ -813,8 +822,8 @@ function DrawingToolsLayerComponent({
 
       toast.info(
         type === "polygon"
-          ? "Click points on the map. Double-click or right-click to finish."
-          : "Click distance points. Double-click or right-click to finish.",
+          ? "Click points on the map. Click the first point, double-click, or right-click to finish."
+          : "Click line points. Click the last point, double-click, or right-click to finish.",
         { position: "bottom-right", autoClose: 2500 },
       );
     } else if (type === "rectangle" || type === "circle") {

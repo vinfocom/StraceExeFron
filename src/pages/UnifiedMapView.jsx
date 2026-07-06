@@ -606,7 +606,7 @@ const normalizeKey = (value) => {
 const normalizeProjectSiteSize = (value, fallback = 1) => {
   const numeric = Number(value);
   if (!Number.isFinite(numeric) || numeric <= 0) return fallback;
-  return Math.max(0.25, Math.min(3, Number(numeric.toFixed(2))));
+  return Math.max(0.25, Math.min(5, Number(numeric.toFixed(2))));
 };
 
 const getCircleBoundaryPoints = (circle, pointCount = 48) => {
@@ -680,6 +680,203 @@ const getSaveableShapeCoordinates = (shape) => {
   }
 
   return [];
+};
+
+const getGeometryBounds = (geometry) => {
+  if (!geometry) return null;
+  const points = [];
+
+  if (geometry.type === "polygon" && Array.isArray(geometry.polygon)) {
+    points.push(...geometry.polygon);
+  } else if (geometry.type === "polyline" && Array.isArray(geometry.path)) {
+    points.push(...geometry.path);
+  } else if (geometry.type === "rectangle" && geometry.rectangle?.sw && geometry.rectangle?.ne) {
+    points.push(geometry.rectangle.sw, geometry.rectangle.ne);
+  } else if (geometry.type === "circle" && geometry.circle?.center) {
+    const center = geometry.circle.center;
+    const radiusMeters = Number(geometry.circle.radius);
+    if (Number.isFinite(radiusMeters) && radiusMeters > 0) {
+      const metersPerDegLat = 111320;
+      const metersPerDegLng = Math.max(
+        1,
+        111320 * Math.cos((Number(center.lat) * Math.PI) / 180),
+      );
+      const latDelta = radiusMeters / metersPerDegLat;
+      const lngDelta = radiusMeters / metersPerDegLng;
+      return {
+        south: Number(center.lat) - latDelta,
+        north: Number(center.lat) + latDelta,
+        west: Number(center.lng) - lngDelta,
+        east: Number(center.lng) + lngDelta,
+      };
+    }
+  }
+
+  const normalized = points
+    .map((point) => ({ lat: Number(point?.lat), lng: Number(point?.lng) }))
+    .filter((point) => Number.isFinite(point.lat) && Number.isFinite(point.lng));
+  if (!normalized.length) return null;
+  return {
+    south: Math.min(...normalized.map((point) => point.lat)),
+    north: Math.max(...normalized.map((point) => point.lat)),
+    west: Math.min(...normalized.map((point) => point.lng)),
+    east: Math.max(...normalized.map((point) => point.lng)),
+  };
+};
+
+const isPointInsideGeometry = (point, geometry) => {
+  if (!point || !geometry) return false;
+  const candidate = { lat: Number(point.lat), lng: Number(point.lng) };
+  if (!Number.isFinite(candidate.lat) || !Number.isFinite(candidate.lng)) return false;
+
+  if (geometry.type === "rectangle" && geometry.rectangle?.sw && geometry.rectangle?.ne) {
+    const south = Math.min(Number(geometry.rectangle.sw.lat), Number(geometry.rectangle.ne.lat));
+    const north = Math.max(Number(geometry.rectangle.sw.lat), Number(geometry.rectangle.ne.lat));
+    const west = Math.min(Number(geometry.rectangle.sw.lng), Number(geometry.rectangle.ne.lng));
+    const east = Math.max(Number(geometry.rectangle.sw.lng), Number(geometry.rectangle.ne.lng));
+    return candidate.lat >= south && candidate.lat <= north && candidate.lng >= west && candidate.lng <= east;
+  }
+
+  if (geometry.type === "circle" && geometry.circle?.center) {
+    const center = {
+      lat: Number(geometry.circle.center.lat),
+      lng: Number(geometry.circle.center.lng),
+    };
+    const radius = Number(geometry.circle.radius);
+    return Number.isFinite(radius) && getApproxDistanceMeters(candidate, center) <= radius;
+  }
+
+  if (geometry.type === "polygon" && Array.isArray(geometry.polygon)) {
+    return isPointInPolygon(candidate, { paths: [geometry.polygon] });
+  }
+
+  return false;
+};
+
+const getApproxDistanceMeters = (a, b) => {
+  const lat1 = Number(a?.lat);
+  const lng1 = Number(a?.lng);
+  const lat2 = Number(b?.lat ?? b?.latitude);
+  const lng2 = Number(b?.lng ?? b?.lon ?? b?.longitude);
+  if (![lat1, lng1, lat2, lng2].every(Number.isFinite)) return Infinity;
+  const meanLatRad = (((lat1 + lat2) / 2) * Math.PI) / 180;
+  const dx = (lng2 - lng1) * 111320 * Math.cos(meanLatRad);
+  const dy = (lat2 - lat1) * 111320;
+  return Math.sqrt(dx * dx + dy * dy);
+};
+
+const getLogPoint = (log) => {
+  const lat = Number(log?.lat ?? log?.latitude ?? log?.Lat);
+  const lng = Number(log?.lng ?? log?.lon ?? log?.longitude ?? log?.Lng);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+  return { lat, lng };
+};
+
+const NUMERIC_FILL_FIELDS = [
+  "rsrp",
+  "rsrq",
+  "sinr",
+  "mos",
+  "dl_thpt",
+  "ul_thpt",
+  "dl_tpt",
+  "ul_tpt",
+  "latency",
+  "jitter",
+  "lte_bler",
+  "rssi",
+  "cqi",
+];
+
+const interpolateNumericFields = (neighbors) => {
+  const result = {};
+  NUMERIC_FILL_FIELDS.forEach((field) => {
+    let totalWeight = 0;
+    let weighted = 0;
+    neighbors.forEach(({ log, distance }) => {
+      const value = Number(log?.[field]);
+      if (!Number.isFinite(value)) return;
+      const weight = 1 / Math.max(distance, 1);
+      weighted += value * weight;
+      totalWeight += weight;
+    });
+    if (totalWeight > 0) result[field] = Number((weighted / totalWeight).toFixed(3));
+  });
+  return result;
+};
+
+const findNearestLogs = (point, sourceLogs, limit = 4) =>
+  (sourceLogs || [])
+    .map((log) => {
+      const logPoint = getLogPoint(log);
+      return logPoint ? { log, distance: getApproxDistanceMeters(point, logPoint) } : null;
+    })
+    .filter((entry) => entry && Number.isFinite(entry.distance))
+    .sort((a, b) => a.distance - b.distance)
+    .slice(0, limit);
+
+const buildGeneratedLog = ({ point, sourceLogs, index, drawingId }) => {
+  const neighbors = findNearestLogs(point, sourceLogs);
+  const nearest = neighbors[0]?.log || {};
+  return {
+    ...nearest,
+    ...interpolateNumericFields(neighbors),
+    id: `draw-fill-${drawingId}-${index}`,
+    log_id: `draw-fill-${drawingId}-${index}`,
+    lat: Number(point.lat.toFixed(7)),
+    lng: Number(point.lng.toFixed(7)),
+    latitude: Number(point.lat.toFixed(7)),
+    longitude: Number(point.lng.toFixed(7)),
+    is_generated_log: true,
+    generated_log: true,
+    source: "draw-fill",
+    generated_from_drawing_id: drawingId,
+    generated_nearest_distance_m: Number((neighbors[0]?.distance ?? 0).toFixed(2)),
+  };
+};
+
+const samplePolylineGeometry = (geometry, spacingMeters, maxPoints) => {
+  const path = (geometry?.path || [])
+    .map((point) => ({ lat: Number(point?.lat), lng: Number(point?.lng) }))
+    .filter((point) => Number.isFinite(point.lat) && Number.isFinite(point.lng));
+  if (path.length < 2) return [];
+
+  const sampled = [];
+  for (let i = 0; i < path.length - 1 && sampled.length < maxPoints; i += 1) {
+    const start = path[i];
+    const end = path[i + 1];
+    const distance = getApproxDistanceMeters(start, end);
+    const steps = Math.max(1, Math.ceil(distance / spacingMeters));
+    for (let step = 0; step <= steps && sampled.length < maxPoints; step += 1) {
+      if (i > 0 && step === 0) continue;
+      const t = step / steps;
+      sampled.push({
+        lat: start.lat + (end.lat - start.lat) * t,
+        lng: start.lng + (end.lng - start.lng) * t,
+      });
+    }
+  }
+  return sampled;
+};
+
+const sampleAreaGeometry = (geometry, spacingMeters, maxPoints) => {
+  const bounds = getGeometryBounds(geometry);
+  if (!bounds) return [];
+  const centerLat = (bounds.south + bounds.north) / 2;
+  const metersPerDegLat = 111320;
+  const metersPerDegLng = Math.max(1, 111320 * Math.cos((centerLat * Math.PI) / 180));
+  const stepLat = spacingMeters / metersPerDegLat;
+  const stepLng = spacingMeters / metersPerDegLng;
+  if (![stepLat, stepLng].every((value) => Number.isFinite(value) && value > 0)) return [];
+
+  const sampled = [];
+  for (let lat = bounds.south + stepLat / 2; lat <= bounds.north && sampled.length < maxPoints; lat += stepLat) {
+    for (let lng = bounds.west + stepLng / 2; lng <= bounds.east && sampled.length < maxPoints; lng += stepLng) {
+      const point = { lat, lng };
+      if (isPointInsideGeometry(point, geometry)) sampled.push(point);
+    }
+  }
+  return sampled;
 };
 
 const getLocationIdKey = (loc) =>
@@ -1564,6 +1761,7 @@ const UnifiedMapView = () => {
 
   const [drawnPoints, setDrawnPoints] = useState(null);
   const [drawnShapeAnalytics, setDrawnShapeAnalytics] = useState([]);
+  const [generatedMapLogs, setGeneratedMapLogs] = useState([]);
   const [newProjectPolygonName, setNewProjectPolygonName] = useState("");
   const [isSavingProjectPolygon, setIsSavingProjectPolygon] = useState(false);
   const [legendFilter, setLegendFilter] = useState(null);
@@ -3803,9 +4001,10 @@ const UnifiedMapView = () => {
   ]);
 
   const finalDisplayLocations = useMemo(() => {
-    if (drawnPoints !== null) return drawnPoints;
-    return preDrawingDisplayLocations;
-  }, [drawnPoints, preDrawingDisplayLocations]);
+    const base = drawnPoints !== null ? drawnPoints : preDrawingDisplayLocations;
+    if (!Array.isArray(generatedMapLogs) || generatedMapLogs.length === 0) return base;
+    return [...(base || []), ...generatedMapLogs];
+  }, [drawnPoints, generatedMapLogs, preDrawingDisplayLocations]);
 
   const renderedLegendFilteredLocations = useMemo(() => {
     const baseLocations = Array.isArray(finalDisplayLocations)
@@ -5375,6 +5574,7 @@ const UnifiedMapView = () => {
     if (!drawings || drawings.length === 0) {
       setDrawnPoints(null);
       setDrawnShapeAnalytics([]);
+      setGeneratedMapLogs([]);
       return;
     }
 
@@ -5384,9 +5584,12 @@ const UnifiedMapView = () => {
     const hasLogsKey = drawings.some((drawing) => Object.prototype.hasOwnProperty.call(drawing, "logs"));
     if (!hasLogsKey) return;
 
-    // Collect all unique logs from inside all drawn shapes
+    const filterDrawings = drawings.filter((drawing) => drawing?.type !== "polyline");
+
+    // Collect all unique logs from inside all area drawings. Polylines are kept for
+    // generated-log filling but do not become a map filter.
     const uniqueLogs = new Map();
-    drawings.forEach((drawing) => {
+    filterDrawings.forEach((drawing) => {
       if (Array.isArray(drawing.logs)) {
         drawing.logs.forEach((log) => {
           const key = log.id || `${log.lat}-${log.lng}-${log.timestamp}`;
@@ -5396,16 +5599,18 @@ const UnifiedMapView = () => {
     });
 
     const newPoints = Array.from(uniqueLogs.values());
-    setDrawnPoints((prev) => {
-      if (prev === null) return newPoints;
-      if (prev.length !== newPoints.length) return newPoints;
-      const prevKeys = new Set(prev.map(getLocationIdentityKey).filter(Boolean));
-      const hasDiff = newPoints.some((p) => {
-        const key = getLocationIdentityKey(p);
-        return key ? !prevKeys.has(key) : true;
+    if (filterDrawings.length > 0) {
+      setDrawnPoints((prev) => {
+        if (prev === null) return newPoints;
+        if (prev.length !== newPoints.length) return newPoints;
+        const prevKeys = new Set(prev.map(getLocationIdentityKey).filter(Boolean));
+        const hasDiff = newPoints.some((p) => {
+          const key = getLocationIdentityKey(p);
+          return key ? !prevKeys.has(key) : true;
+        });
+        return hasDiff ? newPoints : prev;
       });
-      return hasDiff ? newPoints : prev;
-    });
+    }
 
     const drawingAnalytics = drawings.map((drawing) => {
       const areaMeters = Number(drawing?.area);
@@ -5450,6 +5655,55 @@ const UnifiedMapView = () => {
 
     setDrawnShapeAnalytics(drawingAnalytics);
   }, []);
+
+  const handleFillWithLogs = useCallback(() => {
+    const latestDrawing = [...(drawnShapeAnalytics || [])]
+      .reverse()
+      .find((drawing) => drawing?.geometry);
+
+    if (!latestDrawing?.geometry) {
+      toast.warn("Draw a polygon, rectangle, circle, or line first.");
+      return;
+    }
+
+    const sourceLogs = Array.isArray(preDrawingDisplayLocations)
+      ? preDrawingDisplayLocations.filter((log) => !log?.is_generated_log)
+      : [];
+    if (!sourceLogs.length) {
+      toast.warn("No nearby real logs are available to copy values from.");
+      return;
+    }
+
+    const geometryType = latestDrawing.geometry?.type || latestDrawing.type;
+    const spacingMeters = Math.max(5, Number(ui.drawCellSizeMeters) || projectLogGridSizeMeters || 50);
+    const maxPoints = geometryType === "polyline" ? 500 : 1200;
+    const sampledPoints =
+      geometryType === "polyline"
+        ? samplePolylineGeometry(latestDrawing.geometry, spacingMeters, maxPoints)
+        : sampleAreaGeometry(latestDrawing.geometry, spacingMeters, maxPoints);
+
+    if (!sampledPoints.length) {
+      toast.warn("Could not place logs inside the latest drawing.");
+      return;
+    }
+
+    const drawingId = latestDrawing.id || Date.now();
+    const nextGenerated = sampledPoints.map((point, index) =>
+      buildGeneratedLog({ point, sourceLogs, index, drawingId }),
+    );
+
+    setGeneratedMapLogs((prev) => {
+      const retained = (prev || []).filter(
+        (log) => String(log?.generated_from_drawing_id) !== String(drawingId),
+      );
+      return [...retained, ...nextGenerated];
+    });
+
+    toast.success(
+      `Filled ${nextGenerated.length} generated log${nextGenerated.length === 1 ? "" : "s"}.`,
+      { position: "bottom-right", autoClose: 2500 },
+    );
+  }, [drawnShapeAnalytics, preDrawingDisplayLocations, projectLogGridSizeMeters, ui.drawCellSizeMeters]);
 
   const handleMapSnapshot = useCallback(async () => {
     if (!canEnableUnifiedGridView) {
@@ -6031,6 +6285,7 @@ const UnifiedMapView = () => {
         setDefaultSiteBeamwidth={setDefaultSiteBeamwidth}
         ui={ui}
         onUIChange={handleUIChange}
+        onFillWithLogs={handleFillWithLogs}
         onOpenMultiView={handleNavigateToMultiView}
         gridViewEnabled={enableGrid}
         onGridViewToggle={setEnableGrid}

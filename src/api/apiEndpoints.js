@@ -1678,7 +1678,16 @@ export const mapViewApi = {
 
   // ==================== Network Logs ====================
   // In apiEndpoints.js
-  getNetworkLog: async ({ session_ids, page = 1, limit = 20000, signal, project_id, force_refresh = false }) => {
+  getNetworkLog: async ({
+    session_ids,
+    page = 1,
+    limit = 20000,
+    signal,
+    project_id,
+    force_refresh = false,
+    NetworkType,
+    networkType,
+  }) => {
     const sid = Array.isArray(session_ids) ? session_ids.join(",") : session_ids;
 
     debugUnifiedMapApi("getNetworkLog:start", { sid, page, limit, force_refresh });
@@ -1703,6 +1712,7 @@ export const mapViewApi = {
         session_ids: sid,
         sessionId: sid,
         project_id: project_id ?? undefined,
+        NetworkType: NetworkType ?? networkType ?? undefined,
         page: page,
         limit: limit,
         force_refresh: force_refresh ? true : undefined,
