@@ -114,11 +114,19 @@ const getSubSessionTypeLabel = (typeNormalized) => {
   return "N/A";
 };
 
-const SORT_OPTIONS = [
+const PS_SORT_OPTIONS = [
   { key: "NONE", label: "SORT" },
   { key: "MX_SPD", label: "MX SPD" },
   { key: "MN_SPD", label: "MN SPD" },
   { key: "FS", label: "FS" },
+  { key: "DUR_HI", label: "DUR ↓" },
+  { key: "DUR_LO", label: "DUR ↑" },
+];
+
+const CS_SORT_OPTIONS = [
+  { key: "NONE", label: "SORT" },
+  { key: "DUR_HI", label: "DUR ↓" },
+  { key: "DUR_LO", label: "DUR ↑" },
 ];
 
 export default function SubSessionAnalyticsTab({
@@ -133,8 +141,21 @@ export default function SubSessionAnalyticsTab({
   const [sortBy, setSortBy] = useState("NONE");
   const [isSortOpen, setIsSortOpen] = useState(false);
   const [activeTypeTab, setActiveTypeTab] = useState("CS");
+  const [searchQuery, setSearchQuery] = useState("");
+  const [statusFilter, setStatusFilter] = useState("all");
   const sortRef = useRef(null);
   const [info, setInfo] = useState(false);
+
+  const isCallTab = activeTypeTab === CALL_TYPE_TAB;
+  const sortOptions = isCallTab ? CS_SORT_OPTIONS : PS_SORT_OPTIONS;
+  const statusFilterOptions = useMemo(
+    () => [
+      { key: "all", label: "All" },
+      { key: "success", label: isCallTab ? "Connected" : "Success" },
+      { key: "failed", label: isCallTab ? "Not Connected" : "Failed" },
+    ],
+    [isCallTab],
+  );
 
   const requestedCount = Array.isArray(requestedSessionIds) ? requestedSessionIds.length : 0;
 
@@ -177,11 +198,17 @@ export default function SubSessionAnalyticsTab({
     if (activeTypeTab !== CALL_TYPE_TAB) {
       setInfo(false);
     }
-  }, [activeTypeTab]);
+    // Drop a sort/status selection that isn't valid for the newly active tab.
+    setSortBy((current) =>
+      (isCallTab ? CS_SORT_OPTIONS : PS_SORT_OPTIONS).some((option) => option.key === current)
+        ? current
+        : "NONE",
+    );
+  }, [activeTypeTab, isCallTab]);
 
   const selectedSortLabel = useMemo(
-    () => SORT_OPTIONS.find((option) => option.key === sortBy)?.label || "SORT",
-    [sortBy],
+    () => sortOptions.find((option) => option.key === sortBy)?.label || "SORT",
+    [sortOptions, sortBy],
   );
 
   const rows = useMemo(() => {
@@ -270,6 +297,20 @@ export default function SubSessionAnalyticsTab({
         if (b.fileSize == null) return -1;
         return b.fileSize - a.fileSize;
       });
+    } else if (sortBy === "DUR_HI") {
+      sorted.sort((a, b) => {
+        if (a.duration == null && b.duration == null) return 0;
+        if (a.duration == null) return 1;
+        if (b.duration == null) return -1;
+        return b.duration - a.duration;
+      });
+    } else if (sortBy === "DUR_LO") {
+      sorted.sort((a, b) => {
+        if (a.duration == null && b.duration == null) return 0;
+        if (a.duration == null) return 1;
+        if (b.duration == null) return -1;
+        return a.duration - b.duration;
+      });
     }
 
     return sorted;
@@ -279,6 +320,28 @@ export default function SubSessionAnalyticsTab({
     const targetType = getSubSessionTypeForTab(activeTypeTab);
     return sortedRows.filter((row) => row.subSessionTypeNormalized === targetType);
   }, [sortedRows, activeTypeTab]);
+
+  // Rows actually rendered in the table: type-filtered rows narrowed by the
+  // search box and the status filter. Summary/KPI cards intentionally stay on
+  // `filteredRows` so the overview reflects the full tab, not the table filters.
+  const tableRows = useMemo(() => {
+    // Comma-separated search terms are matched with OR logic, so users can list
+    // multiple sessions at once, e.g. "101, 102, 103".
+    const terms = searchQuery
+      .split(",")
+      .map((term) => term.trim().toLowerCase())
+      .filter(Boolean);
+    return filteredRows.filter((row) => {
+      if (statusFilter !== "all" && row.status !== statusFilter) return false;
+      if (!terms.length) return true;
+      const haystack = [row.sessionId, row.subSessionId, row.number, row.direction]
+        .map((value) => String(value ?? "").toLowerCase())
+        .join(" ");
+      return terms.some((term) => haystack.includes(term));
+    });
+  }, [filteredRows, searchQuery, statusFilter]);
+
+  const isFilterActive = searchQuery.trim() !== "" || statusFilter !== "all";
 
   const tabSummary = useMemo(() => {
     const success = filteredRows.filter((row) => row.status === "success").length;
@@ -557,7 +620,7 @@ export default function SubSessionAnalyticsTab({
             </button>
             {isSortOpen && (
               <div className="absolute right-0 mt-1 w-28 rounded-md border border-slate-700 bg-slate-900 shadow-lg z-20">
-                {SORT_OPTIONS.map((option) => (
+                {sortOptions.map((option) => (
                   <button
                     key={option.key}
                     type="button"
@@ -577,6 +640,47 @@ export default function SubSessionAnalyticsTab({
               </div>
             )}
           </div>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2">
+          <input
+            type="text"
+            value={searchQuery}
+            onChange={(event) => setSearchQuery(event.target.value)}
+            placeholder="Search sessions (comma-separated: 101, 102), sub-session, number…"
+            className="flex-1 min-w-[180px] text-[11px] rounded border border-slate-600 bg-slate-800 text-slate-100 placeholder:text-slate-500 px-2 py-1 outline-none focus:border-cyan-500"
+          />
+          <div className="inline-flex items-center rounded-md border border-slate-700 bg-slate-800/60 p-0.5">
+            {statusFilterOptions.map((option) => (
+              <button
+                key={option.key}
+                type="button"
+                onClick={() => setStatusFilter(option.key)}
+                className={`px-2 py-1 text-[11px] rounded ${
+                  statusFilter === option.key
+                    ? "bg-cyan-700 text-white"
+                    : "text-slate-300 hover:bg-slate-700"
+                }`}
+              >
+                {option.label}
+              </button>
+            ))}
+          </div>
+          {isFilterActive && (
+            <button
+              type="button"
+              onClick={() => {
+                setSearchQuery("");
+                setStatusFilter("all");
+              }}
+              className="text-[11px] font-medium border border-slate-600 text-slate-200 bg-slate-800 hover:bg-slate-700 rounded px-2 py-1"
+            >
+              Clear
+            </button>
+          )}
+          <span className="text-[11px] text-slate-400 ml-auto">
+            {tableRows.length} row{tableRows.length === 1 ? "" : "s"}
+          </span>
         </div>
 
         <div
@@ -609,7 +713,15 @@ export default function SubSessionAnalyticsTab({
           )}
         </div>
 
-        {filteredRows.map((row) => {
+        {tableRows.length === 0 && (
+          <div className="border-t border-slate-700 px-3 py-6 text-center text-[11px] text-slate-400">
+            {isFilterActive
+              ? "No sub-sessions match the current filters."
+              : "No sub-sessions for this type."}
+          </div>
+        )}
+
+        {tableRows.map((row) => {
           const isCallRow = getSubSessionTypeLabel(row.subSessionTypeNormalized) === CALL_TYPE_TAB;
           const isSelected =
             (selectedMarkerKey != null &&

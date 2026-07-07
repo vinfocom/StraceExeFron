@@ -646,7 +646,7 @@ const generateGridCellsOptimized = (
     if (key === "band") return "Band";
     if (key === "nodebid") return "NodeB ID";
     if (key === "cell_id") return "Cell ID";
-    if (key === "pci") return "PCI";
+    if (key === "pci") return "PCI/BCCH";
     return "Category";
   };
   const resolveProviderName = (log) => {
@@ -847,7 +847,7 @@ const generateGridCellsOptimized = (
             );
             aggregatedValue = rankedPcis[0][0];
             bestByColor = {
-              label: "PCI",
+              label: "PCI/BCCH",
               name: rankedPcis[0][0],
               count: rankedPcis[0][1],
             };
@@ -1145,7 +1145,7 @@ const PrimaryLogInfoWindow = React.memo(({ log, onClose, resolveColor, selectedM
               {signalValue !== null && signalValue !== undefined && <div className="flex justify-between text-xs items-center"><span className="text-gray-500">RSRP</span><span className="font-semibold" style={{ color: resolveColor(signalValue, 'rsrp') }}>{signalValue?.toFixed?.(1)} dBm</span></div>}
               {log.rsrq !== null && log.rsrq !== undefined && <div className="flex justify-between text-xs items-center"><span className="text-gray-500">RSRQ</span><span className="font-medium" style={{ color: resolveColor(log.rsrq, 'rsrq') }}>{log.rsrq?.toFixed?.(1)} dB</span></div>}
               {log.sinr !== null && log.sinr !== undefined && <div className="flex justify-between text-xs items-center"><span className="text-gray-500">SINR</span><span className="font-medium" style={{ color: resolveColor(log.sinr, 'sinr') }}>{log.sinr?.toFixed?.(1)} dB</span></div>}
-              {log.pci && <div className="flex justify-between text-xs"><span className="text-gray-500">PCI</span><span className="font-medium">{log.pci}</span></div>}
+              {log.pci && <div className="flex justify-between text-xs"><span className="text-gray-500">PCI/BCCH</span><span className="font-medium">{log.pci}</span></div>}
               {log.cell_id && <div className="flex justify-between text-xs"><span className="text-gray-500">Cell ID</span><span className="font-medium">{log.cell_id}</span></div>}
               {log.nodeb_id && <div className="flex justify-between text-xs"><span className="text-gray-500">NodeB</span><span className="font-medium">{log.nodeb_id}</span></div>}
             </>

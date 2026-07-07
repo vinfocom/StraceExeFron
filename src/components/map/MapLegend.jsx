@@ -795,7 +795,7 @@ export default function MapLegend({
             onFilterChange={onFilterChange}
           />
         ),
-        title: String(selectedMetric || "").toLowerCase() === "best_pci" ? "Best PCI" : "PCI",
+        title: String(selectedMetric || "").toLowerCase() === "best_pci" ? "Best PCI" : "PCI/BCCH",
       };
     }
 

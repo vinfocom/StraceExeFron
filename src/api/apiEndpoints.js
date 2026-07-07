@@ -1939,6 +1939,11 @@ export const gridAnalyticsApi = {
       params,
       ...config,
     }),
+  setProjectLogGrid: (params, config = {}) =>
+    api.post("/api/GridAnalytics/SetProjectLogGrid", null, {
+      params,
+      ...config,
+    }),
   getGridAnalytics: (params, config = {}) =>
     api.get("/api/GridAnalytics/GetGridAnalytics", { params, ...config }),
   getCoverageOptimizationSummary: (params, config = {}) =>

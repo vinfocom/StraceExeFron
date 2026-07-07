@@ -436,6 +436,8 @@ const UnifiedMapSidebar = ({
   setEnableGrid,
   gridSizeMeters,
   setGridSizeMeters,
+  onSaveLogGridSize,
+  logGridSaving = false,
   gridAggregationSummary = null,
   canEnableGridView = false,
   lteGridAvailable = false,
@@ -475,6 +477,15 @@ const UnifiedMapSidebar = ({
   const [activeSidebarTab, setActiveSidebarTab] = useState("filter");
   const [isEditingSessions, setIsEditingSessions] = useState(false);
   const [sessionInputValue, setSessionInputValue] = useState("");
+
+  // Draft for the "Log Grid Size" control. The slider edits this draft; the grid
+  // only recomputes (and the value persists to the DB) when the user hits Save.
+  const appliedLogGridSize = Number(gridSizeMeters) || 25;
+  const [logGridDraft, setLogGridDraft] = useState(appliedLogGridSize);
+  useEffect(() => {
+    setLogGridDraft(Number(gridSizeMeters) || 25);
+  }, [gridSizeMeters]);
+  const logGridDirty = Math.round(Number(logGridDraft) || 0) !== Math.round(appliedLogGridSize);
   const normalizedLteGridAggregationMethod =
     lteGridAggregationMethod === "avg" ? "median" : lteGridAggregationMethod || "median";
   const handleLteGridAggregationMethodChange = useCallback(
@@ -2240,7 +2251,7 @@ const UnifiedMapSidebar = ({
                           />
                           <InfoBadge
                             label="Grid Size"
-                            value={`${Number(gridSizeMeters) || 20}m`}
+                            value={`${Number(gridSizeMeters) || 25}m`}
                             color="teal"
                           />
                         </div>
@@ -2469,12 +2480,20 @@ const UnifiedMapSidebar = ({
                         <div className="rounded-lg bg-slate-900/40 p-2">
                           <div className="flex items-center justify-between text-xs mb-2">
                             <span className="text-slate-400">Log Grid Size</span>
+                            {logGridDirty && (
+                              <button
+                                type="button"
+                                onClick={() => onSaveLogGridSize?.(logGridDraft)}
+                                disabled={logGridSaving}
+                                className="px-2 py-0.5 rounded bg-cyan-600 hover:bg-cyan-500 text-white text-[11px] font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+                              >
+                                {logGridSaving ? "Saving…" : "Save"}
+                              </button>
+                            )}
                           </div>
                           <ThresholdInput
-                            value={Number(gridSizeMeters) || 20}
-                            onChange={(next) =>
-                              setGridSizeMeters?.(Math.round(next))
-                            }
+                            value={Number(logGridDraft) || 25}
+                            onChange={(next) => setLogGridDraft(Math.round(next))}
                             min={5}
                             max={1000}
                             step={5}

@@ -337,12 +337,16 @@ CompactHandoverMarker.displayName = "CompactHandoverMarker";
 const HandoverPopup = memo(({ transition, onClose, type }) => {
   if (!transition) return null;
   const { from, to, lat, lng, timestamp, session_id, atIndex } = transition;
+  // Anchor above the marker's rendered (possibly spread) position, lifted so the
+  // popup and its arrow leave the marker itself visible.
+  const anchorLat = Number(transition?._renderLat ?? lat);
+  const anchorLng = Number(transition?._renderLng ?? lng);
   const handoverType = getHandoverType(from, to, type);
   const handleDownloadSingle = () => downloadCSVFunc([transition], `handover_${type}_${from}_to_${to}.csv`);
-  
+
   return (
-    <OverlayView position={{ lat, lng }} mapPaneName={OverlayView.FLOAT_PANE}>
-      <div className="relative transform -translate-x-1/2 -translate-y-full mb-4">
+    <OverlayView position={{ lat: anchorLat, lng: anchorLng }} mapPaneName={OverlayView.FLOAT_PANE}>
+      <div className="relative" style={{ transform: "translate(-50%, calc(-100% - 34px))" }}>
         <div className="bg-slate-900 text-white rounded-lg shadow-xl p-3 min-w-[200px] border border-slate-700">
           <div className="flex items-center justify-between mb-2 pb-2 border-b border-slate-700">
             <span className="text-sm font-semibold capitalize">{type} Handover</span>

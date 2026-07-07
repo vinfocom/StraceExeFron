@@ -1586,6 +1586,20 @@ const summarizeHandoverPairsForLegend = (transitions = [], limit = 8) => {
   };
 };
 
+const EMPTY_HANDOVER_LEGEND_SELECTION = Object.freeze({
+  technology: [],
+  band: [],
+  pci: [],
+});
+
+const filterHandoverTransitionsByPairs = (transitions = [], selectedPairs = []) => {
+  if (!Array.isArray(selectedPairs) || selectedPairs.length === 0) return transitions;
+  const selectedSet = new Set(selectedPairs);
+  return transitions.filter((transition) =>
+    selectedSet.has(getHandoverPairLabel(transition)),
+  );
+};
+
 const HandoverLegend = React.memo(({
   techEnabled,
   bandEnabled,
@@ -1593,6 +1607,9 @@ const HandoverLegend = React.memo(({
   technologyTransitions = [],
   bandTransitions = [],
   pciTransitions = [],
+  selectedPairs = EMPTY_HANDOVER_LEGEND_SELECTION,
+  onTogglePair,
+  onClearTypeSelection,
 }) => {
   const [collapsed, setCollapsed] = useState(false);
   const sections = useMemo(() => {
@@ -1641,7 +1658,9 @@ const HandoverLegend = React.memo(({
       >
         <div className="min-w-0">
           <div className="text-xs font-bold uppercase tracking-wide text-white">Handover Legend</div>
-          <div className="mt-0.5 text-[11px] text-slate-400">{totalHandovers} events by from-to case</div>
+          <div className="mt-0.5 text-[11px] text-slate-400">
+            {totalHandovers} events by from-to case &middot; click rows to filter
+          </div>
         </div>
         <span className="shrink-0 rounded bg-slate-800 px-2 py-0.5 text-[11px] font-semibold text-slate-200">
           {collapsed ? "Show" : "Hide"}
@@ -1653,6 +1672,10 @@ const HandoverLegend = React.memo(({
           <div className="space-y-4">
             {sections.map((section) => {
               const meta = HANDOVER_LEGEND_META[section.type] || HANDOVER_LEGEND_META.technology;
+              const sectionSelectedPairs = Array.isArray(selectedPairs?.[section.type])
+                ? selectedPairs[section.type]
+                : [];
+              const hasSelection = sectionSelectedPairs.length > 0;
               return (
                 <section key={section.type} className="space-y-2">
                   <div className="flex items-center justify-between gap-2">
@@ -1660,26 +1683,54 @@ const HandoverLegend = React.memo(({
                       <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${meta.dotClass}`} />
                       <span className="truncate text-xs font-semibold text-slate-100">{meta.label}</span>
                     </div>
-                    <span className="shrink-0 rounded bg-slate-800 px-2 py-0.5 text-[11px] font-semibold text-slate-300">
-                      {section.total}
-                    </span>
+                    <div className="flex shrink-0 items-center gap-1.5">
+                      {hasSelection && (
+                        <button
+                          type="button"
+                          onClick={() => onClearTypeSelection?.(section.type)}
+                          className="rounded bg-blue-600/30 px-2 py-0.5 text-[11px] font-semibold text-blue-100 transition hover:bg-blue-600/50"
+                          title="Show all handovers of this type"
+                        >
+                          Show all
+                        </button>
+                      )}
+                      <span className="rounded bg-slate-800 px-2 py-0.5 text-[11px] font-semibold text-slate-300">
+                        {section.total}
+                      </span>
+                    </div>
                   </div>
 
                   <div className="space-y-1.5">
-                    {section.items.map((item) => (
-                      <div
-                        key={`${section.type}-${item.pair}`}
-                        className="flex items-center justify-between gap-2 rounded-md bg-slate-900/80 px-2 py-1.5"
-                        title={`${item.pair}: ${item.count}`}
-                      >
-                        <span className="min-w-0 truncate text-[11px] font-medium text-slate-200">
-                          {item.pair}
-                        </span>
-                        <span className="shrink-0 rounded bg-blue-500/15 px-2 py-0.5 text-[11px] font-bold text-blue-100">
-                          {item.count}
-                        </span>
-                      </div>
-                    ))}
+                    {section.items.map((item) => {
+                      const isSelected = sectionSelectedPairs.includes(item.pair);
+                      return (
+                        <button
+                          type="button"
+                          key={`${section.type}-${item.pair}`}
+                          onClick={() => onTogglePair?.(section.type, item.pair)}
+                          aria-pressed={isSelected}
+                          className={`flex w-full items-center justify-between gap-2 rounded-md px-2 py-1.5 text-left transition ${
+                            isSelected
+                              ? "bg-blue-600/30 ring-1 ring-blue-400/70"
+                              : hasSelection
+                                ? "bg-slate-900/80 opacity-55 hover:bg-slate-800 hover:opacity-100"
+                                : "bg-slate-900/80 hover:bg-slate-800"
+                          }`}
+                          title={`${item.pair}: ${item.count}${isSelected ? " (click to hide)" : " (click to show only selected)"}`}
+                        >
+                          <span
+                            className={`min-w-0 truncate text-[11px] font-medium ${
+                              isSelected ? "text-white" : "text-slate-200"
+                            }`}
+                          >
+                            {item.pair}
+                          </span>
+                          <span className="shrink-0 rounded bg-blue-500/15 px-2 py-0.5 text-[11px] font-bold text-blue-100">
+                            {item.count}
+                          </span>
+                        </button>
+                      );
+                    })}
                   </div>
 
                   {section.hiddenCount > 0 && (
@@ -1818,7 +1869,8 @@ const UnifiedMapView = () => {
   );
   const [dataFilters, setDataFilters] = useState(DEFAULT_DATA_FILTERS);
   const [enableGrid, setEnableGrid] = useState(false);
-  const [gridSizeMeters, setGridSizeMeters] = useState(20);
+  const [gridSizeMeters, setGridSizeMeters] = useState(25);
+  const [logGridSaving, setLogGridSaving] = useState(false);
   const [gridCellStats, setGridCellStats] = useState({ total: 0, populated: 0 });
   const [renderedGridLegendLogs, setRenderedGridLegendLogs] = useState(EMPTY_LIST);
   const [lteGridEnabled, setLteGridEnabled] = useState(false);
@@ -2274,6 +2326,50 @@ const UnifiedMapView = () => {
       }
     };
   }, [projectId, triangleScaleMultiplier]);
+
+  // Apply the log grid size and persist it to the project (tbl_project.log_grid).
+  // Called from the sidebar "Save" button so the grid only recomputes on save.
+  const handleSaveLogGridSize = useCallback(
+    async (nextValue) => {
+      const normalized = Math.max(5, Math.round(Number(nextValue) || 0));
+      if (!Number.isFinite(normalized) || normalized <= 0) {
+        toast.error("Grid size must be a positive number.");
+        return;
+      }
+
+      // Apply immediately so the grid recomputes with the new size.
+      setGridSizeMeters(normalized);
+
+      const numericProjectId = Number(projectId);
+      if (!Number.isFinite(numericProjectId) || numericProjectId <= 0) {
+        toast.success("Grid size applied.");
+        return;
+      }
+
+      setLogGridSaving(true);
+      try {
+        await gridAnalyticsApi.setProjectLogGrid({
+          projectId: numericProjectId,
+          gridSize: normalized,
+        });
+
+        setProject((prev) => {
+          if (!prev || Number(prev?.id) !== numericProjectId) return prev;
+          const nextProject = { ...prev, log_grid: String(normalized) };
+          upsertProjectInProjectsCache(nextProject);
+          return nextProject;
+        });
+
+        toast.success("Grid size saved.");
+      } catch (error) {
+        console.error("Failed to save log grid size:", error);
+        toast.error("Failed to save grid size.");
+      } finally {
+        setLogGridSaving(false);
+      }
+    },
+    [projectId],
+  );
 
   useEffect(() => {
     if (!projectId || projectSessionParam) return;
@@ -4437,6 +4533,67 @@ const UnifiedMapView = () => {
     return buildHandoverTransitions(finalDisplayLocations);
   }, [finalDisplayLocations]);
 
+  // From-to pairs selected in the handover legend; empty list = show all of that type.
+  const [handoverLegendSelectedPairs, setHandoverLegendSelectedPairs] = useState(
+    EMPTY_HANDOVER_LEGEND_SELECTION,
+  );
+
+  const handleHandoverLegendPairToggle = useCallback((type, pair) => {
+    setHandoverLegendSelectedPairs((prev) => {
+      const current = Array.isArray(prev[type]) ? prev[type] : [];
+      const next = current.includes(pair)
+        ? current.filter((value) => value !== pair)
+        : [...current, pair];
+      return { ...prev, [type]: next };
+    });
+  }, []);
+
+  const handleHandoverLegendTypeClear = useCallback((type) => {
+    setHandoverLegendSelectedPairs((prev) =>
+      Array.isArray(prev[type]) && prev[type].length > 0
+        ? { ...prev, [type]: [] }
+        : prev,
+    );
+  }, []);
+
+  // Drop selections whose pair no longer exists (e.g. sessions or filters changed),
+  // so a stale selection can't silently hide every marker.
+  useEffect(() => {
+    setHandoverLegendSelectedPairs((prev) => {
+      const pruneType = (transitions, selected) => {
+        if (!Array.isArray(selected) || selected.length === 0) return selected || [];
+        const available = new Set(transitions.map(getHandoverPairLabel));
+        return selected.filter((pair) => available.has(pair));
+      };
+
+      const technology = pruneType(technologyTransitions, prev.technology);
+      const band = pruneType(bandTransitions, prev.band);
+      const pci = pruneType(pciTransitions, prev.pci);
+
+      if (
+        technology.length === (prev.technology?.length || 0) &&
+        band.length === (prev.band?.length || 0) &&
+        pci.length === (prev.pci?.length || 0)
+      ) {
+        return prev;
+      }
+      return { technology, band, pci };
+    });
+  }, [technologyTransitions, bandTransitions, pciTransitions]);
+
+  const visibleTechnologyTransitions = useMemo(
+    () => filterHandoverTransitionsByPairs(technologyTransitions, handoverLegendSelectedPairs.technology),
+    [technologyTransitions, handoverLegendSelectedPairs.technology],
+  );
+  const visibleBandTransitions = useMemo(
+    () => filterHandoverTransitionsByPairs(bandTransitions, handoverLegendSelectedPairs.band),
+    [bandTransitions, handoverLegendSelectedPairs.band],
+  );
+  const visiblePciTransitions = useMemo(
+    () => filterHandoverTransitionsByPairs(pciTransitions, handoverLegendSelectedPairs.pci),
+    [pciTransitions, handoverLegendSelectedPairs.pci],
+  );
+
   const polygonGridColorSource = useMemo(() => {
     if (isStoredGridOverlayVisible) {
       return Array.isArray(storedDeltaGridCells) ? storedDeltaGridCells : EMPTY_LIST;
@@ -6542,6 +6699,8 @@ const UnifiedMapView = () => {
         setEnableGrid={setEnableGrid}
         gridSizeMeters={gridSizeMeters}
         setGridSizeMeters={setGridSizeMeters}
+        onSaveLogGridSize={handleSaveLogGridSize}
+        logGridSaving={logGridSaving}
         gridAggregationSummary={gridFilteredData.summary}
         canEnableGridView={canEnableUnifiedGridView}
         lteGridAvailable={lteGridAvailable}
@@ -6630,6 +6789,9 @@ const UnifiedMapView = () => {
           technologyTransitions={technologyTransitions}
           bandTransitions={bandTransitions}
           pciTransitions={pciTransitions}
+          selectedPairs={handoverLegendSelectedPairs}
+          onTogglePair={handleHandoverLegendPairToggle}
+          onClearTypeSelection={handleHandoverLegendTypeClear}
         />
 
         {canSaveDrawnPolygonToProject && (
@@ -6880,7 +7042,7 @@ const UnifiedMapView = () => {
               {techHandOver && (
                 <TechHandoverMarkers
                   key="technology-handover-layer"
-                  transitions={technologyTransitions}
+                  transitions={visibleTechnologyTransitions}
                   show={true}
                   type="technology"
                   showConnections={false}
@@ -6890,7 +7052,7 @@ const UnifiedMapView = () => {
               {bandHandover && (
                 <TechHandoverMarkers
                   key="band-handover-layer"
-                  transitions={bandTransitions}
+                  transitions={visibleBandTransitions}
                   show={true}
                   type="band"
                   showConnections={false}
@@ -6900,7 +7062,7 @@ const UnifiedMapView = () => {
               {pciHandover && (
                 <TechHandoverMarkers
                   key="pci-handover-layer"
-                  transitions={pciTransitions}
+                  transitions={visiblePciTransitions}
                   show={true}
                   type="pci"
                   showConnections={false}
