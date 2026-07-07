@@ -129,6 +129,10 @@ const DeckGLOverlay = ({
   pickable = true,
   autoHighlight = true,
   primaryRenderLimit = null,
+  gridCells = [],
+  showGrid = false,
+  gridOpacity = 0.72,
+  onGridHover,
 }) => {
   const overlayRef = useRef(null);
   const isCleanedUpRef = useRef(false);
@@ -241,6 +245,15 @@ const DeckGLOverlay = ({
     onHover(info);
   }, [onHover]);
 
+  const handleGridHover = useCallback((info) => {
+    if (!onGridHover) return;
+    if (info?.object?.source) {
+      onGridHover({ cell: info.object.source, x: info.x, y: info.y });
+    } else {
+      onGridHover(null);
+    }
+  }, [onGridHover]);
+
   const primaryData = useMemo(() => {
     if (!showPrimaryLogs || !locations?.length) return [];
     const renderLimit = Number.isFinite(primaryRenderLimit)
@@ -257,6 +270,28 @@ const DeckGLOverlay = ({
       computedColor: getColor ? parseColorToRGB(getColor(loc)) : [16, 185, 129, 200],
     }));
   }, [locations, showPrimaryLogs, getColor, primaryRenderLimit]);
+
+  const gridData = useMemo(() => {
+    if (!showGrid || !gridCells?.length) return [];
+    return gridCells.map((cell, idx) => {
+      const b = cell.bounds || {};
+      const rgb = parseColorToRGB(cell.fillColor);
+      // Populated cells solid, empty cells faint (mirrors previous RectangleF opacity).
+      const alpha = cell.count > 0 ? 255 : 60;
+      return {
+        index: idx,
+        source: cell,
+        polygon: [
+          [b.west, b.south],
+          [b.east, b.south],
+          [b.east, b.north],
+          [b.west, b.north],
+          [b.west, b.south],
+        ],
+        fillColor: [rgb[0], rgb[1], rgb[2], alpha],
+      };
+    });
+  }, [gridCells, showGrid]);
 
   const neighborData = useMemo(() => {
     if (!showNeighbors || !neighbors?.length) return [];
@@ -339,6 +374,25 @@ const DeckGLOverlay = ({
     if (attachedMapRef.current !== map) return;
 
     const layers = [];
+
+    if (showGrid && gridData.length > 0) {
+      layers.push(new PolygonLayer({
+        id: 'grid-cells-layer',
+        data: gridData,
+        getPolygon: d => d.polygon,
+        getFillColor: d => d.fillColor,
+        getLineColor: [255, 255, 255, 0],
+        getLineWidth: 0,
+        lineWidthMinPixels: 0,
+        filled: true,
+        stroked: false,
+        extruded: false,
+        opacity: gridOpacity,
+        pickable,
+        autoHighlight,
+        onHover: handleGridHover,
+      }));
+    }
 
     if (showNeighbors && neighborData.length > 0) {
       layers.push(new PolygonLayer({
@@ -439,7 +493,7 @@ const DeckGLOverlay = ({
     } catch (e) {
       // Overlay can detach during map teardown; skip this update.
     }
-  }, [map, primaryData, neighborData, imageLogData, metricLabelData, showPrimaryLogs, showNeighbors, showImageLogs, selectedIndex, radius, radiusMinPixels, radiusMaxPixels, opacity, neighborOpacity, showNumCells, showMetricLabels, getColor, getNeighborColor, handleImageLogClick, handlePrimaryHover, isValidMapInstance]);
+  }, [map, primaryData, neighborData, gridData, imageLogData, metricLabelData, showPrimaryLogs, showNeighbors, showGrid, gridOpacity, handleGridHover, showImageLogs, selectedIndex, radius, radiusMinPixels, radiusMaxPixels, opacity, neighborOpacity, showNumCells, showMetricLabels, getColor, getNeighborColor, handleImageLogClick, handlePrimaryHover, isValidMapInstance]);
 
   useEffect(() => {
     return () => {

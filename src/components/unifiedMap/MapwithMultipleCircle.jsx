@@ -1,6 +1,6 @@
 // src/components/MapWithMultipleCircles.jsx
 import React, { useCallback, useMemo, useState, useEffect, useRef } from "react";
-import { GoogleMap, PolygonF, RectangleF, InfoWindow } from "@react-google-maps/api";
+import { GoogleMap, PolygonF, InfoWindow } from "@react-google-maps/api";
 import { mapViewApi } from "@/api/apiEndpoints";
 import DeckGLOverlay from "@/components/maps/DeckGLOverlay";
 import { Zap, Layers, Radio, Square, Circle } from "lucide-react";
@@ -2095,7 +2095,8 @@ const MapWithMultipleCircles = ({
   const shouldRenderDeckOverlay =
     (showPoints && orderedLocationsToRender.length > 0) ||
     (showNeighbors && processedNeighbors.length > 0) ||
-    (showImageIcons && imageLogs.length > 0);
+    (showImageIcons && imageLogs.length > 0) ||
+    (enableGrid && visibleGridCells.length > 0);
 
   const handleImageLogClick = useCallback((log) => {
     setSelectedImageLog(log);
@@ -2104,37 +2105,26 @@ const MapWithMultipleCircles = ({
     setSelectedNeighbor(null);
   }, []);
 
-  const getGridTooltipPosition = useCallback((event) => {
-    const domEvent = event?.domEvent;
-    const container = mapContainerRef.current;
-    if (!domEvent || !container) return null;
-
-    const rect = container.getBoundingClientRect();
-    const rawX = domEvent.clientX - rect.left + 14;
-    const rawY = domEvent.clientY - rect.top + 14;
-
-    const maxX = Math.max(12, rect.width - 250);
-    const maxY = Math.max(12, rect.height - 170);
-
-    return {
+  // Grid cells are rendered via the GPU-accelerated deck.gl overlay (not Google
+  // Maps Rectangle overlays), so hover comes through deck.gl with pixel coords.
+  const handleDeckGridHover = useCallback((payload) => {
+    if (!payload?.cell) {
+      setHoveredCell(null);
+      setHoveredCellTooltipPos(null);
+      return;
+    }
+    setHoveredCell(payload.cell);
+    const rect = mapContainerRef.current?.getBoundingClientRect();
+    const width = rect?.width ?? 0;
+    const height = rect?.height ?? 0;
+    const rawX = (payload.x ?? 0) + 14;
+    const rawY = (payload.y ?? 0) + 14;
+    const maxX = Math.max(12, width - 250);
+    const maxY = Math.max(12, height - 170);
+    setHoveredCellTooltipPos({
       x: Math.min(Math.max(12, rawX), maxX),
       y: Math.min(Math.max(12, rawY), maxY),
-    };
-  }, []);
-
-  const handleGridCellMouseOver = useCallback((cell, event) => {
-    setHoveredCell(cell);
-    setHoveredCellTooltipPos(getGridTooltipPosition(event));
-  }, [getGridTooltipPosition]);
-
-  const handleGridCellMouseMove = useCallback((cell, event) => {
-    setHoveredCell(cell);
-    setHoveredCellTooltipPos(getGridTooltipPosition(event));
-  }, [getGridTooltipPosition]);
-
-  const handleGridCellMouseOut = useCallback(() => {
-    setHoveredCell(null);
-    setHoveredCellTooltipPos(null);
+    });
   }, []);
 
   const googleMapOptions = useMemo(
@@ -2206,20 +2196,13 @@ const MapWithMultipleCircles = ({
          />
        ))}
        
-        {enableGrid && visibleGridCells.map((cell) => (
-          <RectangleF
-            key={`grid-${cell.id}`}
-            bounds={cell.bounds}
-            options={{ fillColor: cell.fillColor, fillOpacity: cell.count > 0 ? 0.7 : 0.2, strokeColor: "transparent", strokeWeight: 0, zIndex: 2, clickable: true }}
-            onMouseOver={(event) => handleGridCellMouseOver(cell, event)}
-            onMouseMove={(event) => handleGridCellMouseMove(cell, event)}
-            onMouseOut={handleGridCellMouseOut}
-          />
-        ))}
-
         {map && shouldRenderDeckOverlay && (
           <DeckGLOverlay
             map={map}
+            showGrid={enableGrid}
+            gridCells={enableGrid ? visibleGridCells : EMPTY_ARRAY}
+            gridOpacity={GRID_POLYGON_FILL_OPACITY}
+            onGridHover={handleDeckGridHover}
             locations={showPoints ? orderedLocationsToRender : []}
             imageLogs={imageLogs}
             getColor={getPrimaryColor}
