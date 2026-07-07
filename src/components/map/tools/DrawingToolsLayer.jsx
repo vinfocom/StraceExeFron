@@ -666,14 +666,9 @@ function DrawingToolsLayerComponent({
       if (!active?.overlay) {
         return;
       }
-      const path = active.path || active.overlay.getPath?.();
-      const points = active.points;
-      const pointCount = points?.length ?? path?.getLength?.() ?? 0;
+      const points = active.points || [];
+      const pointCount = points.length;
       const minPoints = active.type === "polygon" ? 3 : 2;
-
-      if (!path && !points) {
-        return;
-      }
 
       if (pointCount < minPoints) {
         toast.warn(
@@ -685,17 +680,31 @@ function DrawingToolsLayerComponent({
         return;
       }
 
-      active.overlay.setOptions({
-        clickable: true,
-        editable: true,
-        draggable: true,
-        ...(active.finalOptions || {}),
-      });
-      if (active.points) {
-        active.overlay.setPath(active.points);
+      let finalOverlay;
+      if (active.type === "polygon") {
+        // While drawing, the overlay is an open preview polyline (so it renders as
+        // connected line segments, not a prematurely-closed shape). Build the real
+        // closed polygon from the committed points on finish.
+        finalOverlay = new gm.Polygon({
+          map,
+          paths: points,
+          ...getShapeOptions(
+            "polygon",
+            resolvedPolygonOpacity,
+            resolvedPolygonFillOpacity,
+          ),
+          clickable: true,
+          editable: true,
+          draggable: true,
+        });
+        active.overlay.setMap(null);
+      } else {
+        finalOverlay = active.overlay;
+        finalOverlay.setPath(points);
+        finalOverlay.setOptions({ clickable: true, editable: true, draggable: true });
       }
       cleanupActiveDrawing(true);
-      registerCompletedShape(active.type, active.overlay);
+      registerCompletedShape(active.type, finalOverlay);
     };
 
     finishActiveDrawingRef.current = finishPathShape;
@@ -703,24 +712,21 @@ function DrawingToolsLayerComponent({
 
     if (type === "polygon" || type === "polyline") {
       const committedPoints = [];
-      const overlay =
+      // Always preview with an OPEN polyline while drawing. A gm.Polygon would draw
+      // its closing edge, making it look like a finished polygon after two points.
+      const previewOptions =
         type === "polygon"
-          ? new gm.Polygon({
-              map,
-              ...shapeOptions,
-              clickable: false,
-              editable: false,
-              draggable: false,
-              fillOpacity: 0,
-            })
-          : new gm.Polyline({
-              map,
-              path: [],
-              ...shapeOptions,
-              clickable: false,
-              editable: false,
-              draggable: false,
-            });
+          ? { strokeWeight: 2, strokeColor: "#1d4ed8", strokeOpacity: resolvedPolygonOpacity }
+          : { strokeWeight: 3, strokeColor: "#ea580c" };
+      const overlay = new gm.Polyline({
+        map,
+        path: [],
+        clickable: false,
+        editable: false,
+        draggable: false,
+        zIndex: 400,
+        ...previewOptions,
+      });
 
       activeDrawingRef.current = {
         type,

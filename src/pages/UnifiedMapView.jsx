@@ -835,13 +835,30 @@ const buildGeneratedLog = ({ point, sourceLogs, index, drawingId }) => {
   };
 };
 
-const samplePolylineGeometry = (geometry, spacingMeters, maxPoints) => {
-  const path = (geometry?.path || [])
+const getPolylinePath = (geometry) =>
+  (geometry?.path || [])
     .map((point) => ({ lat: Number(point?.lat), lng: Number(point?.lng) }))
     .filter((point) => Number.isFinite(point.lat) && Number.isFinite(point.lng));
+
+const getPolylineLengthMeters = (path = []) => {
+  let total = 0;
+  for (let i = 0; i < path.length - 1; i += 1) {
+    total += getApproxDistanceMeters(path[i], path[i + 1]);
+  }
+  return total;
+};
+
+const samplePolylineGeometry = (
+  geometry,
+  spacingMeters,
+  maxPoints,
+  maxLengthMeters = Infinity,
+) => {
+  const path = getPolylinePath(geometry);
   if (path.length < 2) return [];
 
   const sampled = [];
+  let cumulativeMeters = 0;
   for (let i = 0; i < path.length - 1 && sampled.length < maxPoints; i += 1) {
     const start = path[i];
     const end = path[i + 1];
@@ -850,11 +867,14 @@ const samplePolylineGeometry = (geometry, spacingMeters, maxPoints) => {
     for (let step = 0; step <= steps && sampled.length < maxPoints; step += 1) {
       if (i > 0 && step === 0) continue;
       const t = step / steps;
+      // Only generate logs up to the allowed line length (e.g. 1 km).
+      if (cumulativeMeters + distance * t > maxLengthMeters) return sampled;
       sampled.push({
         lat: start.lat + (end.lat - start.lat) * t,
         lng: start.lng + (end.lng - start.lng) * t,
       });
     }
+    cumulativeMeters += distance;
   }
   return sampled;
 };
@@ -5677,10 +5697,25 @@ const UnifiedMapView = () => {
     const geometryType = latestDrawing.geometry?.type || latestDrawing.type;
     const spacingMeters = Math.max(5, Number(ui.drawCellSizeMeters) || projectLogGridSizeMeters || 50);
     const maxPoints = geometryType === "polyline" ? 500 : 1200;
-    const sampledPoints =
-      geometryType === "polyline"
-        ? samplePolylineGeometry(latestDrawing.geometry, spacingMeters, maxPoints)
-        : sampleAreaGeometry(latestDrawing.geometry, spacingMeters, maxPoints);
+    const MAX_LINE_LENGTH_METERS = 1000; // Log generation on a line is capped to 1 km.
+    let sampledPoints;
+    if (geometryType === "polyline") {
+      const lineLength = getPolylineLengthMeters(getPolylinePath(latestDrawing.geometry));
+      if (lineLength > MAX_LINE_LENGTH_METERS) {
+        toast.warn(
+          `Line is ${(lineLength / 1000).toFixed(2)} km — generating logs for the first 1 km only.`,
+          { position: "bottom-right", autoClose: 3000 },
+        );
+      }
+      sampledPoints = samplePolylineGeometry(
+        latestDrawing.geometry,
+        spacingMeters,
+        maxPoints,
+        MAX_LINE_LENGTH_METERS,
+      );
+    } else {
+      sampledPoints = sampleAreaGeometry(latestDrawing.geometry, spacingMeters, maxPoints);
+    }
 
     if (!sampledPoints.length) {
       toast.warn("Could not place logs inside the latest drawing.");
