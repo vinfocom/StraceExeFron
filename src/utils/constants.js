@@ -2,6 +2,8 @@
 const TECHNOLOGY_COLORS = {
   "5g": "#8B5CF6",     
   "nr": "#8B5CF6",     
+  "4g(lteanchornsa)": "#6366F1",
+  "4glteanchornsa": "#6366F1",
   "4g": "#3B82F6",    
   "lte": "#10B981",    
   "3g": "#F59E0B",     
@@ -32,6 +34,10 @@ export const getTechnologyColor = (technology) => {
   // Direct match first
   if (TECHNOLOGY_COLORS[cleanTech]) {
     return TECHNOLOGY_COLORS[cleanTech];
+  }
+
+  if (cleanTech.includes('lteanchor') && cleanTech.includes('nsa')) {
+    return TECHNOLOGY_COLORS['4g(lteanchornsa)'];
   }
   
   if (cleanTech.includes('5g') || cleanTech.includes('nr')) {

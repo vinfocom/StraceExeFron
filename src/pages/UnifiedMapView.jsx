@@ -1792,6 +1792,7 @@ const UnifiedMapView = () => {
   const [showNeighbors, setShowNeighbors] = useState(false);
   const [showSubSession, setShowSubSession] = useState(false);
   const [selectedSubSessionTarget, setSelectedSubSessionTarget] = useState(null);
+  const [selectedSubSessionTargets, setSelectedSubSessionTargets] = useState([]);
 
   const [showPolygons, setShowPolygons] = useState(false);
   const [polygonSource, setPolygonSource] = useState("map");
@@ -6311,21 +6312,103 @@ const UnifiedMapView = () => {
   const handleSubSessionSelect = useCallback((target) => {
     if (!target) {
       setSelectedSubSessionTarget(null);
+      setSelectedSubSessionTargets([]);
       return;
     }
 
-    setSelectedSubSessionTarget({
+    const normalizedTarget = {
       sessionId: target.sessionId ?? null,
       subSessionId: target.subSessionId ?? null,
       markerId: target.markerId ?? null,
+      position: target.position ?? null,
       source: target.source ?? "sub-session",
+    };
+
+    const targetKey =
+      normalizedTarget.markerId != null
+        ? `marker:${String(normalizedTarget.markerId)}`
+        : `session:${String(normalizedTarget.sessionId)}|sub:${String(normalizedTarget.subSessionId)}`;
+
+    let nextTargets = [];
+    let shouldPan = true;
+
+    setSelectedSubSessionTargets((previous) => {
+      const existing = Array.isArray(previous) ? previous : [];
+      const exists = existing.some((item) => {
+        const itemKey =
+          item?.markerId != null
+            ? `marker:${String(item.markerId)}`
+            : `session:${String(item?.sessionId)}|sub:${String(item?.subSessionId)}`;
+        return itemKey === targetKey;
+      });
+
+      if (target.toggle) {
+        nextTargets = exists
+          ? existing.filter((item) => {
+              const itemKey =
+                item?.markerId != null
+                  ? `marker:${String(item.markerId)}`
+                  : `session:${String(item?.sessionId)}|sub:${String(item?.subSessionId)}`;
+              return itemKey !== targetKey;
+            })
+          : [...existing, normalizedTarget];
+        shouldPan = !exists;
+      } else {
+        nextTargets = [normalizedTarget];
+      }
+
+      return nextTargets;
     });
 
-    const position = target.position;
+    setSelectedSubSessionTarget((previous) => {
+      if (target.toggle && previous?.markerId != null && previous.markerId === normalizedTarget.markerId) {
+        const stillSelected = nextTargets.some((item) => item.markerId === previous.markerId);
+        return stillSelected ? normalizedTarget : nextTargets[nextTargets.length - 1] ?? null;
+      }
+
+      if (target.toggle && target.markerId == null && previous?.markerId == null) {
+        const sameSession =
+          previous?.sessionId === normalizedTarget.sessionId &&
+          previous?.subSessionId === normalizedTarget.subSessionId;
+        if (sameSession) {
+          const stillSelected = nextTargets.some(
+            (item) =>
+              item.markerId == null &&
+              item.sessionId === previous.sessionId &&
+              item.subSessionId === previous.subSessionId,
+          );
+          return stillSelected ? normalizedTarget : nextTargets[nextTargets.length - 1] ?? null;
+        }
+      }
+
+      return nextTargets[nextTargets.length - 1] ?? null;
+    });
+
+    if (!shouldPan) {
+      return;
+    }
+
+    const position = normalizedTarget.position;
     const lat = Number(position?.lat);
     const lng = Number(position?.lng);
     if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
     if (!mapRef.current) return;
+
+    if (nextTargets.length > 1 && window?.google?.maps?.LatLngBounds) {
+      const bounds = new window.google.maps.LatLngBounds();
+      nextTargets.forEach((item) => {
+        const itemLat = Number(item?.position?.lat);
+        const itemLng = Number(item?.position?.lng);
+        if (Number.isFinite(itemLat) && Number.isFinite(itemLng)) {
+          bounds.extend({ lat: itemLat, lng: itemLng });
+        }
+      });
+
+      if (!bounds.isEmpty()) {
+        mapRef.current.fitBounds(bounds, 80);
+        return;
+      }
+    }
 
     mapRef.current.panTo({ lat, lng });
     const currentZoom = mapRef.current.getZoom?.();
@@ -6347,6 +6430,7 @@ const UnifiedMapView = () => {
       position: marker.position,
       resultStatus: marker.resultStatus,
       source: "marker",
+      toggle: true,
     });
   }, [handleSubSessionSelect]);
 
@@ -6561,6 +6645,7 @@ const UnifiedMapView = () => {
             subSessionLoading={subSessionLoading}
             subSessionRequestedIds={subSessionRequestedIds}
             selectedSubSessionTarget={selectedSubSessionTarget}
+            selectedSubSessionTargets={selectedSubSessionTargets}
             onSubSessionSelect={handleSubSessionSelect}
             drawnShapeAnalytics={drawnShapeAnalytics}
             activeTabExternal={analyticsActiveTab}
@@ -7075,6 +7160,7 @@ const UnifiedMapView = () => {
                 show={showSubSession}
                 markers={subSessionMarkers}
                 selectedMarkerId={selectedSubSessionTarget?.markerId ?? null}
+                selectedMarkerIds={selectedSubSessionTargets.map((item) => item?.markerId).filter(Boolean)}
                 onMarkerSelect={handleSubSessionMarkerSelect}
               />
 

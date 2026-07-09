@@ -22,7 +22,7 @@ const FILE_TYPES = [
   "text/csv",
   "application/zip",
   "application/vnd.ms-excel",
-  "application/x-zip-compressed",   // ✅ added
+  "application/x-zip-compressed",   
   "application/octet-stream",
   "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
 ];
@@ -37,13 +37,7 @@ const toSafeArray = (value) => {
 
 const normalizeSessionId = (value) => String(value ?? "").trim();
 
-const normalizeSessionIds = (value) => {
-  const source = Array.isArray(value) ? value : [];
-  return source
-    .map(normalizeSessionId)
-    .filter(Boolean)
-    .filter((id, index, arr) => arr.indexOf(id) === index);
-};
+
 
 const formatSessionCell = (sessionValue) => {
   if (Array.isArray(sessionValue)) {
@@ -573,6 +567,11 @@ const UploadDataPage = () => {
                 )}
               </Button>
             </div>
+          </TabsContent>
+          {/* ---------- Indoor file generations ---------- */}  
+          <TabsContent value="Report" className="space-y-4 mt-4">
+           
+
           </TabsContent>
         </Tabs>
 

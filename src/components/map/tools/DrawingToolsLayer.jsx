@@ -569,7 +569,7 @@ function DrawingToolsLayerComponent({
               text,
               color: "#111827",
               fontWeight: "700",
-              fontSize: "12px",
+              fontSize: "20px",
             },
             zIndex: 1000,
           });

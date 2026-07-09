@@ -80,6 +80,8 @@ const normalizeComparisonEntry = (entry = {}) => ({
   count: toFiniteNumber(entry.count) ?? 0,
   total_duration: toFiniteNumber(entry.total_duration),
   avg_duration: toFiniteNumber(entry.avg_duration),
+  total_setup_time: toFiniteNumber(entry.total_setup_time),
+  avg_setup_time: toFiniteNumber(entry.avg_setup_time),
   avg_speed: toFiniteNumber(entry.avg_speed),
   min_speed: toFiniteNumber(entry.min_speed),
   max_speed: toFiniteNumber(entry.max_speed),
@@ -95,6 +97,8 @@ const normalizeComparison = (comparison = {}) => ({
 const normalizeMetrics = (metrics = {}) => ({
   total_duration: toFiniteNumber(metrics.total_duration),
   avg_duration: toFiniteNumber(metrics.avg_duration),
+  total_setup_time: toFiniteNumber(metrics.total_setup_time),
+  avg_setup_time: toFiniteNumber(metrics.avg_setup_time),
   total_speed: toFiniteNumber(metrics.total_speed),
   avg_speed: toFiniteNumber(metrics.avg_speed),
   min_speed: toFiniteNumber(metrics.min_speed),
@@ -129,6 +133,7 @@ const normalizeSubSessionItem = (item = {}) => {
   const end = normalizeLatLng(coordinates.end_lat, coordinates.end_lon);
 
   const duration = toFiniteNumber(item.duration_ms);
+  const setupTime = toFiniteNumber(item.setup_ms ?? item.setupTime ?? item.setup_time);
 
   return {
     subSessionId,
@@ -140,6 +145,7 @@ const normalizeSubSessionItem = (item = {}) => {
     resultStatusRaw,
     resultStatus: normalizeSubSessionResultStatus(resultStatusRaw ?? "failed", duration),
     duration,
+    setupTime,
 
     rawCoordinates: coordinates,
     markerId: null,
@@ -192,6 +198,7 @@ const normalizeSessionItem = (item = {}, index = 0) => {
         markerType: "sub-session-start",
         sessionId,
         duration: sub.duration,
+        setupTime: sub.setupTime,
         subSessionId: sub.subSessionId,
         subSessionType: sub.subSessionType,
         number: sub.number,
@@ -286,6 +293,8 @@ const normalizeResponse = (response) => {
   if (!rawSummary && data.length > 0) {
     let total_duration = 0;
     let avg_duration_sum = 0;
+    let total_setup_time = 0;
+    let avg_setup_time_sum = 0;
     let total_speed = 0;
     let avg_speed_sum = 0;
     let min_speed = null;
@@ -300,6 +309,8 @@ const normalizeResponse = (response) => {
       let hasData = false;
       if (m.total_duration != null) { total_duration += Number(m.total_duration); hasData = true; }
       if (m.avg_duration != null) { avg_duration_sum += Number(m.avg_duration); hasData = true; }
+      if (m.total_setup_time != null) { total_setup_time += Number(m.total_setup_time); hasData = true; }
+      if (m.avg_setup_time != null) { avg_setup_time_sum += Number(m.avg_setup_time); hasData = true; }
       if (m.total_speed != null) { total_speed += Number(m.total_speed); hasData = true; }
       if (m.avg_speed != null) { avg_speed_sum += Number(m.avg_speed); hasData = true; }
       if (m.min_speed != null) {
@@ -326,6 +337,8 @@ const normalizeResponse = (response) => {
     rawSummary = {
       total_duration,
       avg_duration: countWithData > 0 ? avg_duration_sum / countWithData : 0,
+      total_setup_time,
+      avg_setup_time: countWithData > 0 ? avg_setup_time_sum / countWithData : 0,
       total_speed,
       avg_speed: countWithData > 0 ? avg_speed_sum / countWithData : 0,
       min_speed,

@@ -85,6 +85,7 @@ export const COLOR_SCHEMES = {
     "5G": "#EC4899",
     "NR (5G NSA)": "#EC4899",
     "NR (5G SA)": "#EC4899",
+    "4G(LTE-ANCHOR NSA)": "#6366F1",
     "4G": "#8B5CF6",
     "LTE": "#8B5CF6",
     "3G": "#10B981",

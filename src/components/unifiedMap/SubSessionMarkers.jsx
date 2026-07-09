@@ -83,10 +83,15 @@ const SubSessionMarkers = ({
   markers = [],
   show = false,
   selectedMarkerId = null,
+  selectedMarkerIds = [],
   onMarkerSelect,
 }) => {
   const [internalSelectedMarkerId, setInternalSelectedMarkerId] = useState(null);
   const activeMarkerId = selectedMarkerId ?? internalSelectedMarkerId;
+  const highlightedMarkerIdSet = useMemo(() => {
+    const values = Array.isArray(selectedMarkerIds) ? selectedMarkerIds : [];
+    return new Set(values.map((value) => String(value ?? "").trim()).filter(Boolean));
+  }, [selectedMarkerIds]);
 
   useEffect(() => {
     if (!show) {
@@ -118,28 +123,36 @@ const SubSessionMarkers = ({
   return (
     <>
       {markers.map((marker, index) => (
-        <MarkerF
-          key={`${marker.id ?? "sub"}-${marker.sessionId ?? "na"}-${marker.subSessionId ?? "na"}-${index}`}
-          position={marker.position}
-          icon={{
-            path: getSubSessionMarkerPath(marker.subSessionType),
-            fillColor: formatStatus(marker.resultStatus).color,
-            fillOpacity: 1,
-            strokeColor: "#f7f8f8",
-            strokeWeight: 2,
-            scale: 1,
-          }}
-          title={`Session ${marker.sessionId}${marker.subSessionId != null ? ` / Sub ${marker.subSessionId}` : ""
-            } / ${formatSubSessionType(marker.subSessionType)}`}
-          onClick={() => {
-            if (selectedMarkerId == null) {
-              setInternalSelectedMarkerId(marker.id);
-            }
-            if (typeof onMarkerSelect === "function") {
-              onMarkerSelect(marker);
-            }
-          }}
-        />
+        (() => {
+          const markerKey = String(marker.id ?? "");
+          const isHighlighted = highlightedMarkerIdSet.has(markerKey);
+
+          return (
+            <MarkerF
+              key={`${marker.id ?? "sub"}-${marker.sessionId ?? "na"}-${marker.subSessionId ?? "na"}-${index}`}
+              position={marker.position}
+              icon={{
+                path: getSubSessionMarkerPath(marker.subSessionType),
+                fillColor: formatStatus(marker.resultStatus).color,
+                fillOpacity: 1,
+                strokeColor: isHighlighted ? "#22d3ee" : "#f7f8f8",
+                strokeWeight: isHighlighted ? 4 : 2,
+                scale: isHighlighted ? 1.2 : 1,
+              }}
+              zIndex={isHighlighted ? 1000 : undefined}
+              title={`Session ${marker.sessionId}${marker.subSessionId != null ? ` / Sub ${marker.subSessionId}` : ""
+                } / ${formatSubSessionType(marker.subSessionType)}`}
+              onClick={() => {
+                if (selectedMarkerId == null) {
+                  setInternalSelectedMarkerId(marker.id);
+                }
+                if (typeof onMarkerSelect === "function") {
+                  onMarkerSelect(marker);
+                }
+              }}
+            />
+          );
+        })()
       ))}
 
       {selectedMarker && (

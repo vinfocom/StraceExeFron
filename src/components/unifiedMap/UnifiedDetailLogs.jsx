@@ -1092,6 +1092,7 @@ function UnifiedDetailLogs({
   subSessionLoading = false,
   subSessionRequestedIds = [],
   selectedSubSessionTarget = null,
+  selectedSubSessionTargets = [],
   onSubSessionSelect,
   drawnShapeAnalytics = [],
   activeTabExternal = null,
@@ -1942,6 +1943,7 @@ function UnifiedDetailLogs({
               requestedSessionIds={subSessionRequestedIds}
               loading={subSessionLoading}
               selectedSubSessionTarget={selectedSubSessionTarget}
+              selectedSubSessionTargets={selectedSubSessionTargets}
               onSubSessionSelect={onSubSessionSelect}
             />
           )}

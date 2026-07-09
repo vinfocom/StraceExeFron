@@ -181,6 +181,14 @@ export const normalizeTechName = (tech, band = null) => {
 
   const t = techStr.toUpperCase();
 
+  const isLteAnchorNsa =
+    (t.includes("LTE ANCHOR") || t.includes("LTE-ANCHOR") || t.includes("LTE_ANCHOR")) &&
+    t.includes("NSA");
+
+  if (isLteAnchorNsa) {
+    return "4G(LTE-ANCHOR NSA)";
+  }
+
   const has5GSignal =
     t.includes("5G") ||
     t.includes("NR NSA") ||
@@ -188,9 +196,6 @@ export const normalizeTechName = (tech, band = null) => {
     t.includes("NR-CA") ||
     t.includes("NR-DC") ||
     t.includes("VONR") ||
-    t.includes("LTE ANCHOR") ||
-    t.includes("LTE-ANCHOR") ||
-    t.includes("LTE_ANCHOR") ||
     t.includes("NSA") ||
     t.includes("ENDC") ||
     t.includes("EN-DC");
@@ -286,6 +291,7 @@ export const COLOR_SCHEMES = {
   },
   technology: {
     "5G": "#EC4899",
+    "4G(LTE-ANCHOR NSA)": "#6366F1",
     "4G": "#8B5CF6",
     "3G": "#10B981",
     "2G": "#6B7280",

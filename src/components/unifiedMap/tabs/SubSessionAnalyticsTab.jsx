@@ -25,6 +25,11 @@ const formatDuration = (value) => {
   return `${seconds}s`;
 };
 
+const formatPreciseSeconds = (value) => {
+  if (value == null || Number.isNaN(value)) return "N/A";
+  return `${(Number(value) / 1000).toFixed(3)}s`;
+};
+
 const formatBytes = (value) => {
   if (value == null || Number.isNaN(value)) return "N/A";
   const bytes = Number(value);
@@ -136,6 +141,7 @@ export default function SubSessionAnalyticsTab({
   loading = false,
   onSubSessionSelect,
   selectedSubSessionTarget = null,
+  selectedSubSessionTargets = [],
 }) {
   const [expandedRows, setExpandedRows] = useState({});
   const [sortBy, setSortBy] = useState("NONE");
@@ -182,6 +188,21 @@ export default function SubSessionAnalyticsTab({
         : null,
     [selectedSubSessionTarget],
   );
+
+  const selectedSubSessionKeys = useMemo(() => {
+    const targets = Array.isArray(selectedSubSessionTargets) ? selectedSubSessionTargets : [];
+    return new Set(
+      targets
+        .map((target) => {
+          if (target?.markerId != null) return `marker:${String(target.markerId)}`;
+          if (target?.sessionId != null && target?.subSessionId != null) {
+            return `session:${String(target.sessionId)}|sub:${String(target.subSessionId)}`;
+          }
+          return null;
+        })
+        .filter(Boolean),
+    );
+  }, [selectedSubSessionTargets]);
 
   useEffect(() => {
     const handleOutsideClick = (event) => {
@@ -267,6 +288,13 @@ export default function SubSessionAnalyticsTab({
               subMetrics.total_file_size ??
               session.metrics?.total_file_size,
           ),
+          setupTime: toMetric(
+            sub.setup_ms ??
+              sub.setupTime ??
+              sub.setup_time ??
+              subMetrics.avg_setup_time ??
+              session.metrics?.avg_setup_time,
+          ),
           duration,
         };
       }),
@@ -321,12 +349,8 @@ export default function SubSessionAnalyticsTab({
     return sortedRows.filter((row) => row.subSessionTypeNormalized === targetType);
   }, [sortedRows, activeTypeTab]);
 
-  // Rows actually rendered in the table: type-filtered rows narrowed by the
-  // search box and the status filter. Summary/KPI cards intentionally stay on
-  // `filteredRows` so the overview reflects the full tab, not the table filters.
+  
   const tableRows = useMemo(() => {
-    // Comma-separated search terms are matched with OR logic, so users can list
-    // multiple sessions at once, e.g. "101, 102, 103".
     const terms = searchQuery
       .split(",")
       .map((term) => term.trim().toLowerCase())
@@ -367,6 +391,8 @@ export default function SubSessionAnalyticsTab({
       failed,
       total_duration: metric((row) => row.duration, "sum", true),
       avg_duration: metric((row) => row.duration, "avg", true),
+      total_setup_time: metric((row) => row.setupTime, "sum", true),
+      avg_setup_time: metric((row) => row.setupTime, "avg", true),
       total_speed: metric((row) => row.maxSpeed, "sum", true),
       avg_speed: metric((row) => row.maxSpeed, "avg", true),
       min_speed: metric((row) => row.minSpeed, "min", true),
@@ -444,6 +470,7 @@ export default function SubSessionAnalyticsTab({
       position: row.position ?? null,
       resultStatus: row.status,
       source: "sub-session-table",
+      toggle: true,
     });
   };
 
@@ -522,7 +549,7 @@ export default function SubSessionAnalyticsTab({
       </div>
 
       {activeTypeTab === CALL_TYPE_TAB && (
-      <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         <div className="bg-slate-900/70 border border-slate-700 rounded-lg p-3">
           <div className="text-[11px] text-slate-400">Call Rows</div>
           <div className="text-sm font-semibold text-white mt-1">
@@ -559,6 +586,18 @@ export default function SubSessionAnalyticsTab({
             {formatNumber(callKpis.successCalls, 0)}
           </div>
         </div>
+        <div className="bg-slate-900/70 border border-slate-700 rounded-lg p-3">
+          <div className="text-[11px] text-slate-400">Avg Setup Time</div>
+          <div className="text-sm font-semibold text-cyan-200 mt-1">
+            {formatPreciseSeconds(tabSummary.avg_setup_time)}
+          </div>
+        </div>
+        <div className="bg-slate-900/70 border border-slate-700 rounded-lg p-3">
+          <div className="text-[11px] text-slate-400">Total Setup Time</div>
+          <div className="text-sm font-semibold text-white mt-1">
+            {formatPreciseSeconds(tabSummary.total_setup_time)}
+          </div>
+        </div>
       </div>
       )}
 
@@ -567,7 +606,7 @@ export default function SubSessionAnalyticsTab({
 
 
       {activeTypeTab === DETAIL_TYPE_TAB && (
-        <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
           <div className="bg-slate-900/70 border border-slate-700 rounded-lg p-3">
             <div className="text-[11px] text-slate-400">Total Duration</div>
             <div className="text-sm font-semibold text-white mt-1">
@@ -584,6 +623,12 @@ export default function SubSessionAnalyticsTab({
             <div className="text-[11px] text-slate-400">Average Speed</div>
             <div className="text-sm font-semibold text-white mt-1">
               {formatSpeedKbps(tabSummary.avg_speed)}
+            </div>
+          </div>
+          <div className="bg-slate-900/70 border border-slate-700 rounded-lg p-3">
+            <div className="text-[11px] text-slate-400">Avg Setup Time</div>
+            <div className="text-sm font-semibold text-white mt-1">
+              {formatPreciseSeconds(tabSummary.avg_setup_time)}
             </div>
           </div>
           <div className="bg-slate-900/70 border border-slate-700 rounded-lg p-3">
@@ -604,41 +649,58 @@ export default function SubSessionAnalyticsTab({
               {formatBytes(tabSummary.total_file_size)}
             </div>
           </div>
+          <div className="bg-slate-900/70 border border-slate-700 rounded-lg p-3">
+            <div className="text-[11px] text-slate-400">Total Setup Time</div>
+            <div className="text-sm font-semibold text-white mt-1">
+              {formatPreciseSeconds(tabSummary.total_setup_time)}
+            </div>
+          </div>
         </div>
       )}
 
       <div className="space-y-3">
         <div className="flex items-center justify-between">
           <h5 className="text-xs font-semibold text-slate-200">Sub Session Table</h5>
-          <div className="relative" ref={sortRef}>
-            <button
-              type="button"
-              onClick={() => setIsSortOpen((previous) => !previous)}
-              className="text-[11px] font-medium border border-slate-600 text-slate-200 bg-slate-800 hover:bg-slate-700 rounded px-2 py-1"
-            >
-              {selectedSortLabel} v
-            </button>
-            {isSortOpen && (
-              <div className="absolute right-0 mt-1 w-28 rounded-md border border-slate-700 bg-slate-900 shadow-lg z-20">
-                {sortOptions.map((option) => (
-                  <button
-                    key={option.key}
-                    type="button"
-                    onClick={() => {
-                      setSortBy(option.key);
-                      setIsSortOpen(false);
-                    }}
-                    className={`w-full text-left px-2 py-1.5 text-[11px] ${
-                      option.key === sortBy
-                        ? "bg-cyan-900/30 text-cyan-100"
-                        : "text-slate-200 hover:bg-slate-800"
-                    }`}
-                  >
-                    {option.label}
-                  </button>
-                ))}
-              </div>
+          <div className="flex items-center gap-2">
+            {selectedSubSessionKeys.size > 0 && (
+              <button
+                type="button"
+                onClick={() => onSubSessionSelect?.(null)}
+                className="text-[11px] font-medium border border-cyan-700/60 text-cyan-100 bg-cyan-950/40 hover:bg-cyan-900/40 rounded px-2 py-1"
+              >
+                Clear Map Selection ({selectedSubSessionKeys.size})
+              </button>
             )}
+            <div className="relative" ref={sortRef}>
+              <button
+                type="button"
+                onClick={() => setIsSortOpen((previous) => !previous)}
+                className="text-[11px] font-medium border border-slate-600 text-slate-200 bg-slate-800 hover:bg-slate-700 rounded px-2 py-1"
+              >
+                {selectedSortLabel} v
+              </button>
+              {isSortOpen && (
+                <div className="absolute right-0 mt-1 w-28 rounded-md border border-slate-700 bg-slate-900 shadow-lg z-20">
+                  {sortOptions.map((option) => (
+                    <button
+                      key={option.key}
+                      type="button"
+                      onClick={() => {
+                        setSortBy(option.key);
+                        setIsSortOpen(false);
+                      }}
+                      className={`w-full text-left px-2 py-1.5 text-[11px] ${
+                        option.key === sortBy
+                          ? "bg-cyan-900/30 text-cyan-100"
+                          : "text-slate-200 hover:bg-slate-800"
+                      }`}
+                    >
+                      {option.label}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
         </div>
 
@@ -694,9 +756,9 @@ export default function SubSessionAnalyticsTab({
           }
         >
           <span>Session ID</span>
-          <span>Sub Session ID</span>
           {activeTypeTab === CALL_TYPE_TAB ? (
             <>
+              <span>Setup Time</span>
               <span>Number</span>
               <span>Direction</span>
               <span>Duration</span>
@@ -705,6 +767,7 @@ export default function SubSessionAnalyticsTab({
             </>
           ) : (
             <>
+              <span>Sub Session ID</span>
               <span>Type</span>
               <span>Status</span>
               <span>Map</span>
@@ -723,6 +786,11 @@ export default function SubSessionAnalyticsTab({
 
         {tableRows.map((row) => {
           const isCallRow = getSubSessionTypeLabel(row.subSessionTypeNormalized) === CALL_TYPE_TAB;
+          const rowSelectionKey =
+            row.markerId != null
+              ? `marker:${String(row.markerId)}`
+              : `session:${String(row.sessionId)}|sub:${String(row.subSessionId)}`;
+          const isMultiSelected = selectedSubSessionKeys.has(rowSelectionKey);
           const isSelected =
             (selectedMarkerKey != null &&
               row.markerId != null &&
@@ -738,7 +806,7 @@ export default function SubSessionAnalyticsTab({
                 className={`grid ${
                   activeTypeTab === CALL_TYPE_TAB ? "" : "grid-cols-6"
                 } px-2 py-1.5 text-xs border-t border-slate-700 ${
-                  isSelected ? "bg-cyan-900/20 text-cyan-100" : "text-slate-200"
+                  isSelected || isMultiSelected ? "bg-cyan-900/20 text-cyan-100" : "text-slate-200"
                 }`}
                 style={
                   activeTypeTab === CALL_TYPE_TAB
@@ -747,15 +815,18 @@ export default function SubSessionAnalyticsTab({
                 }
               >
                 <span>{row.sessionId}</span>
-                <span>{row.subSessionId}</span>
                 {activeTypeTab === CALL_TYPE_TAB ? (
                   <>
+                    <span>{formatPreciseSeconds(row.setupTime)}</span>
                     <span className="truncate" title={formatText(row.number)}>{formatText(row.number)}</span>
                     <span className="capitalize">{formatText(row.direction)}</span>
                     <span>{formatDuration(row.duration)}</span>
                   </>
                 ) : (
-                  <span>{getSubSessionTypeLabel(row.subSessionTypeNormalized)}</span>
+                  <>
+                    <span>{row.subSessionId}</span>
+                    <span>{getSubSessionTypeLabel(row.subSessionTypeNormalized)}</span>
+                  </>
                 )}
                 <span>
                   <span
@@ -781,11 +852,13 @@ export default function SubSessionAnalyticsTab({
                     disabled={!row.position}
                     className={`px-2 py-0.5 rounded border ${
                       row.position
-                        ? "border-cyan-600/60 text-cyan-200 hover:bg-cyan-800/40"
+                        ? isMultiSelected
+                          ? "border-cyan-400 bg-cyan-900/30 text-cyan-100 hover:bg-cyan-800/50"
+                          : "border-cyan-600/60 text-cyan-200 hover:bg-cyan-800/40"
                         : "border-slate-700 text-slate-500 cursor-not-allowed"
                     }`}
                   >
-                    {row.position ? "Highlight" : "No Point"}
+                    {row.position ? (isMultiSelected ? "Selected" : "Highlight") : "No Point"}
                   </button>
                 </span>
                 {activeTypeTab !== CALL_TYPE_TAB && (
@@ -804,7 +877,7 @@ export default function SubSessionAnalyticsTab({
               {activeTypeTab !== CALL_TYPE_TAB && isExpanded && (
                 <div
                   className={`border-t border-slate-700 px-3 py-2 ${
-                    isSelected ? "bg-cyan-900/10 text-cyan-100" : "bg-slate-900/30 text-slate-300"
+                    isSelected || isMultiSelected ? "bg-cyan-900/10 text-cyan-100" : "bg-slate-900/30 text-slate-300"
                   }`}
                 >
                   <div className="grid grid-cols-2 md:grid-cols-3 gap-2 text-[11px]">
@@ -812,6 +885,7 @@ export default function SubSessionAnalyticsTab({
                     <span className="bg-slate-800/70 rounded px-2 py-1">MN SPD: {formatSpeedKbps(row.minSpeed)}</span>
                     <span className="bg-slate-800/70 rounded px-2 py-1">FS: {formatBytes(row.fileSize)}</span>
                     <span className="bg-slate-800/70 rounded px-2 py-1">DUR: {formatDuration(row.duration)}</span>
+                    <span className="bg-slate-800/70 rounded px-2 py-1">SETUP: {formatPreciseSeconds(row.setupTime)}</span>
                     <span className="bg-slate-800/70 rounded px-2 py-1">ST: {formatLatLng(row.start)}</span>
                     <span className="bg-slate-800/70 rounded px-2 py-1">END: {formatLatLng(row.end)}</span>
                   </div>
