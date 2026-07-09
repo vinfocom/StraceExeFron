@@ -158,7 +158,7 @@ const ToggleRow = memo(
 );
 ToggleRow.displayName = "ToggleRow";
 
-// Compact Select Row
+// Compact Select Row (Single Select)
 const SelectRow = memo(
   ({
     label,
@@ -187,6 +187,84 @@ const SelectRow = memo(
   ),
 );
 SelectRow.displayName = "SelectRow";
+
+// Multi Select Row with Checkboxes
+const MultiSelectRow = memo(
+  ({
+    label,
+    values = [],
+    onChange,
+    options,
+    placeholder,
+    disabled = false,
+    className = "",
+  }) => {
+    const [isOpen, setIsOpen] = useState(false);
+    const containerRef = useRef(null);
+
+    useEffect(() => {
+      const handleClickOutside = (event) => {
+        if (containerRef.current && !containerRef.current.contains(event.target)) {
+          setIsOpen(false);
+        }
+      };
+      document.addEventListener("mousedown", handleClickOutside);
+      return () => document.removeEventListener("mousedown", handleClickOutside);
+    }, []);
+
+    const handleToggle = (optValue) => {
+      if (optValue === "all") {
+        onChange([]);
+        return;
+      }
+      const newValues = values.includes(optValue)
+        ? values.filter(v => v !== optValue)
+        : [...values, optValue];
+      onChange(newValues);
+    };
+
+    const selectedLabels = values.length === 0 
+        ? placeholder 
+        : options.filter(o => values.includes(o.value) && o.value !== "all").map(o => o.label).join(", ");
+
+    return (
+      <div className={`min-w-0 flex-1 space-y-1.5 relative ${className}`} ref={containerRef}>
+        {label && <Label className="text-sm font-semibold text-white">{label}</Label>}
+        <button
+          type="button"
+          onClick={() => !disabled && setIsOpen(!isOpen)}
+          disabled={disabled}
+          className="flex h-8 w-full items-center justify-between rounded-md bg-slate-800 border border-slate-600 px-3 text-xs text-white disabled:opacity-50"
+        >
+          <span className="truncate">{values.length === 0 ? placeholder : selectedLabels}</span>
+          <ChevronDown className="h-4 w-4 opacity-50 shrink-0 ml-2" />
+        </button>
+        {isOpen && (
+          <div className="absolute z-[100] w-full mt-1 max-h-60 overflow-y-auto rounded-md border border-slate-600 bg-slate-900 py-1 shadow-lg">
+            {options.map((opt) => {
+              const isSelected = opt.value === "all" ? values.length === 0 : values.includes(opt.value);
+              return (
+                <div
+                  key={opt.value}
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    handleToggle(opt.value);
+                  }}
+                  className="flex cursor-pointer items-center px-2 py-1.5 text-xs text-white hover:bg-slate-800"
+                >
+                  <Checkbox checked={isSelected} className="mr-2 pointer-events-none" />
+                  <span className="truncate">{opt.label}</span>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    );
+  }
+);
+MultiSelectRow.displayName = "MultiSelectRow";
 
 // Segmented Control
 const SegmentedControl = memo(
@@ -477,6 +555,62 @@ const UnifiedMapSidebar = ({
   const [activeSidebarTab, setActiveSidebarTab] = useState("filter");
   const [isEditingSessions, setIsEditingSessions] = useState(false);
   const [sessionInputValue, setSessionInputValue] = useState("");
+  
+  // Accumulate all filter options seen across the session so they don't disappear on single selection
+  const [accumulatedFilterOptions, setAccumulatedFilterOptions] = useState({
+    providers: [],
+    bands: [],
+    technologies: [],
+    cellIds: [],
+    apps: []
+  });
+
+  useEffect(() => {
+    setAccumulatedFilterOptions({
+      providers: [],
+      bands: [],
+      technologies: [],
+      cellIds: [],
+      apps: []
+    });
+  }, [projectId, sessionIds]);
+
+  useEffect(() => {
+    if (!availableFilterOptions) return;
+    
+    setAccumulatedFilterOptions(prev => {
+      let hasChanges = false;
+      const next = { ...prev };
+      
+      const keys = ['providers', 'bands', 'technologies', 'cellIds', 'apps'];
+      keys.forEach(key => {
+        const incoming = availableFilterOptions[key];
+        if (Array.isArray(incoming) && incoming.length > 0) {
+          const currentSet = new Set(prev[key]);
+          const originalSize = currentSet.size;
+          
+          incoming.forEach(item => {
+            if (item !== null && item !== undefined && item !== "") {
+              currentSet.add(item);
+            }
+          });
+          
+          if (currentSet.size > originalSize) {
+            next[key] = Array.from(currentSet).sort((a, b) => {
+              if (typeof a === 'string' && typeof b === 'string') {
+                return a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' });
+              }
+              return a > b ? 1 : -1;
+            });
+            hasChanges = true;
+          }
+        }
+      });
+      
+      return hasChanges ? next : prev;
+    });
+  }, [availableFilterOptions]);
+
 
   // Draft for the "Log Grid Size" control. The slider edits this draft; the grid
   // only recomputes (and the value persists to the DB) when the user hits Save.
@@ -593,11 +727,16 @@ const UnifiedMapSidebar = ({
 
   // Filter handlers
   const updateDataFilter = useCallback(
-    (filterType, value) => {
-      setDataFilters?.((prev) => ({
-        ...prev,
-        [filterType]: value === "all" ? [] : [value],
-      }));
+    (filterType, valueOrValues) => {
+      setDataFilters?.((prev) => {
+        if (Array.isArray(valueOrValues)) {
+          return { ...prev, [filterType]: valueOrValues };
+        }
+        return {
+          ...prev,
+          [filterType]: valueOrValues === "all" ? [] : [valueOrValues],
+        };
+      });
     },
     [setDataFilters],
   );
@@ -961,8 +1100,8 @@ const UnifiedMapSidebar = ({
   const lteOptimisedOperatorOptions = useMemo(() => {
     const preferredProviders = Array.isArray(siteOperatorOptions) && siteOperatorOptions.length > 0
       ? siteOperatorOptions
-      : Array.isArray(availableFilterOptions?.providers)
-        ? availableFilterOptions.providers
+      : Array.isArray(accumulatedFilterOptions?.providers)
+        ? accumulatedFilterOptions.providers
         : [];
     const rawProviders = preferredProviders;
     const normalized = rawProviders
@@ -973,7 +1112,7 @@ const UnifiedMapSidebar = ({
       value: name.toLowerCase(),
       label: name,
     }));
-  }, [availableFilterOptions?.providers, siteOperatorOptions]);
+  }, [accumulatedFilterOptions?.providers, siteOperatorOptions]);
 
   const ltePredictionOperatorOptions = useMemo(
     () => [
@@ -1740,29 +1879,13 @@ const UnifiedMapSidebar = ({
     ltePredictionToastIdRef.current = loadingToastId;
 
     try {
-      let driveRowsPayload = [];
-      let driveRowsSource = "python_backend_fallback";
-      try {
-        const resolvedDriveRows = await resolveNetworkLogsForPython(validSessionIds, numericProjectId);
-        driveRowsPayload = resolvedDriveRows.rows;
-        driveRowsSource = resolvedDriveRows.source;
-      } catch (logError) {
-        console.warn(
-          "[LTE_PREDICTION_INPUT] frontend log resolve failed; Python will use backend fallback",
-          logError,
-        );
-      }
-
       const response = await predictionApi.runLtePrediction({
-        user_id: Number(user?.id) || 0,
         project_id: numericProjectId,
         session_ids: validSessionIds,
-        grid_value: Number(lteGridSizeMeters) || 25,
+        grid_resolution_m: Number(lteGridSizeMeters) || 25,
         radius_m: Number(ltePredictionRadiusMeters) || 500,
-        building: Boolean(ltePredictionUseBuildings),
+        use_buildings: Boolean(ltePredictionUseBuildings),
         operator: ltePredictionOperator,
-        drive_rows: driveRowsPayload,
-        drive_rows_source: driveRowsSource,
         polygon_ids: activePolygonIdsParam,
       });
 
@@ -2070,18 +2193,14 @@ const UnifiedMapSidebar = ({
   ]);
 
   const selectedEnvironment = useMemo(() => {
-    const current = dataFilters?.indoorOutdoor || [];
-    if (current.includes("Indoor")) return "Indoor";
-    if (current.includes("Outdoor")) return "Outdoor";
-    return "all";
+    return dataFilters?.indoorOutdoor || [];
   }, [dataFilters?.indoorOutdoor]);
 
   const appFilterOptions = useMemo(() => {
-    if (!Array.isArray(availableFilterOptions?.apps)) return [];
-    return availableFilterOptions.apps
+    return accumulatedFilterOptions.apps
       .map((app) => String(app || "").trim())
       .filter(Boolean);
-  }, [availableFilterOptions?.apps]);
+  }, [accumulatedFilterOptions.apps]);
 
   useEffect(() => {
     const selectedApps = Array.isArray(dataFilters?.apps) ? dataFilters.apps : [];
@@ -2096,11 +2215,16 @@ const UnifiedMapSidebar = ({
   }, [appFilterOptions, dataFilters?.apps, setDataFilters]);
 
   const updateEnvironment = useCallback(
-    (value) => {
-      setDataFilters?.((prev) => ({
-        ...prev,
-        indoorOutdoor: value === "all" ? [] : [value],
-      }));
+    (valueOrValues) => {
+      setDataFilters?.((prev) => {
+        if (Array.isArray(valueOrValues)) {
+          return { ...prev, indoorOutdoor: valueOrValues };
+        }
+        return {
+          ...prev,
+          indoorOutdoor: valueOrValues === "all" ? [] : [valueOrValues],
+        };
+      });
     },
     [setDataFilters],
   );
@@ -2434,7 +2558,7 @@ const UnifiedMapSidebar = ({
               }}
               useSwitch={true}
             />
-            {/*  yaha pe hum sub session ko toggle kar rahe hai */}
+            {/* yaha pe hum sub session ko toggle kar rahe hai */}
             <ToggleRow    
                   label="Sub Sessions"
                   checked={Boolean(showSubSession)}
@@ -2669,71 +2793,71 @@ const UnifiedMapSidebar = ({
                   </div>
 
                   <div className="space-y-2">
-                    <SelectRow
+                    <MultiSelectRow
                       label="Provider"
-                      value={dataFilters?.providers?.[0] || "all"}
+                      values={dataFilters?.providers || []}
                       onChange={(v) => updateDataFilter("providers", v)}
                       options={[
                         { value: "all", label: "All Providers" },
-                        ...(availableFilterOptions?.providers?.map((p) => ({
+                        ...(accumulatedFilterOptions.providers.map((p) => ({
                           value: p,
                           label: p,
-                        })) || []),
+                        }))),
                       ]}
+                      placeholder="All Providers"
                       disabled={!enableDataToggle}
                     />
 
-                    <SelectRow
+                    <MultiSelectRow
                       label="Band"
-                      value={dataFilters?.bands?.[0] || "all"}
+                      values={dataFilters?.bands || []}
                       onChange={(v) => updateDataFilter("bands", v)}
                       options={[
                         { value: "all", label: "All Bands" },
-                        ...(availableFilterOptions?.bands?.map((b) => ({
+                        ...(accumulatedFilterOptions.bands.map((b) => ({
                           value: b,
                           label: b,
-                        })) || []),
+                        }))),
                       ]}
+                      placeholder="All Bands"
                       disabled={!enableDataToggle}
                     />
 
-                    <SelectRow
+                    <MultiSelectRow
                       label="Technology"
-                      value={dataFilters?.technologies?.[0] || "all"}
+                      values={dataFilters?.technologies || []}
                       onChange={(v) => updateDataFilter("technologies", v)}
                       options={[
                         { value: "all", label: "All Technologies" },
-                        ...(availableFilterOptions?.technologies
-                          ?.filter((t) => t && t.toLowerCase() !== "unknown")
-                          ?.map((t) => ({ value: t, label: t })) || []),
+                        ...(accumulatedFilterOptions.technologies
+                          .filter((t) => t && t.toLowerCase() !== "unknown")
+                          .map((t) => ({ value: t, label: t }))),
                       ]}
+                      placeholder="All Technologies"
                       disabled={!enableDataToggle}
                     />
 
-                    <SelectRow
+                    <MultiSelectRow
                       label="Cell ID"
-                      value={dataFilters?.cellIds?.[0] || "all"}
+                      values={dataFilters?.cellIds || []}
                       onChange={(v) => updateDataFilter("cellIds", v)}
                       options={[
                         { value: "all", label: "All Cell IDs" },
-                        ...(availableFilterOptions?.cellIds?.map((cellId) => ({
+                        ...(accumulatedFilterOptions.cellIds.map((cellId) => ({
                           value: cellId,
                           label: cellId,
-                        })) || []),
+                        }))),
                       ]}
+                      placeholder="All Cell IDs"
                       disabled={!enableDataToggle}
                     />
-
-                    
 
                   </div>
                 </div>
                 
-
-                
-                <SelectRow
+                <MultiSelectRow
                   label="Environment"
-                  value={selectedEnvironment}
+                  values={selectedEnvironment}
                   onChange={updateEnvironment}
                   disabled={!enableDataToggle}
                   options={[
@@ -2741,18 +2865,15 @@ const UnifiedMapSidebar = ({
                     { value: "Indoor", label: "Indoor" },
                     { value: "Outdoor", label: "Outdoor" },
                   ]}
-                  placeholder="Select environment"
+                  placeholder="All"
                   className="pt-1"
                 />
-
-                
 
                 {activeDataFiltersCount > 0 && (
                   <div className="mt-1 p-2 bg-blue-900/20 border border-blue-700/50 rounded text-xs text-blue-300">
                     Filters active: {activeDataFiltersCount}
                   </div>
                 )}
-
 
               </div>
             ) : (
@@ -3247,7 +3368,7 @@ const UnifiedMapSidebar = ({
                                       handleStoredGridScenarioChange(String(scenarioId));
                                       setStoredGridScenarioMenuOpen(false);
                                     }}
-                                    className={`flex-1 text-left text-xs truncate ${isSelected ? "text-cyan-300" : "text-white"}`}
+                                    className={`flex-1 text-left text-xs truncate ${isSelected ? "text-cyan-300" : "textwhite"}`}
                                   >
                                     {`Scenario ${scenarioId}${item?.status ? ` (${item.status})` : ""}`}
                                   </button>

@@ -112,8 +112,6 @@ export const normalizeProviderName = (rawName) => {
   }
 
   if (
-    
-    cleaned.includes("FAREASTONE") ||
     cleaned.includes("FAREASTONE") ||
     cleaned.includes("EASTONE") ||
     cleaned.includes("遠傳電信")
@@ -121,11 +119,9 @@ export const normalizeProviderName = (rawName) => {
     return "Far Eastone";
   }
 
-  if(
-    (cleaned === "466001")
-  )return "(466001)IR"
+  if ((cleaned === "466001")) return "(466001)IR";
+
   if (
-    
     cleaned.includes("TWMOBILE") ||
     cleaned.includes("TAIWANMOBILE") ||
     cleaned.includes("台灣大哥大")
@@ -134,7 +130,6 @@ export const normalizeProviderName = (rawName) => {
   }
 
   if (
-    
     cleaned.includes("CHUNGHWA") ||
     cleaned.includes("中華電信")
   ) {
@@ -142,7 +137,6 @@ export const normalizeProviderName = (rawName) => {
   }
 
   if (
-   
     cleaned.includes("APTG") ||
     cleaned.includes("ASIAPACIFIC") ||
     cleaned.includes("亞太電信")
@@ -348,6 +342,7 @@ export const getLogColor = (colorBy, value, defaultColor = "#a8a6a2") => {
 
   let normalizedValue = String(value).trim();
 
+  // Value Normalizations
   if (colorBy === "provider") {
     normalizedValue = normalizeProviderName(value);
   } else if (colorBy === "technology") {
@@ -363,14 +358,22 @@ export const getLogColor = (colorBy, value, defaultColor = "#a8a6a2") => {
     normalizedValue = Number.isFinite(pci) ? String(pci) : "Unknown";
   }
 
+  // Handle fully unknown values
   if (!normalizedValue || normalizedValue === "Unknown") {
     return scheme["Unknown"] || defaultColor;
   }
 
+  // 1. Check if color has been explicitly overridden/cached by the user FIRST
+  if (dynamicColorCache[colorBy] && dynamicColorCache[colorBy][normalizedValue]) {
+    return dynamicColorCache[colorBy][normalizedValue];
+  }
+
+  // 2. Fallback to predefined Scheme EXACT match
   if (scheme[normalizedValue]) {
     return scheme[normalizedValue];
   }
 
+  // 3. Fallback to predefined Scheme CASE-INSENSITIVE match
   const matchKey = Object.keys(scheme).find(
     (key) => key.toLowerCase() === normalizedValue.toLowerCase()
   );
@@ -379,6 +382,7 @@ export const getLogColor = (colorBy, value, defaultColor = "#a8a6a2") => {
     return scheme[matchKey];
   }
 
+  // 4. Generate dynamic hash color if completely unknown
   if (!dynamicColorCache[colorBy][normalizedValue]) {
     dynamicColorCache[colorBy][normalizedValue] = generateColorFromHash(normalizedValue);
   }
