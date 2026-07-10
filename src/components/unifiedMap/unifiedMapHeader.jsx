@@ -25,6 +25,7 @@ import DrawingControlsPanel from "../map/layout/DrawingControlsPanel";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import {
   DropdownMenu,
+  DropdownMenuCheckboxItem,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuLabel,
@@ -44,6 +45,11 @@ import {
   upsertProjectInProjectsCache,
   writeProjectsListCache,
 } from "@/utils/projectsCache";
+import {
+  MAP_ZOOM_LOCK_EVENT,
+  MAP_ZOOM_LOCK_STORAGE_KEY,
+  readInitialMapZoomLock,
+} from "@/utils/unifiedMapConfig";
 
 const UPLOAD_SITE_COLUMNS = [
   "site",
@@ -536,6 +542,29 @@ function UnifiedHeader({
   const [activeQuickControl, setActiveQuickControl] = useState(null);
   const [openImportDialog, setOpenImportDialog] = useState(false);
   const [siteScenarioMenuOpen, setSiteScenarioMenuOpen] = useState(false);
+  const [mapZoomLocked, setMapZoomLockedState] = useState(
+    readInitialMapZoomLock,
+  );
+
+  useEffect(() => {
+    const handleMapZoomLockChange = (event) => {
+      setMapZoomLockedState(Boolean(event?.detail?.locked));
+    };
+    window.addEventListener(MAP_ZOOM_LOCK_EVENT, handleMapZoomLockChange);
+    return () =>
+      window.removeEventListener(MAP_ZOOM_LOCK_EVENT, handleMapZoomLockChange);
+  }, []);
+
+  const toggleMapZoomLock = useCallback(() => {
+    const nextLocked = !mapZoomLocked;
+    window.localStorage.setItem(
+      MAP_ZOOM_LOCK_STORAGE_KEY,
+      nextLocked ? "1" : "0",
+    );
+    window.dispatchEvent(
+      new CustomEvent(MAP_ZOOM_LOCK_EVENT, { detail: { locked: nextLocked } }),
+    );
+  }, [mapZoomLocked]);
 
   const handleFileChange = (e) => {
     setSelectedFile(e.target.files[0]);
@@ -800,6 +829,11 @@ function UnifiedHeader({
       disabled: !triangleSizeAvailable,
     },
     {
+      label: "Map Lock",
+      action: toggleMapZoomLock,
+      checked: mapZoomLocked,
+    },
+    {
       label: "Settings",
       action: () => openSettings({ onSaveSuccess: onSettingsSaved }),
     },
@@ -1058,7 +1092,7 @@ function UnifiedHeader({
               </div>
             )}
 
-            {(
+            {!isElectronRuntime && (
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <Button
@@ -1075,15 +1109,29 @@ function UnifiedHeader({
                 <DropdownMenuContent align="end" className="bg-white text-slate-800">
                   <DropdownMenuLabel>Utility</DropdownMenuLabel>
                   <DropdownMenuSeparator />
-                  {utilityMenuItems.map((item) => (
-                    <DropdownMenuItem
-                      key={item.label}
-                      disabled={item.disabled}
-                      onClick={item.action}
-                    >
-                      {item.label}
-                    </DropdownMenuItem>
-                  ))}
+                  {utilityMenuItems.map((item) =>
+                    item.checked !== undefined ? (
+                      <DropdownMenuCheckboxItem
+                        key={item.label}
+                        disabled={item.disabled}
+                        checked={item.checked}
+                        onSelect={(e) => {
+                          e.preventDefault();
+                          item.action();
+                        }}
+                      >
+                        {item.label}
+                      </DropdownMenuCheckboxItem>
+                    ) : (
+                      <DropdownMenuItem
+                        key={item.label}
+                        disabled={item.disabled}
+                        onClick={item.action}
+                      >
+                        {item.label}
+                      </DropdownMenuItem>
+                    ),
+                  )}
                 </DropdownMenuContent>
               </DropdownMenu>
             )}

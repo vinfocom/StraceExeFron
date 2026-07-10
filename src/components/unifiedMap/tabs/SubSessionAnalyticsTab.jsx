@@ -288,9 +288,7 @@ export default function SubSessionAnalyticsTab({
           setupTime: toMetric(
             sub.setup_ms ??
               sub.setupTime ??
-              sub.setup_time ??
-              subMetrics.avg_setup_time ??
-              session.metrics?.avg_setup_time,
+              sub.setup_time,
           ),
           duration,
         };
@@ -613,22 +611,9 @@ export default function SubSessionAnalyticsTab({
             </div>
           </div>
           <div className="bg-slate-900/70 border border-slate-700 rounded-lg p-3">
-            <div className="text-[11px] text-slate-400">Avg Setup Time</div>
-            <div className="text-sm font-semibold text-white mt-1">
-              {formatPreciseSeconds(tabSummary.avg_setup_time)}
-            </div>
-          </div>
-          
-          <div className="bg-slate-900/70 border border-slate-700 rounded-lg p-3">
             <div className="text-[11px] text-slate-400">Total File Size</div>
             <div className="text-sm font-semibold text-white mt-1">
               {formatBytes(tabSummary.total_file_size)}
-            </div>
-          </div>
-          <div className="bg-slate-900/70 border border-slate-700 rounded-lg p-3">
-            <div className="text-[11px] text-slate-400">Total Setup Time</div>
-            <div className="text-sm font-semibold text-white mt-1">
-              {formatPreciseSeconds(tabSummary.total_setup_time)}
             </div>
           </div>
         </div>
@@ -860,7 +845,6 @@ export default function SubSessionAnalyticsTab({
                     <span className="bg-slate-800/70 rounded px-2 py-1">AVG SPD: {formatSpeedKbps(row.avgSpeed)}</span>
                     <span className="bg-slate-800/70 rounded px-2 py-1">FS: {formatBytes(row.fileSize)}</span>
                     <span className="bg-slate-800/70 rounded px-2 py-1">DUR: {formatDuration(row.duration)}</span>
-                    <span className="bg-slate-800/70 rounded px-2 py-1">SETUP: {formatPreciseSeconds(row.setupTime)}</span>
                     <span className="bg-slate-800/70 rounded px-2 py-1">ST: {formatLatLng(row.start)}</span>
                     <span className="bg-slate-800/70 rounded px-2 py-1">END: {formatLatLng(row.end)}</span>
                   </div>

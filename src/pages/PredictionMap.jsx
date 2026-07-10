@@ -14,6 +14,7 @@ import PredictionHeader from "@/components/prediction/PredictionHeader";
 import PredictionSide from "@/components/prediction/PredictionSide";
 import { useSearchParams } from "react-router-dom";
 import { Filter } from "lucide-react";
+import { createZoomStepControl } from "@/utils/mapZoomStepControl";
 
 // ================== CONFIG ==================
 const MAP_CONTAINER_STYLE = { height: "calc(100vh - 64px)", width: "100%" };
@@ -227,6 +228,7 @@ export default function PredictionMapPage() {
 
   const mapRef = useRef(null);
   const listenersRef = useRef([]);
+  const zoomStepControlRef = useRef(null);
 
   const sessionParam = useMemo(() => {
   const sessionId = searchParams.get("sessionId") ?? searchParams.get("session") ?? "";
@@ -380,7 +382,9 @@ useEffect(() => {
 
   const handleMapLoad = useCallback((map) => {
     mapRef.current = map;
-    
+    zoomStepControlRef.current?.dispose?.();
+    zoomStepControlRef.current = createZoomStepControl(map);
+
     const updateViewport = () => {
       const bounds = map.getBounds();
       if (!bounds) return;
@@ -415,6 +419,8 @@ useEffect(() => {
       listenersRef.current.forEach(listener => {
         if (listener && listener.remove) listener.remove();
       });
+      zoomStepControlRef.current?.dispose?.();
+      zoomStepControlRef.current = null;
     };
   }, []);
 
@@ -494,7 +500,8 @@ useEffect(() => {
     const styleKey = uiToggles.basemapStyle || "roadmap";
     return {
       disableDefaultUI: false,
-      zoomControl: true,
+      zoomControl: false,
+      isFractionalZoomEnabled: true,
       streetViewControl: false,
       fullscreenControl: true,
       mapTypeControl: true,

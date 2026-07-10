@@ -72,6 +72,7 @@ import {
   upsertProjectInProjectsCache,
   writeProjectsListCache,
 } from "@/utils/projectsCache";
+import { createZoomStepControl } from "@/utils/mapZoomStepControl";
 import {
   DEFAULT_CENTER,
   DEFAULT_COVERAGE_FILTERS,
@@ -1811,6 +1812,7 @@ const UnifiedMapView = () => {
   const siteSizeHydratedRef = useRef(false);
   const lastPersistedSiteSizeRef = useRef(1);
   const siteSizeSaveTimeoutRef = useRef(null);
+  const gridViewDefaultAppliedForProjectRef = useRef(null);
 
   const [hoveredPolygon, setHoveredPolygon] = useState(null);
   const [hoverPosition, setHoverPosition] = useState(null);
@@ -2567,6 +2569,21 @@ const UnifiedMapView = () => {
       setEnableGrid(false);
     }
   }, [enableGrid, canEnableUnifiedGridView]);
+
+  // Default to grid view (logs rendered as grid cells) when the project has
+  // filtering polygons and a grid size already stored in the DB (grid_size).
+  // Only applied once per project so a user's manual toggle afterwards sticks.
+  useEffect(() => {
+    if (!projectId) return;
+    if (gridViewDefaultAppliedForProjectRef.current === projectId) return;
+    if (!canEnableUnifiedGridView) return;
+    if (!Number.isFinite(projectAreaGridSizeMeters) || projectAreaGridSizeMeters <= 0) {
+      return;
+    }
+
+    gridViewDefaultAppliedForProjectRef.current = projectId;
+    setEnableGrid(true);
+  }, [projectId, canEnableUnifiedGridView, projectAreaGridSizeMeters]);
 
   const shouldFetchSamples =
     isSampleMode && sessionIds.length > 0;
@@ -5352,7 +5369,8 @@ const UnifiedMapView = () => {
       mapTypeId: ui.basemapStyle,
       disableDefaultUI: false,
       streetViewControl: false,
-      zoomControl: !isZoomLocked,
+      zoomControl: false,
+      isFractionalZoomEnabled: true,
       scrollwheel: !isZoomLocked,
       disableDoubleClickZoom: isZoomLocked,
       keyboardShortcuts: !isZoomLocked,
@@ -5384,6 +5402,7 @@ const UnifiedMapView = () => {
     storeHandler: null,
     lockHandler: null,
   });
+  const zoomStepControlRef = useRef(null);
 
   const applyZoomLockControlStyle = useCallback(() => {
     const { rootButton, storeButton, lockButton } = zoomLockControlRef.current;
@@ -5484,6 +5503,9 @@ const UnifiedMapView = () => {
     (map) => {
       mapRef.current = map;
       teardownZoomLockControl();
+      zoomStepControlRef.current?.dispose?.();
+      zoomStepControlRef.current = createZoomStepControl(map);
+      zoomStepControlRef.current?.setDisabled(zoomLockEnabledRef.current);
       // Store all listener handles so we can remove them on unmount / re-mount
       const handles = [];
 
@@ -5711,6 +5733,10 @@ const UnifiedMapView = () => {
     ],
   );
 
+  useEffect(() => {
+    zoomStepControlRef.current?.setDisabled(isZoomLocked);
+  }, [isZoomLocked]);
+
   // Clean up Google Maps listeners when the component unmounts
   useEffect(() => {
     return () => {
@@ -5721,6 +5747,8 @@ const UnifiedMapView = () => {
       });
       mapListenerHandlesRef.current = [];
       teardownZoomLockControl();
+      zoomStepControlRef.current?.dispose?.();
+      zoomStepControlRef.current = null;
     };
   }, [teardownZoomLockControl]);
 

@@ -493,6 +493,30 @@ export const OverviewTab = ({
     };
   }, [processedProviderVolume, sessionIds, isUnknownOrEmpty]);
 
+  const providerVolumeDurationRows = useMemo(() => {
+    if (!processedProviderVolume || processedProviderVolume.length === 0) {
+      return [];
+    }
+
+    return processedProviderVolume
+      .filter((item) => {
+        if (isUnknownOrEmpty(item.provider) || isUnknownOrEmpty(item.technology)) {
+          return false;
+        }
+        return Number(item.durationSec || 0) > 0;
+      })
+      .map((item) => ({
+        provider: item.provider,
+        networkType: item.technology,
+        timeSeconds: item.durationSec,
+        totaltime: item.durationFormatted,
+      }))
+      .sort((a, b) => (b.timeSeconds || 0) - (a.timeSeconds || 0));
+  }, [processedProviderVolume, isUnknownOrEmpty]);
+
+  const displayedDurationData =
+    providerVolumeDurationRows.length > 0 ? providerVolumeDurationRows : durationData;
+
   const drawingSummary = useMemo(() => {
     if (!Array.isArray(drawnShapeAnalytics) || drawnShapeAnalytics.length === 0) {
       return null;
@@ -663,8 +687,8 @@ export const OverviewTab = ({
         <DataVolumeCard volume={volume} sessionWiseVolume={sessionWiseVolume} />
       )} */}
 
-      {durationData && durationData.length > 0 && (
-        <DurationData durationData={durationData} />
+      {displayedDurationData && displayedDurationData.length > 0 && (
+        <DurationData durationData={displayedDurationData} />
       )}
 
       {duration && <SessionDurationCard duration={duration} />}

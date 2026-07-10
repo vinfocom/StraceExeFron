@@ -13,6 +13,7 @@ import {
   getGoogleMapsConfigError,
   getGoogleMapsErrorMessage,
 } from "../lib/googleMapsLoader";
+import { createZoomStepControl } from "../utils/mapZoomStepControl";
 
 const DEFAULT_CENTER = { lat: 25.033, lng: 121.5654 };
 const mapContainerStyle = { width: "100%", height: "100%" };
@@ -177,6 +178,7 @@ export default function RealtimeNetworkMap() {
   const [mapInstance, setMapInstance] = useState(null);
   const mapRef = useRef(null);
   const deckOverlayRef = useRef(null);
+  const zoomStepControlRef = useRef(null);
   const refreshTimerRef = useRef(null);
   const staleRetryTimerRef = useRef(null);
   const fetchInFlightRef = useRef(false);
@@ -427,6 +429,8 @@ export default function RealtimeNetworkMap() {
               mapRef.current = map;
               setMapInstance(map);
               fitPoints(points);
+              zoomStepControlRef.current?.dispose?.();
+              zoomStepControlRef.current = createZoomStepControl(map);
             }}
             onUnmount={() => {
               if (deckOverlayRef.current) {
@@ -439,12 +443,16 @@ export default function RealtimeNetworkMap() {
               }
               mapRef.current = null;
               setMapInstance(null);
+              zoomStepControlRef.current?.dispose?.();
+              zoomStepControlRef.current = null;
             }}
             options={{
               streetViewControl: false,
               fullscreenControl: true,
               mapTypeControl: true,
               clickableIcons: false,
+              zoomControl: false,
+              isFractionalZoomEnabled: true,
             }}
           >
             {points[0] && <MarkerF position={{ lat: points[0].lat, lng: points[0].lng }} label="S" />}

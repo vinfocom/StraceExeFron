@@ -15,7 +15,7 @@ const EMPTY_ANALYTICS = Object.freeze({
   rawResponse: null,
 });
 
-const SUB_SESSION_CACHE_RESOURCE = "unified-sub-session-analytics-v5";
+const SUB_SESSION_CACHE_RESOURCE = "unified-sub-session-analytics-v6";
 const CALL_SUCCESS_DURATION_MS = 90 * 1000;
 
 const toFiniteNumber = (value) => {
@@ -191,7 +191,8 @@ const normalizeSessionItem = (item = {}, index = 0) => {
     let markerId = null;
 
     if (position) {
-      markerId = `sub-${sessionId}-${sub.subSessionId ?? subIndex}`;
+      const typeKey = sub.subSessionType ?? "u";
+      markerId = `sub-${sessionId}-${typeKey}-${sub.subSessionId ?? subIndex}`;
 
       markers.push({
         id: markerId,
