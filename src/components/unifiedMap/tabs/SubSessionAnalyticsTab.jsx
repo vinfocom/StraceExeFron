@@ -121,8 +121,7 @@ const getSubSessionTypeLabel = (typeNormalized) => {
 
 const PS_SORT_OPTIONS = [
   { key: "NONE", label: "SORT" },
-  { key: "MX_SPD", label: "MX SPD" },
-  { key: "MN_SPD", label: "MN SPD" },
+  { key: "AVG_SPD", label: "AVG SPD" },
   { key: "FS", label: "FS" },
   { key: "DUR_HI", label: "DUR ↓" },
   { key: "DUR_LO", label: "DUR ↑" },
@@ -269,17 +268,15 @@ export default function SubSessionAnalyticsTab({
           position: sub.markerPosition ?? sub.start ?? session.start ?? null,
           start: sub.start ?? null,
           end: sub.end ?? null,
-          maxSpeed: toMetric(
-            sub.max_speed ??
+          avgSpeed: toMetric(
+            sub.avg_speed ??
+              sub.avgSpeed ??
+              sub.max_speed ??
               sub.maxSpeed ??
+              subMetrics.avg_speed ??
               subMetrics.max_speed ??
+              session.metrics?.avg_speed ??
               session.metrics?.max_speed,
-          ),
-          minSpeed: toMetric(
-            sub.min_speed ??
-              sub.minSpeed ??
-              subMetrics.min_speed ??
-              session.metrics?.min_speed,
           ),
           fileSize: toMetric(
             sub.file_size ??
@@ -304,19 +301,12 @@ export default function SubSessionAnalyticsTab({
   const sortedRows = useMemo(() => {
     const sorted = [...rows];
 
-    if (sortBy === "MX_SPD") {
+    if (sortBy === "AVG_SPD") {
       sorted.sort((a, b) => {
-        if (a.maxSpeed == null && b.maxSpeed == null) return 0;
-        if (a.maxSpeed == null) return 1;
-        if (b.maxSpeed == null) return -1;
-        return b.maxSpeed - a.maxSpeed;
-      });
-    } else if (sortBy === "MN_SPD") {
-      sorted.sort((a, b) => {
-        if (a.minSpeed == null && b.minSpeed == null) return 0;
-        if (a.minSpeed == null) return 1;
-        if (b.minSpeed == null) return -1;
-        return a.minSpeed - b.minSpeed;
+        if (a.avgSpeed == null && b.avgSpeed == null) return 0;
+        if (a.avgSpeed == null) return 1;
+        if (b.avgSpeed == null) return -1;
+        return b.avgSpeed - a.avgSpeed;
       });
     } else if (sortBy === "FS") {
       sorted.sort((a, b) => {
@@ -393,10 +383,7 @@ export default function SubSessionAnalyticsTab({
       avg_duration: metric((row) => row.duration, "avg", true),
       total_setup_time: metric((row) => row.setupTime, "sum", true),
       avg_setup_time: metric((row) => row.setupTime, "avg", true),
-      total_speed: metric((row) => row.maxSpeed, "sum", true),
-      avg_speed: metric((row) => row.maxSpeed, "avg", true),
-      min_speed: metric((row) => row.minSpeed, "min", true),
-      max_speed: metric((row) => row.maxSpeed, "max", true),
+      avg_speed: metric((row) => row.avgSpeed, "avg", true),
       total_file_size: metric((row) => row.fileSize, "sum", true),
     };
   }, [filteredRows]);
@@ -631,18 +618,7 @@ export default function SubSessionAnalyticsTab({
               {formatPreciseSeconds(tabSummary.avg_setup_time)}
             </div>
           </div>
-          <div className="bg-slate-900/70 border border-slate-700 rounded-lg p-3">
-            <div className="text-[11px] text-slate-400">Min Speed</div>
-            <div className="text-sm font-semibold text-white mt-1">
-              {formatSpeedKbps(tabSummary.min_speed)}
-            </div>
-          </div>
-          <div className="bg-slate-900/70 border border-slate-700 rounded-lg p-3">
-            <div className="text-[11px] text-slate-400">Max Speed</div>
-            <div className="text-sm font-semibold text-white mt-1">
-              {formatSpeedKbps(tabSummary.max_speed)}
-            </div>
-          </div>
+          
           <div className="bg-slate-900/70 border border-slate-700 rounded-lg p-3">
             <div className="text-[11px] text-slate-400">Total File Size</div>
             <div className="text-sm font-semibold text-white mt-1">
@@ -881,8 +857,7 @@ export default function SubSessionAnalyticsTab({
                   }`}
                 >
                   <div className="grid grid-cols-2 md:grid-cols-3 gap-2 text-[11px]">
-                    <span className="bg-slate-800/70 rounded px-2 py-1">MX SPD: {formatSpeedKbps(row.maxSpeed)}</span>
-                    <span className="bg-slate-800/70 rounded px-2 py-1">MN SPD: {formatSpeedKbps(row.minSpeed)}</span>
+                    <span className="bg-slate-800/70 rounded px-2 py-1">AVG SPD: {formatSpeedKbps(row.avgSpeed)}</span>
                     <span className="bg-slate-800/70 rounded px-2 py-1">FS: {formatBytes(row.fileSize)}</span>
                     <span className="bg-slate-800/70 rounded px-2 py-1">DUR: {formatDuration(row.duration)}</span>
                     <span className="bg-slate-800/70 rounded px-2 py-1">SETUP: {formatPreciseSeconds(row.setupTime)}</span>

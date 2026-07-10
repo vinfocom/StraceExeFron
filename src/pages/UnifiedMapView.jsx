@@ -1819,7 +1819,6 @@ const UnifiedMapView = () => {
   const [hoveredLog, setHoveredLog] = useState(null);
   const [selectedSites, setSelectedSites] = useState([]);
   const [sectorPredictionGridPoints, setSectorPredictionGridPoints] = useState([]);
-
   const [ui, setUi] = useState({
     basemapStyle: "roadmap",
     drawEnabled: false,
@@ -1921,6 +1920,8 @@ const UnifiedMapView = () => {
       setShouldRenderSidebar(true);
     }
   }, [isSideOpen]);
+
+  
 
   useEffect(() => {
     if (!enableSiteToggle) {
@@ -2181,6 +2182,8 @@ const UnifiedMapView = () => {
   useEffect(() => {
     setSiteLegendFilter(null);
   }, [modeMethod, siteLabelField, sitePredictionVersion, siteToggle, projectId]);
+
+  
 
   const querySessionParam = useMemo(() => {
     for (const key of SESSION_QUERY_KEYS) {
@@ -3368,6 +3371,8 @@ const UnifiedMapView = () => {
     () => Boolean(isFetchedStoredGridVisible),
     [isFetchedStoredGridVisible],
   );
+
+  
   useEffect(() => {
     if (!isStoredGridOverlayVisible) {
       setBuildingBorderEnabled(false);

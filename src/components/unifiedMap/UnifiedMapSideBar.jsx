@@ -942,6 +942,7 @@ const UnifiedMapSidebar = ({
     subSessionLoading,
     subSessionMarkerCount,
   ]);
+  
 
   const shouldShowMetricSelector = useMemo(
     () =>
