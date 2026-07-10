@@ -59,14 +59,23 @@ const CreateProjectPage = () => {
           ? polygonsRes.data
           : [];
 
-        const mappedPolygons = shapeList.map((p) => ({
+        const mappedPolygons = shapeList
+          .map((p) => ({
           value: p.id,
           label: p.name,
           wkt: p.wkt,
           sessionIds: Array.isArray(p.sessionIds) ? p.sessionIds : [],
+          createdAt: p.created_at ?? p.createdAt ?? null,
+          updatedAt: p.updated_at ?? p.updatedAt ?? null,
           geometry: null,
           geojson: null,
-        }));
+        }))
+          .sort((a, b) => {
+            const timeA = new Date(a.createdAt || a.updatedAt || 0).getTime();
+            const timeB = new Date(b.createdAt || b.updatedAt || 0).getTime();
+            if (timeA !== timeB) return timeB - timeA;
+            return Number(b.value || 0) - Number(a.value || 0);
+          });
 
         setPolygons(mappedPolygons);
 

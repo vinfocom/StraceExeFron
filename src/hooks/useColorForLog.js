@@ -125,7 +125,7 @@ function useColorForLog() {
         const lowerMetric = metric?.toLowerCase();
 
         // 1. Handle Categorical Coloring (Provider, Technology, Band)
-        if (['provider', 'technology', 'band', 'nodebid', 'cell_id'].includes(lowerMetric)) {
+        if (['provider', 'technology', 'band', 'nodebid', 'cell_id', 'earfcn'].includes(lowerMetric)) {
             return getLogColor(lowerMetric, value);
         }
 

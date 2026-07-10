@@ -48,6 +48,7 @@ const dynamicColorCache = {
   band: {},
   nodebid: {},
   cell_id: {},
+  earfcn: {},
   pci: {},
 };
 
@@ -325,6 +326,9 @@ export const COLOR_SCHEMES = {
   cell_id: {
     Unknown: "#a8a6a2",
   },
+  earfcn: {
+    Unknown: "#a8a6a2",
+  },
   pci: {
     Unknown: "#a8a6a2",
   },
@@ -356,6 +360,8 @@ export const getLogColor = (colorBy, value, defaultColor = "#a8a6a2") => {
   } else if (colorBy === "pci") {
     const pci = Number.parseInt(normalizedValue, 10);
     normalizedValue = Number.isFinite(pci) ? String(pci) : "Unknown";
+  } else if (colorBy === "earfcn") {
+    normalizedValue = String(normalizedValue ?? "").trim() || "Unknown";
   }
 
   // Handle fully unknown values
@@ -413,6 +419,7 @@ export const clearDynamicColorCache = () => {
   dynamicColorCache.band = {};
   dynamicColorCache.nodebid = {};
   dynamicColorCache.cell_id = {};
+  dynamicColorCache.earfcn = {};
   dynamicColorCache.pci = {};
 };
 

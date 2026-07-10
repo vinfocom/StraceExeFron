@@ -680,7 +680,7 @@ const UnifiedMapSidebar = ({
         { value: "dl_thpt", label: "DL Throughput" },
         { value: "ul_thpt", label: "UL Throughput" },
         { value: "mos", label: "MOS" },
-        { value: "pci", label: "PCI/BCCH" },
+        { value: "pci", label: "PCI/BSIC" },
         { value: "num_cells", label: "Pilot pollution" },
         { value: "level", label: "Ping pong" },
         { value: "jitter", label: "Jitter" },
@@ -688,6 +688,7 @@ const UnifiedMapSidebar = ({
         { value: "packet_loss", label: "Packet Loss" },
         { value: "cell_id", label: "Cell ID" },
         { value: "nodebid", label: "NodeB ID" },
+        {value: "earfcn", label: "Earfcn/BCCH"},
         { value: "tac", label: "TAC/LAC" },
         { value: "dominance", label: "Dominance Analysis" },
         { value: "coverage_violation", label: "Coverage Violation" },
@@ -709,6 +710,7 @@ const UnifiedMapSidebar = ({
           { value: "provider", label: "Best Operator" },
           { value: "band", label: "Best Band" },
           { value: "technology", label: "Best Technology" },
+          { value: "earfcn", label: "Best EARFCN" },
           { value: "nodebid", label: "Best NodeB ID" },
           { value: "pci", label: "Best Server" },
         ];
@@ -718,6 +720,7 @@ const UnifiedMapSidebar = ({
         { value: "provider", label: "By Provider" },
         { value: "band", label: "By Band" },
         { value: "technology", label: "By Technology" },
+        { value: "earfcn", label: "By EARFCN" },
         { value: "cell_id", label: "By Cell ID" },
         { value: "nodebid", label: "By NodeB ID" },
       ];

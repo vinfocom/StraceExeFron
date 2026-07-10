@@ -4191,6 +4191,10 @@ const UnifiedMapView = () => {
           key =
             String(log?.cell_id ?? log?.cellId ?? log?.CellId ?? "").trim() ||
             "Unknown";
+        } else if (legendFilter.key === "earfcn") {
+          key =
+            String(log?.earfcn ?? log?.EARFCN ?? log?.Earfcn ?? "").trim() ||
+            "Unknown";
         } else if (legendFilter.key === "pci") {
           const pci = Number.parseInt(log?.pci ?? log?.PCI ?? log?.best_pci, 10);
           key = Number.isFinite(pci) ? String(pci) : "Unknown";

@@ -114,6 +114,11 @@ const getLegendCategoryKeyFromLog = (log, colorBy) => {
     return String(cellId ?? "").trim() || "Unknown";
   }
 
+  if (key === "earfcn") {
+    const earfcn = log?.earfcn ?? log?.EARFCN ?? log?.Earfcn;
+    return String(earfcn ?? "").trim() || "Unknown";
+  }
+
   if (key === "pci") {
     const pci = Number.parseInt(log?.pci ?? log?.PCI ?? log?.best_pci, 10);
     return Number.isFinite(pci) ? String(pci) : "Unknown";
@@ -676,6 +681,11 @@ const generateGridCellsOptimized = (
     const value = String(raw ?? "").trim();
     return value || "Unknown";
   };
+  const resolveEarfcn = (log) => {
+    const raw = log?.earfcn ?? log?.EARFCN ?? log?.Earfcn ?? "";
+    const value = String(raw ?? "").trim();
+    return value || "Unknown";
+  };
   const resolveCategoryValue = (log) => {
     if (normalizedColorBy === "provider" || normalizedColorBy === "operator") {
       return resolveProviderName(log);
@@ -684,6 +694,7 @@ const generateGridCellsOptimized = (
     if (normalizedColorBy === "band") return resolveBandName(log);
     if (normalizedColorBy === "nodebid") return resolveNodebId(log);
     if (normalizedColorBy === "cell_id") return resolveCellId(log);
+    if (normalizedColorBy === "earfcn") return resolveEarfcn(log);
     if (normalizedColorBy === "pci") {
       const pci = resolvePciValue(log);
       return Number.isFinite(pci) ? String(pci) : null;
@@ -706,6 +717,9 @@ const generateGridCellsOptimized = (
     }
     if (normalizedColorBy === "cell_id") {
       return getLogColor("cell_id", categoryName);
+    }
+    if (normalizedColorBy === "earfcn") {
+      return getLogColor("earfcn", categoryName);
     }
     if (normalizedColorBy === "pci") {
       const pci = Number.parseInt(categoryName, 10);
@@ -1326,7 +1340,7 @@ const MapWithMultipleCircles = ({
       return generateColorFromHash(String(value));
     }
     
-    if (['provider', 'technology', 'band', 'operator', 'cell_id'].includes(typeKey)) {
+    if (['provider', 'technology', 'band', 'operator', 'cell_id', 'earfcn'].includes(typeKey)) {
         return getLogColor(typeKey, value);
     }
     
@@ -1554,6 +1568,8 @@ const MapWithMultipleCircles = ({
              key = String(log?.nodebid ?? log?.nodeb_id ?? log?.nodebId ?? "").trim() || "Unknown";
            } else if (legendFilter.key === 'cell_id') {
              key = String(log?.cell_id ?? log?.cellId ?? log?.CellId ?? "").trim() || "Unknown";
+           } else if (legendFilter.key === 'earfcn') {
+             key = String(log?.earfcn ?? log?.EARFCN ?? log?.Earfcn ?? "").trim() || "Unknown";
            } else if (legendFilter.key === 'pci') {
              const pci = Number.parseInt(log.pci ?? log.PCI ?? log.best_pci, 10);
              key = Number.isFinite(pci) ? String(pci) : "Unknown";
@@ -1692,6 +1708,8 @@ const MapWithMultipleCircles = ({
              key = String(n?.nodebid ?? n?.nodeb_id ?? n?.nodebId ?? "").trim() || "Unknown";
            } else if (legendFilter.key === 'cell_id') {
              key = String(n?.cell_id ?? n?.cellId ?? n?.CellId ?? "").trim() || "Unknown";
+           } else if (legendFilter.key === 'earfcn') {
+             key = String(n?.earfcn ?? n?.EARFCN ?? n?.Earfcn ?? "").trim() || "Unknown";
            } else if (legendFilter.key === 'pci') {
              const pci = Number.parseInt(n.neighbourPci || n.pci, 10);
              key = Number.isFinite(pci) ? String(pci) : "Unknown";
@@ -1772,7 +1790,7 @@ const MapWithMultipleCircles = ({
         let value = "Unknown";
         if (key === "provider" || key === "operator") {
           value = cell.bestByColor?.name || cell.bestOperator?.name || "Unknown";
-        } else if (key === "band" || key === "technology" || key === "nodebid") {
+        } else if (key === "band" || key === "technology" || key === "nodebid" || key === "earfcn") {
           value = cell.bestByColor?.name || "Unknown";
         } else if (key === "pci") {
           const pci = Number.parseInt(cell.bestByColor?.name, 10);
@@ -1911,6 +1929,9 @@ const MapWithMultipleCircles = ({
           row.technology = categoryName || "Unknown";
           row.best_technology = row.technology;
           row.networkType = row.technology;
+        } else if (categoryKey === "earfcn") {
+          row.earfcn = categoryName || "Unknown";
+          row.best_earfcn = row.earfcn;
         } else if (categoryKey === "nodebid") {
           row.nodebid = categoryName || "Unknown";
           row.nodeb_id = row.nodebid;
@@ -1942,6 +1963,10 @@ const MapWithMultipleCircles = ({
     if (String(selectedMetric || "").trim().toLowerCase() === "cell_id") {
       const cellId = String(loc?.cell_id ?? loc?.cellId ?? loc?.CellId ?? "").trim() || "Unknown";
       return resolveColor(cellId, "cell_id");
+    }
+    if (String(selectedMetric || "").trim().toLowerCase() === "earfcn") {
+      const earfcn = String(loc?.earfcn ?? loc?.EARFCN ?? loc?.Earfcn ?? "").trim() || "Unknown";
+      return resolveColor(earfcn, "earfcn");
     }
     const value = getMetricValueFromLog(loc, selectedMetric);
     return resolveColor(value, selectedMetric);

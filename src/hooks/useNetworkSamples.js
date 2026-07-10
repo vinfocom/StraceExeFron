@@ -1,7 +1,7 @@
 // src/hooks/useNetworkSamples.js
 import { useState, useRef, useCallback, useEffect, startTransition } from 'react';
 import { toast } from 'react-toastify';
-import { mapViewApi } from '@/api/apiEndpoints'; // Adjust path as needed
+import { mapViewApi } from '@/api/apiEndpoints'; 
 import { isCancelledError } from '@/api/apiService';
 import { normalizeTechName, normalizeProviderName } from '@/utils/colorUtils';
 import {
@@ -256,6 +256,7 @@ const parseLogEntry = (log, sessionId) => {
     network: log.network || technology,
     band,
     pci: log.pci ?? log.Pci ?? log.PCI ?? '',
+    earfcn: log.earfcn ?? log.EARFCN ?? log.Earfcn ?? '',
     nodeb_id: log.nodeb_id || '',
     cell_id: log.cell_id ?? log.cellId ?? '',
     num_cells: parseInt(log.num_cells) || null,
@@ -303,7 +304,7 @@ export const useNetworkSamples = (
     const cacheKey = makeProjectCacheKey({
       resource: 'unified-network-samples',
       sessionIds: sessionIds || [],
-      variant: `typed-network-wifi-v9:${safeMaxRows ? `max-${safeMaxRows}` : 'all'}:project-${projectId || 'none'}`,
+      variant: `typed-network-wifi-v10:${safeMaxRows ? `max-${safeMaxRows}` : 'all'}:project-${projectId || 'none'}`,
     });
 
 
@@ -595,6 +596,7 @@ export const useNetworkSamples = (
     setBandTransitions(bandTrans);
     setPciTransitions(pciTrans);
   }, [locations]);
+  
   useEffect(() => {
     mountedRef.current = true;
     return () => {

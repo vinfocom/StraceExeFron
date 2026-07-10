@@ -194,6 +194,11 @@ const getNormalizedKey = (log, colorBy, scheme) => {
       const cellId = String(raw ?? "").trim();
       return cellId || "Unknown";
     }
+    case "earfcn": {
+      const raw = log.earfcn ?? log.EARFCN ?? log.Earfcn;
+      const earfcn = String(raw ?? "").trim();
+      return earfcn || "Unknown";
+    }
     default:
       return "Unknown";
   }
@@ -795,7 +800,7 @@ export default function MapLegend({
             onFilterChange={onFilterChange}
           />
         ),
-        title: String(selectedMetric || "").toLowerCase() === "best_pci" ? "Best PCI" : "PCI/BCCH",
+        title: String(selectedMetric || "").toLowerCase() === "best_pci" ? "Best PCI" : "PCI/BSIC",
       };
     }
 
@@ -823,6 +828,20 @@ export default function MapLegend({
           />
         ),
         title: "Cell ID",
+      };
+    }
+
+    if (selectedMetric?.toLowerCase() === "earfcn") {
+      return {
+        content: (
+          <ColorSchemeLegend
+            colorBy="earfcn"
+            logs={logs}
+            activeFilter={activeFilter}
+            onFilterChange={onFilterChange}
+          />
+        ),
+        title: "EARFCN/BCCH",
       };
     }
 
