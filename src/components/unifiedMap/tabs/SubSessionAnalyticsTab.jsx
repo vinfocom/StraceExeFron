@@ -57,10 +57,6 @@ const toMetric = (value) => {
   return Number.isFinite(parsed) ? parsed : null;
 };
 
-const CALL_SUCCESS_DURATION_MS = 90 * 1000;
-const CALL_DROP_MIN_DURATION_SECONDS = 15;
-const CALL_SUCCESS_DURATION_SECONDS = 90;
-
 const toPositiveMetric = (value) => {
   const parsed = toMetric(value);
   if (parsed == null) return null;
@@ -75,20 +71,27 @@ const formatLatLng = (position) => {
   return `${lat.toFixed(6)}, ${lng.toFixed(6)}`;
 };
 
-const normalizeSubSessionResultStatus = (statusRaw, durationMs = null) => {
-  const duration = toMetric(durationMs);
-  if (duration != null && duration > CALL_SUCCESS_DURATION_MS) {
-    return "success";
-  }
+const normalizeStatusText = (statusRaw) =>
+  String(statusRaw ?? "").trim().toLowerCase().replace(/[_\s-]+/g, " ");
 
+const isDroppedCallStatus = (statusRaw) => {
+  const raw = normalizeStatusText(statusRaw);
+  return ["drop", "dropped", "drop call", "dropped call", "call drop", "call dropped"].includes(raw);
+};
+
+const normalizeSubSessionResultStatus = (statusRaw) => {
   const numeric = Number(statusRaw);
   if (Number.isFinite(numeric)) {
     if (numeric === 1) return "success";
     if (numeric === 2) return "failed";
   }
 
-  const raw = String(statusRaw ?? "").trim().toLowerCase().replace(/[_\s-]+/g, " ");
+  const raw = normalizeStatusText(statusRaw);
   if (!raw) return "failed";
+
+  // A dropped call was connected before it dropped, so it belongs to the
+  // binary Connected bucket while retaining its explicit display label.
+  if (isDroppedCallStatus(raw)) return "success";
 
   if (["success", "succeeded", "pass", "passed", "connected"].includes(raw)) {
     return "success";
@@ -149,7 +152,6 @@ export default function SubSessionAnalyticsTab({
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const sortRef = useRef(null);
-  const [info, setInfo] = useState(false);
 
   const isCallTab = activeTypeTab === CALL_TYPE_TAB;
   const sortOptions = isCallTab ? CS_SORT_OPTIONS : PS_SORT_OPTIONS;
@@ -215,9 +217,6 @@ export default function SubSessionAnalyticsTab({
   }, []);
 
   useEffect(() => {
-    if (activeTypeTab !== CALL_TYPE_TAB) {
-      setInfo(false);
-    }
     // Drop a sort/status selection that isn't valid for the newly active tab.
     setSortBy((current) =>
       (isCallTab ? CS_SORT_OPTIONS : PS_SORT_OPTIONS).some((option) => option.key === current)
@@ -244,6 +243,15 @@ export default function SubSessionAnalyticsTab({
             sub.total_duration ??
             subMetrics.total_duration,
         );
+        const resultStatusRaw =
+          sub.resultStatusRaw ??
+          sub.result_status_raw ??
+          sub.resultStatus ??
+          sub.result_status ??
+          sub.status ??
+          sub.connection_status ??
+          sub.connectionStatus ??
+          "Not Connected";
 
         return {
           rowKey: `sub-row-${session.sessionId ?? sessionIndex}-${sub.subSessionId ?? subIndex}-${subIndex}`,
@@ -253,17 +261,8 @@ export default function SubSessionAnalyticsTab({
           subSessionTypeNormalized: normalizeSubSessionType(sub.subSessionType),
           number: sub.number ?? sub.phone_number ?? sub.phoneNumber ?? null,
           direction: sub.direction ?? sub.call_direction ?? sub.callDirection ?? null,
-          status: normalizeSubSessionResultStatus(
-            sub.resultStatusRaw ??
-              sub.result_status_raw ??
-            sub.resultStatus ??
-              sub.result_status ??
-              sub.status ??
-              sub.connection_status ??
-              sub.connectionStatus ??
-              "Not Connected",
-            duration,
-          ),
+          status: normalizeSubSessionResultStatus(resultStatusRaw),
+          isDroppedCall: isDroppedCallStatus(resultStatusRaw),
           markerId: sub.markerId ?? null,
           position: sub.markerPosition ?? sub.start ?? session.start ?? null,
           start: sub.start ?? null,
@@ -393,48 +392,24 @@ export default function SubSessionAnalyticsTab({
 
     let connectedCalls = 0;
     let notConnectedCalls = 0;
-    let dropCalls = 0;
-    let successCalls = 0;
-
     callRows.forEach((row) => {
       const isCallType = getSubSessionTypeLabel(row.subSessionTypeNormalized) === CALL_TYPE_TAB;
       if (!isCallType) return;
 
-      const status = normalizeSubSessionResultStatus(row.status, row.duration);
-      const durationMs = toPositiveMetric(row.duration);
-      const durationSec = durationMs != null ? durationMs / 1000 : null;
-      const isSuccessCall = durationSec != null && durationSec > CALL_SUCCESS_DURATION_SECONDS;
-
-      if (isSuccessCall || status === "success") {
+      if (row.status === "success") {
         connectedCalls += 1;
       } else {
         notConnectedCalls += 1;
       }
-
-      if (isSuccessCall) {
-        successCalls += 1;
-      }
-
-      if (
-        durationSec != null &&
-        durationSec >= CALL_DROP_MIN_DURATION_SECONDS &&
-        durationSec <= CALL_SUCCESS_DURATION_SECONDS
-      ) {
-        dropCalls += 1;
-      }
     });
 
     const callSetupRate = totalCalls > 0 ? (connectedCalls / totalCalls) * 100 : 0;
-    const dropCallRate = totalCalls > 0 ? (dropCalls / totalCalls) * 100 : 0;
 
     return {
       totalCalls,
       connectedCalls,
       notConnectedCalls,
-      dropCalls,
-      successCalls,
       callSetupRate,
-      dropCallRate,
     };
   }, [filteredRows]);
 
@@ -500,28 +475,12 @@ export default function SubSessionAnalyticsTab({
               PS
             </button>
           </div>
-          {activeTypeTab === CALL_TYPE_TAB && (
-            <button
-              type="button"
-              onClick={() => setInfo((prev) => !prev)}
-              className="h-6 w-6 rounded-full border border-slate-600 bg-slate-800 text-slate-200 text-xs font-semibold hover:bg-slate-700"
-              aria-label="Show CS call rules"
-              title="Show CS call rules"
-            >
-              i
-            </button>
-          )}
         </div>
-        {activeTypeTab === CALL_TYPE_TAB && info && (
-          <div className="rounded-md border border-slate-700 bg-slate-800/60 px-3 py-2 text-[11px] text-slate-200">
-            Call Success: Above 90 sec | Call Drop: 15 sec to 90 sec | Less than 15 sec: Not Connected
-          </div>
-        )}
         <div className="flex items-center justify-between">
-          <h4 className="text-sm font-semibold text-slate-100">{activeTypeTab} Pass vs Fail</h4>
+         
           <div className="flex items-center gap-2">
             <span className="text-[11px] text-slate-300 bg-slate-800 px-2 py-1 rounded">
-              Success {formatNumber(tabSummary.success, 0)} | Failed {formatNumber(tabSummary.failed, 0)}
+              {isCallTab ? "Connected" : "Success"} {formatNumber(tabSummary.success, 0)} | {isCallTab ? "Not Connected" : "Failed"} {formatNumber(tabSummary.failed, 0)}
             </span>
             <span className="text-[11px] text-slate-300 bg-slate-800 px-2 py-1 rounded">
               Total Sub Sessions: {formatNumber(tabSummary.total, 0)}
@@ -557,18 +516,6 @@ export default function SubSessionAnalyticsTab({
           <div className="text-[11px] text-slate-400">Call Setup Rate</div>
           <div className="text-sm font-semibold text-cyan-200 mt-1">
             {formatPercent(callKpis.callSetupRate)}
-          </div>
-        </div>
-        <div className="bg-slate-900/70 border border-slate-700 rounded-lg p-3">
-          <div className="text-[11px] text-slate-400">Drop Call </div>
-          <div className="text-sm font-semibold text-rose-300 mt-1">
-            {formatNumber(callKpis.dropCalls, 0)} ({formatPercent(callKpis.dropCallRate)})
-          </div>
-        </div>
-        <div className="bg-slate-900/70 border border-slate-700 rounded-lg p-3">
-          <div className="text-[11px] text-slate-400">Success Call</div>
-          <div className="text-sm font-semibold text-emerald-300 mt-1">
-            {formatNumber(callKpis.successCalls, 0)}
           </div>
         </div>
         <div className="bg-slate-900/70 border border-slate-700 rounded-lg p-3">
@@ -792,12 +739,16 @@ export default function SubSessionAnalyticsTab({
                 <span>
                   <span
                     className={`inline-flex items-center rounded-md px-2 py-0.5 text-[11px] border ${
-                      row.status === "success"
+                      row.isDroppedCall
+                        ? "border-amber-700/40 bg-amber-900/20 text-amber-300"
+                        : row.status === "success"
                         ? "border-emerald-700/40 bg-emerald-900/20 text-emerald-300"
                         : "border-rose-700/40 bg-rose-900/20 text-rose-300"
                     }`}
                   >
-                    {row.status === "success"
+                    {isCallRow && row.isDroppedCall
+                      ? "Drop"
+                      : row.status === "success"
                       ? isCallRow
                         ? "Connected"
                         : "Success"
