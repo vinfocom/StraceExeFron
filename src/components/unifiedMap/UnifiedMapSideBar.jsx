@@ -1,5 +1,6 @@
 // src/components/UnifiedMapSidebar.jsx
 import React, { useMemo, useCallback, memo, useState, useEffect, useRef } from "react";
+import { createPortal } from "react-dom";
 import { Rnd } from "react-rnd";
 import { toast } from "react-toastify";
 import {
@@ -201,16 +202,73 @@ const MultiSelectRow = memo(
   }) => {
     const [isOpen, setIsOpen] = useState(false);
     const containerRef = useRef(null);
+    const panelRef = useRef(null);
+    const [position, setPosition] = useState({ top: 0, left: 0, width: 0, placement: "bottom" });
+
+    // Recompute panel position relative to the trigger so the dropdown is anchored
+    // to the field even when the sidebar is scrolled/resized. Auto-flips above the
+    // trigger when there isn't enough room below — the Cell ID dropdown is near
+    // the bottom of the filter section, so flipping is required to stay visible.
+    const updatePosition = useCallback(() => {
+      const trigger = containerRef.current;
+      if (!trigger) return;
+      const rect = trigger.getBoundingClientRect();
+      const PANEL_MAX_HEIGHT = 240; // matches max-h-60 (15rem)
+      const GAP = 4;
+      const viewportHeight =
+        typeof window !== "undefined" ? window.innerHeight : 0;
+      const spaceBelow = viewportHeight - rect.bottom - GAP;
+      const placeAbove = spaceBelow < PANEL_MAX_HEIGHT && rect.top > spaceBelow;
+
+      setPosition({
+        top: placeAbove ? rect.top - GAP : rect.bottom + GAP,
+        left: rect.left,
+        width: rect.width,
+        placement: placeAbove ? "top" : "bottom",
+      });
+    }, []);
+
+    useEffect(() => {
+      if (!isOpen) return undefined;
+      updatePosition();
+      window.addEventListener("scroll", updatePosition, true);
+      window.addEventListener("resize", updatePosition);
+      return () => {
+        window.removeEventListener("scroll", updatePosition, true);
+        window.removeEventListener("resize", updatePosition);
+      };
+    }, [isOpen, updatePosition]);
 
     useEffect(() => {
       const handleClickOutside = (event) => {
-        if (containerRef.current && !containerRef.current.contains(event.target)) {
+        const triggerContains = containerRef.current?.contains(event.target);
+        const panelContains = panelRef.current?.contains(event.target);
+        if (!triggerContains && !panelContains) {
           setIsOpen(false);
         }
       };
       document.addEventListener("mousedown", handleClickOutside);
       return () => document.removeEventListener("mousedown", handleClickOutside);
     }, []);
+
+    // Prevent the sidebar's own wheel/trackpad scroll while the user is
+    // scrolling inside the dropdown options list.
+    useEffect(() => {
+      const panel = panelRef.current;
+      if (!isOpen || !panel) return undefined;
+      const stopWheelPropagation = (e) => {
+        e.stopPropagation();
+      };
+      const stopTouchMovePropagation = (e) => {
+        e.stopPropagation();
+      };
+      panel.addEventListener("wheel", stopWheelPropagation, { passive: true });
+      panel.addEventListener("touchmove", stopTouchMovePropagation, { passive: true });
+      return () => {
+        panel.removeEventListener("wheel", stopWheelPropagation);
+        panel.removeEventListener("touchmove", stopTouchMovePropagation);
+      };
+    }, [isOpen]);
 
     const handleToggle = (optValue) => {
       if (optValue === "all") {
@@ -223,24 +281,35 @@ const MultiSelectRow = memo(
       onChange(newValues);
     };
 
-    const selectedLabels = values.length === 0 
-        ? placeholder 
+    const selectedLabels = values.length === 0
+        ? placeholder
         : options.filter(o => values.includes(o.value) && o.value !== "all").map(o => o.label).join(", ");
 
     return (
-      <div className={`min-w-0 flex-1 space-y-1.5 relative ${className}`} ref={containerRef}>
+      <div className={`min-w-0 flex-1 space-y-1.5 ${className}`} ref={containerRef}>
         {label && <Label className="text-sm font-semibold text-white">{label}</Label>}
         <button
           type="button"
-          onClick={() => !disabled && setIsOpen(!isOpen)}
+          onClick={() => !disabled && setIsOpen((prev) => !prev)}
           disabled={disabled}
           className="flex h-8 w-full items-center justify-between rounded-md bg-slate-800 border border-slate-600 px-3 text-xs text-white disabled:opacity-50"
         >
           <span className="truncate">{values.length === 0 ? placeholder : selectedLabels}</span>
           <ChevronDown className="h-4 w-4 opacity-50 shrink-0 ml-2" />
         </button>
-        {isOpen && (
-          <div className="absolute z-[100] w-full mt-1 max-h-60 overflow-y-auto rounded-md border border-slate-600 bg-slate-900 py-1 shadow-lg">
+        {isOpen && typeof document !== "undefined" && createPortal(
+          <div
+            ref={panelRef}
+            style={{
+              position: "fixed",
+              top: `${position.top}px`,
+              left: `${position.left}px`,
+              width: `${position.width}px`,
+              transform: position.placement === "top" ? "translateY(-100%)" : undefined,
+              zIndex: 1000,
+            }}
+            className="max-h-60 overflow-y-auto rounded-md border border-slate-600 bg-slate-900 py-1 shadow-lg overscroll-contain"
+          >
             {options.map((opt) => {
               const isSelected = opt.value === "all" ? values.length === 0 : values.includes(opt.value);
               return (
@@ -258,7 +327,8 @@ const MultiSelectRow = memo(
                 </div>
               );
             })}
-          </div>
+          </div>,
+          document.body,
         )}
       </div>
     );
