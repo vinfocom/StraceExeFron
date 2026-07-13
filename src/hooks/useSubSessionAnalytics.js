@@ -15,20 +15,14 @@ const EMPTY_ANALYTICS = Object.freeze({
   rawResponse: null,
 });
 
-const SUB_SESSION_CACHE_RESOURCE = "unified-sub-session-analytics-v6";
-const CALL_SUCCESS_DURATION_MS = 90 * 1000;
+const SUB_SESSION_CACHE_RESOURCE = "unified-sub-session-analytics-v7";
 
 const toFiniteNumber = (value) => {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : null;
 };
 
-const normalizeSubSessionResultStatus = (statusRaw, durationMs = null) => {
-  const duration = toFiniteNumber(durationMs);
-  if (duration != null && duration > CALL_SUCCESS_DURATION_MS) {
-    return "success";
-  }
-
+const normalizeSubSessionResultStatus = (statusRaw) => {
   const numeric = Number(statusRaw);
   if (Number.isFinite(numeric)) {
     if (numeric === 1) return "success";
@@ -37,6 +31,10 @@ const normalizeSubSessionResultStatus = (statusRaw, durationMs = null) => {
 
   const raw = String(statusRaw ?? "").trim().toLowerCase().replace(/[_\s-]+/g, " ");
   if (!raw) return "failed";
+
+  if (["drop", "dropped", "drop call", "dropped call", "call drop", "call dropped"].includes(raw)) {
+    return "success";
+  }
 
   if (["success", "succeeded", "pass", "passed", "connected"].includes(raw)) {
     return "success";
@@ -143,7 +141,7 @@ const normalizeSubSessionItem = (item = {}) => {
     start,
     end,
     resultStatusRaw,
-    resultStatus: normalizeSubSessionResultStatus(resultStatusRaw ?? "failed", duration),
+    resultStatus: normalizeSubSessionResultStatus(resultStatusRaw ?? "failed"),
     duration,
     setupTime,
 

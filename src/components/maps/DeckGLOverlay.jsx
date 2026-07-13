@@ -1,5 +1,5 @@
 // src/components/maps/DeckGLOverlay.jsx
-import React, { useEffect, useRef, useMemo, useCallback } from 'react';
+import React, { useEffect, useRef, useMemo, useCallback, useState } from 'react';
 import { GoogleMapsOverlay } from '@deck.gl/google-maps';
 import { ScatterplotLayer, PolygonLayer, TextLayer } from '@deck.gl/layers';
 import { getMetricConfig, getMetricValueFromLog } from '@/utils/metrics';
@@ -133,8 +133,10 @@ const DeckGLOverlay = ({
   showGrid = false,
   gridOpacity = 0.72,
   onGridHover,
+  gridMinPixelSize = 5,
 }) => {
   const overlayRef = useRef(null);
+  const [mapZoom, setMapZoom] = useState(null);
   const isCleanedUpRef = useRef(false);
   const attachedMapRef = useRef(null);
   const idleListenerRef = useRef(null);
@@ -221,6 +223,19 @@ const DeckGLOverlay = ({
     };
   }, [map, isValidMapInstance, canAttachOverlay]);
 
+  useEffect(() => {
+    if (!isValidMapInstance(map) || typeof map.addListener !== 'function') return;
+    setMapZoom(map.getZoom());
+    const listener = map.addListener('zoom_changed', () => {
+      setMapZoom(map.getZoom());
+    });
+    return () => {
+      if (window.google?.maps?.event?.removeListener) {
+        window.google.maps.event.removeListener(listener);
+      }
+    };
+  }, [map, isValidMapInstance]);
+
   const handlePrimaryClick = useCallback((info) => {
     if (!onClick || !info?.object) return;
     onClick(info.index, info.object.source ?? info.object);
@@ -273,25 +288,49 @@ const DeckGLOverlay = ({
 
   const gridData = useMemo(() => {
     if (!showGrid || !gridCells?.length) return [];
+    // Cells keep their real-world (e.g. 25m) size at close zoom. Once that size
+    // would render under `gridMinPixelSize` on screen, we inflate the drawn
+    // polygon (visual only — cell.bounds/aggregation/data stay untouched) so the
+    // grid stays visible and clickable when zoomed out over a large project.
+    const zoom = Number.isFinite(mapZoom) ? mapZoom : 14;
     return gridCells.map((cell, idx) => {
       const b = cell.bounds || {};
       const rgb = parseColorToRGB(cell.fillColor);
       // Populated cells solid, empty cells faint (mirrors previous RectangleF opacity).
       const alpha = cell.count > 0 ? 255 : 60;
+
+      const centerLat = (b.north + b.south) / 2;
+      const centerLng = (b.east + b.west) / 2;
+      const halfLatDeg = (b.north - b.south) / 2;
+      const halfLngDeg = (b.east - b.west) / 2;
+
+      const metersPerPixel =
+        (156543.03392 * Math.cos((centerLat * Math.PI) / 180)) / Math.pow(2, zoom);
+      const minHalfSizeMeters = (gridMinPixelSize / 2) * metersPerPixel;
+      const minHalfLatDeg = minHalfSizeMeters * metersToLatDeg;
+      const minHalfLngDeg = minHalfLatDeg / Math.cos((centerLat * Math.PI) / 180);
+
+      const drawHalfLatDeg = Math.max(halfLatDeg, minHalfLatDeg);
+      const drawHalfLngDeg = Math.max(halfLngDeg, minHalfLngDeg);
+      const south = centerLat - drawHalfLatDeg;
+      const north = centerLat + drawHalfLatDeg;
+      const west = centerLng - drawHalfLngDeg;
+      const east = centerLng + drawHalfLngDeg;
+
       return {
         index: idx,
         source: cell,
         polygon: [
-          [b.west, b.south],
-          [b.east, b.south],
-          [b.east, b.north],
-          [b.west, b.north],
-          [b.west, b.south],
+          [west, south],
+          [east, south],
+          [east, north],
+          [west, north],
+          [west, south],
         ],
         fillColor: [rgb[0], rgb[1], rgb[2], alpha],
       };
     });
-  }, [gridCells, showGrid]);
+  }, [gridCells, showGrid, mapZoom, gridMinPixelSize]);
 
   const neighborData = useMemo(() => {
     if (!showNeighbors || !neighbors?.length) return [];

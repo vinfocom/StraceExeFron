@@ -477,7 +477,7 @@ export default function SubSessionAnalyticsTab({
           </div>
         </div>
         <div className="flex items-center justify-between">
-         
+          
           <div className="flex items-center gap-2">
             <span className="text-[11px] text-slate-300 bg-slate-800 px-2 py-1 rounded">
               {isCallTab ? "Connected" : "Success"} {formatNumber(tabSummary.success, 0)} | {isCallTab ? "Not Connected" : "Failed"} {formatNumber(tabSummary.failed, 0)}

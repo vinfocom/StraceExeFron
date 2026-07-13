@@ -27,6 +27,7 @@ const getNormalizedStatus = (statusRaw) => {
   }
 
   const value = String(statusRaw ?? "").trim().toLowerCase().replace(/[_\s-]+/g, " ");
+  if (["drop", "dropped", "drop call", "dropped call", "call drop", "call dropped"].includes(value)) return "drop";
   if (["success", "succeeded", "pass", "passed", "connected"].includes(value)) return "success";
   if (["failed", "fail", "error", "not connected", "disconnected"].includes(value)) return "failed";
   return "failed";
@@ -37,7 +38,7 @@ const getNormalizedStatus = (statusRaw) => {
 const formatStatus = (statusRaw) => {
   const status = getNormalizedStatus(statusRaw);
 
-  if (status === "success") {
+  if (status === "success" || status === "drop") {
     return {
       status: "Success",
       color: "#22C55E",
@@ -63,6 +64,8 @@ const formatSubSessionType = (subSessionType) => {
 const formatSubSessionStatus = (statusRaw, subSessionType) => {
   const status = getNormalizedStatus(statusRaw);
   const type = formatSubSessionType(subSessionType);
+
+  if (type === "CS" && status === "drop") return "Drop";
 
   if (status === "success") {
     return type === "CS" ? "Connected" : "Success";
@@ -185,7 +188,10 @@ const SubSessionMarkers = ({
               <div className="flex justify-between gap-3">
                 <span className="text-slate-500">Status</span>
                 <span className="font-medium">
-                  {formatSubSessionStatus(selectedMarker.resultStatus, selectedMarker.subSessionType)}
+                  {formatSubSessionStatus(
+                    selectedMarker.resultStatusRaw ?? selectedMarker.resultStatus,
+                    selectedMarker.subSessionType,
+                  )}
                 </span>
               </div>
               {formatSubSessionType(selectedMarker.subSessionType) === "CS" && (
