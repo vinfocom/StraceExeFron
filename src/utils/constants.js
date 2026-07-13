@@ -140,6 +140,7 @@ export const TABS = [
   { id: "Application", label: "Apps", icon: "PieChartIcon" },
   { id: "io", label: "I/O Analysis", icon: "Database" },
   { id: "handover", label: "Handover", icon: "Hand" },
+  { id: "l3Events", label: "L3 Events", icon: "Radio" },
 ];
 
 export const CHART_CONFIG = {

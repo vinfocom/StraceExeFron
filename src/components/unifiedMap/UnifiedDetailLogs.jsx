@@ -92,6 +92,11 @@ const ConditionLogsTab = lazy(() =>
     default: module.ConditionLogsTab || module.default,
   })),
 );
+const L3EventsTab = lazy(() =>
+  import("./tabs/L3EventsTab").then((module) => ({
+    default: module.L3EventsTab || module.default,
+  })),
+);
 
 const DEFAULT_DATA_FILTERS = {
   providers: [],
@@ -1925,6 +1930,8 @@ function UnifiedDetailLogs({
               pciTransitions={pciTransitions}
             />
           )}
+
+          {activeTab === "l3Events" && <L3EventsTab />}
 
           {activeTab === "n78" && (
             <N78AnalysisTab
