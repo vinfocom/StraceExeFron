@@ -6,14 +6,16 @@ import React, {
   useEffect,
   useDeferredValue,
 } from "react";
-import { Upload, Loader2, AlertTriangle } from "lucide-react";
+import { Upload, Loader2, AlertTriangle, X } from "lucide-react";
 
 import { extractL3AndEventFiles } from "@/utils/l3Events/zipParser";
 import { parseL3CSV } from "@/utils/l3Events/l3Parser";
 import { parseEventCSV } from "@/utils/l3Events/eventParser";
 import { mergeTimeline } from "@/utils/l3Events/timelineBuilder";
+import { buildCallSummary } from "@/utils/l3Events/callSummaryBuilder";
 import { FilterChips } from "./l3Events/FilterChips";
 import { TimelineCard } from "./l3Events/TimelineCard";
+import { CallSummaryPanel } from "./l3Events/CallSummaryPanel";
 
 const PAGE_SIZE = 150;
 
@@ -26,6 +28,7 @@ export const L3EventsTab = () => {
   const [search, setSearch] = useState("");
   const [activeCategory, setActiveCategory] = useState("All");
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
+  const [selectedCall, setSelectedCall] = useState(null);
 
   const deferredSearch = useDeferredValue(search);
   const sentinelRef = useRef(null);
@@ -39,6 +42,7 @@ export const L3EventsTab = () => {
     setWarningMessage("");
     setFileName(file.name);
     setVisibleCount(PAGE_SIZE);
+    setSelectedCall(null);
 
     try {
       const { l3Files, eventFiles } = await extractL3AndEventFiles(file);
@@ -78,23 +82,42 @@ export const L3EventsTab = () => {
     const set = new Set();
     timeline.forEach((item) => {
       if (item.category) set.add(item.category);
+      // PS/CS is a second classification axis (packet vs circuit switched
+      // domain) surfaced through the same chip row as the content category.
+      if (item.domain) set.add(item.domain);
     });
     return Array.from(set).sort();
   }, [timeline]);
 
   const filteredTimeline = useMemo(() => {
     const query = deferredSearch.trim().toLowerCase();
+    const callStart = selectedCall?.startTime?.getTime();
+    const callEnd = (selectedCall?.endTime || selectedCall?.startTime)?.getTime();
+
     return timeline.filter((item) => {
-      if (activeCategory !== "All" && item.category !== activeCategory) return false;
+      if (selectedCall) {
+        // Drilled into one call: show everything in its time window
+        // regardless of category chip, so L3 + other events during the
+        // call are visible too.
+        const t = item.timestamp?.getTime();
+        if (t == null || callStart == null || callEnd == null || t < callStart || t > callEnd) return false;
+      } else if (activeCategory !== "All" && item.category !== activeCategory && item.domain !== activeCategory) {
+        return false;
+      }
       if (!query) return true;
-      const haystack = `${item.title} ${item.summary} ${item.category} ${item.rawMessage}`.toLowerCase();
+      const haystack = `${item.title} ${item.summary} ${item.category} ${item.domain || ""} ${item.rawMessage}`.toLowerCase();
       return haystack.includes(query);
     });
-  }, [timeline, deferredSearch, activeCategory]);
+  }, [timeline, deferredSearch, activeCategory, selectedCall]);
 
   useEffect(() => {
     setVisibleCount(PAGE_SIZE);
-  }, [deferredSearch, activeCategory]);
+  }, [deferredSearch, activeCategory, selectedCall]);
+
+  const handleSelectCall = useCallback((call) => {
+    if (!call?.startTime) return;
+    setSelectedCall(call);
+  }, []);
 
   // Incremental rendering instead of pulling in a virtualization library:
   // only the first `visibleCount` rows render; a sentinel grows that window
@@ -116,6 +139,7 @@ export const L3EventsTab = () => {
   }, [filteredTimeline.length]);
 
   const visibleItems = filteredTimeline.slice(0, visibleCount);
+  const callSummary = useMemo(() => buildCallSummary(timeline), [timeline]);
 
   return (
     <div className="space-y-4">
@@ -158,6 +182,32 @@ export const L3EventsTab = () => {
             </div>
           )}
 
+          <CallSummaryPanel
+            summary={callSummary}
+            selectedCallId={selectedCall?.id}
+            onSelectCall={handleSelectCall}
+          />
+
+          {selectedCall && (
+            <div className="flex items-center justify-between gap-2 text-xs bg-blue-500/10 border border-blue-500/30 rounded-lg px-3 py-2">
+              <span className="text-blue-300">
+                Showing events for the call at{" "}
+                {selectedCall.startTime.toLocaleTimeString([], { hour12: false, timeZone: "UTC" })}
+                {selectedCall.endTime
+                  ? ` – ${selectedCall.endTime.toLocaleTimeString([], { hour12: false, timeZone: "UTC" })}`
+                  : ""}{" "}
+                ({selectedCall.status})
+              </span>
+              <button
+                type="button"
+                onClick={() => setSelectedCall(null)}
+                className="flex items-center gap-1 text-blue-300 hover:text-blue-200 shrink-0"
+              >
+                <X className="h-3.5 w-3.5" /> Clear
+              </button>
+            </div>
+          )}
+
           <div className="space-y-3">
             <input
               type="text"
@@ -166,7 +216,9 @@ export const L3EventsTab = () => {
               placeholder="Search title, summary, category, or raw message..."
               className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-200 placeholder:text-slate-500 focus:outline-none focus:border-blue-500"
             />
-            <FilterChips categories={categories} active={activeCategory} onSelect={setActiveCategory} />
+            {!selectedCall && (
+              <FilterChips categories={categories} active={activeCategory} onSelect={setActiveCategory} />
+            )}
           </div>
 
           {filteredTimeline.length === 0 ? (

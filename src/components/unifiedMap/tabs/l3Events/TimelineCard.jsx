@@ -6,6 +6,15 @@ const TYPE_BADGE_CLASS = {
   event: "bg-emerald-500/15 text-emerald-300 border-emerald-500/30",
 };
 
+const DOMAIN_BADGE_CLASS = {
+  CS: "bg-amber-500/15 text-amber-300 border-amber-500/30",
+  PS: "bg-cyan-500/15 text-cyan-300 border-cyan-500/30",
+  "CS+PS": "bg-fuchsia-500/15 text-fuchsia-300 border-fuchsia-500/30",
+};
+
+const WARNING_SEVERITIES = new Set(["WARN", "WARNING", "ERROR", "FATAL"]);
+const isWarningSeverity = (severity) => WARNING_SEVERITIES.has(String(severity || "").toUpperCase());
+
 function TimelineCardComponent({ item }) {
   const [expanded, setExpanded] = useState(false);
 
@@ -19,6 +28,9 @@ function TimelineCardComponent({ item }) {
         <span className="text-xl leading-none mt-0.5">{item.icon}</span>
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
+            {isWarningSeverity(item.severity) && (
+              <span className="h-1.5 w-1.5 rounded-full bg-red-500 shrink-0" title={`Severity: ${item.severity}`} />
+            )}
             <span className="font-medium text-slate-100 text-sm">{item.title}</span>
             <span
               className={`text-[10px] px-1.5 py-0.5 rounded-full border ${
@@ -27,6 +39,16 @@ function TimelineCardComponent({ item }) {
             >
               {item.category}
             </span>
+            {item.domain && (
+              <span
+                className={`text-[10px] px-1.5 py-0.5 rounded-full border ${
+                  DOMAIN_BADGE_CLASS[item.domain] || "bg-slate-700 text-slate-300 border-slate-600"
+                }`}
+                title="PS/CS domain"
+              >
+                {item.domain}
+              </span>
+            )}
             <span className="text-xs text-slate-400 ml-auto font-mono shrink-0">{item.timestampLabel}</span>
           </div>
           {item.summary && <p className="text-xs text-slate-400 mt-1 truncate">{item.summary}</p>}
@@ -42,7 +64,13 @@ function TimelineCardComponent({ item }) {
         <div className="px-3 pb-3 pt-0 border-t border-slate-700/70 space-y-2">
           <div className="text-xs text-slate-400 pt-2">
             <span className="font-semibold text-slate-300">Category:</span> {item.category}
-            {item.sourceFile && <span className="ml-3 text-slate-500">Source: {item.sourceFile}</span>}
+            {item.domain && (
+              <span className="ml-3">
+                <span className="font-semibold text-slate-300">Domain:</span> {item.domain}
+              </span>
+            )}
+            {item.originSource && <span className="ml-3 text-slate-500">Origin: {item.originSource}</span>}
+            {item.sourceFile && <span className="ml-3 text-slate-500">File: {item.sourceFile}</span>}
           </div>
 
           {item.details?.length > 0 && (
