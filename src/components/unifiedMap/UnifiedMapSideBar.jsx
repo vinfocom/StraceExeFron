@@ -1954,6 +1954,7 @@ const UnifiedMapSidebar = ({
 
     try {
       const response = await predictionApi.runLtePrediction({
+        user_id: Number(user?.id) || 0,
         project_id: numericProjectId,
         session_ids: validSessionIds,
         grid_resolution_m: Number(lteGridSizeMeters) || 25,
