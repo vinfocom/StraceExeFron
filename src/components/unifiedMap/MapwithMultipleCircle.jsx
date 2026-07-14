@@ -6,7 +6,7 @@ import DeckGLOverlay from "@/components/maps/DeckGLOverlay";
 import { Zap, Layers, Radio, Square, Circle } from "lucide-react";
 // import TechHandoverMarkers from "../unifiedMap/TechHandoverMarkers";
 import useColorForLog from "@/hooks/useColorForLog";
-import { getMetricValueFromLog, getPciColor } from "@/utils/metrics";
+import { getMetricValueFromLog, getPciColor, getEarfcnColor } from "@/utils/metrics";
 import { normalizeProviderName, normalizeTechName, normalizeBandName, getLogColor, generateColorFromHash } from "@/utils/colorUtils";
 
 const DEFAULT_CENTER = { lat: 28.64453086, lng: 77.37324242 };
@@ -719,7 +719,7 @@ const generateGridCellsOptimized = (
       return getLogColor("cell_id", categoryName);
     }
     if (normalizedColorBy === "earfcn") {
-      return getLogColor("earfcn", categoryName);
+      return getEarfcnColor(categoryName);
     }
     if (normalizedColorBy === "pci") {
       const pci = Number.parseInt(categoryName, 10);
@@ -1300,7 +1300,6 @@ const MapWithMultipleCircles = ({
   
   const onFilteredLocationsChangeRef = useRef(onFilteredLocationsChange);
   const onFilteredNeighborsChangeRef = useRef(onFilteredNeighborsChange);
-  const spatialIndexRef = useRef(null);
   const mapContainerRef = useRef(null);
   const onMarkerClickRef = useRef(onMarkerClick);
   const onNeighborClickRef = useRef(onNeighborClick);
@@ -1339,8 +1338,12 @@ const MapWithMultipleCircles = ({
     if (typeKey === 'tac') {
       return generateColorFromHash(String(value));
     }
-    
-    if (['provider', 'technology', 'band', 'operator', 'cell_id', 'earfcn'].includes(typeKey)) {
+
+    if (typeKey === 'earfcn') {
+      return getEarfcnColor(value);
+    }
+
+    if (['provider', 'technology', 'band', 'operator', 'cell_id'].includes(typeKey)) {
         return getLogColor(typeKey, value);
     }
     
@@ -1734,14 +1737,11 @@ const MapWithMultipleCircles = ({
     hasActivePolygons,
   ]);
 
-  useEffect(() => {
-    if (locationsToRender.length > 1000) {
-      const index = new SpatialHashGrid(0.001);
-      index.build(locationsToRender);
-      spatialIndexRef.current = index;
-    } else {
-      spatialIndexRef.current = null;
-    }
+  const spatialIndex = useMemo(() => {
+    if (locationsToRender.length <= 1000) return null;
+    const index = new SpatialHashGrid(0.001);
+    index.build(locationsToRender);
+    return index;
   }, [locationsToRender]);
 
   useEffect(() => {
@@ -1763,16 +1763,16 @@ const MapWithMultipleCircles = ({
     if (!enableGrid || !gridPolygonData.length || !orderedLocationsToRender.length) return [];
     
     return generateGridCellsOptimized(
-      gridPolygonData, 
-      gridSizeMeters, 
-      orderedLocationsToRender, 
-      selectedMetric, 
-      resolveColor, 
+      gridPolygonData,
+      gridSizeMeters,
+      orderedLocationsToRender,
+      selectedMetric,
+      resolveColor,
       gridAggregationMethod,
-      spatialIndexRef.current,
+      spatialIndex,
       colorBy
     );
-  }, [enableGrid, gridSizeMeters, gridPolygonData, orderedLocationsToRender, selectedMetric, gridAggregationMethod, resolveColor, colorBy]);
+  }, [enableGrid, gridSizeMeters, gridPolygonData, orderedLocationsToRender, selectedMetric, gridAggregationMethod, resolveColor, colorBy, spatialIndex]);
 
   const visibleGridCells = useMemo(() => {
     if (!legendFilter) return gridCells;
@@ -1790,7 +1790,7 @@ const MapWithMultipleCircles = ({
         let value = "Unknown";
         if (key === "provider" || key === "operator") {
           value = cell.bestByColor?.name || cell.bestOperator?.name || "Unknown";
-        } else if (key === "band" || key === "technology" || key === "nodebid" || key === "earfcn") {
+        } else if (key === "band" || key === "technology" || key === "nodebid" || key === "earfcn" || key === "cell_id") {
           value = cell.bestByColor?.name || "Unknown";
         } else if (key === "pci") {
           const pci = Number.parseInt(cell.bestByColor?.name, 10);

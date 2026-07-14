@@ -304,7 +304,7 @@ export const useNetworkSamples = (
     const cacheKey = makeProjectCacheKey({
       resource: 'unified-network-samples',
       sessionIds: sessionIds || [],
-      variant: `typed-network-wifi-v10:${safeMaxRows ? `max-${safeMaxRows}` : 'all'}:project-${projectId || 'none'}`,
+      variant: `typed-network-wifi-v11:${safeMaxRows ? `max-${safeMaxRows}` : 'all'}:project-${projectId || 'none'}`,
     });
 
 

@@ -187,6 +187,22 @@ export const getPciColor = (pciValue) => {
   return PCI_COLOR_PALETTE[Math.abs(Math.floor(numValue)) % PCI_COLOR_PALETTE.length];
 };
 
+// Same distinct-per-value approach as getPciColor: numeric EARFCNs are spread
+// across the palette by value, non-numeric ones fall back to a string hash
+// so every distinct EARFCN still gets a stable, distinguishable color.
+export const getEarfcnColor = (earfcnValue) => {
+  const raw = String(earfcnValue ?? "").trim();
+  if (!raw || raw.toLowerCase() === "unknown") return "#808080";
+
+  const numValue = parseFloat(raw);
+  if (Number.isFinite(numValue)) {
+    return PCI_COLOR_PALETTE[Math.abs(Math.floor(numValue)) % PCI_COLOR_PALETTE.length];
+  }
+
+  const hash = hashString(raw);
+  return DYNAMIC_PROVIDER_PALETTE[hash % DYNAMIC_PROVIDER_PALETTE.length];
+};
+
 export const METRIC_CONFIG = {
   rsrp: {
     thresholdKey: 'rsrp',

@@ -25,7 +25,7 @@ const CATEGORY_GRID_METRICS = new Set([
   "best_technology",
   "best_pci",
 ]);
-const CATEGORY_COLOR_MODES = new Set(["provider", "operator", "band", "technology", "nodebid", "pci"]);
+const CATEGORY_COLOR_MODES = new Set(["provider", "operator", "band", "technology", "nodebid", "cell_id", "pci"]);
 
 const isWifiLogRow = (loc) => {
   const type = String(
@@ -275,11 +275,13 @@ export const useUnifiedGridViewData = ({
           bands: new Map(),
           technologies: new Map(),
           nodebids: new Map(),
+          cellIds: new Map(),
           pcis: new Map(),
           providerMetrics: new Map(),
           bandMetrics: new Map(),
           technologyMetrics: new Map(),
           nodebidMetrics: new Map(),
+          cellIdMetrics: new Map(),
           pciMetrics: new Map(),
           sessions: new Set(),
         });
@@ -321,6 +323,11 @@ export const useUnifiedGridViewData = ({
         (value) => String(value ?? "").trim() || "Unknown",
       );
       incrementCounter(
+        bucket.cellIds,
+        loc?.cell_id ?? loc?.cellId ?? loc?.CellId ?? loc?.CELL_ID,
+        (value) => String(value ?? "").trim() || "Unknown",
+      );
+      incrementCounter(
         bucket.pcis,
         loc?.pci,
         (value) => {
@@ -343,12 +350,16 @@ export const useUnifiedGridViewData = ({
         const nodebidName = String(
           loc?.nodebid ?? loc?.nodeb_id ?? loc?.nodebId ?? "",
         ).trim() || "Unknown";
+        const cellIdName = String(
+          loc?.cell_id ?? loc?.cellId ?? loc?.CellId ?? loc?.CELL_ID ?? "",
+        ).trim() || "Unknown";
         const pciValue = Number.parseInt(loc?.pci, 10);
 
         pushCategoryMetricValue(bucket.providerMetrics, providerName, selectedMetricValue);
         pushCategoryMetricValue(bucket.bandMetrics, bandName, selectedMetricValue);
         pushCategoryMetricValue(bucket.technologyMetrics, technologyName, selectedMetricValue);
         pushCategoryMetricValue(bucket.nodebidMetrics, nodebidName, selectedMetricValue);
+        pushCategoryMetricValue(bucket.cellIdMetrics, cellIdName, selectedMetricValue);
         pushCategoryMetricValue(
           bucket.pciMetrics,
           Number.isFinite(pciValue) ? String(pciValue) : "Unknown",
@@ -385,6 +396,7 @@ export const useUnifiedGridViewData = ({
         const dominantBand = pickTopCategory(bucket.bands);
         const dominantTechnology = pickTopCategory(bucket.technologies);
         const dominantNodebid = pickTopCategory(bucket.nodebids);
+        const dominantCellId = pickTopCategory(bucket.cellIds);
         const bestProviderByMetric = pickBestCategoryByMetric(
           bucket.providerMetrics,
           normalizedAggregationMethod,
@@ -402,6 +414,11 @@ export const useUnifiedGridViewData = ({
         );
         const bestNodebidByMetric = pickBestCategoryByMetric(
           bucket.nodebidMetrics,
+          normalizedAggregationMethod,
+          isLowerBetterMetric,
+        );
+        const bestCellIdByMetric = pickBestCategoryByMetric(
+          bucket.cellIdMetrics,
           normalizedAggregationMethod,
           isLowerBetterMetric,
         );
@@ -426,6 +443,10 @@ export const useUnifiedGridViewData = ({
           useCategoryColor && normalizedColorBy === "nodebid"
             ? bestNodebidByMetric?.name || dominantNodebid
             : dominantNodebid;
+        const colorCellId =
+          useCategoryColor && normalizedColorBy === "cell_id"
+            ? bestCellIdByMetric?.name || dominantCellId
+            : dominantCellId;
         const colorPciRaw =
           useCategoryColor && normalizedColorBy === "pci"
             ? bestPciByMetric?.name ?? dominantPciRaw
@@ -461,20 +482,25 @@ export const useUnifiedGridViewData = ({
           nodebid: colorNodebid,
           nodeb_id: colorNodebid,
           best_nodebid: colorNodebid,
+          cell_id: colorCellId,
+          best_cell_id: colorCellId,
           pci: colorPci,
           best_pci: colorPci,
           dominant_provider: dominantProvider,
           dominant_technology: dominantTechnology,
           dominant_nodebid: dominantNodebid,
+          dominant_cell_id: dominantCellId,
           dominant_pci: dominantPci,
           best_provider_value: bestProviderByMetric?.value ?? null,
           best_band_value: bestBandByMetric?.value ?? null,
           best_technology_value: bestTechnologyByMetric?.value ?? null,
           best_nodebid_value: bestNodebidByMetric?.value ?? null,
+          best_cell_id_value: bestCellIdByMetric?.value ?? null,
           best_pci_value: bestPciByMetric?.value ?? null,
           provider_count: getTopCount(bucket.providers),
           technology_count: getTopCount(bucket.technologies),
           nodebid_count: getTopCount(bucket.nodebids),
+          cell_id_count: getTopCount(bucket.cellIds),
           pci_count: getTopCount(bucket.pcis),
           value: selectedMetricValue,
           metric_value: selectedMetricValue,

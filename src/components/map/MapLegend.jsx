@@ -4,6 +4,7 @@ import { Rnd } from "react-rnd";
 import {
   PCI_COLOR_PALETTE,
   getPciColor as getMetricPciColor,
+  getEarfcnColor,
   getMetricConfig,
   getMetricValueFromLog,
 } from "@/utils/metrics";
@@ -226,6 +227,8 @@ const ColorSchemeLegend = ({ colorBy, logs, activeFilter, onFilterChange }) => {
         colorOverrides[key] ||
         (colorBy === "pci"
           ? getMetricPciColor(key)
+          : colorBy === "earfcn"
+          ? getEarfcnColor(key)
           : scheme[key] || getLogColor(colorBy, key)),
       ]);
 
@@ -778,6 +781,14 @@ export default function MapLegend({
 
   const { content, title } = useMemo(() => {
     if (colorBy) {
+      const colorByTitle =
+        colorBy === "earfcn"
+          ? "EARFCN/BCCH"
+          : colorBy === "cell_id"
+          ? "Cell ID"
+          : colorBy === "nodebid"
+          ? "NodeB ID"
+          : colorBy.charAt(0).toUpperCase() + colorBy.slice(1);
       return {
         content: (
           <ColorSchemeLegend
@@ -787,7 +798,7 @@ export default function MapLegend({
             onFilterChange={onFilterChange}
           />
         ),
-        title: colorBy.charAt(0).toUpperCase() + colorBy.slice(1),
+        title: colorByTitle,
       };
     }
 

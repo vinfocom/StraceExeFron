@@ -781,6 +781,7 @@ const UnifiedMapSidebar = ({
           { value: "band", label: "Best Band" },
           { value: "technology", label: "Best Technology" },
           { value: "earfcn", label: "Best EARFCN" },
+          { value: "cell_id", label: "Best Cell ID" },
           { value: "nodebid", label: "Best NodeB ID" },
           { value: "pci", label: "Best Server" },
         ];
