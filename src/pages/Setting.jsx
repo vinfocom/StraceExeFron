@@ -537,7 +537,7 @@ const parseThresholdData = (data) => {
             parsedData[key] = parseNumber(data.coveragehole_json || data.coveragehole) || DEFAULT_COVERAGE_HOLE;
         } else if (key === "num_cells" || key === "level" || key === "jitter" || key === "latency" || key === "packet_loss" || key === "tac" || key === "dominance" || key === "coverage_violation" ) {
       
-            const jsonString = data[key]; // Read directly from num_cells and level
+            const jsonString = data[key]; 
             let parsed = [];
             
             if (jsonString) {

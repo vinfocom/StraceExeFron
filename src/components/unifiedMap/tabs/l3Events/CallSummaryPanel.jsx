@@ -30,26 +30,23 @@ export const CallSummaryPanel = ({ summary, selectedCallId, onSelectCall }) => {
       </div>
 
       <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
-        <StatCard icon={Phone} label="Calls Made" value={summary.totalCalls} color="blue" />
-        <StatCard icon={Phone} label="Connected" value={summary.connected} color="green" />
-        <StatCard icon={PhoneOff} label="Dropped" value={summary.dropped} color="red" />
-        <StatCard icon={PhoneMissed} label="Not Connected" value={summary.notConnected} color="yellow" />
+        <StatCard icon={Phone} label="Calls Made" value={summary.totalCalls} color="blue"  />
+        <StatCard icon={Phone} label="Connected" value={summary.connected} color="green"  />
+        <StatCard icon={PhoneOff} label="Dropped" value={summary.dropped} color="red"  />
+        <StatCard icon={PhoneMissed} label="Not Connected" value={summary.notConnected} color="yellow"  />
         <StatCard
           icon={Clock}
           label="Total Duration"
           value={formatDurationMs(summary.totalDurationMs)}
           color="cyan"
+          
         />
       </div>
 
-      <p className="text-[11px] text-slate-500">
-        Connected/Dropped are based on whether a call reached "Active" and, if so, whether its disconnect cause
-        was a standard normal/local hangup or an abnormal one. Not Connected covers attempts that never reached
-        Active (no answer, rejected, or failed to set up).
-      </p>
+      
 
       {expanded && (
-        <div className="overflow-x-auto">
+        <div className="overflow-x-auto border border-slate-300/30 rounded-xl p-2">
           <table className="w-full text-xs">
             <thead>
               <tr className="text-slate-500 border-b border-slate-700">
