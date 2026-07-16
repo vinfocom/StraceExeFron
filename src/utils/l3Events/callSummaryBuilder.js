@@ -120,12 +120,24 @@ export function buildCallSummary(timeline = []) {
     else summary.notConnected += 1;
 
     summary.totalDurationMs += duration;
+
+    const callStart = session.startTime?.getTime();
+    const callEnd = (session.endTime || session.startTime)?.getTime();
+
+    // ENHANCEMENT: Filter out all discrete raw timeline elements falling into this temporal scope window
+    const nestedEvents = timeline.filter((item) => {
+      const itemTime = item.timestamp?.getTime();
+      if (itemTime == null || callStart == null || callEnd == null) return false;
+      return itemTime >= callStart && itemTime <= callEnd;
+    }).sort((a, b) => (a.timestamp?.getTime() ?? 0) - (b.timestamp?.getTime() ?? 0));
+
     summary.calls.push({
       id: `call-${summary.calls.length}`,
       startTime: session.startTime,
       endTime: session.endTime,
       status,
       durationMs: duration,
+      events: nestedEvents, // This populates the panel tables with data!
     });
   });
 

@@ -55,6 +55,7 @@ export const CallSummaryPanel = ({ summary, selectedCallId, onSelectCall }) => {
                 <th className="text-left py-1.5 pr-3 font-medium">Status</th>
                 <th className="text-left py-1.5 font-medium">Duration</th>
               </tr>
+             
             </thead>
             <tbody>
               {summary.calls.map((call) => {
@@ -65,11 +66,14 @@ export const CallSummaryPanel = ({ summary, selectedCallId, onSelectCall }) => {
                     key={call.id}
                     onClick={isClickable ? () => onSelectCall(call) : undefined}
                     title={isClickable ? "View this call's events in the timeline" : undefined}
-                    className={`border-b border-slate-800/70 ${
-                      isClickable ? "cursor-pointer hover:bg-slate-700/40" : ""
-                    } ${isSelected ? "bg-blue-500/10" : ""}`}
+                    className={`border-b border-slate-800/70 cursor-pointer transition-colors ${
+                      isSelected 
+                        ? 'bg-blue-500/20 border-l-4 border-blue-500' // Adjusted to fit your dark theme
+                        : 'hover:bg-slate-700/40'
+                    }`}
                   >
-                    <td className="py-1.5 pr-3 font-mono text-slate-300">
+                    {/* ... (td elements remain exactly the same) */}
+                    <td className="py-1.5 pl-3 pr-3 font-mono text-slate-300">
                       {call.startTime
                         ? call.startTime.toLocaleTimeString([], { hour12: false, timeZone: "UTC" })
                         : "--:--:--"}
@@ -90,6 +94,7 @@ export const CallSummaryPanel = ({ summary, selectedCallId, onSelectCall }) => {
                     </td>
                     <td className="py-1.5 text-slate-300">{formatDurationMs(call.durationMs)}</td>
                   </tr>
+                  
                 );
               })}
             </tbody>

@@ -7,7 +7,7 @@ import React, {
   useDeferredValue,
 } from "react";
 import { Upload, Loader2, AlertTriangle, X } from "lucide-react";
-
+import { CallDetailPanel } from "./l3Events/CallDetailPanel";
 import { extractL3AndEventFiles } from "@/utils/l3Events/zipParser";
 import { parseL3CSV } from "@/utils/l3Events/l3Parser";
 import { parseEventCSV } from "@/utils/l3Events/eventParser";
@@ -187,92 +187,105 @@ const currentActiveTimeline = activeTab === "l3" ? l3Timeline : eventTimeline;
         </div>
       )}
 
-      {status === "ready" && (
-        <>
-          {warningMessage && (
-            <div className="text-xs text-amber-300 bg-amber-500/10 border border-amber-500/30 rounded-lg px-3 py-2">
-              {warningMessage}
-            </div>
-          )}
+{status === "ready" && (
+  <>
+    {warningMessage && (
+      <div className="text-xs text-amber-300 bg-amber-500/10 border border-amber-500/30 rounded-lg px-3 py-2">
+        {warningMessage}
+      </div>
+    )}
 
-          <CallSummaryPanel
-            summary={callSummary}
-            selectedCallId={selectedCall?.id}
-            onSelectCall={handleSelectCall}
-          />
+    <CallSummaryPanel
+      summary={callSummary}
+      selectedCallId={selectedCall?.id}
+      onSelectCall={handleSelectCall}
+    />
 
-          {selectedCall && (
-            <div className="flex items-center justify-between gap-2 text-xs bg-blue-500/10 border border-blue-500/30 rounded-lg px-3 py-2">
-              <span className="text-blue-300">
-                Showing events for the call at{" "}
-                {selectedCall.startTime.toLocaleTimeString([], { hour12: false, timeZone: "UTC" })}
-                {selectedCall.endTime
-                  ? ` – ${selectedCall.endTime.toLocaleTimeString([], { hour12: false, timeZone: "UTC" })}`
-                  : ""}{" "}
-                ({selectedCall.status})
-              </span>
-              <button
-                type="button"
-                onClick={() => setSelectedCall(null)}
-                className="flex items-center gap-1 text-blue-300 hover:text-blue-200 shrink-0"
-              >
-                <X className="h-3.5 w-3.5" /> Clear
-              </button>
-            </div>
-          )}
-
-          <div className="space-y-3">
-            <input
-              type="text"
-              value={search}
-              onChange={(event) => setSearch(event.target.value)}
-              placeholder="Search title, summary, category, or raw message..."
-              className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white placeholder:text-white focus:outline-none focus:border-blue-500"
-            />
-            {!selectedCall && (
-              <FilterChips categories={categories} active={activeCategory} onSelect={setActiveCategory} />
-            )}
+    {/* Master-Detail Layout Split Section */}
+    <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 items-start">
+      
+      {/* Dynamic Content Timeline Grid Segment */}
+      <div className={`space-y-4 transition-all duration-300 ${selectedCall ? "lg:col-span-5" : "lg:col-span-12"}`}>
+        {selectedCall && (
+          <div className="flex items-center justify-between gap-2 text-xs bg-blue-500/10 border border-blue-500/30 rounded-lg px-3 py-2">
+            <span className="text-blue-300 truncate">
+              Filtering by Call at{" "}
+              {selectedCall.startTime.toLocaleTimeString([], { hour12: false, timeZone: "UTC" })}
+            </span>
+            <button
+              type="button"
+              onClick={() => setSelectedCall(null)}
+              className="flex items-center gap-1 text-blue-300 hover:text-blue-200 shrink-0 font-medium"
+            >
+              <X className="h-3.5 w-3.5" /> Clear
+            </button>
           </div>
+        )}
 
-          {/* Radix UI Tabs Implementation */}
-          <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-            <TabsList className="grid grid-cols-2 w-[300px] mb-4 bg-slate-800 border border-slate-700 text-white">
-              <TabsTrigger value="l3" className="data-[state=active]:bg-slate-700 data-[state=active]:text-white">
-                L3 Messages ({l3Timeline.length})
-              </TabsTrigger>
-              <TabsTrigger value="event" className="data-[state=active]:bg-slate-700 data-[state=active]:text-white">
-                Events ({eventTimeline.length})
-              </TabsTrigger>
-            </TabsList>
-
-            <TabsContent value="l3" className="space-y-2 focus-visible:ring-0">
-              {visibleItems.length === 0 ? (
-                <div className="text-sm text-white text-center py-8">No matching L3 messages.</div>
-              ) : (
-                visibleItems.map((item) => (
-                  <TimelineCard key={item.id} item={item} />
-                ))
-              )}
-            </TabsContent>
-
-            <TabsContent value="event" className="space-y-2 focus-visible:ring-0">
-              {visibleItems.length === 0 ? (
-                <div className="text-sm text-white text-center py-8">No matching Events.</div>
-              ) : (
-                visibleItems.map((item) => (
-                  <TimelineCard key={item.id} item={item} />
-                ))
-              )}
-            </TabsContent>
-          </Tabs>
-
-          {visibleCount < currentActiveTimeline.length && (
-            <div ref={sentinelRef} className="py-4 text-center text-xs text-white">
-              Loading more...
-            </div>
+        <div className="space-y-3">
+          <input
+            type="text"
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+            placeholder="Search title, summary, category, or raw message..."
+            className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white placeholder:text-slate-500 focus:outline-none focus:border-blue-500"
+          />
+          {!selectedCall && (
+            <FilterChips categories={categories} active={activeCategory} onSelect={setActiveCategory} />
           )}
-        </>
+        </div>
+
+        {/* Radix UI Tabs Implementation */}
+        <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+          <TabsList className="grid grid-cols-2 w-[300px] mb-4 bg-slate-800 border border-slate-700 text-white">
+            <TabsTrigger value="l3" className="data-[state=active]:bg-slate-700 data-[state=active]:text-white text-xs">
+              L3 Messages ({l3Timeline.length})
+            </TabsTrigger>
+            <TabsTrigger value="event" className="data-[state=active]:bg-slate-700 data-[state=active]:text-white text-xs">
+              Events ({eventTimeline.length})
+            </TabsTrigger>
+          </TabsList>
+
+          <TabsContent value="l3" className="space-y-2 focus-visible:ring-0 max-h-[600px] overflow-y-auto pr-1">
+            {visibleItems.length === 0 ? (
+              <div className="text-sm text-white text-center py-8">No matching L3 messages.</div>
+            ) : (
+              visibleItems.map((item) => (
+                <TimelineCard key={item.id} item={item} />
+              ))
+            )}
+          </TabsContent>
+
+          <TabsContent value="event" className="space-y-2 focus-visible:ring-0 max-h-[600px] overflow-y-auto pr-1">
+            {visibleItems.length === 0 ? (
+              <div className="text-sm text-white text-center py-8">No matching Events.</div>
+            ) : (
+              visibleItems.map((item) => (
+                <TimelineCard key={item.id} item={item} />
+              ))
+            )}
+          </TabsContent>
+        </Tabs>
+
+        {visibleCount < currentActiveTimeline.length && (
+          <div ref={sentinelRef} className="py-4 text-center text-xs text-slate-400">
+            Loading more rows...
+          </div>
+        )}
+      </div>
+
+      {/* Dedicated Information Structure Panel Panel View Column */}
+      {selectedCall && (
+        <div className="lg:col-span-7 h-[730px] lg:sticky lg:top-4">
+          <CallDetailPanel 
+            call={selectedCall} 
+            onClose={() => setSelectedCall(null)} 
+          />
+        </div>
       )}
+    </div>
+  </>
+)}
     </div>
   );
 };
