@@ -9,6 +9,7 @@
     "build": "vite build",
     "build:electron": "vite build --base ./",
     "lint": "eslint .",
+    "test": "node --test src/utils/l3Events/callSummaryBuilder.test.js",
     "preview": "vite preview"
   },
   "dependencies": {
