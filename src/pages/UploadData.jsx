@@ -8,10 +8,9 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { UploadCloud, File, X, Download, MapPinned, RefreshCw } from "lucide-react";
 
-
 import Spinner from "../components/common/Spinner";
 
-import { excelApi, mapViewApi } from "../api/apiEndpoints";
+import { excelApi, mapViewApi, uniReport } from "../api/apiEndpoints";
 import { useFileUpload } from "../hooks/useFileUpload";
 import { useAuth } from "@/context/AuthContext";
 
@@ -32,12 +31,33 @@ const toSafeArray = (value) => {
   if (Array.isArray(value?.Data)) return value.Data;
   if (Array.isArray(value?.data)) return value.data;
   if (Array.isArray(value?.data?.Data)) return value.data.Data;
+  if (Array.isArray(value?.AvailableBands)) return value.AvailableBands;
   return [];
 };
 
+const normalizeDiscoveredBands = (value) =>
+  toSafeArray(value)
+    .map((item) => {
+      if (typeof item === "string") {
+        const band = item.trim();
+        return band ? { Band: band, Count: null, Percentage: null } : null;
+      }
+
+      const band = String(item?.Band ?? item?.band ?? "").trim();
+      if (!band) return null;
+
+      const count = Number(item?.Count ?? item?.count);
+      const percentage = Number(item?.Percentage ?? item?.percentage);
+
+      return {
+        Band: band,
+        Count: Number.isFinite(count) ? count : null,
+        Percentage: Number.isFinite(percentage) ? percentage : null,
+      };
+    })
+    .filter(Boolean);
+
 const normalizeSessionId = (value) => String(value ?? "").trim();
-
-
 
 const formatSessionCell = (sessionValue) => {
   if (Array.isArray(sessionValue)) {
@@ -220,6 +240,14 @@ const UploadDataPage = () => {
   const [activeTab, setActiveTab] = useState("session");
   const [historyLoading, setHistoryLoading] = useState(true);
 
+  // --- REPORT GENERATION STATE ---
+  const [reportFile, setReportFile] = useState(null);
+  const [discoveredBands, setDiscoveredBands] = useState([]);
+  const [selectedBand, setSelectedBand] = useState("");
+  const [reportTitle, setReportTitle] = useState("");
+  const [reportLoading, setReportLoading] = useState(false);
+  const [reportError, setReportError] = useState(null);
+
   const { loading, errorLog, uploadFile, setErrorLog } = useFileUpload();
 
   // ------------------ FILE UPLOAD LOGIC ------------------
@@ -316,13 +344,122 @@ const UploadDataPage = () => {
   });
 
   const removeFile = (type, index = null) => {
-    if (type !== "session") return;
-    if (index === null) {
-      setSessionFiles([]);
+    if (type === "session") {
+      if (index === null) {
+        setSessionFiles([]);
+        return;
+      }
+      setSessionFiles((prev) => prev.filter((_, itemIndex) => itemIndex !== index));
+    } else if (type === "report") {
+      setReportFile(null);
+      setDiscoveredBands([]);
+      setSelectedBand("");
+      setReportTitle("");
+      setReportError(null);
+    }
+  };
+
+  // ------------------ REPORT GENERATION UPLOAD LOGIC ------------------
+  const onDropReport = useCallback((files) => {
+    if (files && files.length > 0) {
+      const file = files[0];
+      if (file.size > MAX_FILE_SIZE) {
+        toast.error(`Size limit exceeded. Maximum allowed file size is ${MAX_FILE_SIZE_LABEL}.`);
+        return;
+      }
+      setReportFile(file);
+      setDiscoveredBands([]); // Reset on new file
+      setSelectedBand("");
+      setReportTitle("");
+      setReportError(null);
+    }
+  }, []);
+
+  const {
+    getRootProps: getRootPropsReport,
+    getInputProps: getInputPropsReport,
+    isDragActive: isDragActiveReport,
+  } = useDropzone({
+    onDrop: onDropReport,
+    accept: {
+      'application/zip': ['.zip'],
+      'application/x-zip-compressed': ['.zip']
+    },
+    multiple: false,
+    maxSize: MAX_FILE_SIZE,
+  });
+
+  const handleDiscoverBands = async () => {
+    if (!reportFile) return;
+    setReportLoading(true);
+    setReportError(null);
+    setDiscoveredBands([]);
+    setSelectedBand("");
+
+    try {
+      const formData = new FormData();
+      formData.append("LogZip", reportFile);
+
+      const response = await uniReport.getBand(formData);
+      const bandsList = normalizeDiscoveredBands(response?.AvailableBands ?? response);
+
+      if (!bandsList.length) {
+        const message = "No bands found in this ZIP file.";
+        setReportError(message);
+        toast.info(message);
+        return;
+      }
+
+      setDiscoveredBands(bandsList);
+      setSelectedBand(bandsList[0]?.Band || "");
+      toast.success("Bands discovered successfully!");
+    } catch (err) {
+      const message = err?.message || "Failed to discover bands.";
+      setReportError(message);
+      toast.error(message);
+    } finally {
+      setReportLoading(false);
+    }
+  };
+
+  const handleGenerateReport = async () => {
+    if (!selectedBand) {
+      toast.warn("Please select a band first.");
       return;
     }
-    setSessionFiles((prev) => prev.filter((_, itemIndex) => itemIndex !== index));
+    setReportLoading(true);
+    setReportError(null);
+
+    try {
+      const formData = new FormData();
+      formData.append("LogZip", reportFile);
+      formData.append("Title", reportTitle || "");
+      formData.append("BandFilter", selectedBand);
+
+      const blob = await uniReport.generateFromZip(formData);
+      const downloadUrl = window.URL.createObjectURL(blob);
+      const link = document.createElement("a");
+
+      link.href = downloadUrl;
+      link.setAttribute(
+        "download",
+        `${reportFile.name.replace(/\.zip$/i, "")}_${selectedBand || "ALL"}_report.pdf`,
+      );
+      document.body.appendChild(link);
+      link.click();
+
+      link.parentNode.removeChild(link);
+      window.URL.revokeObjectURL(downloadUrl);
+      toast.success("Report downloaded successfully!");
+    } catch (err) {
+      const message = err?.message || "Failed to generate the report.";
+      setReportError(message);
+      toast.error(message);
+    } finally {
+      setReportLoading(false);
+    }
   };
+
 
   // ------------------ UPLOAD HISTORY FETCH ------------------
   const fetchUploadedFiles = useCallback(async ({ showLoader = true, showError = true } = {}) => {
@@ -569,18 +706,84 @@ const UploadDataPage = () => {
               </Button>
             </div>
           </TabsContent>
-          {/* ---------- Indoor file generations ---------- */}  
-          <TabsContent value="Report" className="space-y-4 mt-4">
-           {renderFileInput(
-              getRootPropsSession,
-              getInputPropsSession,
-              isDragActiveSession,
-              sessionFiles,
-              "session",
-              "Session Data Files (.csv or .zip, max 500 MB each)"
-            )}
-            
 
+          {/* ---------- REPORT GENERATION TAB ---------- */}  
+          <TabsContent value="Report" className="space-y-4 mt-4">
+            {renderFileInput(
+              getRootPropsReport,
+              getInputPropsReport,
+              isDragActiveReport,
+              reportFile ? [reportFile] : [],
+              "report",
+              "Upload Log ZIP File (.zip, max 500 MB)"
+            )}
+
+            {reportError && (
+              <div className="p-3 bg-red-100 text-red-700 border border-red-300 rounded text-sm">
+                {reportError}
+              </div>
+            )}
+
+            {/* Discover Bands Action Button */}
+            {reportFile && discoveredBands.length === 0 && (
+              <Button
+                onClick={handleDiscoverBands}
+                disabled={reportLoading}
+                className="w-full bg-blue-600 hover:bg-blue-700 text-white font-medium py-2 px-4 rounded-md transition"
+              >
+                {reportLoading ? (
+                  <><RefreshCw className="mr-2 h-4 w-4 animate-spin" /> Discovering...</>
+                ) : (
+                  'Discover Bands'
+                )}
+              </Button>
+            )}
+
+            {/* Selection & Download UI (Appears after Discovery) */}
+            {discoveredBands.length > 0 && (
+              <div className="mt-6 border-t border-gray-500 pt-4 space-y-4">
+                <div>
+                  <label className="block text-sm font-semibold mb-1">Select Discovered Band</label>
+                  <select
+                    value={selectedBand}
+                    onChange={(e) => setSelectedBand(e.target.value)}
+                    className="block w-full rounded-md bg-white text-black p-2 outline-none focus:ring-2 focus:ring-blue-500"
+                  >
+                    <option value="" disabled>-- Select a Band --</option>
+                    {discoveredBands.map((band, idx) => (
+                      <option key={`${band.Band}-${idx}`} value={band.Band}>
+                        {band.Band}
+                        {band.Count !== null ? ` (${band.Count})` : ""}
+                        {band.Percentage !== null ? ` - ${band.Percentage}%` : ""}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* <div>
+                  <label className="block text-sm font-semibold mb-1">Report Title (Optional)</label>
+                  <Input
+                    type="text"
+                    value={reportTitle}
+                    onChange={(e) => setReportTitle(e.target.value)}
+                    placeholder="Enter a report title"
+                    className="bg-white text-black placeholder:text-gray-500"
+                  />
+                </div> */}
+
+                <Button
+                  onClick={handleGenerateReport}
+                  disabled={reportLoading || !selectedBand}
+                  className="w-full bg-green-600 hover:bg-green-700 text-white font-medium py-2 px-4 rounded-md transition"
+                >
+                  {reportLoading ? (
+                    <><RefreshCw className="mr-2 h-4 w-4 animate-spin" /> Generating...</>
+                  ) : (
+                    'Generate & Download Report'
+                  )}
+                </Button>
+              </div>
+            )}
           </TabsContent>
         </Tabs>
 
@@ -592,6 +795,7 @@ const UploadDataPage = () => {
           </div>
         )}
 
+        {/* ---------- Upload Action Buttons for Session Tab ---------- */}
         {activeTab === "session" && (
           <div className="mt-8 flex justify-center gap-4">
             <Button

@@ -2148,6 +2148,82 @@ export const excelApi = {
   },
 };
 
+export const uniReport = {
+  getBand: async (formData, onUploadProgress = null) => {
+    try {
+      return await api.post("/api/UnifiedMapZipReport/DiscoverBands", formData, {
+        timeout: 7200000,
+        onUploadProgress:
+          onUploadProgress ||
+          ((progressEvent) => {
+            const percentCompleted = Math.round(
+              (progressEvent.loaded * 100) / progressEvent.total
+            );
+          }),
+      });
+    } catch (error) {
+      const message = String(error?.message || "").toLowerCase();
+      
+      if (message.includes("timed out") || message.includes("timeout")) {
+        throw error;
+      }
+
+     
+      try {
+        await authApi.checkStatus();
+        throw error;
+      } catch (statusError) {
+        const cloudReachable = !(
+          statusError?.isNetworkError === true ||
+          /no response from server|network error|request setup failed/i.test(
+            String(statusError?.message || ""),
+          )
+        );
+        if (cloudReachable) {
+          throw error;
+        }
+      }
+
+      if (!shouldFallbackToOfflineCache(error)) throw error;
+      const fallbackForm = new FormData();
+      const mainFile = formData.get("UploadFile");
+      const polygonFile = formData.get("UploadNoteFile");
+      if (mainFile) fallbackForm.append("files", mainFile);
+      if (polygonFile) fallbackForm.append("files", polygonFile);
+      fallbackForm.append("workspaceName", "Auto Cache");
+      fallbackForm.append(
+        "metadata",
+        JSON.stringify({
+          source: "upload-data",
+          upload_file_type: formData.get("UploadFileType") || "",
+          remarks: formData.get("remarks") || "",
+          project_name: formData.get("ProjectName") || "",
+          session_ids: formData.get("SessionIds") || "",
+        }),
+      );
+      return offlineApi.importFiles(fallbackForm);
+    }
+  },
+
+  generateFromZip: async (formData, onUploadProgress = null) => {
+    try {
+      return await api.post("/api/UnifiedMapZipReport/GenerateFromZip", formData, {
+        timeout: 7200000,
+        responseType: "blob",
+        onUploadProgress:
+          onUploadProgress ||
+          ((progressEvent) => {
+            const percentCompleted = Math.round(
+              (progressEvent.loaded * 100) / progressEvent.total
+            );
+          }),
+      });
+    } catch (error) {
+      throw error;
+    }
+  },
+}
+
 
 export const checkAllServices = async (options = {}) => {
   const includePython = options?.includePython === true;
