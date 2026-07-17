@@ -471,9 +471,10 @@ const UploadDataPage = () => {
         <h1 className="text-2xl font-semibold mb-4 text-center">Upload Data</h1>
 
         <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-          <TabsList className="grid grid-cols-2 bg-gray-700 text-white rounded">
+          <TabsList className="grid grid-cols-3 bg-gray-700 text-white rounded">
             <TabsTrigger value="session">Upload Session Data</TabsTrigger>
             <TabsTrigger value="polygon">Import Polygon</TabsTrigger>
+            <TabsTrigger value="Report">Report Generation</TabsTrigger>
           </TabsList>
 
           {/* ---------- SESSION TAB ---------- */}
@@ -570,7 +571,15 @@ const UploadDataPage = () => {
           </TabsContent>
           {/* ---------- Indoor file generations ---------- */}  
           <TabsContent value="Report" className="space-y-4 mt-4">
-           
+           {renderFileInput(
+              getRootPropsSession,
+              getInputPropsSession,
+              isDragActiveSession,
+              sessionFiles,
+              "session",
+              "Session Data Files (.csv or .zip, max 500 MB each)"
+            )}
+            
 
           </TabsContent>
         </Tabs>
