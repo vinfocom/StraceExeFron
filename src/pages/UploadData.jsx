@@ -243,7 +243,7 @@ const UploadDataPage = () => {
   // --- REPORT GENERATION STATE ---
   const [reportFile, setReportFile] = useState(null);
   const [discoveredBands, setDiscoveredBands] = useState([]);
-  const [selectedBand, setSelectedBand] = useState("");
+  const [selectedBands, setSelectedBands] = useState([]);
   const [reportTitle, setReportTitle] = useState("");
   const [reportLoading, setReportLoading] = useState(false);
   const [reportError, setReportError] = useState(null);
@@ -353,7 +353,7 @@ const UploadDataPage = () => {
     } else if (type === "report") {
       setReportFile(null);
       setDiscoveredBands([]);
-      setSelectedBand("");
+      setSelectedBands([]);
       setReportTitle("");
       setReportError(null);
     }
@@ -369,7 +369,7 @@ const UploadDataPage = () => {
       }
       setReportFile(file);
       setDiscoveredBands([]); // Reset on new file
-      setSelectedBand("");
+      setSelectedBands([]);
       setReportTitle("");
       setReportError(null);
     }
@@ -394,7 +394,7 @@ const UploadDataPage = () => {
     setReportLoading(true);
     setReportError(null);
     setDiscoveredBands([]);
-    setSelectedBand("");
+    setSelectedBands([]);
 
     try {
       const formData = new FormData();
@@ -411,7 +411,7 @@ const UploadDataPage = () => {
       }
 
       setDiscoveredBands(bandsList);
-      setSelectedBand(bandsList[0]?.Band || "");
+      setSelectedBands(bandsList.map((band) => band.Band).filter(Boolean));
       toast.success("Bands discovered successfully!");
     } catch (err) {
       const message = err?.message || "Failed to discover bands.";
@@ -423,8 +423,8 @@ const UploadDataPage = () => {
   };
 
   const handleGenerateReport = async () => {
-    if (!selectedBand) {
-      toast.warn("Please select a band first.");
+    if (!selectedBands.length) {
+      toast.warn("Please select at least one band first.");
       return;
     }
     setReportLoading(true);
@@ -434,7 +434,10 @@ const UploadDataPage = () => {
       const formData = new FormData();
       formData.append("LogZip", reportFile);
       formData.append("Title", reportTitle || "");
-      formData.append("BandFilter", selectedBand);
+      formData.append("BandFilter", selectedBands.join(","));
+      selectedBands.forEach((band) => {
+        formData.append("Bands", band);
+      });
 
       const blob = await uniReport.generateFromZip(formData);
       const downloadUrl = window.URL.createObjectURL(blob);
@@ -443,7 +446,7 @@ const UploadDataPage = () => {
       link.href = downloadUrl;
       link.setAttribute(
         "download",
-        `${reportFile.name.replace(/\.zip$/i, "")}_${selectedBand || "ALL"}_report.pdf`,
+        `${reportFile.name.replace(/\.zip$/i, "")}_${selectedBands.join("-") || "ALL"}_report.pdf`,
       );
       document.body.appendChild(link);
       link.click();
@@ -459,6 +462,14 @@ const UploadDataPage = () => {
       setReportLoading(false);
     }
   };
+
+  const handleBandToggle = useCallback((bandValue) => {
+    setSelectedBands((prev) =>
+      prev.includes(bandValue)
+        ? prev.filter((value) => value !== bandValue)
+        : [...prev, bandValue],
+    );
+  }, []);
 
 
   // ------------------ UPLOAD HISTORY FETCH ------------------
@@ -743,21 +754,30 @@ const UploadDataPage = () => {
             {discoveredBands.length > 0 && (
               <div className="mt-6 border-t border-gray-500 pt-4 space-y-4">
                 <div>
-                  <label className="block text-sm font-semibold mb-1">Select Discovered Band</label>
-                  <select
-                    value={selectedBand}
-                    onChange={(e) => setSelectedBand(e.target.value)}
-                    className="block w-full rounded-md bg-white text-black p-2 outline-none focus:ring-2 focus:ring-blue-500"
-                  >
-                    <option value="" disabled>-- Select a Band --</option>
+                  <label className="block text-sm font-semibold mb-1">Select Discovered Bands</label>
+                  <div className="max-h-64 space-y-2 overflow-y-auto rounded-md bg-white p-3 text-black">
                     {discoveredBands.map((band, idx) => (
-                      <option key={`${band.Band}-${idx}`} value={band.Band}>
-                        {band.Band}
-                        {band.Count !== null ? ` (${band.Count})` : ""}
-                        {band.Percentage !== null ? ` - ${band.Percentage}%` : ""}
-                      </option>
+                      <label
+                        key={`${band.Band}-${idx}`}
+                        className="flex cursor-pointer items-center gap-3 rounded border border-gray-200 px-3 py-2 hover:bg-gray-50"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={selectedBands.includes(band.Band)}
+                          onChange={() => handleBandToggle(band.Band)}
+                          className="h-4 w-4"
+                        />
+                        <span className="text-sm">
+                          {band.Band}
+                          {band.Count !== null ? ` (${band.Count})` : ""}
+                          {band.Percentage !== null ? ` - ${band.Percentage}%` : ""}
+                        </span>
+                      </label>
                     ))}
-                  </select>
+                  </div>
+                  <p className="mt-2 text-xs text-gray-200">
+                    Tick one or more bands. All discovered bands are selected by default.
+                  </p>
                 </div>
 
                 {/* <div>
@@ -773,7 +793,7 @@ const UploadDataPage = () => {
 
                 <Button
                   onClick={handleGenerateReport}
-                  disabled={reportLoading || !selectedBand}
+                  disabled={reportLoading || !selectedBands.length}
                   className="w-full bg-green-600 hover:bg-green-700 text-white font-medium py-2 px-4 rounded-md transition"
                 >
                   {reportLoading ? (
