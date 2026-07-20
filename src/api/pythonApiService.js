@@ -5,33 +5,45 @@ const isElectronRuntime =
   typeof navigator !== "undefined" &&
   /electron/i.test(navigator.userAgent || "");
 
-const DEPLOYED_API_BASE_URL = "https://s-traccceer.vinfocom.co.in";
+const isProductionBuild = Boolean(import.meta.env.PROD);
+
+const normalizeBaseUrl = (value) =>
+  String(value || "")
+    .trim()
+    .replace(/\/+$/, "");
 
 const getRuntimePythonBaseUrl = () => {
-  if (!isElectronRuntime) return "";
   if (typeof window === "undefined") return "";
 
   try {
     const queryValue = new URLSearchParams(window.location.search).get(
       "pythonApiBaseUrl",
     );
-    return String(queryValue || "").trim();
+    const runtimeConfigValue =
+      window.__STRACER_CONFIG__?.PYTHON_API_URL ||
+      window.__STRACER_CONFIG__?.pythonApiUrl ||
+      window.__APP_CONFIG__?.PYTHON_API_URL ||
+      window.__APP_CONFIG__?.pythonApiUrl;
+
+    return normalizeBaseUrl(queryValue || runtimeConfigValue);
   } catch {
     return "";
   }
 };
 
-const PYTHON_BASE_URL = String(
-  isElectronRuntime
-    ? (
-        getRuntimePythonBaseUrl() ||
-        import.meta.env.VITE_ELECTRON_PYTHON_API_URL ||
-        "http://127.0.0.1:8081"
-      )
-    : (import.meta.env.VITE_PYTHON_API_URL || DEPLOYED_API_BASE_URL)
-)
-  .trim()
-  .replace(/\/+$/, "");
+const getConfiguredPythonBaseUrl = () => {
+  const runtimeBaseUrl = getRuntimePythonBaseUrl();
+  if (runtimeBaseUrl) return runtimeBaseUrl;
+
+  const envBaseUrl = isElectronRuntime
+    ? import.meta.env.VITE_ELECTRON_PYTHON_API_URL || import.meta.env.VITE_PYTHON_API_URL
+    : import.meta.env.VITE_PYTHON_API_URL;
+  if (envBaseUrl) return normalizeBaseUrl(envBaseUrl);
+
+  return "";
+};
+
+const PYTHON_BASE_URL = getConfiguredPythonBaseUrl();
 
 let activePythonBaseUrl = PYTHON_BASE_URL;
 let discoveryPromise = null;
@@ -102,20 +114,19 @@ const discoverPythonBaseUrl = async () => {
   if (discoveryPromise) return discoveryPromise;
 
   discoveryPromise = (async () => {
-    if (!isElectronRuntime) return "";
+    if (!isElectronRuntime || isProductionBuild) return "";
 
-    const candidates = [];
-    const explicitHost = (import.meta.env.VITE_ELECTRON_PYTHON_API_HOST || "127.0.0.1").trim();
+    const candidates = [
+      normalizeBaseUrl(import.meta.env.VITE_ELECTRON_PYTHON_API_URL),
+      normalizeBaseUrl(import.meta.env.VITE_PYTHON_API_URL),
+    ].filter(Boolean);
+    const explicitHost = String(import.meta.env.VITE_ELECTRON_PYTHON_API_HOST || "").trim();
     const explicitPort = Number(
       String(import.meta.env.VITE_ELECTRON_PYTHON_API_PORT || "").trim()
     );
 
-    if (Number.isFinite(explicitPort) && explicitPort > 0) {
+    if (explicitHost && Number.isFinite(explicitPort) && explicitPort > 0) {
       candidates.push(`http://${explicitHost}:${explicitPort}`);
-    }
-
-    for (let port = 8081; port <= 8105; port += 1) {
-      candidates.push(`http://127.0.0.1:${port}`);
     }
 
     const uniqueCandidates = [...new Set(candidates)];
@@ -183,7 +194,7 @@ pythonAxios.interceptors.response.use(
     } else if (error.request) {
       logApiWarn('Python API No Response:', error.config?.url || activePythonBaseUrl);
       const originalConfig = error.config || {};
-      if (!originalConfig.__portAutoRetried) {
+      if (activePythonBaseUrl && !originalConfig.__portAutoRetried) {
         const discoveredBaseUrl = await discoverPythonBaseUrl();
         if (discoveredBaseUrl) {
           setPythonBaseUrl(discoveredBaseUrl);
@@ -195,7 +206,9 @@ pythonAxios.interceptors.response.use(
         }
       }
 
-      error.message = `No response from Python backend. Tried base URL: ${activePythonBaseUrl}`;
+      error.message = activePythonBaseUrl
+        ? `No response from Python backend. Tried base URL: ${activePythonBaseUrl}`
+        : 'Python API URL is not configured. Set VITE_PYTHON_API_URL or provide pythonApiBaseUrl in the runtime config.';
     } else {
       logApiError('Python API Request Setup Error:', error.message);
     }

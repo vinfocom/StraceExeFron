@@ -177,6 +177,57 @@ function normalizeMatchValue(value) {
   return lowered;
 }
 
+function readFirstText(source, keys = []) {
+  if (!source || typeof source !== "object") return "";
+  for (const key of keys) {
+    const value = source?.[key];
+    if (value == null) continue;
+    const text = String(value).trim();
+    if (text) return text;
+  }
+  return "";
+}
+
+function getSitePredictionIdentityKey(source = {}) {
+  const backendKey = readFirstText(source, [
+    "sitePredictionKey",
+    "site_cell_sector_band_operator_key",
+    "siteCellSectorBandOperatorKey",
+  ]);
+  if (backendKey) return backendKey;
+
+  const rawSite = source?.rawSite && typeof source.rawSite === "object" ? source.rawSite : {};
+  const site = getDisplaySiteId(source) || getDisplaySiteId(rawSite);
+  const cellId =
+    getSiteCellId(source) ||
+    getSiteCellId(rawSite) ||
+    readFirstText(source, ["cell_id", "cellId"]) ||
+    readFirstText(rawSite, ["cell_id", "cellId"]);
+  const sector =
+    readFirstText(source, ["sector", "sector_id", "sectorId"]) ||
+    readFirstText(rawSite, ["sector", "sector_id", "sectorId"]);
+  const band =
+    resolveSiteBandValue(source) ||
+    resolveSiteBandValue(rawSite) ||
+    readFirstText(source, ["band", "frequency_band", "Band"]) ||
+    readFirstText(rawSite, ["band", "frequency_band", "Band"]);
+  const operator =
+    readFirstText(source, ["provider", "operatorName", "operator_name", "network", "Network", "operator"]) ||
+    readFirstText(rawSite, ["provider", "operatorName", "operator_name", "network", "Network", "operator", "cluster"]);
+
+  if (!site || !cellId) return "";
+  return [site, cellId, sector, band, operator].join("|");
+}
+
+function normalizeIdentityKey(value) {
+  const raw = String(value ?? "").trim();
+  if (!raw) return "";
+  return raw
+    .split("|")
+    .map((part) => String(part ?? "").trim().toLowerCase())
+    .join("|");
+}
+
 function extractMatchValue(source, keys = []) {
   if (!source || typeof source !== "object" || !Array.isArray(keys) || keys.length === 0) {
     return null;
@@ -366,11 +417,19 @@ function getSectorBandSizeMultiplier(band) {
   return 0.5;
 }
 
-function getSectorBandZIndex(band, baseZIndex = 5000) {
-  const bandNumber = getSectorBandNumber(band);
-  if (!bandNumber) return baseZIndex;
+// Keep in sync with the actual min/max return values of getSectorBandSizeMultiplier.
+const MIN_SECTOR_BAND_SIZE_MULTIPLIER = 0.45;
+const MAX_SECTOR_BAND_SIZE_MULTIPLIER = 2.3;
 
-  const zOffset = Math.min(900, Math.max(0, Math.round(bandNumber / 5)));
+function getSectorBandZIndex(band, baseZIndex = 5000) {
+  const multiplier = getSectorBandSizeMultiplier(band);
+  // Sibling cells at the same sector (e.g. 900 vs 1800 MHz) render as concentric
+  // triangles from the same apex. The smaller triangle's clickable area sits fully
+  // inside the bigger one, so it must get the higher zIndex or it can never be clicked.
+  const sizeRatio =
+    (MAX_SECTOR_BAND_SIZE_MULTIPLIER - multiplier) /
+    (MAX_SECTOR_BAND_SIZE_MULTIPLIER - MIN_SECTOR_BAND_SIZE_MULTIPLIER);
+  const zOffset = Math.min(900, Math.max(0, Math.round(sizeRatio * 900)));
   return baseZIndex + zOffset;
 }
 
@@ -1325,6 +1384,7 @@ function generateSectorsFromSite(site, siteIndex, colorMode = "Operator", option
   ).trim();
   const cellIdRaw = site.cell_id ?? site.cellId ?? null;
   const sectorRaw = site.sector ?? site.sector_id ?? site.sectorId ?? null;
+  const sitePredictionIdentityKey = getSitePredictionIdentityKey(site);
   const samples = Number.isFinite(Number(site.samples)) ? Number(site.samples) : null;
   const azimuthReliability = Number.isFinite(Number(site.azimuth_reliability ?? site.azimuthReliability))
     ? Number(site.azimuth_reliability ?? site.azimuthReliability)
@@ -1394,6 +1454,8 @@ function generateSectorsFromSite(site, siteIndex, colorMode = "Operator", option
       cellIdRepresentative: cellIdRepresentative || null,
       cellId: cellIdRaw != null && String(cellIdRaw).trim() !== "" ? String(cellIdRaw).trim() : null,
       sector: sectorRaw != null && String(sectorRaw).trim() !== "" ? String(sectorRaw).trim() : null,
+      sitePredictionKey: sitePredictionIdentityKey || null,
+      siteCellSectorBandOperatorKey: sitePredictionIdentityKey || null,
       samples,
       azimuthReliability,
       medianSampleDistanceM,
@@ -1919,15 +1981,17 @@ const NetworkPlannerMap = ({
       const lng = parseFloat(item.lng ?? item.longitude ?? item.lon_pred ?? item.lon ?? 0);
       if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
       const deltaVariant = String(item.deltaVariant ?? item.delta_variant ?? "").trim().toLowerCase();
+      const identityKey = getSitePredictionIdentityKey(item);
       const cellIdentity = String(
-        item.cell_id ??
+        identityKey ||
+          (item.cell_id ??
           item.cellId ??
           item.cell_id_representative ??
           item.cellIdRepresentative ??
           item.sector ??
           item.sector_id ??
           item.sectorId ??
-          "",
+          ""),
       ).trim();
       const markerKey = isDeltaMode
         ? `${siteId}|${deltaVariant || "unknown"}|${lat.toFixed(6)}|${lng.toFixed(6)}`
@@ -1945,6 +2009,10 @@ const NetworkPlannerMap = ({
           nodebId: extractNodebId(item),
           pci: item.pci ?? item.PCI ?? item.pci_or_psi ?? null,
           band: resolveSiteBandValue(item) ?? item.frequency ?? null,
+          sector: item.sector ?? item.sector_id ?? item.sectorId ?? null,
+          provider: item.provider ?? item.operator_name ?? item.cluster ?? item.network ?? null,
+          sitePredictionKey: identityKey || null,
+          siteCellSectorBandOperatorKey: identityKey || null,
           rawSite: item,
           lat,
           lng,
@@ -2946,6 +3014,8 @@ const NetworkPlannerMap = ({
         (normalizedVersion === "delta" &&
           (deltaVariant === "optimized" || deltaVariant === "optimised")) ||
         (activeSitePredictionScenarioId && (nextSector.isUpdated || deltaVariant === "updated"));
+      const targetIdentityKey = normalizeIdentityKey(getSitePredictionIdentityKey(nextSector));
+      const targetBandForLookup = String(resolveSiteBandValue(nextSector) || "").trim();
 
       setLoadingSectorDetailsKey(nextSector.renderKey || null);
       try {
@@ -2965,6 +3035,9 @@ const NetworkPlannerMap = ({
                     project_id: projectId,
                     node_b_id: optimizedNodeBId || undefined,
                     cell_id: candidate || undefined,
+                    sector: sectorValueForLookup || undefined,
+                    sector_id: sectorValueForLookup || undefined,
+                    band: targetBandForLookup || undefined,
                     polygon_ids: activePolygonIdsParam,
                     scenario: activeSitePredictionScenarioId || undefined,
                     scenario_id: activeSitePredictionScenarioId || undefined,
@@ -2980,6 +3053,9 @@ const NetworkPlannerMap = ({
                     project_id: projectId,
                     node_b_id: optimizedNodeBId || undefined,
                     cell_id: candidate || undefined,
+                    sector: sectorValueForLookup || undefined,
+                    sector_id: sectorValueForLookup || undefined,
+                    band: targetBandForLookup || undefined,
                     polygon_ids: activePolygonIdsParam,
                   }),
               },
@@ -3041,8 +3117,20 @@ const NetworkPlannerMap = ({
         );
         const targetCellId = normalizeMatchValue(fallbackCellId || optimizedCellId);
         const targetSector = normalizeMatchValue(sectorValueForLookup);
+        const targetBand = normalizeMatchValue(resolveSiteBandValue(nextSector));
+        const targetOperator = normalizeMatchValue(
+          nextSector.network ??
+            nextSector.provider ??
+            nextSector.rawSite?.provider ??
+            nextSector.rawSite?.operator_name ??
+            nextSector.rawSite?.cluster,
+        );
 
         const matchedRow =
+          rows.find((row) => {
+            if (!targetIdentityKey) return false;
+            return normalizeIdentityKey(getSitePredictionIdentityKey(row)) === targetIdentityKey;
+          }) ||
           rows.find((row) => {
             const rowSiteId = normalizeComparableSiteId(
               row?.site_id ?? row?.siteId ?? row?.site ?? row?.node_b_id ?? row?.nodeb_id ?? "",
@@ -3050,10 +3138,19 @@ const NetworkPlannerMap = ({
             const rowNodeB = extractNodebId(row);
             const rowCellId = normalizeMatchValue(row?.cell_id ?? row?.cellId ?? "");
             const rowSector = normalizeMatchValue(row?.sector ?? row?.sector_id ?? row?.sectorId ?? "");
+            const rowBand = normalizeMatchValue(resolveSiteBandValue(row));
+            const rowOperator = normalizeMatchValue(row?.provider ?? row?.operator_name ?? row?.cluster ?? row?.network);
 
-            if (targetSiteId && rowSiteId && rowSiteId === targetSiteId) return true;
-            if (targetNodeB && rowNodeB && rowNodeB === targetNodeB && targetCellId && rowCellId && rowCellId === targetCellId) return true;
-            if (targetNodeB && rowNodeB && rowNodeB === targetNodeB && targetSector && rowSector && rowSector === targetSector) return true;
+            const sameSite = targetSiteId && rowSiteId && rowSiteId === targetSiteId;
+            const sameNode = targetNodeB && rowNodeB && rowNodeB === targetNodeB;
+            const sameCell = targetCellId && rowCellId && rowCellId === targetCellId;
+            const sameSector = targetSector && rowSector && rowSector === targetSector;
+            const sameBand = !targetBand || !rowBand || rowBand === targetBand;
+            const sameOperator = !targetOperator || !rowOperator || rowOperator === targetOperator;
+
+            if ((sameSite || sameNode) && sameCell && sameSector && sameBand && sameOperator) return true;
+            if ((sameSite || sameNode) && sameCell && !targetSector && sameBand && sameOperator) return true;
+            if ((sameSite || sameNode) && sameSector && !targetCellId && sameBand && sameOperator) return true;
             return false;
           }) ||
           rows.find((row) => {
@@ -3061,6 +3158,12 @@ const NetworkPlannerMap = ({
             const rowCellId = String(row?.cell_id ?? row?.cellId ?? "").trim();
             return rowSector === resolvedLookupValue || rowCellId === resolvedLookupValue;
           }) ||
+          // Last resort before grabbing an arbitrary row: if we know which band was clicked,
+          // prefer a row whose band actually matches it so co-located sibling-band cells
+          // (e.g. 900 vs 1800) don't silently swap data.
+          (targetBand
+            ? rows.find((row) => normalizeMatchValue(resolveSiteBandValue(row)) === targetBand)
+            : null) ||
           rows[0];
         const mergedSector = mergeSectorWithFetchedRow(nextSector, matchedRow);
         if (nextSector.renderKey) {
@@ -4372,7 +4475,7 @@ const NetworkPlannerMap = ({
         const isSectorDataActive =
           Array.isArray(sectorPredictionRowsByRenderKey?.[sectorRenderKey]) &&
           sectorPredictionRowsByRenderKey[sectorRenderKey].length > 0;
-        const bandZIndex = getSectorBandZIndex(sectorBandValue, 5000);
+        const bandZIndex = getSectorBandZIndex(sectorBandValue, 50000);
         const infoSector = isSelectedSector ? selectedSectorInfo || effectiveSector : effectiveSector;
         const infoSectorSiteId = getDisplaySiteId(infoSector);
         const canEditSitePrediction = String(siteToggle || "").toLowerCase() === "cell";
@@ -4396,13 +4499,15 @@ const NetworkPlannerMap = ({
                 strokeWeight: isSectorDataActive ? 2 : isSelectedSector ? 2 : 1,
                 strokeColor: isSelectedSector ? "#111827" : isHoveredMatch ? "#FF0000" : effectiveSector.color,
                 strokeOpacity: isSectorDataActive ? 0.95 : 1,
-                zIndex: isSectorDataActive
-                  ? 7000 + bandZIndex
-                  : isSelectedSector
-                    ? 6500 + bandZIndex
-                    : isHoveredMatch
-                      ? 6200 + bandZIndex
-                      : bandZIndex,
+                // Size must always win the stacking order: a selected/active/hovered
+                // sector must never rise above a smaller sibling cell (e.g. clicking the
+                // bigger 900 MHz triangle must not cover/hide the smaller 1800 MHz one),
+                // or that sibling becomes permanently unclickable. So the size-derived
+                // bandZIndex is the dominant term, and selection state only breaks ties
+                // between sectors that render at the same size.
+                zIndex:
+                  bandZIndex * 10 +
+                  (isSectorDataActive ? 3 : isSelectedSector ? 2 : isHoveredMatch ? 1 : 0),
               }}
               onClick={() => {
                 void handleSectorLeftClick(effectiveSector, infoPos);

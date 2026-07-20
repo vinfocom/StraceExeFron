@@ -134,6 +134,14 @@ const getSitePredictionRowKey = (row = {}, index = 0) =>
   ].join("|");
 
 const getSitePredictionMergeKey = (row = {}) => {
+  const backendKey = String(
+    row?.sitePredictionKey ??
+      row?.site_cell_sector_band_operator_key ??
+      row?.siteCellSectorBandOperatorKey ??
+      "",
+  ).trim();
+  if (backendKey) return `identity:${backendKey}`;
+
   const site = String(
     row?.site ??
       row?.site_id ??

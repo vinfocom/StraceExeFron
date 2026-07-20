@@ -49,17 +49,34 @@ const readSiteId = (row = {}) =>
       "",
   ).trim();
 
-const readSectorId = (row = {}) =>
-  String(
-    row.sector ??
-      row.sector_id ??
-      row.sectorId ??
-      row.cell_id ??
-      row.cellId ??
-      row.cell_id_representative ??
-      row.cellIdRepresentative ??
-      "",
-  ).trim();
+const readValue = (row = {}, ...keys) => {
+  for (const key of keys) {
+    const value = row?.[key];
+    if (value == null) continue;
+    const text = String(value).trim();
+    if (text) return text;
+  }
+  return "";
+};
+
+const readLegendIdentityKey = (row = {}) => {
+  const backendKey = readValue(
+    row,
+    "sitePredictionKey",
+    "site_cell_sector_band_operator_key",
+    "siteCellSectorBandOperatorKey",
+  );
+  if (backendKey) return backendKey;
+
+  const site = readSiteId(row);
+  const cellId = readValue(row, "cell_id", "cellId");
+  const sector = readValue(row, "sector", "sector_id", "sectorId");
+  const band = readValue(row, "band", "frequency_band", "Band");
+  const operator = readValue(row, "provider", "operatorName", "operator_name", "network", "Network", "operator");
+
+  if (!site || !cellId) return "";
+  return [site, cellId, sector, band, operator].join("|");
+};
 
 const formatBandLegendLabel = (band) => {
   const normalized = normalizeBandName(band);
@@ -91,15 +108,13 @@ export default function SiteLegend({
     const result = [];
 
     sites.forEach((row) => {
-      const siteId = readSiteId(row);
-      const sectorId = readSectorId(row);
-      if (!sectorId) return;
+      const identityKey = readLegendIdentityKey(row);
+      if (!identityKey) return;
 
       const variant = normalizeDeltaVariant(
         row?.deltaVariant ?? row?.delta_variant ?? "",
       );
-      const baseKey = `${siteId || "unknown-site"}|${sectorId}`;
-      const uniqueKey = variant ? `${baseKey}|${variant}` : baseKey;
+      const uniqueKey = variant ? `${identityKey}|${variant}` : identityKey;
 
       if (seen.has(uniqueKey)) return;
       seen.add(uniqueKey);
