@@ -10,6 +10,8 @@ const isProductionBuild = Boolean(import.meta.env.PROD);
 const normalizeBaseUrl = (value) =>
   String(value || "")
     .trim()
+    .replace(/^=+/, "")
+    .trim()
     .replace(/\/+$/, "");
 
 const getRuntimePythonBaseUrl = () => {

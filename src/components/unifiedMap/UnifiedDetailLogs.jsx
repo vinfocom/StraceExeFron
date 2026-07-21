@@ -1584,8 +1584,11 @@ function UnifiedDetailLogs({
           } catch (statusError) {
             transientStatusErrors += 1;
             const message = statusError?.message || "Waiting for Python report service...";
+            const isReportStatusMiss =
+              String(message).includes("Status: 404") ||
+              String(message).toLowerCase().includes("not_found");
 
-            if (transientStatusErrors >= MAX_TRANSIENT_STATUS_ERRORS) {
+            if (!isReportStatusMiss && transientStatusErrors >= MAX_TRANSIENT_STATUS_ERRORS) {
               throw new Error(
                 `${message} Report generation may still be running. Please try checking again after the Python service is back.`
               );

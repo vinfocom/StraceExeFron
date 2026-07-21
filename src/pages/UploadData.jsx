@@ -227,9 +227,25 @@ const normalizeHistoryItems = (items) =>
     uploaded_on: item.uploaded_on ?? item.uploadedOn ?? null,
   }));
 
+// Per-file upload status shown next to each queued session file.
+const FILE_STATUS_META = {
+  queued: { label: "Queued", className: "bg-gray-300 text-gray-800" },
+  uploading: { label: "Uploading…", className: "bg-blue-200 text-blue-800" },
+  success: { label: "Uploaded", className: "bg-green-200 text-green-800" },
+  processing: { label: "Processing…", className: "bg-yellow-200 text-yellow-800" },
+  error: { label: "Failed", className: "bg-red-200 text-red-800" },
+};
+
+const fileStatusKey = (file) => `${file.name}-${file.size}-${file.lastModified}`;
+
 const UploadDataPage = () => {
   const { user } = useAuth();
   const [sessionFiles, setSessionFiles] = useState([]);
+  // Per-file status for the current/last upload batch, keyed by fileStatusKey(file).
+  const [fileStatuses, setFileStatuses] = useState({});
+  // True for the whole duration of a sequential upload batch (distinct from the
+  // per-request `loading` flag from useFileUpload, which toggles between files).
+  const [batchUploading, setBatchUploading] = useState(false);
   const [remarks, setRemarks] = useState("");
   const [polygonName, setPolygonName] = useState("");
   const [polygonText, setPolygonText] = useState("");
@@ -251,38 +267,84 @@ const UploadDataPage = () => {
   const { loading, errorLog, uploadFile, setErrorLog } = useFileUpload();
 
   // ------------------ FILE UPLOAD LOGIC ------------------
-  const handleUpload = async () => {
-    const files = toSafeArray(sessionFiles);
-    if (!files.length) {
-      toast.warn("Please select a main data file.");
-      return;
-    }
+  // Uploads a single file and records its status. Server-side, network-log ingestion
+  // does a bulk row insert plus a heavy correlated UPDATE inside one DB transaction —
+  // uploading files one at a time (never in parallel) keeps each request's transaction
+  // short-lived and avoids two uploads locking each other out of the same table.
+  const uploadOneFile = async (file) => {
+    const key = fileStatusKey(file);
+    setFileStatuses((prev) => ({ ...prev, [key]: { status: "uploading", message: "" } }));
 
     const formData = new FormData();
-    files.forEach((file) => {
-      formData.append("UploadFile", file);
-    });
+    formData.append("UploadFile", file);
     formData.append("UploadFileType", "1");
     formData.append("remarks", remarks);
     formData.append("ProjectName", "");
     formData.append("SessionIds", "");
 
     const result = await uploadFile(formData);
+
     if (result.success) {
-      toast.success("File uploaded successfully!");
-      resetForm();
-      fetchUploadedFiles();
+      setFileStatuses((prev) => ({ ...prev, [key]: { status: "success", message: "" } }));
+      return true;
+    }
+
+    setFileStatuses((prev) => ({
+      ...prev,
+      [key]: {
+        status: result.isLikelyProcessing ? "processing" : "error",
+        message: result.message || "Upload failed.",
+      },
+    }));
+    // "Still processing in background" isn't a hard failure — let the queue continue.
+    return Boolean(result.isLikelyProcessing);
+  };
+
+  // Uploads every selected file sequentially. You can select as many files as you
+  // like; they queue up and are sent one request at a time, each shown with its own
+  // status below, so a failure on one file doesn't block or get confused with the rest.
+  const handleUpload = async () => {
+    const files = toSafeArray(sessionFiles);
+    if (!files.length) {
+      toast.warn("Please select at least one data file.");
       return;
     }
 
-    if (result?.isLikelyProcessing) {
-      toast.info("Upload request ended after a long wait. History will auto-refresh while processing continues.");
-      fetchUploadedFiles({ showLoader: false, showError: false });
+    setBatchUploading(true);
+    let successCount = 0;
+    let failCount = 0;
+
+    for (const file of files) {
+      const ok = await uploadOneFile(file);
+      if (ok) successCount += 1;
+      else failCount += 1;
     }
+
+    setBatchUploading(false);
+    fetchUploadedFiles();
+
+    if (failCount === 0) {
+      toast.success(
+        successCount === 1 ? "File uploaded successfully!" : `All ${successCount} files uploaded successfully!`
+      );
+      resetForm();
+    } else {
+      toast.error(
+        `${successCount} of ${files.length} file(s) uploaded. ${failCount} failed — see status below and retry.`
+      );
+    }
+  };
+
+  const retryFile = async (file) => {
+    setBatchUploading(true);
+    await uploadOneFile(file);
+    setBatchUploading(false);
+    fetchUploadedFiles();
   };
 
   const resetForm = () => {
     setSessionFiles([]);
+    setFileStatuses({});
     setRemarks("");
     setErrorLog("");
   };
@@ -577,24 +639,53 @@ const UploadDataPage = () => {
     const safeFiles = toSafeArray(files);
     return safeFiles.length ? (
       <div className="mt-4 space-y-2">
-        {safeFiles.map((file, i) => (
-          <div key={i} className="flex items-center justify-between bg-gray-500 rounded px-3 py-2">
-            <div className="flex items-center gap-2">
-              <File className="h-5 w-5 text-white" />
-              <span>{file.name}</span>
-              <span className="text-xs text-blue-200">{(file.size / 1024 / 1024).toFixed(2)} MB</span>
+        {safeFiles.map((file, i) => {
+          const status = type === "session" ? fileStatuses[fileStatusKey(file)] : null;
+          const statusMeta = status ? FILE_STATUS_META[status.status] : null;
+          return (
+            <div key={i} className="flex flex-col gap-1 bg-gray-500 rounded px-3 py-2">
+              <div className="flex items-center justify-between">
+                <div className="flex flex-wrap items-center gap-2">
+                  <File className="h-5 w-5 text-white" />
+                  <span>{file.name}</span>
+                  <span className="text-xs text-blue-200">{(file.size / 1024 / 1024).toFixed(2)} MB</span>
+                  {statusMeta && (
+                    <span className={`text-xs font-medium rounded px-2 py-0.5 ${statusMeta.className}`}>
+                      {statusMeta.label}
+                    </span>
+                  )}
+                </div>
+                <div className="flex items-center gap-3">
+                  {status?.status === "error" && (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        retryFile(file);
+                      }}
+                      disabled={batchUploading}
+                      className="text-xs underline text-blue-200 hover:text-blue-400 disabled:opacity-50"
+                    >
+                      Retry
+                    </button>
+                  )}
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      removeFile(type, i);
+                    }}
+                    disabled={batchUploading}
+                    className="text-red-200 hover:text-red-400 disabled:opacity-50"
+                  >
+                    <X className="h-5 w-5" />
+                  </button>
+                </div>
+              </div>
+              {status?.status === "error" && status.message && (
+                <p className="text-xs text-red-200 whitespace-pre-wrap">{status.message}</p>
+              )}
             </div>
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                removeFile(type, i);
-              }}
-              className="text-red-200 hover:text-red-400"
-            >
-              <X className="h-5 w-5" />
-            </button>
-          </div>
-        ))}
+          );
+        })}
       </div>
     ) : null;
   };
@@ -633,7 +724,7 @@ const UploadDataPage = () => {
               isDragActiveSession,
               sessionFiles,
               "session",
-              "Session Data Files (.csv or .zip, max 500 MB each)"
+              "Session Data Files (.csv or .zip, max 500 MB each) — select as many as you like, they'll upload one at a time"
             )}
             <Textarea
               placeholder=" Remarks (Required)"
@@ -817,14 +908,24 @@ const UploadDataPage = () => {
 
         {/* ---------- Upload Action Buttons for Session Tab ---------- */}
         {activeTab === "session" && (
-          <div className="mt-8 flex justify-center gap-4">
+          <div className="mt-8 flex flex-col items-center gap-2">
+            {batchUploading && sessionFiles.length > 1 && (
+              <p className="text-sm text-blue-200">
+                Uploading {
+                  Object.values(fileStatuses).filter((s) =>
+                    ["success", "error", "processing"].includes(s.status)
+                  ).length
+                } of {sessionFiles.length}…
+              </p>
+            )}
+            <div className="flex justify-center gap-4">
             <Button
               onClick={handleUpload}
-              disabled={loading}
+              disabled={batchUploading}
               size="lg"
               className="bg-white text-gray-700 hover:bg-blue-200"
             >
-              {loading ? <Spinner /> : "Upload & Process"}
+              {batchUploading ? <Spinner /> : "Upload & Process"}
             </Button>
             <Button
               onClick={() => excelApi.downloadTemplate(1)}
@@ -835,6 +936,7 @@ const UploadDataPage = () => {
               <Download className="mr-2 h-4 w-4" />
               Download Template
             </Button>
+            </div>
           </div>
         )}
 
