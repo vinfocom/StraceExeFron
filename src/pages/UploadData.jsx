@@ -23,8 +23,9 @@ const FILE_TYPES = [
   "application/vnd.ms-excel",
   "application/x-zip-compressed",   
   "application/octet-stream",
-  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
 ];
+
+const SESSION_FILE_EXTENSIONS = [".csv", ".zip"];
 
 const toSafeArray = (value) => {
   if (Array.isArray(value)) return value;
@@ -224,6 +225,7 @@ const normalizeHistoryItems = (items) =>
     uploaded_by: item.uploaded_by ?? item.uploadedBy ?? "Unknown",
     status: item.status ?? "N/A",
     remarks: item.remarks ?? "",
+    errors: item.errors ?? item.error ?? "",
     uploaded_on: item.uploaded_on ?? item.uploadedOn ?? null,
   }));
 
@@ -237,6 +239,29 @@ const FILE_STATUS_META = {
 };
 
 const fileStatusKey = (file) => `${file.name}-${file.size}-${file.lastModified}`;
+
+const formatUploadBytes = (bytes) => {
+  const value = Number(bytes);
+  if (!Number.isFinite(value) || value <= 0) return "0 KB";
+  if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`;
+  return `${(value / 1024 / 1024).toFixed(2)} MB`;
+};
+
+const normalizeUploadProgress = (progressEvent, file) => {
+  const fallbackTotal = Number(file?.size || 0);
+  const rawTotal = Number(progressEvent?.total || fallbackTotal);
+  const totalBytes = Number.isFinite(rawTotal) && rawTotal > 0 ? rawTotal : fallbackTotal;
+  const rawLoaded = Number(progressEvent?.loaded || 0);
+  const loadedBytes = Math.max(0, Math.min(rawLoaded, totalBytes || rawLoaded));
+  const percent = totalBytes > 0 ? Math.min(100, Math.round((loadedBytes / totalBytes) * 100)) : 0;
+
+  return { loadedBytes, totalBytes, percent };
+};
+
+const getFileExtension = (fileName) => {
+  const match = String(fileName || "").toLowerCase().match(/\.[^.]+$/);
+  return match ? match[0] : "";
+};
 
 const UploadDataPage = () => {
   const { user } = useAuth();
@@ -273,7 +298,16 @@ const UploadDataPage = () => {
   // short-lived and avoids two uploads locking each other out of the same table.
   const uploadOneFile = async (file) => {
     const key = fileStatusKey(file);
-    setFileStatuses((prev) => ({ ...prev, [key]: { status: "uploading", message: "" } }));
+    setFileStatuses((prev) => ({
+      ...prev,
+      [key]: {
+        status: "uploading",
+        message: "",
+        progress: 0,
+        loadedBytes: 0,
+        totalBytes: file.size,
+      },
+    }));
 
     const formData = new FormData();
     formData.append("UploadFile", file);
@@ -282,22 +316,48 @@ const UploadDataPage = () => {
     formData.append("ProjectName", "");
     formData.append("SessionIds", "");
 
-    const result = await uploadFile(formData);
+    const result = await uploadFile(formData, (progressEvent) => {
+      const progress = normalizeUploadProgress(progressEvent, file);
+      setFileStatuses((prev) => ({
+        ...prev,
+        [key]: {
+          ...(prev[key] || {}),
+          status: "uploading",
+          message: "",
+          progress: progress.percent,
+          loadedBytes: progress.loadedBytes,
+          totalBytes: progress.totalBytes,
+        },
+      }));
+    });
 
     if (result.success) {
-      setFileStatuses((prev) => ({ ...prev, [key]: { status: "success", message: "" } }));
-      return true;
+      setFileStatuses((prev) => ({
+        ...prev,
+        [key]: {
+          ...(prev[key] || {}),
+          status: result.isProcessing ? "processing" : "success",
+          message: result.message || "",
+          uploadHistoryId: result.uploadId ?? result.uploadIds?.[0] ?? null,
+          progress: 100,
+          loadedBytes: file.size,
+          totalBytes: file.size,
+        },
+      }));
+      return { ok: true, processing: Boolean(result.isProcessing) };
     }
 
     setFileStatuses((prev) => ({
       ...prev,
       [key]: {
+        ...(prev[key] || {}),
         status: result.isLikelyProcessing ? "processing" : "error",
         message: result.message || "Upload failed.",
+        uploadHistoryId: result.uploadId ?? result.uploadIds?.[0] ?? null,
       },
     }));
     // "Still processing in background" isn't a hard failure — let the queue continue.
-    return Boolean(result.isLikelyProcessing);
+    return { ok: Boolean(result.isLikelyProcessing), processing: Boolean(result.isLikelyProcessing) };
   };
 
   // Uploads every selected file sequentially. You can select as many files as you
@@ -313,21 +373,31 @@ const UploadDataPage = () => {
     setBatchUploading(true);
     let successCount = 0;
     let failCount = 0;
+    let processingCount = 0;
 
     for (const file of files) {
-      const ok = await uploadOneFile(file);
-      if (ok) successCount += 1;
+      const result = await uploadOneFile(file);
+      if (result.ok) successCount += 1;
       else failCount += 1;
+      if (result.processing) processingCount += 1;
     }
 
     setBatchUploading(false);
     fetchUploadedFiles();
 
     if (failCount === 0) {
-      toast.success(
-        successCount === 1 ? "File uploaded successfully!" : `All ${successCount} files uploaded successfully!`
-      );
-      resetForm();
+      if (processingCount > 0) {
+        toast.info(
+          processingCount === 1
+            ? "File uploaded. Processing is running in the background."
+            : `${processingCount} files uploaded. Processing is running in the background.`
+        );
+      } else {
+        toast.success(
+          successCount === 1 ? "File uploaded successfully!" : `All ${successCount} files uploaded successfully!`
+        );
+        resetForm();
+      }
     } else {
       toast.error(
         `${successCount} of ${files.length} file(s) uploaded. ${failCount} failed — see status below and retry.`
@@ -349,7 +419,12 @@ const UploadDataPage = () => {
     setErrorLog("");
   };
 
-  const validateFile = (file, allowedTypes) => {
+  const validateFile = (file, allowedTypes, allowedExtensions = []) => {
+    const extension = getFileExtension(file.name);
+    if (allowedExtensions.length && !allowedExtensions.includes(extension)) {
+      toast.error(`${file.name} is not supported. Upload a CSV file or session ZIP export.`);
+      return false;
+    }
     if (![...allowedTypes, ""].includes(file.type)) {
       toast.error(`File type '${file.type || "unknown"}' not supported.`);
       return false;
@@ -362,7 +437,7 @@ const UploadDataPage = () => {
   };
 
   const onDropSession = useCallback((files) => {
-    const valid = toSafeArray(files).filter((f) => validateFile(f, FILE_TYPES));
+    const valid = toSafeArray(files).filter((f) => validateFile(f, FILE_TYPES, SESSION_FILE_EXTENSIONS));
     if (!valid.length) return;
     setSessionFiles((prev) => {
       const next = [...prev];
@@ -570,6 +645,51 @@ const UploadDataPage = () => {
     return () => clearInterval(intervalId);
   }, [uploadedFiles, fetchUploadedFiles]);
 
+  useEffect(() => {
+    if (!uploadedFiles.length) return;
+
+    const historyById = new Map(
+      uploadedFiles
+        .map((file) => [String(file?.id ?? "").trim(), file])
+        .filter(([id]) => id),
+    );
+
+    setFileStatuses((prev) => {
+      let changed = false;
+      const next = { ...prev };
+
+      Object.entries(prev).forEach(([key, status]) => {
+        const uploadHistoryId = String(status?.uploadHistoryId ?? "").trim();
+        if (!uploadHistoryId) return;
+
+        const history = historyById.get(uploadHistoryId);
+        if (!history) return;
+
+        const historyStatus = normalizeStatus(history.status);
+        const nextStatus =
+          historyStatus === "success"
+            ? "success"
+            : historyStatus === "processing"
+              ? "processing"
+              : historyStatus === "failed"
+                ? "error"
+                : status.status;
+
+        if (nextStatus !== status.status) {
+          changed = true;
+          next[key] = {
+            ...status,
+            status: nextStatus,
+            message: nextStatus === "error" ? history.errors || status.message || "Processing failed." : status.message,
+            progress: 100,
+          };
+        }
+      });
+
+      return changed ? next : prev;
+    });
+  }, [uploadedFiles]);
+
   const handlePolygonFileChange = useCallback((event) => {
     const file = event.target.files?.[0];
     if (!file) return;
@@ -642,6 +762,17 @@ const UploadDataPage = () => {
         {safeFiles.map((file, i) => {
           const status = type === "session" ? fileStatuses[fileStatusKey(file)] : null;
           const statusMeta = status ? FILE_STATUS_META[status.status] : null;
+          const uploadProgress = Number(status?.progress ?? 0);
+          const progressPercent = Number.isFinite(uploadProgress)
+            ? Math.max(0, Math.min(100, uploadProgress))
+            : 0;
+          const showUploadProgress =
+            type === "session" &&
+            status &&
+            ["uploading", "processing", "success"].includes(status.status) &&
+            Number.isFinite(uploadProgress);
+          const uploadedBytes = status?.loadedBytes ?? (progressPercent >= 100 ? file.size : 0);
+          const totalBytes = status?.totalBytes ?? file.size;
           return (
             <div key={i} className="flex flex-col gap-1 bg-gray-500 rounded px-3 py-2">
               <div className="flex items-center justify-between">
@@ -680,6 +811,33 @@ const UploadDataPage = () => {
                   </button>
                 </div>
               </div>
+              {showUploadProgress && (
+                <div className="space-y-1">
+                  <div className="flex items-center justify-between gap-3 text-xs text-blue-100">
+                    <span className="inline-flex items-center gap-1">
+                      {["uploading", "processing"].includes(status.status) && (
+                        <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+                      )}
+                      {status.status === "uploading"
+                        ? `Uploading ${progressPercent}%`
+                        : status.status === "processing"
+                          ? "Uploaded. Processing..."
+                          : "Upload complete"}
+                    </span>
+                    <span>
+                      {formatUploadBytes(uploadedBytes)} / {formatUploadBytes(totalBytes)}
+                    </span>
+                  </div>
+                  <div className="h-2 overflow-hidden rounded-full bg-gray-700">
+                    <div
+                      className={`h-full rounded-full transition-all duration-300 ${
+                        status.status === "processing" ? "bg-yellow-300" : "bg-blue-300"
+                      }`}
+                      style={{ width: `${progressPercent}%` }}
+                    />
+                  </div>
+                </div>
+              )}
               {status?.status === "error" && status.message && (
                 <p className="text-xs text-red-200 whitespace-pre-wrap">{status.message}</p>
               )}

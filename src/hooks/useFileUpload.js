@@ -123,18 +123,29 @@ export const useFileUpload = () => {
   const [loading, setLoading] = useState(false);
   const [errorLog, setErrorLog] = useState("");
 
-  const uploadFile = async (formData) => {
+  const uploadFile = async (formData, onUploadProgress = null) => {
     setLoading(true);
     setErrorLog("");
     try {
       // FIX: Changed uploadApi.uploadFile to excelApi.uploadFile
-      const resp = await excelApi.uploadFile(formData);
+      const resp = await excelApi.uploadFile(formData, onUploadProgress);
       if (resp.Status === 1) {
-        return { success: true };
+        return {
+          success: true,
+          message: resp.Message || "",
+          uploadId: resp.UploadId ?? resp.uploadId ?? null,
+          uploadIds: resp.UploadIds ?? resp.uploadIds ?? [],
+        };
       } else if (resp.Status === 2) {
         const msg = resp.Message || "Upload accepted and still processing.";
-        setErrorLog(msg);
-        return { success: false, isLikelyProcessing: true, message: msg };
+        return {
+          success: true,
+          isProcessing: true,
+          isLikelyProcessing: true,
+          message: msg,
+          uploadId: resp.UploadId ?? resp.uploadId ?? null,
+          uploadIds: resp.UploadIds ?? resp.uploadIds ?? [],
+        };
       } else {
         const rawMessage = getFailureMessage(resp, resp.Message || "Processing failed.");
         const msg = getDisplayFailureMessage(rawMessage);
