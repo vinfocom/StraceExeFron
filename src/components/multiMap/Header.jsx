@@ -3,7 +3,7 @@ import React, { useState, useEffect } from "react";
 import { useAuth } from "@/context/AuthContext";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogTrigger, DialogContent } from "@/components/ui/dialog";
-import { LogOut, Plus, BarChart3, ArrowLeft } from "lucide-react";
+import { LogOut, Plus, BarChart3, ArrowLeft, Columns2, Rows2 } from "lucide-react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { mapViewApi } from "@/api/apiEndpoints";
 import MultiAnalytics from "./MultiAnalytics";
@@ -28,6 +28,8 @@ export default function Header({
   onMetchOnlyChange,
   displayMode = "logs",
   onDisplayModeChange,
+  layoutDirection = "horizontal",
+  onLayoutDirectionChange,
   ui,
   onUIChange,
 }) {
@@ -147,6 +149,28 @@ export default function Header({
             Site
           </button>
         </div>
+
+        <button
+          type="button"
+          onClick={() =>
+            onLayoutDirectionChange?.(
+              layoutDirection === "vertical" ? "horizontal" : "vertical",
+            )
+          }
+          title={
+            layoutDirection === "vertical"
+              ? "Switch to side-by-side layout"
+              : "Switch to stacked (vertical) layout"
+          }
+          className="flex items-center gap-1 rounded bg-slate-700 px-2 py-1.5 text-xs font-semibold text-slate-200 hover:bg-slate-600"
+        >
+          {layoutDirection === "vertical" ? (
+            <Rows2 size={14} />
+          ) : (
+            <Columns2 size={14} />
+          )}
+          {layoutDirection === "vertical" ? "Stacked" : "Side by Side"}
+        </button>
 
         <Button
           size="sm"

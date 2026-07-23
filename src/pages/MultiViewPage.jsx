@@ -89,6 +89,14 @@ const MultiViewPage = () => {
   const hasPassedNeighbors =
     Array.isArray(passedNeighbors) && passedNeighbors.length > 0;
 
+  // Filter/KPI that was active on the Unified Map view when the user
+  // navigated here, so each map slide can preselect the same view.
+  const initialMetric = passedState?.initialMetric || "rsrp";
+  const initialDataFilters = passedState?.initialFilters;
+  const initialTech = initialDataFilters?.technologies?.[0] || "All";
+  const initialProvider = initialDataFilters?.providers?.[0] || "All";
+  const initialBand = initialDataFilters?.bands?.[0] || "All";
+
   const shouldFetch = !hasPassedLocations;
 
   const { locations: fetchedLocations, loading: samplesLoading } =
@@ -130,6 +138,7 @@ const MultiViewPage = () => {
   const thresholds = passedThresholds || hookThresholds;
   const [metchOnly, setMetchOnly] = useState(false);
   const [displayMode, setDisplayMode] = useState("logs"); // "logs" | "site"
+  const [layoutDirection, setLayoutDirection] = useState("horizontal"); // "horizontal" | "vertical"
   const [ui, setUi] = useState({
     drawEnabled: false,
     shapeMode: null,
@@ -349,6 +358,8 @@ const MultiViewPage = () => {
         onMetchOnlyChange={setMetchOnly}
         displayMode={displayMode}
         onDisplayModeChange={setDisplayMode}
+        layoutDirection={layoutDirection}
+        onLayoutDirectionChange={setLayoutDirection}
         ui={ui}
         onUIChange={handleDrawingUiChange}
       />
@@ -434,9 +445,13 @@ const MultiViewPage = () => {
 
         {/* --- Main Grid Area --- */}
         <div className="flex-grow p-2 bg-slate-100 relative">
-          <div 
+          <div
             className={`h-full grid gap-2 ${
-              visibleMaps.length === 1 ? "grid-cols-1" : "grid-cols-2"
+              visibleMaps.length === 1
+                ? "grid-cols-1"
+                : layoutDirection === "vertical"
+                  ? "grid-cols-1 grid-rows-2"
+                  : "grid-cols-2"
             }`}
           >
             {visibleMaps.length > 0 ? (
@@ -451,6 +466,10 @@ const MultiViewPage = () => {
                   mapRole={mapInstance.role}
                   thresholds={thresholds}
                   project={project}
+                  initialMetric={initialMetric}
+                  initialTech={initialTech}
+                  initialProvider={initialProvider}
+                  initialBand={initialBand}
                   onRemove={(id) => removeMap(id)}
                   onRoleChange={(id, role) => setMapRole(id, role)}
                   displayMode={displayMode}
@@ -467,7 +486,9 @@ const MultiViewPage = () => {
                 />
               ))
             ) : (
-              <div className="col-span-2 flex items-center justify-center text-gray-400 flex-col gap-2 border-2 border-dashed border-gray-300 rounded-lg m-4">
+              <div
+                className={`${layoutDirection === "vertical" ? "row-span-2" : "col-span-2"} flex items-center justify-center text-gray-400 flex-col gap-2 border-2 border-dashed border-gray-300 rounded-lg m-4`}
+              >
                 <MapIcon size={48} className="opacity-20" />
                 <p>No maps active. Click "Add View" to start.</p>
               </div>

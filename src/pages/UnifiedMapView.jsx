@@ -6231,20 +6231,28 @@ const UnifiedMapView = () => {
     const url = `/multi-map?session=${sessionIds.join(",")}&project_id=${projectId || ""}`;
     navigate(url, {
       state: {
-        locations: finalDisplayLocations,
-        neighborData: filteredNeighbors,
+        // Pass the unfiltered session samples so Multi Map starts with all
+        // initial samples instead of whatever attribute filter was active here.
+        locations: locations,
+        neighborData: polygonFilteredNeighborData,
         thresholds: effectiveThresholds,
         project: project,
+        // Let Multi Map preselect the same filter/KPI that was active here,
+        // so the initial view still matches what the user was looking at.
+        initialFilters: dataFilters,
+        initialMetric: selectedMetric,
       },
     });
   }, [
     sessionIds,
     projectId,
     navigate,
-    finalDisplayLocations,
-    filteredNeighbors,
+    locations,
+    polygonFilteredNeighborData,
     effectiveThresholds,
     project,
+    dataFilters,
+    selectedMetric,
   ]);
 
   const handleBack = useCallback(() => {

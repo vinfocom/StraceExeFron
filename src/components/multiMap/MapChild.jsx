@@ -109,14 +109,18 @@ const MapChild = ({
   onDrawingsChange,
   onDrawingUiChange,
   onActivateForDrawing,
+  initialMetric = "rsrp",
+  initialTech = "All",
+  initialProvider = "All",
+  initialBand = "All",
 }) => {
   const isSecondaryView = mapRole === "secondary";
   const isAllView = mapRole === "all";
   const isSiteMode = String(displayMode || "logs").toLowerCase() === "site";
-  const [metric, setMetric] = useState("rsrp");
-  const [provider, setProvider] = useState("All");
-  const [band, setBand] = useState("All");
-  const [tech, setTech] = useState("All");
+  const [metric, setMetric] = useState(initialMetric);
+  const [provider, setProvider] = useState(initialProvider);
+  const [band, setBand] = useState(initialBand);
+  const [tech, setTech] = useState(initialTech);
   const [legendFilter, setLegendFilter] = useState(null);
   const [mapRef, setMapRef] = useState(null);
   const [selectedSiteIds, setSelectedSiteIds] = useState([]);

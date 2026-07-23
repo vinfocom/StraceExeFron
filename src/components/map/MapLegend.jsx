@@ -1,4 +1,11 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { ChevronDown, Layers, Settings2, X } from "lucide-react";
 import { Rnd } from "react-rnd";
 import {
@@ -79,34 +86,36 @@ const getViewportSize = () => ({
   height: typeof window === "undefined" ? 768 : window.innerHeight,
 });
 
-const getInitialLegendPosition = () => {
-  const viewport = getViewportSize();
+// `bounds` is the size of the legend's own positioning container, not
+// necessarily the browser window (e.g. a single map panel in Multi Map is
+// only a fraction of the window, so positioning against window size would
+// place the legend outside that panel and clip it via overflow-hidden).
+const getInitialLegendPosition = (bounds) => {
   return {
     x: Math.max(
       LEGEND_VIEWPORT_MARGIN,
-      viewport.width - DEFAULT_LEGEND_SIZE.width - LEGEND_VIEWPORT_MARGIN,
+      bounds.width - DEFAULT_LEGEND_SIZE.width - LEGEND_VIEWPORT_MARGIN,
     ),
     y: Math.min(
       Math.max(LEGEND_VIEWPORT_MARGIN, DEFAULT_LEGEND_TOP),
       Math.max(
         LEGEND_VIEWPORT_MARGIN,
-        viewport.height - DEFAULT_LEGEND_SIZE.height - LEGEND_VIEWPORT_MARGIN,
+        bounds.height - DEFAULT_LEGEND_SIZE.height - LEGEND_VIEWPORT_MARGIN,
       ),
     ),
   };
 };
 
-const clampLegendPosition = (position, size) => {
-  const viewport = getViewportSize();
+const clampLegendPosition = (position, size, bounds) => {
   const width = Number(size?.width) || DEFAULT_LEGEND_SIZE.width;
   const height = Number(size?.height) || COLLAPSED_LEGEND_HEIGHT;
   const maxX = Math.max(
     LEGEND_VIEWPORT_MARGIN,
-    viewport.width - width - LEGEND_VIEWPORT_MARGIN,
+    bounds.width - width - LEGEND_VIEWPORT_MARGIN,
   );
   const maxY = Math.max(
     LEGEND_VIEWPORT_MARGIN,
-    viewport.height - height - LEGEND_VIEWPORT_MARGIN,
+    bounds.height - height - LEGEND_VIEWPORT_MARGIN,
   );
 
   return {
@@ -729,9 +738,12 @@ export default function MapLegend({
   className, // Added className prop
 }) {
   const { openSettings: openSettingsDialog } = useSettingsDialog();
+  const containerRef = useRef(null);
   const [collapsed, setCollapsed] = useState(false);
   const [legendSize, setLegendSize] = useState(DEFAULT_LEGEND_SIZE);
-  const [legendPosition, setLegendPosition] = useState(getInitialLegendPosition);
+  const [legendPosition, setLegendPosition] = useState(() =>
+    getInitialLegendPosition(getViewportSize()),
+  );
   const visibleLegendSize = useMemo(
     () => ({
       width: legendSize.width,
@@ -740,13 +752,34 @@ export default function MapLegend({
     [collapsed, legendSize],
   );
 
+  // Measure the legend's own positioning container rather than the browser
+  // window — inside Multi Map each panel is only part of the window, so
+  // window-based positioning pushes the legend outside the panel.
+  const getContainerBounds = useCallback(() => {
+    const el = containerRef.current;
+    if (el) {
+      const rect = el.getBoundingClientRect();
+      if (rect.width > 0 && rect.height > 0) {
+        return { width: rect.width, height: rect.height };
+      }
+    }
+    return getViewportSize();
+  }, []);
+
   const clampCurrentPosition = useCallback(
     () =>
       setLegendPosition((position) =>
-        clampLegendPosition(position, visibleLegendSize),
+        clampLegendPosition(position, visibleLegendSize, getContainerBounds()),
       ),
-    [visibleLegendSize],
+    [visibleLegendSize, getContainerBounds],
   );
+
+  // Snap to the correct corner of the actual container as soon as it's
+  // mounted and measurable (the initial state above only has the window
+  // size to go on, since the ref isn't attached yet on first render).
+  useLayoutEffect(() => {
+    setLegendPosition(getInitialLegendPosition(getContainerBounds()));
+  }, []);
 
   useEffect(() => {
     clampCurrentPosition();
@@ -756,6 +789,14 @@ export default function MapLegend({
     if (typeof window === "undefined") return undefined;
     window.addEventListener("resize", clampCurrentPosition);
     return () => window.removeEventListener("resize", clampCurrentPosition);
+  }, [clampCurrentPosition]);
+
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el || typeof ResizeObserver === "undefined") return undefined;
+    const observer = new ResizeObserver(() => clampCurrentPosition());
+    observer.observe(el);
+    return () => observer.disconnect();
   }, [clampCurrentPosition]);
 
   // Clear filter button if active
@@ -882,7 +923,10 @@ export default function MapLegend({
         .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.25); }
       `}</style>
 
-      <div className={className || "fixed inset-0 z-10 pointer-events-none"}>
+      <div
+        ref={containerRef}
+        className={className || "fixed inset-0 z-10 pointer-events-none"}
+      >
         <Rnd
           position={legendPosition}
           size={
@@ -910,7 +954,11 @@ export default function MapLegend({
           }
           onDragStop={(event, data) => {
             setLegendPosition(
-              clampLegendPosition({ x: data.x, y: data.y }, visibleLegendSize),
+              clampLegendPosition(
+                { x: data.x, y: data.y },
+                visibleLegendSize,
+                getContainerBounds(),
+              ),
             );
           }}
           onResize={(event, direction, ref, delta, position) => {
@@ -919,7 +967,9 @@ export default function MapLegend({
               height: legendSize.height,
             };
             setLegendSize(nextSize);
-            setLegendPosition(clampLegendPosition(position, nextSize));
+            setLegendPosition(
+              clampLegendPosition(position, nextSize, getContainerBounds()),
+            );
           }}
           onResizeStop={(event, direction, ref, delta, position) => {
             const nextSize = {
@@ -927,7 +977,9 @@ export default function MapLegend({
               height: legendSize.height,
             };
             setLegendSize(nextSize);
-            setLegendPosition(clampLegendPosition(position, nextSize));
+            setLegendPosition(
+              clampLegendPosition(position, nextSize, getContainerBounds()),
+            );
           }}
           className="pointer-events-auto"
           resizeHandleStyles={{
