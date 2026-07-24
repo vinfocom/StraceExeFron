@@ -1,3 +1,5 @@
+import { extractRowInsights, mergeDetails } from "./rowInsights";
+
 // Converts raw Event/L3 rows into human-readable timeline entries: a
 // category (used for filter chips), a title + icon, a one-line summary,
 // and a best-effort list of decoded label/value details.
@@ -363,7 +365,11 @@ export function decodeL3Item(item) {
   const domainStatusDetails = extractDomainStatus(item, combinedText);
   const domain = applyDomainStatus(detectDomain(combinedText), domainStatusDetails);
 
-  const details = [...extractDecodedDetails(item.decodedText || ""), ...domainStatusDetails];
+  const details = mergeDetails(
+    extractDecodedDetails(item.decodedText || ""),
+    extractRowInsights(item),
+    domainStatusDetails,
+  );
   const summary = details.length
     ? details.map((detail) => `${detail.label}: ${detail.value}`).join(" · ")
     : (item.decodedText || message || "").slice(0, 140);
@@ -401,12 +407,13 @@ export function decodeEventItem(item) {
   const cellMeasDetail = rawCategory === "CELL_MEAS" ? decodeCellMeasDetail(eventKey, item.value || "") : null;
   const changeDetails = cellMeasDetail ? [] : decodeSimpleValueChange(item.value || "");
 
-  const details = [
-    ...(cellMeasDetail ? [cellMeasDetail] : []),
-    ...changeDetails,
-    ...extractDecodedDetails(item.value || ""),
-    ...domainStatusDetails,
-  ];
+  const details = mergeDetails(
+    cellMeasDetail ? [cellMeasDetail] : [],
+    changeDetails,
+    extractDecodedDetails(item.value || ""),
+    extractRowInsights(item),
+    domainStatusDetails,
+  );
 
   const summary = details.length
     ? details.map((detail) => `${detail.label}: ${detail.value}`).join(" · ")

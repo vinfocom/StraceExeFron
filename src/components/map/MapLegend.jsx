@@ -517,11 +517,13 @@ const MetricThresholdLegend = ({
     [list],
   );
 
-  const { validCount, invalidCount, unmatchedCount, usedThresholds } = useMemo(() => {
+  const { validCount, invalidCount, belowRangeCount, aboveRangeCount, unmatchedCount, usedThresholds } = useMemo(() => {
     if (!logs?.length || !normalizedThresholds.length) {
       return {
         validCount: 0,
         invalidCount: 0,
+        belowRangeCount: 0,
+        aboveRangeCount: 0,
         unmatchedCount: 0,
         usedThresholds: [],
       };
@@ -530,7 +532,11 @@ const MetricThresholdLegend = ({
     const tempCounts = new Array(normalizedThresholds.length).fill(0);
     let valid = 0,
       invalid = 0,
+      belowRange = 0,
+      aboveRange = 0,
       unmatched = 0;
+    const lowestMin = normalizedThresholds[0]?.minNum;
+    const highestMax = normalizedThresholds[normalizedThresholds.length - 1]?.maxNum;
 
     logs.forEach((log) => {
       const val = getMetricValueFromLog(log, selectedMetric);
@@ -548,6 +554,11 @@ const MetricThresholdLegend = ({
       if (idx !== -1) {
         tempCounts[idx]++;
       } else {
+        if (Number.isFinite(lowestMin) && val < lowestMin) {
+          belowRange++;
+        } else if (Number.isFinite(highestMax) && val > highestMax) {
+          aboveRange++;
+        }
         unmatched++;
       }
     });
@@ -555,6 +566,8 @@ const MetricThresholdLegend = ({
     return {
       validCount: valid,
       invalidCount: invalid,
+      belowRangeCount: belowRange,
+      aboveRangeCount: aboveRange,
       unmatchedCount: unmatched,
       usedThresholds: normalizedThresholds
         .map((t, idx) => ({ ...t, idx, count: tempCounts[idx] }))
@@ -616,16 +629,44 @@ const MetricThresholdLegend = ({
           );
         })}
         {unmatchedCount > 0 ? (
-          <LegendRow
-            key="metric-unmatched"
-            color="#808080"
-            label="No Range Match"
-            count={unmatchedCount}
-            total={validCount}
-            onClick={() => {}}
-            isActive={false}
-            isDimmed={false}
-          />
+          <>
+            {belowRangeCount > 0 && (
+              <LegendRow
+                key="metric-below-range"
+                color="#64748b"
+                label={`Less than ${normalizedThresholds[0]?.minNum}`}
+                count={belowRangeCount}
+                total={validCount}
+                onClick={() => {}}
+                isActive={false}
+                isDimmed={false}
+              />
+            )}
+            {aboveRangeCount > 0 && (
+              <LegendRow
+                key="metric-above-range"
+                color="#111827"
+                label={`More than ${normalizedThresholds[normalizedThresholds.length - 1]?.maxNum}`}
+                count={aboveRangeCount}
+                total={validCount}
+                onClick={() => {}}
+                isActive={false}
+                isDimmed={false}
+              />
+            )}
+            {unmatchedCount - belowRangeCount - aboveRangeCount > 0 && (
+              <LegendRow
+                key="metric-outside-range"
+                color="#808080"
+                label="Outside configured ranges"
+                count={unmatchedCount - belowRangeCount - aboveRangeCount}
+                total={validCount}
+                onClick={() => {}}
+                isActive={false}
+                isDimmed={false}
+              />
+            )}
+          </>
         ) : null}
       </div>
       <LegendFooter

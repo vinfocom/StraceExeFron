@@ -37,7 +37,12 @@ export function parseTimestampValue(value) {
 // actually said.
 export function formatTimelineTimestamp(date) {
   if (!date) return "--:--:--";
-  return date.toLocaleTimeString([], { hour12: false, timeZone: "UTC" });
+  const pad = (value, size = 2) => String(value).padStart(size, "0");
+  return [
+    pad(date.getUTCHours()),
+    pad(date.getUTCMinutes()),
+    pad(date.getUTCSeconds()),
+  ].join(":") + `.${pad(date.getUTCMilliseconds(), 3)}`;
 }
 
 let idCounter = 0;

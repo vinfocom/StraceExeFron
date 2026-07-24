@@ -50,6 +50,7 @@ export const CallSummaryPanel = ({ summary, selectedCallId, onSelectCall }) => {
           <table className="w-full text-xs">
             <thead>
               <tr className="text-slate-500 border-b border-slate-700">
+                <th className="text-left py-1.5 pr-3 font-medium">Call ID</th>
                 <th className="text-left py-1.5 pr-3 font-medium">Start</th>
                 <th className="text-left py-1.5 pr-3 font-medium">End</th>
                 <th className="text-left py-1.5 pr-3 font-medium">Status</th>
@@ -70,9 +71,11 @@ export const CallSummaryPanel = ({ summary, selectedCallId, onSelectCall }) => {
                       isSelected 
                         ? 'bg-blue-500/20 border-l-4 border-blue-500' // Adjusted to fit your dark theme
                         : 'hover:bg-slate-700/40'
-                    }`}
+                      }`}
                   >
-                    {/* ... (td elements remain exactly the same) */}
+                    <td className="py-1.5 pl-3 pr-3 font-mono text-blue-300 font-semibold whitespace-nowrap">
+                      {call.id}
+                    </td>
                     <td className="py-1.5 pl-3 pr-3 font-mono text-slate-300">
                       {call.startTime
                         ? call.startTime.toLocaleTimeString([], { hour12: false, timeZone: "UTC" })

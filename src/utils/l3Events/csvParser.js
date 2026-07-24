@@ -58,14 +58,35 @@ export function parseCSV(text) {
 
   const headers = nonEmptyRows[0].map((header) => String(header ?? "").trim());
   const dataRows = nonEmptyRows.slice(1).map((cells) => {
+    const alignedCells = alignOverflowCells(headers, cells);
     const record = {};
     headers.forEach((header, idx) => {
-      record[header] = cells[idx] !== undefined ? String(cells[idx]).trim() : "";
+      record[header] = alignedCells[idx] !== undefined ? String(alignedCells[idx]).trim() : "";
     });
     return record;
   });
 
   return { headers, rows: dataRows };
+}
+
+function alignOverflowCells(headers, cells) {
+  if (cells.length <= headers.length) return cells;
+
+  const detailIndex = headers.findIndex((header, index) => (
+    index > 1 && /^(detail|details|decode|decoded|description|info|value|data|content|text)$/i.test(header)
+  ));
+
+  if (detailIndex === -1) return cells;
+
+  const trailingCount = headers.length - detailIndex - 1;
+  const tailStart = cells.length - trailingCount;
+  if (tailStart <= detailIndex) return cells;
+
+  return [
+    ...cells.slice(0, detailIndex),
+    cells.slice(detailIndex, tailStart).join(","),
+    ...cells.slice(tailStart),
+  ];
 }
 
 // Finds the header name matching one of the given aliases (case-insensitive,

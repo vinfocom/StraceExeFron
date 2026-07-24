@@ -1,10 +1,13 @@
 import { analyzeCalls } from "./CallAnalyzer.js";
+import { getFlowModel, matchFlowModel } from "./flowModels.js";
 import { formatTimelineTimestamp } from "./timelineBuilder.js";
 
 const PROCEDURE_GAP_MS = 30000;
 const EVENT_CORRELATION_MS = 1500;
 
 const SPEC = {
+  gsm: "3GPP TS 44.018 / 24.008",
+  umts: "3GPP TS 25.331 / 24.008",
   lteRrc: "3GPP TS 36.331",
   nrRrc: "3GPP TS 38.331",
   epsNas: "3GPP TS 24.301",
@@ -23,6 +26,80 @@ const COLOR_BY_PROTOCOL = {
 
 const PROCEDURE_LIBRARY = [
   {
+    procedureName: "GSM MO Call",
+    messageName: "ChannelRequest",
+    test: /channel\W*request/i,
+    protocol: "GSM RR",
+    from: "UE",
+    to: "BTS/BSC",
+    spec: SPEC.gsm,
+    section: "RR channel establishment",
+    startsNew: true,
+    callSignaling: true,
+    flowModelId: "gsm-mo-call",
+  },
+  {
+    procedureName: "GSM MO Call",
+    messageName: "ImmediateAssignment",
+    test: /immediate\W*assignment/i,
+    protocol: "GSM RR",
+    from: "BTS/BSC",
+    to: "UE",
+    spec: SPEC.gsm,
+    section: "RR channel establishment",
+    callSignaling: true,
+    flowModelId: "gsm-mo-call",
+  },
+  {
+    procedureName: "GSM MO Call",
+    messageName: "CMServiceRequest",
+    test: /cm\W*service\W*request/i,
+    protocol: "GSM MM/CC",
+    from: "UE",
+    to: "MSC",
+    spec: SPEC.gsm,
+    section: "MM connection",
+    callSignaling: true,
+    flowModelId: "gsm-mo-call",
+  },
+  {
+    procedureName: "GSM MO Call",
+    messageName: "CipherMode",
+    test: /cipher\W*mode\W*(command|complete)?/i,
+    protocol: "GSM RR",
+    from: "MSC",
+    to: "UE",
+    spec: SPEC.gsm,
+    section: "Security",
+    callSignaling: true,
+    flowModelId: "gsm-mo-call",
+  },
+  {
+    procedureName: "GSM MO Call",
+    messageName: "CallProceedingAlertingConnect",
+    test: /call\W*proceeding|alerting|\bconnect\b/i,
+    protocol: "GSM CC",
+    from: "MSC",
+    to: "UE",
+    spec: SPEC.gsm,
+    section: "Call control",
+    callSignaling: true,
+    success: true,
+    flowModelId: "gsm-mo-call",
+  },
+  {
+    procedureName: "UMTS CS MO Call",
+    messageName: "RABAssignment",
+    test: /rab\W*assignment/i,
+    protocol: "UMTS RRC",
+    from: "MSC",
+    to: "NodeB/RNC",
+    spec: SPEC.umts,
+    section: "RAB setup",
+    callSignaling: true,
+    flowModelId: "umts-cs-mo-call",
+  },
+  {
     procedureName: "Paging Procedure",
     messageName: "Paging",
     test: /\bpaging\b/i,
@@ -31,6 +108,7 @@ const PROCEDURE_LIBRARY = [
     to: "UE",
     spec: SPEC.lteRrc,
     section: "5.3.2",
+    flowModelId: "lte-volte-mt-call",
   },
   {
     procedureName: "RRC Connection Establishment",
@@ -394,12 +472,15 @@ function rowText(item = {}) {
     item.eventKey,
     item.type,
     item.sourceFile,
+    ...(item.details || []).flatMap((detail) => [detail.label, detail.value]),
   ].filter(Boolean).join(" ");
 }
 
 function inferProtocol(item, definition) {
   if (definition?.protocol) return definition.protocol;
   const text = rowText(item);
+  if (/gsm|bts|bsc|channel\W*request|immediate\W*assignment|cm\W*service\W*request|cipher\W*mode/i.test(text)) return "GSM RR";
+  if (/umts|utran|nodeb|rnc|rab\W*assignment/i.test(text)) return "UMTS RRC";
   if (/nr|5g|38\.331/i.test(text)) return "NR RRC";
   if (/nas|attach|registration|authentication|security/i.test(text)) return "NAS";
   if (/ims|sip|volte|vonr|call/i.test(text)) return "IMS";
@@ -409,8 +490,12 @@ function inferProtocol(item, definition) {
 
 function inferTechnology(item, protocol) {
   const text = rowText(item);
-  if (/nr|5g|gnb|38\.331|vonr/i.test(text) || protocol === "NR RRC") return "NR";
-  if (/ims|sip|volte/i.test(text)) return "IMS";
+  if (/gsm|bts|bsc/i.test(text) || /^GSM/.test(protocol)) return "GSM";
+  if (/umts|utran|nodeb|rnc/i.test(text) || /^UMTS/.test(protocol)) return "UMTS";
+  if (/vonr|voice\W*over\W*nr/i.test(text)) return "NR SA IMS";
+  if (/endc|en-dc|nr\W*nsa|scg|pscell/i.test(text)) return "LTE-NR NSA";
+  if (/nr\W*sa|5g\W*sa|pdu\W*session|gnb|38\.331/i.test(text) || protocol === "NR RRC") return "NR SA";
+  if (/ims|sip|volte/i.test(text)) return "LTE IMS";
   if (/lte|4g|enodeb|36\.331|36\.413/i.test(text) || protocol === "LTE RRC") return "LTE";
   return protocol === "NAS" ? "LTE/NR" : "Unknown";
 }
@@ -418,6 +503,45 @@ function inferTechnology(item, protocol) {
 function findDefinition(item) {
   const text = rowText(item);
   return PROCEDURE_LIBRARY.find((definition) => definition.test.test(text)) || null;
+}
+
+function inferNetworkNode(item, protocol = "") {
+  const text = rowText(item);
+  if (/gsm|bts|bsc/i.test(text) || /^GSM/.test(protocol)) return /msc/i.test(text) ? "MSC" : "BTS/BSC";
+  if (/umts|utran|nodeb|rnc/i.test(text) || /^UMTS/.test(protocol)) return /msc/i.test(text) ? "MSC" : "NodeB/RNC";
+  if (/ims|sip|volte|vonr/i.test(text) || protocol === "IMS") return "IMS";
+  if (/nr|5g|gnb|38\.331/i.test(text) || protocol === "NR RRC") return "gNB";
+  if (/nas|attach|registration|authentication|security|service/i.test(text) || protocol === "NAS") return "MME";
+  return "eNodeB";
+}
+
+function inferRowFlow(item, protocol) {
+  const text = rowText(item);
+  const node = inferNetworkNode(item, protocol);
+  if (/\]\s*>|ue\s*[-=]+>\s*\w+|\b(request|complete|report|dial|register)\b/i.test(text)) {
+    return { from: "UE", to: node };
+  }
+  if (/\]\s*<|\w+\s*[-=]+>\s*ue|\b(unsol|paging|setup|command|accept|enquiry|incoming|ringing|release)\b/i.test(text)) {
+    return { from: node, to: "UE" };
+  }
+  return item.type === "event" ? { from: "Event", to: "Timeline" } : { from: "UE", to: node };
+}
+
+function createRowAnalysisDefinition(item) {
+  const protocol = inferProtocol(item, null);
+  const flow = inferRowFlow(item, protocol);
+  const category = item.category || (item.type === "l3" ? "Layer 3" : "Event");
+
+  return {
+    procedureName: `${category} Row Analysis`,
+    messageName: item.title || item.eventKey || item.rawMessage || "LogRow",
+    protocol,
+    from: flow.from,
+    to: flow.to,
+    spec: /^GSM/.test(protocol) ? SPEC.gsm : /^UMTS/.test(protocol) ? SPEC.umts : protocol === "NR RRC" ? SPEC.nrRrc : protocol === "LTE RRC" ? SPEC.lteRrc : protocol === "IMS" ? SPEC.ims : SPEC.epsNas,
+    section: "Decoded row",
+    rowFallback: true,
+  };
 }
 
 function detailValue(item, label) {
@@ -473,7 +597,7 @@ function createProcedure(definition, item, idNumber, callId) {
     technology: inferTechnology(item, protocol),
     spec: definition.spec,
     section: definition.section,
-    result: "Ongoing",
+    result: definition.rowFallback ? "Observed" : "Ongoing",
     items: [],
     startTime: item.timestamp || null,
     endTime: item.timestamp || null,
@@ -487,6 +611,7 @@ function createProcedure(definition, item, idNumber, callId) {
     plmn: "",
     bandwidth: "",
     color: COLOR_BY_PROTOCOL[protocol] || "blue",
+    flowModel: getFlowModel(definition.flowModelId),
   };
 }
 
@@ -547,6 +672,11 @@ function finalizeProcedure(procedure) {
     procedure.result = "Observed";
   }
 
+  procedure.flowModel = matchFlowModel(procedure.items, procedure) || procedure.flowModel;
+  if (procedure.flowModel) {
+    procedure.technology = procedure.flowModel.technology;
+  }
+
   return procedure;
 }
 
@@ -569,7 +699,7 @@ function buildCallMembership(timeline) {
   const byWindow = [];
 
   calls.forEach((call, index) => {
-    const callId = `Call-${String(index + 1).padStart(3, "0")}`;
+    const callId = call.id || `Cl${index + 1}`;
     call.events?.forEach((event) => byEventId.set(event.id, callId));
     byWindow.push({
       callId,
@@ -667,6 +797,11 @@ function collectColumns(procedures) {
   const columns = ["UE"];
   const seen = new Set(columns);
   procedures.forEach((procedure) => {
+    procedure.flowModel?.nodes?.forEach((node) => {
+      if (!node || seen.has(node)) return;
+      seen.add(node);
+      columns.push(node);
+    });
     procedure.items.forEach((item) => {
       [item.from, item.to].forEach((node) => {
         if (!node || node === "Timeline" || node === "Event" || seen.has(node)) return;
@@ -691,8 +826,7 @@ export function buildProtocolAnalysis(timeline = []) {
   let procedureCounter = 0;
 
   for (const item of ordered) {
-    const definition = findDefinition(item);
-    if (!definition) continue;
+    const definition = findDefinition(item) || createRowAnalysisDefinition(item);
 
     const callId = findCallId(item, definition, membership);
     const key = activeProcedureKey(definition, callId);
@@ -724,6 +858,8 @@ export function buildProtocolAnalysis(timeline = []) {
     columns: collectColumns(procedures),
     states: buildStates(procedures),
     stats: {
+      totalRows: ordered.length,
+      analyzedRows: procedures.reduce((count, procedure) => count + procedure.items.length, 0),
       totalProcedures: procedures.length,
       callProcedures: procedures.filter((procedure) => procedure.callId).length,
       failures: procedures.filter((procedure) => procedure.result === "Failure").length,

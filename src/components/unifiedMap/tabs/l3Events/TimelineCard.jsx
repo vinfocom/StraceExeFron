@@ -1,5 +1,6 @@
 import React, { memo, useState } from "react";
-import { ChevronDown, ChevronUp } from "lucide-react";
+import { ArrowDownLeft, ArrowUpRight, ChevronDown, ChevronUp, MoveHorizontal } from "lucide-react";
+import { getDirectionInfo } from "@/utils/l3Events/direction";
 
 const TYPE_BADGE_CLASS = {
   l3: "bg-indigo-500/15 text-indigo-300 border-indigo-500/30",
@@ -15,8 +16,22 @@ const DOMAIN_BADGE_CLASS = {
 const WARNING_SEVERITIES = new Set(["WARN", "WARNING", "ERROR", "FATAL"]);
 const isWarningSeverity = (severity) => WARNING_SEVERITIES.has(String(severity || "").toUpperCase());
 
+const DIRECTION_BADGE_CLASS = {
+  upload: "bg-blue-500/15 text-blue-300 border-blue-500/30",
+  download: "bg-emerald-500/15 text-emerald-300 border-emerald-500/30",
+  event: "bg-slate-500/15 text-slate-300 border-slate-500/30",
+};
+
+const DIRECTION_ICON = {
+  upload: ArrowUpRight,
+  download: ArrowDownLeft,
+  event: MoveHorizontal,
+};
+
 function TimelineCardComponent({ item }) {
   const [expanded, setExpanded] = useState(false);
+  const direction = getDirectionInfo(item);
+  const DirectionIcon = DIRECTION_ICON[direction.key] || MoveHorizontal;
 
   return (
     <div className="rounded-lg border border-slate-700 bg-slate-800/60 hover:bg-slate-800 transition-colors">
@@ -32,6 +47,14 @@ function TimelineCardComponent({ item }) {
               <span className="h-1.5 w-1.5 rounded-full bg-red-500 shrink-0" title={`Severity: ${item.severity}`} />
             )}
             <span className="font-medium text-white text-sm">{item.title}</span>
+            <span
+              className={`inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded-full border ${
+                DIRECTION_BADGE_CLASS[direction.key] || DIRECTION_BADGE_CLASS.event
+              }`}
+              title={direction.ariaLabel}
+            >
+              <DirectionIcon className="h-3 w-3" />
+            </span>
             <span
               className={`text-[10px] px-1.5 py-0.5 rounded-full border ${
                 TYPE_BADGE_CLASS[item.type] || "bg-slate-700 text-white border-slate-600"
@@ -64,6 +87,9 @@ function TimelineCardComponent({ item }) {
         <div className="px-3 pb-3 pt-0 border-t border-slate-700/70 space-y-2">
           <div className="text-xs text-white pt-2">
             <span className="font-semibold text-white">Category:</span> {item.category}
+            <span className="ml-3">
+              <span className="font-semibold text-white">Direction:</span> {direction.shortLabel}
+            </span>
             {item.domain && (
               <span className="ml-3">
                 <span className="font-semibold text-white">Domain:</span> {item.domain}

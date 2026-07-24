@@ -4145,6 +4145,12 @@ const UnifiedMapView = () => {
     return [...(base || []), ...generatedMapLogs];
   }, [drawnPoints, generatedMapLogs, preDrawingDisplayLocations]);
 
+  // Deferred so filter clicks paint the sidebar/legend immediately; the
+  // expensive raster/grid rebuild (generateGridCellsOptimized, grid
+  // aggregation) then runs as a lower-priority, interruptible update.
+  const deferredGridDisplayLocations = useDeferredValue(finalDisplayLocations);
+  const deferredGridFilteredLocations = useDeferredValue(filteredLocations);
+
   const renderedLegendFilteredLocations = useMemo(() => {
     const baseLocations = Array.isArray(finalDisplayLocations)
       ? finalDisplayLocations
@@ -4298,7 +4304,7 @@ const UnifiedMapView = () => {
 
   const gridDisplayData = useUnifiedGridViewData({
     enabled: enableGrid,
-    locations: finalDisplayLocations,
+    locations: deferredGridDisplayLocations,
     selectedMetric,
     colorBy: effectiveGridColorBy,
     gridSizeMeters,
@@ -4307,7 +4313,7 @@ const UnifiedMapView = () => {
 
   const gridFilteredData = useUnifiedGridViewData({
     enabled: enableGrid,
-    locations: filteredLocations,
+    locations: deferredGridFilteredLocations,
     selectedMetric,
     colorBy: effectiveGridColorBy,
     gridSizeMeters,
@@ -6971,7 +6977,7 @@ const UnifiedMapView = () => {
             <MapWithMultipleCircles
               isLoaded={isLoaded}
               loadError={loadError}
-              locations={isDataPredictionMode ? EMPTY_LIST : finalDisplayLocations}
+              locations={isDataPredictionMode ? EMPTY_LIST : deferredGridDisplayLocations}
               thresholds={effectiveThresholds}
               selectedMetric={selectedMetric}
               areaData={areaData}

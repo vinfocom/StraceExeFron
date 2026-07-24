@@ -8,12 +8,14 @@ function sanitizeTimeline(timeline = []) {
   return timeline.filter(Boolean);
 }
 
+const formatCallId = (index) => `Cl${index + 1}`;
+
 export function analyzeCalls(timeline = []) {
   const safeTimeline = sanitizeTimeline(timeline);
   const { sessions, orderedTimeline } = buildSessions(safeTimeline);
   attachSessionEvents(sessions, orderedTimeline);
 
-  return sessions.map((session) => {
+  return sessions.map((session, index) => {
     const durations = calculateDurations(session);
     const classified = classifyCall({ ...session, ...durations });
     const enrichedSession = {
@@ -30,7 +32,7 @@ export function analyzeCalls(timeline = []) {
     });
 
     return {
-      id: session.id,
+      id: formatCallId(index),
       startTime: enrichedSession.startTime,
       answerTime: enrichedSession.answerTime,
       endTime: enrichedSession.endTime,
