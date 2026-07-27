@@ -270,6 +270,75 @@ const normalizeSessionIds = (values = []) => {
   return Array.from(ids);
 };
 
+const getLegendFilterItems = (legendFilter) => {
+  if (!legendFilter) return [];
+  if (Array.isArray(legendFilter.filters)) return legendFilter.filters.filter(Boolean);
+  return [legendFilter];
+};
+
+const matchesHighPerfLegendFilter = (log, legendFilter) => {
+  if (legendFilter.type === 'metric') {
+    const val = log.metricValue;
+    const min = Number(legendFilter.min);
+    const max = Number(legendFilter.max);
+    const includeMax = Boolean(legendFilter.includeMax);
+
+    if (!Number.isFinite(val)) return false;
+    if (legendFilter.min === null && Number.isFinite(max)) return val < max;
+    if (Number.isFinite(min) && legendFilter.max === null) return val >= min;
+    if (![min, max].every(Number.isFinite)) return false;
+
+    return val >= min && (includeMax ? val <= max : val < max);
+  }
+
+  if (legendFilter.type === 'pci') {
+    const val = log.pci || log.Pci || log.PCI;
+    return Math.floor(val) === Number(legendFilter.value);
+  }
+
+  if (legendFilter.type === 'tac') {
+    const val = log.tac || log.TAC;
+    return String(val ?? "") === String(legendFilter.value ?? "");
+  }
+
+  if (legendFilter.type === 'category') {
+    let key = "Unknown";
+
+    if (legendFilter.key === 'provider') {
+      key = normalizeProviderName(log.provider || log.Provider || log.carrier) || "Unknown";
+    } else if (legendFilter.key === 'technology') {
+      key = normalizeTechName(
+        log.network || log.Network || log.technology || log.networkType,
+        log.band || log.Band || log.neighbourBand || log.neighborBand
+      );
+    } else if (legendFilter.key === 'band') {
+      const b = String(
+        log.neighbourBand ||
+        log.neighborBand ||
+        log.neighbour_band ||
+        log.band ||
+        log.Band ||
+        ""
+      ).trim();
+      const normalizedBand = normalizeBandName(b);
+      key = (normalizedBand === "-1" || normalizedBand === "") ? "Unknown" : normalizedBand;
+    } else if (legendFilter.key === 'nodebid') {
+      key = String(log?.nodebid ?? log?.nodeb_id ?? log?.nodebId ?? "").trim() || "Unknown";
+    } else if (legendFilter.key === 'cell_id') {
+      key = String(log?.cell_id ?? log?.cellId ?? log?.CellId ?? "").trim() || "Unknown";
+    } else if (legendFilter.key === 'earfcn') {
+      key = String(log?.earfcn ?? log?.EARFCN ?? log?.Earfcn ?? "").trim() || "Unknown";
+    } else if (legendFilter.key === 'pci') {
+      const pci = Number.parseInt(log?.pci ?? log?.PCI ?? log?.best_pci, 10);
+      key = Number.isFinite(pci) ? String(pci) : "Unknown";
+    }
+
+    return key === legendFilter.value;
+  }
+
+  return true;
+};
+
 export default function HighPerfMap() {
   const navigate = useNavigate();
   const { isLoaded, loadError } = useJsApiLoader(GOOGLE_MAPS_LOADER_OPTIONS);
@@ -355,47 +424,12 @@ export default function HighPerfMap() {
   }, [displayedLogs, displayedNeighbourLogs, ui.showPrimaryLogs, ui.showNeighbours, selectedMetric, thresholds]);
 
   const mapVisibleLogs = useMemo(() => {
-    if (!legendFilter) return combinedDisplayedLogs;
+    const activeLegendFilters = getLegendFilterItems(legendFilter);
+    if (!activeLegendFilters.length) return combinedDisplayedLogs;
 
-    return combinedDisplayedLogs.filter(log => {
-      if (legendFilter.type === 'metric') {
-        const val = log.metricValue;
-        return Number.isFinite(val) && val >= legendFilter.min && val < legendFilter.max;
-      }
-
-      if (legendFilter.type === 'pci') {
-        const val = log.pci || log.Pci || log.PCI;
-        return Math.floor(val) === legendFilter.value;
-      }
-
-      if (legendFilter.type === 'category') {
-        let key = "Unknown";
-
-        if (legendFilter.key === 'provider') {
-          key = normalizeProviderName(log.provider || log.Provider || log.carrier) || "Unknown";
-        } else if (legendFilter.key === 'technology') {
-          key = normalizeTechName(
-            log.network || log.Network || log.technology || log.networkType, 
-            log.band || log.Band || log.neighbourBand || log.neighborBand
-          );
-        } else if (legendFilter.key === 'band') {
-          const b = String(
-            log.neighbourBand || 
-            log.neighborBand || 
-            log.neighbour_band || 
-            log.band || 
-            log.Band || 
-            ""
-          ).trim();
-          const normalizedBand = normalizeBandName(b);
-          key = (normalizedBand === "-1" || normalizedBand === "") ? "Unknown" : normalizedBand;
-        }
-
-        return key === legendFilter.value;
-      }
-
-      return true;
-    });
+    return combinedDisplayedLogs.filter(log =>
+      activeLegendFilters.some((filter) => matchesHighPerfLegendFilter(log, filter)),
+    );
   }, [combinedDisplayedLogs, legendFilter]);
 
   const combinedAppSummary = useMemo(() => {

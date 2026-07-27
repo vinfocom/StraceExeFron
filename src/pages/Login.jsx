@@ -8,6 +8,8 @@ import comlog from "/logo.svg";
 import axios from "axios";
 import { Eye, EyeOff } from "lucide-react";
 
+const APP_VERSION = "1.6.0";
+
 const LoginPage = () => {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -253,6 +255,9 @@ const LoginPage = () => {
             </button>
           </div>
         </form>
+      </div>
+      <div className="absolute bottom-4 left-0 right-0 px-4 text-center text-xs font-medium text-slate-500">
+        S-Tracer v{APP_VERSION}
       </div>
     </div>
   );

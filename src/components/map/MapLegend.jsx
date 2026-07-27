@@ -152,6 +152,67 @@ const isUnknownLegendKey = (value) => {
   );
 };
 
+const getLegendFilterItems = (filter) => {
+  if (!filter) return [];
+  if (Array.isArray(filter.filters)) return filter.filters.filter(Boolean);
+  return [filter];
+};
+
+const getLegendFilterSignature = (filter) => {
+  if (!filter) return "";
+
+  return [
+    filter.type,
+    filter.key ?? "",
+    filter.metric ?? "",
+    filter.id ?? "",
+    filter.value ?? "",
+    filter.min ?? "",
+    filter.max ?? "",
+    filter.includeMax ? "1" : "0",
+  ].join("|");
+};
+
+const canCombineLegendFilters = (a, b) => {
+  if (!a || !b || a.type !== b.type) return false;
+  if (a.type === "category") return a.key === b.key;
+  if (a.type === "metric") return a.metric === b.metric;
+  return true;
+};
+
+const hasLegendFilter = (activeFilter, filter) => {
+  const signature = getLegendFilterSignature(filter);
+  return getLegendFilterItems(activeFilter).some(
+    (item) => getLegendFilterSignature(item) === signature,
+  );
+};
+
+const toggleLegendFilter = (activeFilter, nextFilter, onFilterChange) => {
+  const activeItems = getLegendFilterItems(activeFilter);
+  const compatibleItems = activeItems.every((item) =>
+    canCombineLegendFilters(item, nextFilter),
+  )
+    ? activeItems
+    : [];
+  const nextSignature = getLegendFilterSignature(nextFilter);
+  const exists = compatibleItems.some(
+    (item) => getLegendFilterSignature(item) === nextSignature,
+  );
+  const nextItems = exists
+    ? compatibleItems.filter(
+        (item) => getLegendFilterSignature(item) !== nextSignature,
+      )
+    : [...compatibleItems, nextFilter];
+
+  if (nextItems.length === 0) {
+    onFilterChange(null);
+  } else if (nextItems.length === 1) {
+    onFilterChange(nextItems[0]);
+  } else {
+    onFilterChange({ type: "multi", filters: nextItems });
+  }
+};
+
 const getNormalizedKey = (log, colorBy, scheme) => {
   switch (colorBy) {
     case "provider":
@@ -246,11 +307,11 @@ const ColorSchemeLegend = ({ colorBy, logs, activeFilter, onFilterChange }) => {
 
   
   const handleRowClick = (key) => {
-    if (activeFilter?.type === "category" && activeFilter?.value === key) {
-      onFilterChange(null);
-    } else {
-      onFilterChange({ type: "category", value: key, key: colorBy });
-    }
+    toggleLegendFilter(
+      activeFilter,
+      { type: "category", value: key, key: colorBy },
+      onFilterChange,
+    );
   };
 
   const handleColorChange = (key, color) => {
@@ -284,9 +345,12 @@ const ColorSchemeLegend = ({ colorBy, logs, activeFilter, onFilterChange }) => {
     <div className="flex flex-col">
       <div className="max-h-64 overflow-y-auto space-y-0.5 pr-1 custom-scrollbar">
         {usedEntries.map(([key, color]) => {
-          const isActive =
-            activeFilter?.type === "category" && activeFilter?.value === key;
-          const isDimmed = activeFilter && !isActive;
+          const isActive = hasLegendFilter(activeFilter, {
+            type: "category",
+            value: key,
+            key: colorBy,
+          });
+          const isDimmed = getLegendFilterItems(activeFilter).length > 0 && !isActive;
           const isPaletteOpen = openColorKey === key;
 
           return (
@@ -369,11 +433,7 @@ const TacLegend = ({ logs, activeFilter, onFilterChange }) => {
     }, [logs]);
 
     const handleRowClick = (val) => {
-      if (activeFilter?.type === "tac" && activeFilter?.value === val) {
-        onFilterChange(null);
-      } else {
-        onFilterChange({ type: "tac", value: val });
-      }
+      toggleLegendFilter(activeFilter, { type: "tac", value: val }, onFilterChange);
     };
 
     if (stats.sorted.length === 0) {
@@ -388,9 +448,11 @@ const TacLegend = ({ logs, activeFilter, onFilterChange }) => {
       <div className="flex flex-col">
         <div className="max-h-64 overflow-y-auto space-y-0.5 pr-1 custom-scrollbar">
           {stats.sorted.map(({ label, count, color }) => {
-            const isActive =
-              activeFilter?.type === "tac" && activeFilter?.value === label;
-            const isDimmed = activeFilter && !isActive;
+            const isActive = hasLegendFilter(activeFilter, {
+              type: "tac",
+              value: label,
+            });
+            const isDimmed = getLegendFilterItems(activeFilter).length > 0 && !isActive;
 
             return (
               <LegendRow
@@ -444,11 +506,7 @@ const PciLegend = ({ logs, activeFilter, onFilterChange }) => {
     PCI_COLOR_PALETTE[Math.abs(Math.floor(pci)) % PCI_COLOR_PALETTE.length];
 
   const handleRowClick = (pci) => {
-    if (activeFilter?.type === "pci" && activeFilter?.value === pci) {
-      onFilterChange(null);
-    } else {
-      onFilterChange({ type: "pci", value: pci });
-    }
+    toggleLegendFilter(activeFilter, { type: "pci", value: pci }, onFilterChange);
   };
 
   if (!pciStats.allPcis.length) {
@@ -463,9 +521,11 @@ const PciLegend = ({ logs, activeFilter, onFilterChange }) => {
     <div className="flex flex-col">
       <div className="max-h-64 overflow-y-auto space-y-0.5 pr-1 custom-scrollbar">
         {pciStats.allPcis.map(([pci, count]) => {
-          const isActive =
-            activeFilter?.type === "pci" && activeFilter?.value === pci;
-          const isDimmed = activeFilter && !isActive;
+          const isActive = hasLegendFilter(activeFilter, {
+            type: "pci",
+            value: pci,
+          });
+          const isDimmed = getLegendFilterItems(activeFilter).length > 0 && !isActive;
 
           return (
             <LegendRow
@@ -577,18 +637,18 @@ const MetricThresholdLegend = ({
 
   const handleRowClick = (threshold) => {
     const id = `metric-${threshold.min}-${threshold.max}`;
-    if (activeFilter?.id === id) {
-      onFilterChange(null);
-    } else {
-      onFilterChange({
+    toggleLegendFilter(
+      activeFilter,
+      {
         type: "metric",
         id,
         min: parseFloat(threshold.min),
         max: parseFloat(threshold.max),
         includeMax: Boolean(threshold.isLast),
         metric: selectedMetric,
-      });
-    }
+      },
+      onFilterChange,
+    );
   };
 
   if (!list.length) {
@@ -612,8 +672,15 @@ const MetricThresholdLegend = ({
       <div className="max-h-64 overflow-y-auto space-y-0.5 pr-1 custom-scrollbar">
         {usedThresholds.map((t) => {
           const id = `metric-${t.min}-${t.max}`;
-          const isActive = activeFilter?.id === id;
-          const isDimmed = activeFilter && !isActive;
+          const isActive = hasLegendFilter(activeFilter, {
+            type: "metric",
+            id,
+            min: parseFloat(t.min),
+            max: parseFloat(t.max),
+            includeMax: Boolean(t.isLast),
+            metric: selectedMetric,
+          });
+          const isDimmed = getLegendFilterItems(activeFilter).length > 0 && !isActive;
 
           return (
             <LegendRow

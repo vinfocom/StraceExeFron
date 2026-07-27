@@ -194,9 +194,13 @@ const matchesLegendMetricRange = (value, legendFilter) => {
   return lowerMatch && upperMatch;
 };
 
-const matchesLegendFilter = (point, legendFilter, selectedMetric) => {
-  if (!legendFilter) return true;
+const getLegendFilterItems = (legendFilter) => {
+  if (!legendFilter) return [];
+  if (Array.isArray(legendFilter.filters)) return legendFilter.filters.filter(Boolean);
+  return [legendFilter];
+};
 
+const matchesSingleLegendFilter = (point, legendFilter, selectedMetric) => {
   if (legendFilter.type === "metric") {
     const metric = legendFilter.metric || selectedMetric;
     const value = getMetricValueFromPoint(point, metric);
@@ -219,6 +223,14 @@ const matchesLegendFilter = (point, legendFilter, selectedMetric) => {
   }
 
   return true;
+};
+
+const matchesLegendFilter = (point, legendFilter, selectedMetric) => {
+  const filters = getLegendFilterItems(legendFilter);
+  if (!filters.length) return true;
+  return filters.some((filter) =>
+    matchesSingleLegendFilter(point, filter, selectedMetric),
+  );
 };
 
 const getPathBounds = (path) => {

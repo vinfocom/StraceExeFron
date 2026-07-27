@@ -17,6 +17,22 @@ const EMPTY_POINTS = [];
 const MAX_OPTIONS_SCAN_POINTS = 50000;
 const MAX_LEGEND_SAMPLE_POINTS = 40000;
 const MAX_DRAWING_SAMPLE_POINTS = 60000;
+const COLOR_BY_OPTIONS = [
+  { value: "metric", label: "By Metric" },
+  { value: "provider", label: "By Provider" },
+  { value: "band", label: "By Band" },
+  { value: "technology", label: "By Technology" },
+  { value: "earfcn", label: "By EARFCN" },
+  { value: "cell_id", label: "By Cell ID" },
+  { value: "nodebid", label: "By NodeB ID" },
+  { value: "pci", label: "By PCI" },
+];
+
+const clampNumber = (value, min, max, fallback) => {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return fallback;
+  return Math.max(min, Math.min(max, numeric));
+};
 
 const sampleRows = (rows, maxRows) => {
   if (!Array.isArray(rows)) return [];
@@ -113,6 +129,10 @@ const MapChild = ({
   initialTech = "All",
   initialProvider = "All",
   initialBand = "All",
+  logRadius = 10,
+  onLogRadiusChange,
+  siteSize = 1,
+  onSiteSizeChange,
 }) => {
   const isSecondaryView = mapRole === "secondary";
   const isAllView = mapRole === "all";
@@ -121,9 +141,12 @@ const MapChild = ({
   const [provider, setProvider] = useState(initialProvider);
   const [band, setBand] = useState(initialBand);
   const [tech, setTech] = useState(initialTech);
+  const [colorBy, setColorBy] = useState(null);
   const [legendFilter, setLegendFilter] = useState(null);
   const [mapRef, setMapRef] = useState(null);
   const [selectedSiteIds, setSelectedSiteIds] = useState([]);
+  const currentLogRadius = clampNumber(logRadius, 4, 40, 10);
+  const currentSiteSize = clampNumber(siteSize, 0.25, 5, 1);
 
   const shouldFetchSiteLtePrediction =
     isSiteMode && Number(projectId) > 0 && selectedSiteIds.length > 0;
@@ -147,6 +170,10 @@ const MapChild = ({
       setSelectedSiteIds([]);
     }
   }, [isSiteMode, selectedSiteIds.length]);
+
+  useEffect(() => {
+    setLegendFilter(null);
+  }, [colorBy, metric]);
 
   const handleSiteSelectionChange = useCallback((siteIds = []) => {
     const normalized = Array.isArray(siteIds)
@@ -392,10 +419,10 @@ const MapChild = ({
   }, [locationOptionsSource, neighborOptionsSource, isSecondaryView, isAllView, isSiteMode]);
 
   return (
-    <div className="relative w-full h-full flex flex-col border rounded-lg bg-white shadow-sm overflow-hidden">
+    <div className="relative w-full h-full min-h-0 flex flex-col border bg-white overflow-hidden">
       {/* --- Mini Toolbar --- */}
       <div className="flex items-center justify-between p-2 bg-gray-50 border-b h-12">
-        <div className="flex items-center gap-2">
+        <div className="flex min-w-0 items-center gap-2">
           <span className="font-bold text-sm text-gray-700">{title}</span>
           {/* <span
             className={`text-[10px] px-1.5 py-0.5 rounded font-semibold ${
@@ -450,6 +477,23 @@ const MapChild = ({
             <option value="num_cells">Pilot pollution</option>
             <option value="level">SSI</option>
           </select>
+
+          {!isSiteMode && (
+            <select
+              value={colorBy || "metric"}
+              onChange={(e) =>
+                setColorBy(e.target.value === "metric" ? null : e.target.value)
+              }
+              className="text-xs border rounded px-1 py-1 bg-white max-w-[115px]"
+              title="Color By"
+            >
+              {COLOR_BY_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          )}
         </div>
 
         <div className="flex items-center gap-2">
@@ -458,10 +502,11 @@ const MapChild = ({
             value={tech}
             onChange={(e) => setTech(e.target.value)}
             className="text-xs border rounded px-1 py-1 bg-white max-w-[80px]"
+            title="Technology"
           >
             {options.tech.map((t) => (
               <option key={t} value={t}>
-                {t}
+                {t === "All" ? "Tech" : t}
               </option>
             ))}
           </select>
@@ -471,10 +516,11 @@ const MapChild = ({
             value={provider}
             onChange={(e) => setProvider(e.target.value)}
             className="text-xs border rounded px-1 py-1 bg-white max-w-[80px]"
+            title="Operator"
           >
             {options.provs.map((p) => (
               <option key={p} value={p}>
-                {p}
+                {p === "All" ? "Operator" : p}
               </option>
             ))}
           </select>
@@ -483,10 +529,11 @@ const MapChild = ({
             value={band}
             onChange={(e) => setBand(e.target.value)}
             className="text-xs border rounded px-1 py-1 bg-white max-w-[80px]"
+            title="Band"
           >
             {options.bands.map((b) => (
               <option key={b} value={b}>
-                {b}
+                {b === "All" ? "Band" : b}
               </option>
             ))}
           </select>
@@ -510,9 +557,11 @@ const MapChild = ({
           locations={isSiteMode ? EMPTY_POINTS : isSecondaryView ? EMPTY_POINTS : primaryDataForRender}
           selectedMetric={metric}
           thresholds={thresholds}
+          colorBy={colorBy}
+          pointRadius={currentLogRadius}
           neighborData={isSiteMode ? EMPTY_POINTS : isSecondaryView || isAllView ? neighborDataForRender : EMPTY_POINTS}
           showNeighbors={isSiteMode ? false : isSecondaryView || isAllView}
-          neighborSquareSize={30}
+          neighborSquareSize={currentLogRadius}
           neighborMinSquareSize={8}
           disableDeckInteractions={drawEnabled && Boolean(drawShapeMode)}
           fitToLocations={true}
@@ -546,6 +595,7 @@ const MapChild = ({
             enableSiteLteOverlay={false}
             singleSiteSelection={true}
             showBulkSiteActions={false}
+            triangleScaleMultiplier={currentSiteSize}
             colorMode="Operator"
             options={{
               scale: 0.6,
@@ -611,6 +661,7 @@ const MapChild = ({
           <MapLegend
             thresholds={thresholds}
             selectedMetric={metric}
+            colorBy={colorBy}
             logs={legendData}
             activeFilter={legendFilter}
             onFilterChange={setLegendFilter}

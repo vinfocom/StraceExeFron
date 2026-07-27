@@ -141,6 +141,125 @@ const matchesLegendMetricRange = (value, legendFilter) => {
   return lowerMatch && upperMatch;
 };
 
+const getLegendFilterItems = (legendFilter) => {
+  if (!legendFilter) return [];
+  if (Array.isArray(legendFilter.filters)) return legendFilter.filters.filter(Boolean);
+  return [legendFilter];
+};
+
+const matchesPrimaryLegendFilter = (log, legendFilter) => {
+  if (legendFilter.type === 'metric') {
+    const val = getMetricValueFromLog(log, legendFilter.metric);
+    return Number.isFinite(val) && matchesLegendMetricRange(val, legendFilter);
+  }
+
+  if (legendFilter.type === 'pci') {
+    const val = getMetricValueFromLog(log, 'pci');
+    return Math.floor(val) === Number(legendFilter.value);
+  }
+
+  if (legendFilter.type === 'tac') {
+    const val = log.tac || log.TAC;
+    return String(val) === String(legendFilter.value);
+  }
+
+  if (legendFilter.type === 'category') {
+    let key = "Unknown";
+    if (legendFilter.key === 'provider') {
+      key = resolveProviderDisplayName(log);
+    } else if (legendFilter.key === 'technology') {
+      const tech = log.network || log.Network || log.technology || log.networkType;
+      const band = log.band || log.Band || log.neighbourBand || log.neighborBand || log.neighbour_band;
+      key = normalizeTechName(tech, band);
+    } else if (legendFilter.key === 'band') {
+      const b = String(log.neighbourBand || log.neighborBand || log.neighbour_band || log.band || log.Band || "").trim();
+      const normalizedBand = normalizeBandName(b);
+      key = (normalizedBand === "-1" || normalizedBand === "") ? "Unknown" : normalizedBand;
+    } else if (legendFilter.key === 'nodebid') {
+      key = String(log?.nodebid ?? log?.nodeb_id ?? log?.nodebId ?? "").trim() || "Unknown";
+    } else if (legendFilter.key === 'cell_id') {
+      key = String(log?.cell_id ?? log?.cellId ?? log?.CellId ?? "").trim() || "Unknown";
+    } else if (legendFilter.key === 'earfcn') {
+      key = String(log?.earfcn ?? log?.EARFCN ?? log?.Earfcn ?? "").trim() || "Unknown";
+    } else if (legendFilter.key === 'pci') {
+      const pci = Number.parseInt(log.pci ?? log.PCI ?? log.best_pci, 10);
+      key = Number.isFinite(pci) ? String(pci) : "Unknown";
+    }
+
+    return key === legendFilter.value;
+  }
+
+  return true;
+};
+
+const matchesNeighborLegendFilter = (neighbor, legendFilter) => {
+  if (legendFilter.type === 'metric') {
+    const val = neighbor.metricValue;
+    return Number.isFinite(val) && matchesLegendMetricRange(val, legendFilter);
+  }
+
+  if (legendFilter.type === 'pci') {
+    const val = neighbor.neighbourPci || neighbor.pci;
+    return Math.floor(val) === Number(legendFilter.value);
+  }
+
+  if (legendFilter.type === 'category') {
+    let key = "Unknown";
+    if (legendFilter.key === 'provider') {
+      key = resolveProviderDisplayName(neighbor);
+    } else if (legendFilter.key === 'technology') {
+      key = normalizeTechName(neighbor.technology || neighbor.networkType, neighbor.band);
+    } else if (legendFilter.key === 'band') {
+      const b = String(neighbor.neighbourBand || neighbor.neighborBand || neighbor.band || "").trim();
+      const normalizedBand = normalizeBandName(b);
+      key = (normalizedBand === "-1" || normalizedBand === "") ? "Unknown" : normalizedBand;
+    } else if (legendFilter.key === 'nodebid') {
+      key = String(neighbor?.nodebid ?? neighbor?.nodeb_id ?? neighbor?.nodebId ?? "").trim() || "Unknown";
+    } else if (legendFilter.key === 'cell_id') {
+      key = String(neighbor?.cell_id ?? neighbor?.cellId ?? neighbor?.CellId ?? "").trim() || "Unknown";
+    } else if (legendFilter.key === 'earfcn') {
+      key = String(neighbor?.earfcn ?? neighbor?.EARFCN ?? neighbor?.Earfcn ?? "").trim() || "Unknown";
+    } else if (legendFilter.key === 'pci') {
+      const pci = Number.parseInt(neighbor.neighbourPci || neighbor.pci, 10);
+      key = Number.isFinite(pci) ? String(pci) : "Unknown";
+    }
+
+    return key === legendFilter.value;
+  }
+
+  return true;
+};
+
+const matchesGridCellLegendFilter = (cell, legendFilter) => {
+  if (cell.count <= 0) return false;
+
+  if (legendFilter.type === "metric") {
+    const value = Number(cell.aggregatedValue);
+    return Number.isFinite(value) && matchesLegendMetricRange(value, legendFilter);
+  }
+
+  if (legendFilter.type === "category") {
+    const key = String(legendFilter.key || "").trim().toLowerCase();
+    let value = "Unknown";
+    if (key === "provider" || key === "operator") {
+      value = cell.bestByColor?.name || cell.bestOperator?.name || "Unknown";
+    } else if (key === "band" || key === "technology" || key === "nodebid" || key === "earfcn" || key === "cell_id") {
+      value = cell.bestByColor?.name || "Unknown";
+    } else if (key === "pci") {
+      const pci = Number.parseInt(cell.bestByColor?.name, 10);
+      value = Number.isFinite(pci) ? String(pci) : "Unknown";
+    }
+    return String(value) === String(legendFilter.value);
+  }
+
+  if (legendFilter.type === "pci") {
+    const pci = Number.parseInt(cell.bestByColor?.name ?? cell.aggregatedValue, 10);
+    return Number.isFinite(pci) && pci === Number(legendFilter.value);
+  }
+
+  return true;
+};
+
 const normalizeImagePath = (rawPath) => {
   if (rawPath === null || rawPath === undefined) return null;
   const normalized = String(rawPath).trim();
@@ -1538,51 +1657,11 @@ const MapWithMultipleCircles = ({
       }
     }
 
-    if (legendFilter && !enableGrid) {
-      filtered = filtered.filter(log => {
-        if (legendFilter.type === 'metric') {
-          const val = getMetricValueFromLog(log, legendFilter.metric);
-          return Number.isFinite(val) && matchesLegendMetricRange(val, legendFilter);
-        }
-
-        if (legendFilter.type === 'pci') {
-          const val = getMetricValueFromLog(log, 'pci');
-          return Math.floor(val) === legendFilter.value;
-        }
-
-        if (legendFilter.type === 'tac') {
-            const val = log.tac || log.TAC;
-            return String(val) === String(legendFilter.value);
-        }
-
-        if (legendFilter.type === 'category') {
-           let key = "Unknown";
-           if (legendFilter.key === 'provider') {
-             key = resolveProviderDisplayName(log);
-           } else if (legendFilter.key === 'technology') {
-             const tech = log.network || log.Network || log.technology || log.networkType;
-             const band = log.band || log.Band || log.neighbourBand || log.neighborBand || log.neighbour_band;
-             key = normalizeTechName(tech, band);
-           } else if (legendFilter.key === 'band') {
-             const b = String(log.neighbourBand || log.neighborBand || log.neighbour_band || log.band || log.Band || "").trim();
-             const normalizedBand = normalizeBandName(b);
-             key = (normalizedBand === "-1" || normalizedBand === "") ? "Unknown" : normalizedBand;
-           } else if (legendFilter.key === 'nodebid') {
-             key = String(log?.nodebid ?? log?.nodeb_id ?? log?.nodebId ?? "").trim() || "Unknown";
-           } else if (legendFilter.key === 'cell_id') {
-             key = String(log?.cell_id ?? log?.cellId ?? log?.CellId ?? "").trim() || "Unknown";
-           } else if (legendFilter.key === 'earfcn') {
-             key = String(log?.earfcn ?? log?.EARFCN ?? log?.Earfcn ?? "").trim() || "Unknown";
-           } else if (legendFilter.key === 'pci') {
-             const pci = Number.parseInt(log.pci ?? log.PCI ?? log.best_pci, 10);
-             key = Number.isFinite(pci) ? String(pci) : "Unknown";
-           }
-           
-           return key === legendFilter.value;
-        }
-        
-        return true;
-      });
+    const activeLegendFilters = getLegendFilterItems(legendFilter);
+    if (activeLegendFilters.length && !enableGrid) {
+      filtered = filtered.filter(log =>
+        activeLegendFilters.some((filter) => matchesPrimaryLegendFilter(log, filter)),
+      );
     }
 
     return filtered;
@@ -1687,40 +1766,11 @@ const MapWithMultipleCircles = ({
       }
     }
 
-    if (legendFilter) {
-      parsed = parsed.filter(n => {
-        if (legendFilter.type === 'metric') {
-          const val = n.metricValue;
-          return Number.isFinite(val) && matchesLegendMetricRange(val, legendFilter);
-        }
-        if (legendFilter.type === 'pci') {
-          const val = n.neighbourPci || n.pci;
-          return Math.floor(val) === legendFilter.value;
-        }
-        if (legendFilter.type === 'category') {
-           let key = "Unknown";
-           if (legendFilter.key === 'provider') {
-             key = resolveProviderDisplayName(n);
-           } else if (legendFilter.key === 'technology') {
-             key = normalizeTechName(n.technology || n.networkType, n.band);
-           } else if (legendFilter.key === 'band') {
-             const b = String(n.neighbourBand || n.neighborBand || n.band || "").trim();
-             const normalizedBand = normalizeBandName(b);
-             key = (normalizedBand === "-1" || normalizedBand === "") ? "Unknown" : normalizedBand;
-           } else if (legendFilter.key === 'nodebid') {
-             key = String(n?.nodebid ?? n?.nodeb_id ?? n?.nodebId ?? "").trim() || "Unknown";
-           } else if (legendFilter.key === 'cell_id') {
-             key = String(n?.cell_id ?? n?.cellId ?? n?.CellId ?? "").trim() || "Unknown";
-           } else if (legendFilter.key === 'earfcn') {
-             key = String(n?.earfcn ?? n?.EARFCN ?? n?.Earfcn ?? "").trim() || "Unknown";
-           } else if (legendFilter.key === 'pci') {
-             const pci = Number.parseInt(n.neighbourPci || n.pci, 10);
-             key = Number.isFinite(pci) ? String(pci) : "Unknown";
-           }
-           return key === legendFilter.value;
-        }
-        return true;
-      });
+    const activeLegendFilters = getLegendFilterItems(legendFilter);
+    if (activeLegendFilters.length) {
+      parsed = parsed.filter(n =>
+        activeLegendFilters.some((filter) => matchesNeighborLegendFilter(n, filter)),
+      );
     }
 
     return parsed;
@@ -1775,37 +1825,12 @@ const MapWithMultipleCircles = ({
   }, [enableGrid, gridSizeMeters, gridPolygonData, orderedLocationsToRender, selectedMetric, gridAggregationMethod, resolveColor, colorBy, spatialIndex]);
 
   const visibleGridCells = useMemo(() => {
-    if (!legendFilter) return gridCells;
+    const activeLegendFilters = getLegendFilterItems(legendFilter);
+    if (!activeLegendFilters.length) return gridCells;
 
-    return gridCells.filter((cell) => {
-      if (cell.count <= 0) return false;
-
-      if (legendFilter.type === "metric") {
-        const value = Number(cell.aggregatedValue);
-        return Number.isFinite(value) && matchesLegendMetricRange(value, legendFilter);
-      }
-
-      if (legendFilter.type === "category") {
-        const key = String(legendFilter.key || "").trim().toLowerCase();
-        let value = "Unknown";
-        if (key === "provider" || key === "operator") {
-          value = cell.bestByColor?.name || cell.bestOperator?.name || "Unknown";
-        } else if (key === "band" || key === "technology" || key === "nodebid" || key === "earfcn" || key === "cell_id") {
-          value = cell.bestByColor?.name || "Unknown";
-        } else if (key === "pci") {
-          const pci = Number.parseInt(cell.bestByColor?.name, 10);
-          value = Number.isFinite(pci) ? String(pci) : "Unknown";
-        }
-        return String(value) === String(legendFilter.value);
-      }
-
-      if (legendFilter.type === "pci") {
-        const pci = Number.parseInt(cell.bestByColor?.name ?? cell.aggregatedValue, 10);
-        return Number.isFinite(pci) && pci === legendFilter.value;
-      }
-
-      return true;
-    });
+    return gridCells.filter((cell) =>
+      activeLegendFilters.some((filter) => matchesGridCellLegendFilter(cell, filter)),
+    );
   }, [gridCells, legendFilter]);
 
   const polygonGridAverages = useMemo(() => {
