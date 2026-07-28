@@ -515,6 +515,7 @@ function UnifiedHeader({
   onDeleteSitePredictionScenario,
   siteLabelField = "none",
   setSiteLabelField,
+  isRestoringFromStorage = false,
 }) {
   const { user, logout } = useAuth();
   const { openSettings } = useSettingsDialog();
@@ -930,7 +931,12 @@ function UnifiedHeader({
   }, [scenarioSelectableVersion, siteToggle]);
 
   return (
-    <header className="min-h-14 bg-gray-800 text-white shadow-sm flex flex-wrap xl:flex-nowrap items-center justify-between gap-2 px-3 sm:px-4 xl:px-6 py-2 xl:py-0 flex-shrink-0 relative z-10">
+    <header className="min-h-14 bg-gray-800 text-white shadow-sm flex flex-wrap xl:flex-nowrap items-center justify-between gap-2 px-3 sm:px-4 xl:px-6 py-2 xl:py-0 flex-shrink-0 relative overflow-hidden z-10">
+      {isRestoringFromStorage && (
+        <div className="pointer-events-none absolute inset-x-0 top-0 h-0.5 bg-slate-700/80">
+          <div className="h-full w-1/3 animate-[pulse_1.1s_ease-in-out_infinite] rounded-full bg-cyan-400/90 shadow-[0_0_12px_rgba(34,211,238,0.65)]" />
+        </div>
+      )}
       <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2 sm:gap-3">
         {isMapPage && (
           <>

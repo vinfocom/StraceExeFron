@@ -579,9 +579,8 @@ export const ProjectForm = ({
         ProjectName: projectName.trim(),
         PolygonIds: [selectedPolygon],
         SessionIds: selectedSessions,
-        GridSize: String(parseFloat(gridSize)),
-        LogGrid: String(parseFloat(logGridSize)),
-        log_grid: String(parseFloat(logGridSize)),
+        LogGrid: String(parseFloat(gridSize)),
+        log_grid: String(parseFloat(gridSize)),
         ...(Number.isFinite(scopedCompanyId) && scopedCompanyId > 0
           ? { company_id: scopedCompanyId }
           : {}),
@@ -609,8 +608,7 @@ export const ProjectForm = ({
         ref_session_id: Array.isArray(selectedSessions)
           ? selectedSessions.join(",")
           : projectData?.ref_session_id,
-        grid_size: String(parseFloat(gridSize)),
-        log_grid: String(parseFloat(logGridSize)),
+        log_grid: String(parseFloat(gridSize)),
         created_on: projectData?.created_on || new Date().toISOString(),
         status: projectData?.status ?? 1,
       });

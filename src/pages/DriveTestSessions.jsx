@@ -80,6 +80,21 @@ const sortSessionsByIdDescending = (rows = []) =>
     return bId - aId;
   });
 
+const isSessionLiveToday = (session) => {
+  if (!session?.start_time || session?.end_time) return false;
+
+  const startTime = new Date(session.start_time);
+  if (Number.isNaN(startTime.getTime())) return false;
+
+  const now = new Date();
+
+  return (
+    startTime.getFullYear() === now.getFullYear() &&
+    startTime.getMonth() === now.getMonth() &&
+    startTime.getDate() === now.getDate()
+  );
+};
+
 const DriveTestSessionsPage = () => {
   const { user } = useAuth();
   const [sessions, setSessions] = useState([]);
@@ -1156,7 +1171,15 @@ setWifiSessions(wifiData);
 
                   {visibleColumns.sessionId && (
                     <TableCell className="whitespace-normal break-words max-w-[150px]">
-                      <div className="font-medium">{session.id || "N/A"}</div>
+                      <div className="flex items-center gap-2 font-medium">
+                        {isSessionLiveToday(session) && (
+                          <span
+                            className="inline-block h-2.5 w-2.5 rounded-full bg-emerald-500 shadow-[0_0_0_3px_rgba(34,197,94,0.18)]"
+                            title="Live session"
+                          />
+                        )}
+                        <span>{session.id || "N/A"}</span>
+                      </div>
                       {session.is_local && (
                         <div className="mt-1 text-[11px] font-medium text-amber-700">
                           Local import
@@ -1167,9 +1190,17 @@ setWifiSessions(wifiData);
 
                   {visibleColumns.userDetails && (
                     <TableCell className="whitespace-normal break-words max-w-[200px]">
-                      <div className="font-medium">
+                      <div className="flex items-center gap-2 font-medium">
+                        {isSessionLiveToday(session) && (
+                          <span
+                            className="inline-block h-2.5 w-2.5 rounded-full bg-emerald-500 shadow-[0_0_0_3px_rgba(34,197,94,0.18)]"
+                            title="Live session"
+                          />
+                        )}
+                        <span>
                         {session.CreatedBy || "Unknown User"} (
                         {session.mobile || "N/A"})
+                        </span>
                       </div>
                       <div className="text-sm text-muted-foreground">
                         {session.make}, {session.model}, {session.os},{" "}

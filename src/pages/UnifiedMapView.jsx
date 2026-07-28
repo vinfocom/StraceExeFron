@@ -137,6 +137,13 @@ const getIndoorOutdoorBucket = (value) => {
   return formatIndoorOutdoorValue(value);
 };
 
+const DEFAULT_SITE_FILTERS = Object.freeze({
+  technologies: [],
+  operators: [],
+  bands: [],
+  pcis: [],
+});
+
 const buildIndoorOutdoorFromLogs = (logs = []) => {
   const indoor = [];
   const outdoor = [];
@@ -1952,6 +1959,7 @@ const UnifiedMapView = () => {
     DEFAULT_COVERAGE_FILTERS,
   );
   const [dataFilters, setDataFilters] = useState(DEFAULT_DATA_FILTERS);
+  const [siteFilters, setSiteFilters] = useState(DEFAULT_SITE_FILTERS);
   const [enableGrid, setEnableGrid] = useState(false);
   const [gridSizeMeters, setGridSizeMeters] = useState(25);
   const [logGridSaving, setLogGridSaving] = useState(false);
@@ -2014,6 +2022,7 @@ const UnifiedMapView = () => {
       setManualSiteDataReady(false);
       setSelectedSites([]);
       setSiteLegendFilter(null);
+      setSiteFilters(DEFAULT_SITE_FILTERS);
     }
   }, [enableSiteToggle]);
 
@@ -2309,6 +2318,8 @@ const UnifiedMapView = () => {
     );
   }, [project, passedProject]);
 
+  const [isRestoringFromStorage, setIsRestoringFromStorage] = useState(false);
+
   useEffect(() => {
     if (passedProject?.id == null) return;
     upsertProjectInProjectsCache(passedProject);
@@ -2318,6 +2329,7 @@ const UnifiedMapView = () => {
     if (!projectId || project?.id != null) return;
     const cachedProject = findProjectInProjectsCache(projectId);
     if (cachedProject) {
+      setIsRestoringFromStorage(true);
       setProject(cachedProject);
     }
   }, [projectId, project?.id]);
@@ -3937,6 +3949,17 @@ const UnifiedMapView = () => {
     polygonLoading ||
     areaLoading ||
     (shouldFetchNeighbors && sessionNeighborLoading);
+
+  useEffect(() => {
+    if (!isRestoringFromStorage) return undefined;
+    if (isLoading) return undefined;
+
+    const timeoutId = window.setTimeout(() => {
+      setIsRestoringFromStorage(false);
+    }, 250);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [isRestoringFromStorage, isLoading]);
 
   const error = sampleError || predictionError;
   const displayDataError = useMemo(
@@ -6577,6 +6600,61 @@ const UnifiedMapView = () => {
     return Array.from(set).sort();
   }, [siteData]);
 
+  const siteFilterOptions = useMemo(() => {
+    const technologies = new Set();
+    const operators = new Set();
+    const bands = new Set();
+    const pcis = new Set();
+
+    (effectiveSiteData || []).forEach((site) => {
+      const technologyName = normalizeTechName(
+        site?.technology ?? site?.Technology ?? site?.network ?? site?.Network ?? "",
+        site?.band ?? site?.Band,
+      );
+      if (technologyName && !isUnknownOption(technologyName)) {
+        technologies.add(technologyName);
+      }
+
+      const operatorName = normalizeProviderName(
+        site?.provider ??
+          site?.Provider ??
+          site?.cluster ??
+          site?.Cluster ??
+          site?.operator ??
+          site?.Operator ??
+          site?.network ??
+          site?.Network ??
+          "",
+      );
+      if (operatorName && !isUnknownOption(operatorName)) {
+        operators.add(operatorName);
+      }
+
+      const bandName = normalizeBandName(site?.band ?? site?.Band ?? "");
+      if (bandName && !isUnknownOption(bandName)) {
+        bands.add(bandName);
+      }
+
+      const pciValue = site?.pci ?? site?.Pci ?? site?.PCI;
+      if (pciValue !== undefined && pciValue !== null && String(pciValue).trim() !== "") {
+        pcis.add(String(pciValue).trim());
+      }
+    });
+
+    return {
+      technologies: Array.from(technologies).sort((a, b) =>
+        a.localeCompare(b, undefined, { sensitivity: "base" }),
+      ),
+      operators: Array.from(operators).sort((a, b) =>
+        a.localeCompare(b, undefined, { sensitivity: "base" }),
+      ),
+      bands: Array.from(bands).sort((a, b) =>
+        a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" }),
+      ),
+      pcis: Array.from(pcis).sort((a, b) => Number(a) - Number(b)),
+    };
+  }, [effectiveSiteData]);
+
   if (mapsConfigError)
     return (
       <div className="flex items-center justify-center h-screen text-red-500">
@@ -6641,6 +6719,7 @@ const UnifiedMapView = () => {
         onDeleteSitePredictionScenario={handleDeleteSitePredictionScenario}
         siteLabelField={siteLabelField}
         setSiteLabelField={setSiteLabelField}
+        isRestoringFromStorage={isRestoringFromStorage}
       />
 
       {showAnalytics && (
@@ -6789,6 +6868,9 @@ const UnifiedMapView = () => {
         setCoverageHoleFilters={setCoverageHoleFilters}
         dataFilters={dataFilters}
         setDataFilters={setDataFilters}
+        siteFilters={siteFilters}
+        setSiteFilters={setSiteFilters}
+        siteFilterOptions={siteFilterOptions}
         availableFilterOptions={availableFilterOptions}
         siteOperatorOptions={siteOperatorOptions}
         colorBy={colorBy}
@@ -7176,6 +7258,7 @@ const UnifiedMapView = () => {
                   onSectorPredictionPointsChange={setSectorPredictionGridPoints}
                   triangleScaleMultiplier={triangleScaleMultiplier}
                   siteLegendFilter={siteLegendFilter}
+                  siteFilters={siteFilters}
                   siteColorOverrides={siteColorOverrides}
                   options={{
                     scale: 0.6,

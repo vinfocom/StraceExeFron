@@ -34,16 +34,16 @@ export default function MapHeader({
   const [filtersOpen, setFiltersOpen] = useState(false);
 
   return (
-    <header className="h-16 bg-slate-900 text-white shadow-lg flex items-center justify-between px-4 sm:px-6 relative z-50">
-      <div className="flex items-center gap-4">
+    <header className="relative z-50 flex flex-wrap items-center gap-3 bg-slate-900 px-3 py-3 text-white shadow-lg sm:px-4 lg:px-6">
+      <div className="order-1 flex min-w-0 flex-1 items-center gap-3 sm:flex-none">
         <Button
           size="sm"
-          className="bg-blue-600 hover:bg-blue-700 text-white flex items-center gap-2"
+          className="flex h-9 items-center gap-2 bg-blue-600 text-white hover:bg-blue-700"
           onClick={() => setFiltersOpen(true)}
           title="Open filters"
         >
           <SlidersHorizontal className="h-4 w-4" />
-          <span className="hidden sm:inline">Filters</span>
+          <span className="inline">Filters</span>
           {rawLogsCount > 0 && (
             <span className="ml-1 px-1.5 py-0.5 text-xs bg-green-500 rounded-full font-medium">
               {rawLogsCount > 1000 ? `${(rawLogsCount / 1000).toFixed(1)}k` : rawLogsCount}
@@ -51,7 +51,8 @@ export default function MapHeader({
           )}
         </Button>
       </div>
-      <div className="relative">
+
+      <div className="order-3 w-full min-w-0 lg:order-2 lg:flex-1">
         <DrawingControlsPanel
           ui={ui}
           onUIChange={onUIChange}
@@ -64,15 +65,15 @@ export default function MapHeader({
         />
       </div>
 
-      <div className="flex items-center gap-3">
+      <div className="order-2 ml-auto flex items-center gap-2 sm:gap-3 lg:order-3 lg:ml-0">
         <Button
           size="sm"
           variant={isSearchOpen ? "default" : "secondary"}
           onClick={onSearchToggle}
           className={
             isSearchOpen
-              ? "bg-blue-600 hover:bg-blue-700"
-              : "bg-slate-700 hover:bg-slate-600"
+              ? "h-9 bg-blue-600 hover:bg-blue-700"
+              : "h-9 bg-slate-700 hover:bg-slate-600"
           }
           title={isSearchOpen ? "Close search" : "Open search"}
         >
@@ -83,11 +84,11 @@ export default function MapHeader({
           )}
         </Button>
 
-        <div className="hidden md:flex items-center gap-2 px-3 py-1.5 bg-slate-800 rounded-lg">
+        <div className="hidden min-w-0 items-center gap-2 rounded-lg bg-slate-800 px-3 py-1.5 xl:flex">
           <div className="w-7 h-7 rounded-full bg-blue-600 flex items-center justify-center text-xs font-bold">
             {user?.name?.charAt(0)?.toUpperCase() || "U"}
           </div>
-          <span className="text-sm font-medium text-white">
+          <span className="max-w-[180px] truncate text-sm font-medium text-white">
             {user?.name || "User"}
           </span>
         </div>
@@ -96,7 +97,7 @@ export default function MapHeader({
           onClick={logout}
           variant="default"
           size="sm"
-          className="bg-red-600 hover:bg-red-700 text-white"
+          className="h-9 bg-red-600 text-white hover:bg-red-700"
         >
           <LogOut className="h-4 w-4 sm:mr-2" />
           <span className="hidden sm:inline">Logout</span>

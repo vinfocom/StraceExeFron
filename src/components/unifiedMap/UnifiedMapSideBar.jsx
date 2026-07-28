@@ -524,6 +524,9 @@ const UnifiedMapSidebar = ({
   setCoverageHoleFilters,
   dataFilters,
   setDataFilters,
+  siteFilters,
+  setSiteFilters,
+  siteFilterOptions = {},
   availableFilterOptions,
   siteOperatorOptions = [],
   colorBy,
@@ -889,6 +892,37 @@ const UnifiedMapSidebar = ({
       (String(dataFilters.excludedMetricValue ?? "").trim() ? 1 : 0)
     );
   }, [dataFilters]);
+
+  const activeSiteFiltersCount = useMemo(() => {
+    if (!siteFilters) return 0;
+    return (
+      (siteFilters.technologies?.length > 0 ? 1 : 0) +
+      (siteFilters.operators?.length > 0 ? 1 : 0) +
+      (siteFilters.bands?.length > 0 ? 1 : 0) +
+      (siteFilters.pcis?.length > 0 ? 1 : 0)
+    );
+  }, [siteFilters]);
+
+  const updateSiteFilter = useCallback(
+    (key, values) => {
+      setSiteFilters?.((prev) => ({
+        ...(prev || {}),
+        [key]: Array.isArray(values)
+          ? values.filter((value) => String(value || "").trim().toLowerCase() !== "all")
+          : [],
+      }));
+    },
+    [setSiteFilters],
+  );
+
+  const clearAllSiteFilters = useCallback(() => {
+    setSiteFilters?.({
+      technologies: [],
+      operators: [],
+      bands: [],
+      pcis: [],
+    });
+  }, [setSiteFilters]);
 
   const activeAppFiltersCount = useMemo(
     () => (Array.isArray(dataFilters?.apps) ? dataFilters.apps.length : 0),
@@ -2929,6 +2963,80 @@ const UnifiedMapSidebar = ({
                     />
 
                   </div>
+                </div>
+
+                <div className="border border-slate-700/50 rounded-lg p-2.5 bg-slate-900/40 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-semibold text-slate-200">Site</span>
+                    {activeSiteFiltersCount > 0 && (
+                      <button
+                        onClick={clearAllSiteFilters}
+                        className="text-[10px] text-blue-400 hover:underline"
+                      >
+                        Clear
+                      </button>
+                    )}
+                  </div>
+
+                  <MultiSelectRow
+                    label="Technology"
+                    values={siteFilters?.technologies || []}
+                    onChange={(v) => updateSiteFilter("technologies", v)}
+                    options={[
+                      { value: "all", label: "All Technologies" },
+                      ...((siteFilterOptions?.technologies || []).map((item) => ({
+                        value: item,
+                        label: item,
+                      }))),
+                    ]}
+                    placeholder="All Technologies"
+                    disabled={!enableSiteToggle}
+                  />
+
+                  <MultiSelectRow
+                    label="Operator"
+                    values={siteFilters?.operators || []}
+                    onChange={(v) => updateSiteFilter("operators", v)}
+                    options={[
+                      { value: "all", label: "All Operators" },
+                      ...((siteFilterOptions?.operators || []).map((item) => ({
+                        value: item,
+                        label: item,
+                      }))),
+                    ]}
+                    placeholder="All Operators"
+                    disabled={!enableSiteToggle}
+                  />
+
+                  <MultiSelectRow
+                    label="Band"
+                    values={siteFilters?.bands || []}
+                    onChange={(v) => updateSiteFilter("bands", v)}
+                    options={[
+                      { value: "all", label: "All Bands" },
+                      ...((siteFilterOptions?.bands || []).map((item) => ({
+                        value: item,
+                        label: item,
+                      }))),
+                    ]}
+                    placeholder="All Bands"
+                    disabled={!enableSiteToggle}
+                  />
+
+                  <MultiSelectRow
+                    label="PCI"
+                    values={siteFilters?.pcis || []}
+                    onChange={(v) => updateSiteFilter("pcis", v)}
+                    options={[
+                      { value: "all", label: "All PCIs" },
+                      ...((siteFilterOptions?.pcis || []).map((item) => ({
+                        value: item,
+                        label: item,
+                      }))),
+                    ]}
+                    placeholder="All PCIs"
+                    disabled={!enableSiteToggle}
+                  />
                 </div>
                 
                 <MultiSelectRow

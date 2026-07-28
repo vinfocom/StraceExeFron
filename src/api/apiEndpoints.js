@@ -1070,6 +1070,12 @@ export const reportApi = {
       timeout: 600000,
       dedupe: false,
     }),
+  generateUnifiedMapExcel: (payload) =>
+    api.post("/api/ExcelReport/Generate", payload, {
+      responseType: "blob",
+      timeout: 600000,
+      dedupe: false,
+    }),
 };
 
 export const authApi = {

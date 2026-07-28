@@ -851,7 +851,7 @@ const UploadDataPage = () => {
   const renderFileInput = (getRootProps, getInputProps, isActive, files, type, label) => (
     <div
       {...getRootProps()}
-      className={`p-8 border-2 border-dashed rounded-lg cursor-pointer text-center transition-colors ${
+      className={`rounded-lg border-2 border-dashed p-5 text-center transition-colors sm:p-8 ${
         isActive ? "border-gray-800 bg-blue-200" : "border-white bg-gray-400"
       }`}
     >
@@ -863,15 +863,21 @@ const UploadDataPage = () => {
   );
 
   return (
-    <div className="p-6 flex flex-col items-center bg-gray-700 text-white min-h-screen">
-      <div className="max-w-4xl w-full">
-        <h1 className="text-2xl font-semibold mb-4 text-center">Upload Data</h1>
+    <div className="min-h-screen bg-gray-700 px-3 py-4 text-white sm:px-4 lg:px-6">
+      <div className="mx-auto w-full max-w-5xl">
+        <h1 className="mb-4 text-center text-2xl font-semibold">Upload Data</h1>
 
         <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-          <TabsList className="grid grid-cols-3 bg-gray-700 text-white rounded">
-            <TabsTrigger value="session">Upload Session Data</TabsTrigger>
-            <TabsTrigger value="polygon">Import Polygon</TabsTrigger>
-            <TabsTrigger value="Report">Report Generation</TabsTrigger>
+          <TabsList className="grid h-auto grid-cols-1 gap-2 rounded bg-gray-700 p-1 text-white sm:grid-cols-3">
+            <TabsTrigger value="session" className="whitespace-normal px-3 py-2 text-center">
+              Upload Session Data
+            </TabsTrigger>
+            <TabsTrigger value="polygon" className="whitespace-normal px-3 py-2 text-center">
+              Import Polygon
+            </TabsTrigger>
+            <TabsTrigger value="Report" className="whitespace-normal px-3 py-2 text-center">
+              Report Generation
+            </TabsTrigger>
           </TabsList>
 
           {/* ---------- SESSION TAB ---------- */}
@@ -882,7 +888,7 @@ const UploadDataPage = () => {
               isDragActiveSession,
               sessionFiles,
               "session",
-              "Session Data Files (.csv or .zip, max 500 MB each) — select as many as you like, they'll upload one at a time"
+              "Session Data Files (.csv or .zip, max 500 MB each) "
             )}
             <Textarea
               placeholder=" Remarks (Required)"
@@ -894,7 +900,7 @@ const UploadDataPage = () => {
 
           {/* ---------- POLYGON TAB ---------- */}
           <TabsContent value="polygon" className="space-y-4 mt-4">
-            <div className="grid grid-cols-1 md:grid-cols-[1fr_180px] gap-4">
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-[minmax(0,1fr)_180px]">
               <div>
                 <label className="text-sm font-semibold">Polygon Name</label>
                 <Input
@@ -1076,24 +1082,24 @@ const UploadDataPage = () => {
                 } of {sessionFiles.length}…
               </p>
             )}
-            <div className="flex justify-center gap-4">
-            <Button
-              onClick={handleUpload}
-              disabled={batchUploading}
-              size="lg"
-              className="bg-white text-gray-700 hover:bg-blue-200"
-            >
-              {batchUploading ? <Spinner /> : "Upload & Process"}
-            </Button>
-            <Button
-              onClick={() => excelApi.downloadTemplate(1)}
-              variant="outline"
-              size="lg"
-              className="bg-white text-gray-700 hover:bg-blue-200"
-            >
-              <Download className="mr-2 h-4 w-4" />
-              Download Template
-            </Button>
+            <div className="flex w-full flex-col justify-center gap-3 sm:w-auto sm:flex-row sm:gap-4">
+              <Button
+                onClick={handleUpload}
+                disabled={batchUploading}
+                size="lg"
+                className="w-full bg-white text-gray-700 hover:bg-blue-200 sm:w-auto"
+              >
+                {batchUploading ? <Spinner /> : "Upload & Process"}
+              </Button>
+              <Button
+                onClick={() => excelApi.downloadTemplate(1)}
+                variant="outline"
+                size="lg"
+                className="w-full bg-white text-gray-700 hover:bg-blue-200 sm:w-auto"
+              >
+                <Download className="mr-2 h-4 w-4" />
+                Download Template
+              </Button>
             </div>
           </div>
         )}
@@ -1103,8 +1109,8 @@ const UploadDataPage = () => {
           <h2 className="text-xl font-semibold mb-4">
             Upload History for '{activeTab}'
           </h2>
-          <div className="border rounded-lg bg-gray-500">
-            <Table>
+          <div className="overflow-x-auto rounded-lg border bg-gray-500">
+            <Table className="min-w-[760px]">
               <TableHeader>
                 <TableRow>
                   <TableHead>File Name</TableHead>
@@ -1134,16 +1140,16 @@ const UploadDataPage = () => {
 
                     return (
                       <TableRow key={`${file.id}-${index}`}>
-                        <TableCell>{file.file_name}</TableCell>
-                        <TableCell>{file.uploaded_by}</TableCell>
-                        <TableCell>{formatSessionCell(file.session_id)}</TableCell>
-                        <TableCell>
+                        <TableCell className="max-w-[220px] whitespace-normal break-words">{file.file_name}</TableCell>
+                        <TableCell className="max-w-[180px] whitespace-normal break-words">{file.uploaded_by}</TableCell>
+                        <TableCell className="whitespace-nowrap">{formatSessionCell(file.session_id)}</TableCell>
+                        <TableCell className="whitespace-nowrap">
                           {file.uploaded_on ? new Date(file.uploaded_on).toLocaleString() : "N/A"}
                         </TableCell>
-                        <TableCell className={statusClass}>
+                        <TableCell className={`${statusClass} whitespace-nowrap`}>
                           {file.status}
                         </TableCell>
-                        <TableCell>{file.remarks}</TableCell>
+                        <TableCell className="max-w-[260px] whitespace-normal break-words">{file.remarks}</TableCell>
                       </TableRow>
                     );
                   })

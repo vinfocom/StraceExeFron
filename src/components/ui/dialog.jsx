@@ -7,8 +7,10 @@ import { VisuallyHidden } from "@radix-ui/react-visually-hidden";
 const basicOverlayStyle = {
   position: "fixed",
   inset: 0,
-  backgroundColor: "rgba(0, 0, 0, 0.5)",
-  zIndex: 50,
+  backgroundColor: "rgba(2, 6, 23, 0.58)",
+  backdropFilter: "blur(6px)",
+  WebkitBackdropFilter: "blur(6px)",
+  zIndex: 2000,
 };
 
 const basicContentStyle = {
@@ -23,7 +25,8 @@ const basicContentStyle = {
   maxHeight: "90vh",
   overflowY: "auto",
   width: "50%",
-  zIndex: 51,
+  zIndex: 2001,
+  boxShadow: "0 30px 80px rgba(15, 23, 42, 0.45)",
 };
 
 function Dialog(props) {
@@ -38,16 +41,16 @@ function DialogPortal(props) {
   return <DialogPrimitive.Portal {...props} />;
 }
 
-function DialogOverlay(props) {
-  return <DialogPrimitive.Overlay style={basicOverlayStyle} {...props} />;
+function DialogOverlay({ style, ...props }) {
+  return <DialogPrimitive.Overlay style={{ ...basicOverlayStyle, ...style }} {...props} />;
 }
 
-function DialogContent({ children,title,  showCloseButton = true, ...props }) {
+function DialogContent({ children, title, showCloseButton = true, style, ...props }) {
   return (
     <DialogPortal>
       <DialogOverlay />
       <DialogPrimitive.Content 
-        style={basicContentStyle} 
+        style={{ ...basicContentStyle, ...style }}
         aria-describedby={props['aria-describedby'] === undefined ? undefined : props['aria-describedby']}
         {...props}
       >
@@ -61,10 +64,10 @@ function DialogContent({ children,title,  showCloseButton = true, ...props }) {
               position: "absolute",
               top: "0.5rem",
               right: "0.5rem",
-              background: "white",
+              background: "transparent",
               border: "none",
               cursor: "pointer",
-              text: "black"
+              color: "inherit",
             }}
           >
             <XIcon size={16} />

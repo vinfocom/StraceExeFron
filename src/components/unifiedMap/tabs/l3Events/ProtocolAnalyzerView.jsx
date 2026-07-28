@@ -571,19 +571,7 @@ function MessageDetails({ procedure, message }) {
           ]}
         />
 
-        {selected?.details?.length > 0 && (
-          <div>
-            <h5 className="text-[11px] uppercase tracking-wide text-slate-500 mb-2">Information Elements</h5>
-            <div className="space-y-1.5">
-              {selected.details.map((detail, index) => (
-                <div key={`${detail.label}-${index}`} className="rounded-md border border-slate-800 bg-slate-950/60 px-2 py-1.5">
-                  <div className="text-[10px] uppercase text-slate-500">{detail.label}</div>
-                  <div className="text-xs text-white">{detail.value}</div>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
+       
 
         <DetailSection
           title="3GPP Reference"

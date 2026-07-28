@@ -52,6 +52,9 @@ const DrawingControlsPanel = memo(function DrawingControlsPanel({
   const downloadHandlers = context?.downloadHandlersRef?.current || {};
 
   const [isExpanded, setIsExpanded] = useState(false);
+  const [isCompactViewport, setIsCompactViewport] = useState(() =>
+    typeof window !== "undefined" ? window.innerWidth < 1180 : false,
+  );
 
   const handleDownloadStatsCsv = propOnDownloadStatsCsv || downloadHandlers.onDownloadStatsCsv;
   const handleDownloadRawCsv = propOnDownloadRawCsv || downloadHandlers.onDownloadRawCsv;
@@ -76,6 +79,16 @@ const DrawingControlsPanel = memo(function DrawingControlsPanel({
       setIsExpanded(true);
     }
   }, [safeUi.drawEnabled]);
+
+  useEffect(() => {
+    const handleResize = () => {
+      setIsCompactViewport(window.innerWidth < 1180);
+    };
+
+    handleResize();
+    window.addEventListener("resize", handleResize);
+    return () => window.removeEventListener("resize", handleResize);
+  }, []);
 
   const activateTool = useCallback((mode) => {
     onUIChange?.({ 
@@ -108,7 +121,7 @@ const DrawingControlsPanel = memo(function DrawingControlsPanel({
     "top-left": "absolute top-4 left-4",
     "bottom-right": "absolute bottom-8 right-4",
     "bottom-left": "absolute bottom-8 left-4",
-    "relative": "relative inline-block",
+    "relative": "relative block w-full",
     
   };
 
@@ -116,16 +129,18 @@ const DrawingControlsPanel = memo(function DrawingControlsPanel({
   const sessionCount = polygonStats?.intersectingSessions?.length || 0;
 
   return (
-    <div className={`${positionClasses[position]} z-40 flex flex-col gap-3 items-end`}>
+    <div className={`${positionClasses[position]} z-40 flex flex-col gap-3 ${position === "relative" ? "items-stretch" : "items-end"}`}>
       
       <div
         className={`
           relative backdrop-blur-md shadow-xl border border-white/20 ring-1 ring-black/5
           transition-all duration-500 ease-out
-          flex items-center overflow-hidden rounded-full
+          flex items-center overflow-hidden
           ${isExpanded 
-            ? "bg-white/95 p-1.5" 
-            : "bg-slate-700/95 w-11 h-11 cursor-pointer hover:bg-slate-600/95"
+            ? `${isCompactViewport
+                ? "w-full rounded-2xl bg-white/95 p-1.5"
+                : "rounded-full bg-white/95 p-1.5"}`
+            : "h-11 w-11 cursor-pointer rounded-full bg-slate-700/95 hover:bg-slate-600/95"
           }
         `}
         onClick={!isExpanded ? () => setIsExpanded(true) : undefined}
@@ -147,7 +162,8 @@ const DrawingControlsPanel = memo(function DrawingControlsPanel({
         {/* TOOLBAR CONTENT (Visible when expanded) */}
         <div 
           className={`
-            flex items-center gap-1 transition-all duration-300 whitespace-nowrap
+            flex items-center gap-1 transition-all duration-300
+            ${isCompactViewport ? "w-full overflow-x-auto whitespace-nowrap scrollbar-hide" : "whitespace-nowrap"}
             ${isExpanded 
               ? "opacity-100 translate-x-0" 
               : "opacity-0 translate-x-10 pointer-events-none"
@@ -305,10 +321,10 @@ const DrawingControlsPanel = memo(function DrawingControlsPanel({
 
       {/* Contextual Action Button (Fetch Logs) */}
       {hasShape && !context?.isDrawing && sessionCount > 0 && (
-        <div className="animate-in fade-in slide-in-from-right-4 duration-300">
+        <div className={`animate-in fade-in slide-in-from-right-4 duration-300 ${position === "relative" ? "self-start" : ""}`}>
           <Button 
             size="sm" 
-            className="bg-indigo-600 hover:bg-indigo-700 text-white shadow-lg gap-2 rounded-full px-4"
+            className="gap-2 rounded-full bg-indigo-600 px-4 text-white shadow-lg hover:bg-indigo-700"
             onClick={handleFetchLogs}
           >
             <Search size={14} />

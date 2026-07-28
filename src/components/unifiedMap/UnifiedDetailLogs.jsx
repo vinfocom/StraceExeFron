@@ -34,6 +34,14 @@ import {
 } from "lucide-react";
 import { toast } from "react-toastify";
 import { Rnd } from "react-rnd";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 
 import { TabButton } from "./common/TabButton";
 import { LoadingSpinner } from "./common/LoadingSpinner";
@@ -451,6 +459,7 @@ const ExportDropdown = ({
   const [isOpen, setIsOpen] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
   const [exportType, setExportType] = useState(null);
+  const [isExportDialogOpen, setIsExportDialogOpen] = useState(false);
   const dropdownRef = useRef(null);
 
   useEffect(() => {
@@ -916,8 +925,15 @@ Technologies: ${dataFilters.technologies?.join(", ") || "None"}
     if (isExporting) return;
 
     setIsOpen(false);
+    setIsExportDialogOpen(true);
+  };
+
+  const handlePdfExport = async () => {
+    if (isExporting) return;
+
+    setIsExportDialogOpen(false);
     setIsExporting(true);
-    setExportType("full");
+    setExportType("pdf");
 
     try {
       if (onGeneratePdfExport) {
@@ -942,6 +958,43 @@ Technologies: ${dataFilters.technologies?.join(", ") || "None"}
           n78NeighborStats,
         });
       }
+    } finally {
+      setIsExporting(false);
+      setExportType(null);
+    }
+  };
+
+  const handleExcelExport = async () => {
+    if (isExporting) return;
+
+    if (!projectId || !Array.isArray(sessionIds) || sessionIds.length === 0) {
+      toast.error("Project ID or session IDs are missing for Excel export.");
+      return;
+    }
+
+    setIsExportDialogOpen(false);
+    setIsExporting(true);
+    setExportType("excel");
+
+    try {
+      const excelBlob = await reportApi.generateUnifiedMapExcel({
+        projectId: Number(projectId),
+        sessionIds: sessionIds.map((id) => Number(id)).filter(Number.isFinite),
+      });
+
+      downloadPdfBlob(
+        excelBlob instanceof Blob
+          ? excelBlob
+          : new Blob([excelBlob], {
+              type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            }),
+        `UnifiedMap_Report_${projectId}_${new Date().toISOString().split("T")[0]}.xlsx`,
+      );
+
+      toast.success("Excel report downloaded successfully!");
+    } catch (error) {
+      console.error("Export Excel report error:", error);
+      toast.error(error?.message || "Failed to generate Excel report");
     } finally {
       setIsExporting(false);
       setExportType(null);
@@ -992,7 +1045,13 @@ Technologies: ${dataFilters.technologies?.join(", ") || "None"}
           {isExporting && exportType !== "network-site" ? (
             <>
               <Loader2 className="h-4 w-4 animate-spin" />
-              <span>Exporting...</span>
+              <span>
+                {exportType === "excel"
+                  ? "Exporting Excel..."
+                  : exportType === "pdf"
+                    ? "Exporting PDF..."
+                    : "Exporting..."}
+              </span>
             </>
           ) : (
             <>
@@ -1002,6 +1061,62 @@ Technologies: ${dataFilters.technologies?.join(", ") || "None"}
           )}
         </button>
       </div>
+
+      <Dialog open={isExportDialogOpen} onOpenChange={setIsExportDialogOpen}>
+        <DialogContent
+          title="Export Report"
+          className="max-w-md border border-slate-700 bg-slate-900 text-slate-100"
+          style={{
+            background: "#0f172a",
+            color: "#e2e8f0",
+            border: "1px solid #334155",
+            width: "100%",
+            maxWidth: "28rem",
+          }}
+        >
+          <DialogHeader>
+            <DialogTitle>Export Report</DialogTitle>
+            <DialogDescription style={{ color: "#94a3b8" }}>
+              Choose the export format.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="grid gap-3 py-2">
+            <button
+              onClick={handlePdfExport}
+              disabled={isExporting}
+              className="flex items-center justify-between rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-left transition hover:bg-emerald-500/20 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              <span className="flex items-center gap-3">
+                <FileText className="h-5 w-5 text-emerald-400" />
+                <span>PDF</span>
+              </span>
+              <span className="text-xs text-slate-400">Current link</span>
+            </button>
+
+            <button
+              onClick={handleExcelExport}
+              disabled={isExporting}
+              className="flex items-center justify-between rounded-lg border border-sky-500/30 bg-sky-500/10 px-4 py-3 text-left transition hover:bg-sky-500/20 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              <span className="flex items-center gap-3">
+                <FileSpreadsheet className="h-5 w-5 text-sky-400" />
+                <span>Excel</span>
+              </span>
+              <span className="text-xs text-slate-400">projectId + sessionIds</span>
+            </button>
+          </div>
+
+          <DialogFooter>
+            <button
+              onClick={() => setIsExportDialogOpen(false)}
+              className="rounded-lg border border-slate-600 px-3 py-1.5 text-sm text-slate-300 transition hover:bg-slate-800"
+            >
+              Cancel
+            </button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };

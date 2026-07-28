@@ -420,16 +420,16 @@ const ViewProjectsPage = () => {
   }
 
   return (
-    <div className="p-6 min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-gray-50 p-3 sm:p-4 lg:p-6">
       {/* Header */}
-      <div className="mb-6 flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-bold text-gray-900">Existing Projects</h1>
+      <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0">
+          <h1 className="text-2xl font-bold text-gray-900 sm:text-3xl">Existing Projects</h1>
           <p className="text-gray-600 mt-1">
             Browse and open your previously created projects.
           </p>
         </div>
-        <Button variant="outline" size="sm" onClick={() => fetchProjects()}>
+        <Button variant="outline" size="sm" onClick={() => fetchProjects()} className="w-full sm:w-auto">
           <RefreshCw className="h-4 w-4 mr-2" />
           Refresh
         </Button>
@@ -438,10 +438,10 @@ const ViewProjectsPage = () => {
       {/* Projects Card */}
       <Card className="h-full">
         <CardHeader>
-          <div className="flex items-center justify-between">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <CardTitle>Project List</CardTitle>
             {/* Search Input */}
-            <div className="relative w-72">
+            <div className="relative w-full sm:w-72">
               <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
               <Input
                 type="text"
@@ -461,15 +461,15 @@ const ViewProjectsPage = () => {
             </div>
           ) : filteredProjects.length ? (
             <div className="max-h-[70vh] overflow-y-auto pr-1">
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
                 {filteredProjects.map((project) => {
                   const polygonPoints = getProjectPolygonPoints(project);
                   return (
-                    <Card key={project.id} className="border-slate-200 shadow-sm aspect-square flex flex-col">
+                    <Card key={project.id} className="flex min-h-[320px] flex-col border-slate-200 shadow-sm sm:min-h-[360px]">
                       <CardHeader className="pb-3">
                         <CardTitle className="text-base">
-                          <div className="flex items-start justify-between gap-3">
-                            <div>
+                          <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                            <div className="min-w-0">
                               <p className="font-semibold text-slate-900">
                                 {project.project_name || "Untitled Project"}
                               </p>
@@ -482,7 +482,7 @@ const ViewProjectsPage = () => {
                                 )}
                               </div>
                             </div>
-                            <div className="text-xs text-slate-500 flex items-center gap-1">
+                            <div className="flex items-center gap-1 text-xs text-slate-500">
                               <Calendar className="h-3.5 w-3.5" />
                                {formatDate(project.created_on)}
                             </div>

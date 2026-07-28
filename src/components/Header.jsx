@@ -1,6 +1,7 @@
 // components/Header.jsx
 import React, { useEffect, useMemo, useState } from 'react';
 import { useLocation } from 'react-router-dom';
+import { Menu } from 'lucide-react';
 import DrawingControlsPanel from './map/layout/DrawingControlsPanel';
 import AdvancedFilters from './map/HeaderFilters';
 import { checkAllServices } from '../api/apiEndpoints';
@@ -20,7 +21,7 @@ const PAGE_TITLES = {
   '/uploaddata': 'Upload Data',
 };
 
-export default function Header() {
+export default function Header({ showSidebarToggle = false, onSidebarToggle = null }) {
   const location = useLocation();
   const [serverOnline, setServerOnline] = useState(false);
   const normalizedPath = location.pathname.toLowerCase().replace(/\/+$/, '') || '/';
@@ -57,21 +58,31 @@ export default function Header() {
   );
 
   return (
-    <header className="h-14 bg-slate-900/95 border border-slate-700/40 backdrop-blur-md rounded-none shadow-sm flex items-center justify-between px-3 sm:px-4 flex-shrink-0 relative z-30 text-slate-100">
-      <div className="flex items-center space-x-2 min-w-[180px]">
+    <header className="relative z-30 flex min-h-14 flex-wrap items-center gap-3 border border-slate-700/40 bg-slate-900/95 px-3 py-2 text-slate-100 shadow-sm backdrop-blur-md sm:px-4">
+      <div className="flex min-w-0 flex-1 items-center gap-2">
+        {showSidebarToggle && (
+          <button
+            type="button"
+            onClick={onSidebarToggle}
+            className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-slate-700 bg-slate-800/70 text-slate-100 transition hover:bg-slate-700"
+            aria-label="Toggle sidebar"
+          >
+            <Menu className="h-4 w-4" />
+          </button>
+        )}
         {!isMapPage && (
-          <p className="text-base sm:text-lg font-bold tracking-tight text-white truncate">
+          <p className="min-w-0 truncate text-base font-bold tracking-tight text-white sm:text-lg">
             {routeLabel}
           </p>
         )}
         {isMapPage && <AdvancedFilters />}
       </div>
 
-      <div className="flex-1 flex items-center justify-center">
+      <div className="order-3 flex w-full items-center justify-start md:order-none md:w-auto md:flex-1 md:justify-center">
         {isMapPage && <DrawingControlsPanel position="relative" />}
       </div>
 
-      <div className="flex items-center space-x-3 min-w-[180px] justify-end">
+      <div className="flex items-center justify-end gap-3 md:min-w-[80px]">
         <span
           className={`inline-block h-2 w-2 rounded-full ${statusDotClass}`}
           title={serverOnline ? "Server connected" : "Working offline"}

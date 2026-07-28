@@ -150,6 +150,59 @@ function getSiteLabelText(site, labelField = "none") {
   return text && text.toLowerCase() !== "unknown" ? text : "";
 }
 
+function normalizeSiteFilterValue(value) {
+  const text = String(value ?? "").trim();
+  if (!text) return null;
+  return text.toLowerCase();
+}
+
+function getSiteFilterTechnology(site) {
+  const value = normalizeTechName(
+    site?.technology ?? site?.Technology ?? site?.network ?? site?.Network ?? "",
+    site?.band ?? site?.Band,
+  );
+  return value && value !== "Unknown" ? value : "";
+}
+
+function getSiteFilterOperator(site) {
+  const value = normalizeProviderName(
+    site?.provider ??
+      site?.Provider ??
+      site?.cluster ??
+      site?.Cluster ??
+      site?.operator ??
+      site?.Operator ??
+      site?.network ??
+      site?.Network ??
+      "",
+  );
+  return value && value !== "Unknown" ? value : "";
+}
+
+function getSiteFilterBand(site) {
+  const value = normalizeBandName(resolveSiteBandValue(site) || site?.band || site?.Band || "");
+  return value && value !== "Unknown" ? value : "";
+}
+
+function getSiteFilterPci(site) {
+  const value =
+    site?.pci ??
+    site?.Pci ??
+    site?.PCI ??
+    site?.rawSite?.pci ??
+    site?.rawSite?.Pci ??
+    site?.rawSite?.PCI;
+  if (value === undefined || value === null) return "";
+  return String(value).trim();
+}
+
+function matchesSiteMultiFilter(selectedValues = [], actualValue) {
+  if (!Array.isArray(selectedValues) || selectedValues.length === 0) return true;
+  const normalizedActual = normalizeSiteFilterValue(actualValue);
+  if (!normalizedActual) return false;
+  return selectedValues.some((value) => normalizeSiteFilterValue(value) === normalizedActual);
+}
+
 function getZoomSectorScale(zoom) {
   const numericZoom = Number(zoom);
   if (!Number.isFinite(numericZoom)) return 1;
@@ -1494,6 +1547,7 @@ const NetworkPlannerMap = ({
   onSectorPredictionPointsChange = null,
   triangleScaleMultiplier = 1,
   siteLegendFilter = null,
+  siteFilters = null,
   siteColorOverrides = {},
 }) => {
   const siteLteDebugEnabled = useMemo(() => isSiteLteDebugEnabled(), []);
@@ -1884,9 +1938,33 @@ const NetworkPlannerMap = ({
     sitePredictionVersion,
   ]);
 
+  const fullyFilteredSiteData = useMemo(() => {
+    const technologyFilters = Array.isArray(siteFilters?.technologies) ? siteFilters.technologies : [];
+    const operatorFilters = Array.isArray(siteFilters?.operators) ? siteFilters.operators : [];
+    const bandFilters = Array.isArray(siteFilters?.bands) ? siteFilters.bands : [];
+    const pciFilters = Array.isArray(siteFilters?.pcis) ? siteFilters.pcis : [];
+
+    if (
+      technologyFilters.length === 0 &&
+      operatorFilters.length === 0 &&
+      bandFilters.length === 0 &&
+      pciFilters.length === 0
+    ) {
+      return filteredSiteData;
+    }
+
+    return filteredSiteData.filter((site) => {
+      if (!matchesSiteMultiFilter(technologyFilters, getSiteFilterTechnology(site))) return false;
+      if (!matchesSiteMultiFilter(operatorFilters, getSiteFilterOperator(site))) return false;
+      if (!matchesSiteMultiFilter(bandFilters, getSiteFilterBand(site))) return false;
+      if (!matchesSiteMultiFilter(pciFilters, getSiteFilterPci(site))) return false;
+      return true;
+    });
+  }, [filteredSiteData, siteFilters]);
+
   const allSectors = useMemo(
     () =>
-      filteredSiteData.flatMap((site, idx) =>
+      fullyFilteredSiteData.flatMap((site, idx) =>
         generateSectorsFromSite(site, idx, colorMode, {
           forceSingleSector: String(siteToggle || "").toLowerCase() === "cell",
           defaultBeamwidth,
@@ -1895,7 +1973,7 @@ const NetworkPlannerMap = ({
           siteColorOverrides,
         }),
       ),
-    [filteredSiteData, colorMode, siteToggle, defaultBeamwidth, siteLabelField, sitePredictionVersion, siteColorOverrides],
+    [fullyFilteredSiteData, colorMode, siteToggle, defaultBeamwidth, siteLabelField, sitePredictionVersion, siteColorOverrides],
   );
 
   const uniqueSectors = useMemo(() => {

@@ -168,8 +168,8 @@ const DashboardPage = () => {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-50 via-blue-50 to-indigo-50">
-      <div className="max-w-[1920px] mx-auto p-3 sm:p-4 lg:p-6 space-y-4 sm:space-y-6">
-        <div className="flex flex-wrap items-center justify-end gap-4 mb-6">
+      <div className="mx-auto max-w-[1920px] space-y-4 p-3 sm:space-y-6 sm:p-4 lg:p-6">
+        <div className="mb-4 flex flex-wrap items-center justify-end gap-3 sm:mb-6 sm:gap-4">
           <button
             onClick={handleRefreshAll}
             disabled={isRefreshing}
@@ -187,16 +187,16 @@ const DashboardPage = () => {
           </button>
         </div>
 
-        <div className="flex flex-wrap gap-4 sm:gap-6">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4 2xl:grid-cols-5 sm:gap-6">
           {isKPILoading ? (
             Array.from({ length: 8 }).map((_, i) => (
-              <div key={i} className="flex-1 min-w-[240px] sm:min-w-[280px] max-w-[320px]">
+              <div key={i} className="min-w-0">
                 <StatCardSkeleton />
               </div>
             ))
           ) : (
             stats.map(s => (
-              <div key={s.title} className="flex-1 min-w-[240px] sm:min-w-[280px] max-w-[320px]">
+              <div key={s.title} className="min-w-0">
                 <MemoizedStatCard {...s} />
               </div>
             ))
