@@ -4,13 +4,15 @@ import React, {
   useCallback,
   useRef,
 } from "react";
-import { Upload, Loader2, AlertTriangle, X, Search } from "lucide-react";
+import { Upload, Loader2, AlertTriangle, X, Search, FileText } from "lucide-react";
+import toast from "react-hot-toast";
 import { extractL3AndEventFiles } from "@/utils/l3Events/zipParser";
 import { parseL3CSV } from "@/utils/l3Events/l3Parser";
 import { parseEventCSV } from "@/utils/l3Events/eventParser";
 import { mergeTimeline } from "@/utils/l3Events/timelineBuilder";
 import { buildCallSummary } from "@/utils/l3Events/callSummaryBuilder";
 import { buildProtocolAnalysis } from "@/utils/l3Events/protocolAnalyzer";
+import { downloadL3EventPdfReport } from "@/utils/l3Events/pdfReport";
 import { NETWORK_FLOW_MODELS } from "@/utils/l3Events/flowModels";
 import { CallSummaryPanel } from "./l3Events/CallSummaryPanel";
 import { FlowModelCatalog } from "./l3Events/FlowModelCatalog";
@@ -33,53 +35,57 @@ export const L3EventsTab = () => {
   const [selectedCall, setSelectedCall] = useState(null);
   const [activeView, setActiveView] = useState("analyzer");
   const [search, setSearch] = useState("");
+  const [isExportingReport, setIsExportingReport] = useState(false);
 
   const fileInputRef = useRef(null);
 
  
 
-const handleFile = useCallback(async (file) => {
-  if (!file) return;
+  const handleFile = useCallback(async (files) => {
+    const selectedFiles = Array.from(files || []).filter(Boolean);
+    if (!selectedFiles.length) return;
 
-  setStatus("loading");
-  setErrorMessage("");
-  setWarningMessage("");
-  setFileName(file.name);
-  setSelectedCall(null);
-  setActiveView("analyzer");
-  setSearch("");
+    setStatus("loading");
+    setErrorMessage("");
+    setWarningMessage("");
+    setFileName(selectedFiles.length === 1 ? selectedFiles[0].name : `${selectedFiles.length} files selected`);
+    setSelectedCall(null);
+    setActiveView("analyzer");
+    setSearch("");
 
-  try {
-    const { l3Files, eventFiles } = await extractL3AndEventFiles(file);
+    try {
+      const extractedFiles = await Promise.all(selectedFiles.map((file) => extractL3AndEventFiles(file)));
+      const l3Files = extractedFiles.flatMap((entry) => entry.l3Files);
+      const eventFiles = extractedFiles.flatMap((entry) => entry.eventFiles);
 
-    if (!l3Files.length && !eventFiles.length) {
+      if (!l3Files.length && !eventFiles.length) {
+        setTimeline([]);
+        setStatus("error");
+        setErrorMessage("The selected files do not contain supported Layer 3 or Event logs.");
+        return;
+      }
+
+      const l3Rows = l3Files.flatMap((f) => parseL3CSV(f.text, f.name));
+      const eventRows = eventFiles.flatMap((f) => parseEventCSV(f.text, f.name));
+      const merged = mergeTimeline(l3Rows, eventRows);
+
+      let warning = "";
+      if (!l3Files.length) warning = "No Layer 3 logs found.";
+      else if (!eventFiles.length) warning = "No Event logs found.";
+
+      setTimeline(merged);
+      setWarningMessage(warning);
+      setStatus("ready");
+    } catch (error) {
       setTimeline([]);
       setStatus("error");
-      setErrorMessage("This ZIP does not contain supported Layer 3 or Event logs.");
-      return;
+      setErrorMessage("Failed to read the selected files. Please confirm they are valid CSV, ZIP, or .xlsx workbooks.");
     }
-
-    const l3Rows = l3Files.flatMap((f) => parseL3CSV(f.text, f.name));
-    const eventRows = eventFiles.flatMap((f) => parseEventCSV(f.text, f.name));
-    const merged = mergeTimeline(l3Rows, eventRows);
-
-    let warning = "";
-    if (!l3Files.length) warning = "No Layer 3 logs found.";
-    else if (!eventFiles.length) warning = "No Event logs found.";
-
-    setTimeline(merged);
-    setWarningMessage(warning);
-    setStatus("ready");
-  } catch (error) {
-    setTimeline([]);
-    setStatus("error");
-    setErrorMessage("Failed to read this ZIP file. Please confirm it is a valid archive.");
-  }
-}, []);
+  }, []);
 
   const onInputChange = (event) => {
-    const file = event.target.files?.[0];
-    handleFile(file);
+    const files = event.target.files;
+    handleFile(files);
     event.target.value = "";
   };
 
@@ -105,6 +111,28 @@ const handleFile = useCallback(async (file) => {
   const protocolAnalysis = useMemo(() => buildProtocolAnalysis(filteredProtocolTimeline), [filteredProtocolTimeline]);
   const l3Messages = useMemo(() => timeline.filter((item) => item.type === "l3"), [timeline]);
   const eventMessages = useMemo(() => timeline.filter((item) => item.type === "event"), [timeline]);
+  const canExportReport = status === "ready" && protocolAnalysis.procedures.length > 0;
+  const reportSummary = useMemo(() => {
+    if (!selectedCall) return callSummary;
+
+    const statusValue = selectedCall.status || "Unknown";
+    return {
+      totalCalls: 1,
+      connected: statusValue === "Connected" ? 1 : 0,
+      dropped: statusValue === "Dropped" ? 1 : 0,
+      notConnected: statusValue === "Not Connected" ? 1 : 0,
+      busy: selectedCall.detailedStatus === "Busy" ? 1 : 0,
+      rejected: selectedCall.detailedStatus === "Rejected" ? 1 : 0,
+      setupFailures: selectedCall.detailedStatus === "Call Setup Failure" ? 1 : 0,
+      ongoing: selectedCall.detailedStatus === "Ongoing" ? 1 : 0,
+      unknown: selectedCall.detailedStatus === "Unknown" ? 1 : 0,
+      averageSetupTime: selectedCall.setupTimeMs || 0,
+      averageTalkTime: selectedCall.talkTimeMs || 0,
+      totalDurationMs: selectedCall.durationMs || selectedCall.totalDurationMs || 0,
+      successRate: statusValue === "Connected" ? 1 : 0,
+      calls: [selectedCall],
+    };
+  }, [callSummary, selectedCall]);
   const visibleRawMessages = useMemo(() => {
     const source = activeView === "events" ? eventMessages : l3Messages;
     const query = search.trim().toLowerCase();
@@ -123,6 +151,27 @@ const handleFile = useCallback(async (file) => {
     });
   }, [activeView, eventMessages, l3Messages, search]);
 
+  const handleExportReport = useCallback(async () => {
+    if (!canExportReport) return;
+
+    setIsExportingReport(true);
+    try {
+      downloadL3EventPdfReport({
+        sourceFileName: fileName,
+        summary: reportSummary,
+        analysis: protocolAnalysis,
+        timeline: filteredProtocolTimeline,
+        selectedCall,
+      });
+      toast.success(selectedCall ? `PDF report generated for ${selectedCall.id}.` : "PDF report generated.");
+    } catch (error) {
+      console.error("Failed to export L3 event PDF report:", error);
+      toast.error(error?.message || "Failed to generate PDF report.");
+    } finally {
+      setIsExportingReport(false);
+    }
+  }, [canExportReport, fileName, filteredProtocolTimeline, protocolAnalysis, reportSummary, selectedCall]);
+
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-3 bg-slate-800/60 border border-slate-700 rounded-lg p-3">
@@ -132,9 +181,18 @@ const handleFile = useCallback(async (file) => {
           className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium transition-colors"
         >
           <Upload className="h-4 w-4" />
-          {fileName ? "Change ZIP" : "Upload ZIP"}
+          {fileName ? "Change File" : "Upload CSV, ZIP, or Excel"}
         </button>
-        <input ref={fileInputRef} type="file" accept=".zip" className="hidden" onChange={onInputChange} />
+        <input ref={fileInputRef} type="file" multiple accept=".csv,.zip,.xlsx" className="hidden" onChange={onInputChange} />
+        <button
+          type="button"
+          onClick={handleExportReport}
+          disabled={!canExportReport || isExportingReport}
+          className="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-slate-600 bg-slate-900 hover:bg-slate-800 text-white text-sm font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {isExportingReport ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileText className="h-4 w-4" />}
+          {isExportingReport ? "Generating PDF..." : "Generate PDF Report"}
+        </button>
         {fileName && <span className="text-xs text-white truncate max-w-[240px]">{fileName}</span>}
         {status === "loading" && (
           <span className="flex items-center gap-2 text-xs text-blue-400">
@@ -145,7 +203,7 @@ const handleFile = useCallback(async (file) => {
 
       {status === "idle" && (
         <div className="text-sm text-white border border-dashed border-slate-700 rounded-lg p-8 text-center">
-          Upload a ZIP file to build a standards-based Layer 3 and Event protocol analyzer.
+          Upload a CSV, ZIP archive, or `.xlsx` workbook to build a standards-based Layer 3 and Event protocol analyzer.
         </div>
       )}
 

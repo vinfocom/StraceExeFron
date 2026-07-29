@@ -421,9 +421,12 @@ const MapChild = ({
   return (
     <div className="relative w-full h-full min-h-0 flex flex-col border bg-white overflow-hidden">
       {/* --- Mini Toolbar --- */}
-      <div className="flex items-center justify-between p-2 bg-gray-50 border-b h-12">
-        <div className="flex min-w-0 items-center gap-2">
-          <span className="font-bold text-sm text-gray-700">{title}</span>
+      <div className="border-b bg-gray-50 p-2">
+        <div className="flex flex-wrap items-start justify-between gap-2">
+          <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5">
+            <span className="min-w-0 truncate pr-1 text-sm font-bold text-gray-700">
+              {title}
+            </span>
           {/* <span
             className={`text-[10px] px-1.5 py-0.5 rounded font-semibold ${
               isSecondaryView
@@ -442,7 +445,7 @@ const MapChild = ({
           <select
             value={mapRole}
             onChange={(e) => onRoleChange?.(id, e.target.value)}
-            className="text-[10px] px-1.5 py-0.5 rounded border border-gray-300 text-gray-600 bg-white"
+            className="h-7 min-w-[76px] rounded border border-gray-300 bg-white px-1.5 py-0.5 text-[10px] text-gray-600"
           >
             <option value="all">All</option>
             <option value="primary">Primary</option>
@@ -453,7 +456,7 @@ const MapChild = ({
             <select
               value={sitePredictionVersion}
               onChange={(e) => onSitePredictionVersionChange?.(id, e.target.value)}
-              className="text-[10px] px-1.5 py-0.5 rounded border border-gray-300 text-gray-700 bg-white"
+              className="h-7 min-w-[96px] rounded border border-gray-300 bg-white px-1.5 py-0.5 text-[10px] text-gray-700"
             >
               <option value="original">Baselined</option>
               <option value="updated">Optimized</option>
@@ -464,7 +467,7 @@ const MapChild = ({
           <select
             value={metric}
             onChange={(e) => setMetric(e.target.value)}
-            className="text-xs border rounded px-1 py-1 bg-white"
+            className="h-7 min-w-[88px] max-w-[120px] rounded border bg-white px-1 py-1 text-[11px]"
           >
             <option value="rsrp">RSRP</option>
             <option value="rsrq">RSRQ</option>
@@ -484,7 +487,7 @@ const MapChild = ({
               onChange={(e) =>
                 setColorBy(e.target.value === "metric" ? null : e.target.value)
               }
-              className="text-xs border rounded px-1 py-1 bg-white max-w-[115px]"
+              className="h-7 min-w-[92px] max-w-[132px] rounded border bg-white px-1 py-1 text-[11px]"
               title="Color By"
             >
               {COLOR_BY_OPTIONS.map((option) => (
@@ -493,15 +496,15 @@ const MapChild = ({
                 </option>
               ))}
             </select>
-          )}
-        </div>
+            )}
+          </div>
 
-        <div className="flex items-center gap-2">
+          <div className="flex w-full flex-wrap items-center justify-end gap-1.5 xl:w-auto xl:flex-nowrap">
           {/* Tech Filter */}
           <select
             value={tech}
             onChange={(e) => setTech(e.target.value)}
-            className="text-xs border rounded px-1 py-1 bg-white max-w-[80px]"
+            className="h-7 min-w-[72px] max-w-[110px] flex-1 rounded border bg-white px-1 py-1 text-[11px] sm:flex-none"
             title="Technology"
           >
             {options.tech.map((t) => (
@@ -515,7 +518,7 @@ const MapChild = ({
           <select
             value={provider}
             onChange={(e) => setProvider(e.target.value)}
-            className="text-xs border rounded px-1 py-1 bg-white max-w-[80px]"
+            className="h-7 min-w-[82px] max-w-[120px] flex-1 rounded border bg-white px-1 py-1 text-[11px] sm:flex-none"
             title="Operator"
           >
             {options.provs.map((p) => (
@@ -528,7 +531,7 @@ const MapChild = ({
           <select
             value={band}
             onChange={(e) => setBand(e.target.value)}
-            className="text-xs border rounded px-1 py-1 bg-white max-w-[80px]"
+            className="h-7 min-w-[72px] max-w-[110px] flex-1 rounded border bg-white px-1 py-1 text-[11px] sm:flex-none"
             title="Band"
           >
             {options.bands.map((b) => (
@@ -540,10 +543,12 @@ const MapChild = ({
 
           <button
             onClick={() => onRemove(id)}
-            className="text-gray-400 hover:text-red-500"
+            className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded border border-transparent text-gray-400 hover:border-red-100 hover:bg-red-50 hover:text-red-500"
+            title="Remove map"
           >
             <X size={16} />
           </button>
+          </div>
         </div>
       </div>
 

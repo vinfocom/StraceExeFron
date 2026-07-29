@@ -3,6 +3,13 @@ import { toast } from "react-toastify";
 import { useDropzone } from "react-dropzone";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -57,6 +64,21 @@ const normalizeDiscoveredBands = (value) =>
       };
     })
     .filter(Boolean);
+
+const REPORT_TYPE_OPTIONS = {
+  pdf: {
+    label: "PDF",
+    discover: (formData) => uniReport.getBand(formData),
+    generate: (formData) => uniReport.generateFromZip(formData),
+    extension: "pdf",
+  },
+  excel: {
+    label: "Excel",
+    discover: (formData) => uniReport.getExcelBands(formData),
+    generate: (formData) => uniReport.generateExcelFromZip(formData),
+    extension: "xlsx",
+  },
+};
 
 const normalizeSessionId = (value) => String(value ?? "").trim();
 
@@ -286,6 +308,7 @@ const UploadDataPage = () => {
   const [discoveredBands, setDiscoveredBands] = useState([]);
   const [selectedBands, setSelectedBands] = useState([]);
   const [reportTitle, setReportTitle] = useState("");
+  const [reportType, setReportType] = useState("pdf");
   const [reportLoading, setReportLoading] = useState(false);
   const [reportError, setReportError] = useState(null);
 
@@ -492,6 +515,7 @@ const UploadDataPage = () => {
       setDiscoveredBands([]);
       setSelectedBands([]);
       setReportTitle("");
+      setReportType("pdf");
       setReportError(null);
     }
   };
@@ -537,7 +561,8 @@ const UploadDataPage = () => {
       const formData = new FormData();
       formData.append("LogZip", reportFile);
 
-      const response = await uniReport.getBand(formData);
+      const reportHandler = REPORT_TYPE_OPTIONS[reportType] || REPORT_TYPE_OPTIONS.pdf;
+      const response = await reportHandler.discover(formData);
       const bandsList = normalizeDiscoveredBands(response?.AvailableBands ?? response);
 
       if (!bandsList.length) {
@@ -576,21 +601,24 @@ const UploadDataPage = () => {
         formData.append("Bands", band);
       });
 
-      const blob = await uniReport.generateFromZip(formData);
+      const reportHandler = REPORT_TYPE_OPTIONS[reportType] || REPORT_TYPE_OPTIONS.pdf;
+      const blob = await reportHandler.generate(formData);
       const downloadUrl = window.URL.createObjectURL(blob);
       const link = document.createElement("a");
+      const safeBands = selectedBands.join("-") || "ALL";
+      const safeBaseName = reportFile.name.replace(/\.zip$/i, "");
 
       link.href = downloadUrl;
       link.setAttribute(
         "download",
-        `${reportFile.name.replace(/\.zip$/i, "")}_${selectedBands.join("-") || "ALL"}_report.pdf`,
+        `${safeBaseName}_${safeBands}_report.${reportHandler.extension}`,
       );
       document.body.appendChild(link);
       link.click();
 
       link.parentNode.removeChild(link);
       window.URL.revokeObjectURL(downloadUrl);
-      toast.success("Report downloaded successfully!");
+      toast.success(`${reportHandler.label} report downloaded successfully!`);
     } catch (err) {
       const message = err?.message || "Failed to generate the report.";
       setReportError(message);
@@ -984,6 +1012,32 @@ const UploadDataPage = () => {
               "Upload Log ZIP File (.zip, max 500 MB)"
             )}
 
+            <div className="space-y-2">
+              <label className="block text-sm font-semibold">Report Type</label>
+              <Select
+                value={reportType}
+                onValueChange={(value) => {
+                  setReportType(value);
+                  setDiscoveredBands([]);
+                  setSelectedBands([]);
+                  setReportError(null);
+                }}
+                disabled={reportLoading}
+              >
+                <SelectTrigger className="bg-white text-black">
+                  <SelectValue placeholder="Select report type" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="pdf">PDF</SelectItem>
+                  <SelectItem value="excel">Excel</SelectItem>
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-gray-200">
+                <code>PDF</code> uses the current ZIP report flow. <code>Excel</code> uses the new
+                Excel report endpoints.
+              </p>
+            </div>
+
             {reportError && (
               <div className="p-3 bg-red-100 text-red-700 border border-red-300 rounded text-sm">
                 {reportError}
@@ -1000,7 +1054,7 @@ const UploadDataPage = () => {
                 {reportLoading ? (
                   <><RefreshCw className="mr-2 h-4 w-4 animate-spin" /> Discovering...</>
                 ) : (
-                  'Discover Bands'
+                  `Discover Bands for ${REPORT_TYPE_OPTIONS[reportType]?.label || "PDF"}`
                 )}
               </Button>
             )}
@@ -1054,7 +1108,7 @@ const UploadDataPage = () => {
                   {reportLoading ? (
                     <><RefreshCw className="mr-2 h-4 w-4 animate-spin" /> Generating...</>
                   ) : (
-                    'Generate & Download Report'
+                    `Generate & Download ${REPORT_TYPE_OPTIONS[reportType]?.label || "PDF"} Report`
                   )}
                 </Button>
               </div>

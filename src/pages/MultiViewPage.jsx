@@ -469,11 +469,11 @@ const MultiViewPage = () => {
 
   return (
     <div className="h-screen bg-gray-100 overflow-hidden flex flex-col">
-      <div className="h-12 flex-shrink-0 border-b border-slate-200 bg-white px-3 flex items-center justify-between">
-        <div className="min-w-0 text-sm font-semibold text-slate-700 truncate">
+      <div className="flex flex-shrink-0 flex-wrap items-center justify-between gap-2 border-b border-slate-200 bg-white px-3 py-2">
+        <div className="min-w-0 flex-1 text-sm font-semibold text-slate-700 truncate">
           {project?.project_name || project?.name || "Multi Map"}
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex w-full flex-wrap items-center justify-end gap-2 lg:w-auto lg:flex-nowrap">
           <div className="flex items-center gap-1 border border-slate-300 bg-white px-1.5 py-1 text-[11px] text-slate-600">
             <span className="font-semibold">Log Size</span>
             <button
@@ -503,7 +503,13 @@ const MultiViewPage = () => {
               <Plus size={13} />
             </button>
           </div>
-          <DrawingControlsPanel position="relative" onUIChange={handleDrawingUiChange} ui={ui} />
+          <div className="min-w-0">
+            <DrawingControlsPanel
+              position="relative"
+              onUIChange={handleDrawingUiChange}
+              ui={ui}
+            />
+          </div>
         </div>
       </div>
 

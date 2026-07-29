@@ -6927,6 +6927,7 @@ const UnifiedMapView = () => {
         enableGrid={enableGrid}
         setEnableGrid={setEnableGrid}
         gridSizeMeters={gridSizeMeters}
+        logSizeMeters={projectLogGridSizeMeters}
         setGridSizeMeters={setGridSizeMeters}
         onSaveLogGridSize={handleSaveLogGridSize}
         logGridSaving={logGridSaving}

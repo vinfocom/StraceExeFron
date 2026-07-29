@@ -2228,6 +2228,36 @@ export const uniReport = {
       throw error;
     }
   },
+  getExcelBands: async (formData, onUploadProgress = null) => {
+    try {
+      return await api.post("/api/ExcelReport/DiscoverBands", formData, {
+        timeout: 7200000,
+        onUploadProgress:
+          onUploadProgress ||
+          (() => {
+            // noop
+          }),
+      });
+    } catch (error) {
+      throw error;
+    }
+  },
+
+  generateExcelFromZip: async (formData, onUploadProgress = null) => {
+    try {
+      return await api.post("/api/ExcelReport/GenerateFromZip", formData, {
+        timeout: 7200000,
+        responseType: "blob",
+        onUploadProgress:
+          onUploadProgress ||
+          (() => {
+            // noop
+          }),
+      });
+    } catch (error) {
+      throw error;
+    }
+  },
 }
 
 

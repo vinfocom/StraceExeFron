@@ -43,12 +43,14 @@ const MAP_COLOR_PRESETS = [
 
 const DEFAULT_LEGEND_SIZE = {
   width: 280,
-  height: 320,
+  height: 220,
 };
 
 const LEGEND_VIEWPORT_MARGIN = 16;
 const DEFAULT_LEGEND_TOP = 140;
 const COLLAPSED_LEGEND_HEIGHT = 44;
+const MIN_LEGEND_WIDTH = 240;
+const MIN_LEGEND_HEIGHT = 180;
 
 const isWifiLogRow = (log) => {
   const type = String(
@@ -343,7 +345,7 @@ const ColorSchemeLegend = ({ colorBy, logs, activeFilter, onFilterChange }) => {
 
   return (
     <div className="flex flex-col">
-      <div className="max-h-64 overflow-y-auto space-y-0.5 pr-1 custom-scrollbar">
+      <div className="max-h-64 overflow-y-auto space-y-px custom-scrollbar">
         {usedEntries.map(([key, color]) => {
           const isActive = hasLegendFilter(activeFilter, {
             type: "category",
@@ -446,7 +448,7 @@ const TacLegend = ({ logs, activeFilter, onFilterChange }) => {
 
     return (
       <div className="flex flex-col">
-        <div className="max-h-64 overflow-y-auto space-y-0.5 pr-1 custom-scrollbar">
+        <div className="max-h-64 overflow-y-auto space-y-px custom-scrollbar">
           {stats.sorted.map(({ label, count, color }) => {
             const isActive = hasLegendFilter(activeFilter, {
               type: "tac",
@@ -519,7 +521,7 @@ const PciLegend = ({ logs, activeFilter, onFilterChange }) => {
 
   return (
     <div className="flex flex-col">
-      <div className="max-h-64 overflow-y-auto space-y-0.5 pr-1 custom-scrollbar">
+      <div className="max-h-64 overflow-y-auto space-y-px custom-scrollbar">
         {pciStats.allPcis.map(([pci, count]) => {
           const isActive = hasLegendFilter(activeFilter, {
             type: "pci",
@@ -669,7 +671,7 @@ const MetricThresholdLegend = ({
 
   return (
     <div className="flex flex-col">
-      <div className="max-h-64 overflow-y-auto space-y-0.5 pr-1 custom-scrollbar">
+      <div className="max-h-64 overflow-y-auto space-y-px custom-scrollbar">
         {usedThresholds.map((t) => {
           const id = `metric-${t.min}-${t.max}`;
           const isActive = hasLegendFilter(activeFilter, {
@@ -766,7 +768,7 @@ const LegendRow = ({
   return (
     <div
       onClick={onClick}
-      className={`flex items-center gap-3 py-1.5 px-1 rounded transition-all cursor-pointer border border-transparent
+      className={`flex items-center gap-2 py-1 px-0.5 rounded transition-all cursor-pointer border border-transparent
         ${isActive ? "bg-white/10 border-white/20" : "hover:bg-white/5"}
         ${isDimmed ? "opacity-30 hover:opacity-50" : "opacity-100"}
       `}
@@ -794,7 +796,7 @@ const LegendRow = ({
         />
       )}
       <span className="text-[11px] text-white flex-1 truncate">{label}</span>
-      <span className="text-sm tabular-nums text-white min-w-[96px] text-right">
+      <span className="text-[11px] tabular-nums text-white min-w-[84px] text-right">
         {safeCount.toLocaleString()}
         {percentage !== null ? ` (${percentage.toFixed(1)}%)` : ""}
       </span>
@@ -802,14 +804,13 @@ const LegendRow = ({
   );
 };
 
-// ✅ Reusable Legend Footer Component
 const LegendFooter = ({
   total,
   uniqueCount,
   invalidCount,
   invalidLabel = "No PCI",
 }) => (
-  <div className="pt-2 mt-2 border-t border-gray-700/50 space-y-1 px-1">
+  <div className="mt-1.5 border-t border-gray-700/50 px-0.5 pt-1.5 space-y-0.5">
     {uniqueCount !== undefined && (
       <div className="flex justify-between">
         <span className="text-[10px] text-gray-500">Unique</span>
@@ -847,6 +848,9 @@ export default function MapLegend({
 }) {
   const { openSettings: openSettingsDialog } = useSettingsDialog();
   const containerRef = useRef(null);
+  const headerRef = useRef(null);
+  const bodyRef = useRef(null);
+  const hasManualResizeRef = useRef(false);
   const [collapsed, setCollapsed] = useState(false);
   const [legendSize, setLegendSize] = useState(DEFAULT_LEGEND_SIZE);
   const [legendPosition, setLegendPosition] = useState(() =>
@@ -860,9 +864,7 @@ export default function MapLegend({
     [collapsed, legendSize],
   );
 
-  // Measure the legend's own positioning container rather than the browser
-  // window — inside Multi Map each panel is only part of the window, so
-  // window-based positioning pushes the legend outside the panel.
+ 
   const getContainerBounds = useCallback(() => {
     const el = containerRef.current;
     if (el) {
@@ -906,6 +908,16 @@ export default function MapLegend({
     observer.observe(el);
     return () => observer.disconnect();
   }, [clampCurrentPosition]);
+
+  const containerBounds = getContainerBounds();
+  const maxLegendWidth = Math.max(
+    MIN_LEGEND_WIDTH,
+    containerBounds.width - LEGEND_VIEWPORT_MARGIN * 2,
+  );
+  const maxLegendHeight = Math.max(
+    collapsed ? COLLAPSED_LEGEND_HEIGHT : MIN_LEGEND_HEIGHT,
+    containerBounds.height - LEGEND_VIEWPORT_MARGIN * 2,
+  );
 
   // Clear filter button if active
   const clearFilter = (e) => {
@@ -1020,6 +1032,22 @@ export default function MapLegend({
     };
   }, [colorBy, selectedMetric, thresholds, logs, activeFilter, onFilterChange]);
 
+  useLayoutEffect(() => {
+    if (collapsed || hasManualResizeRef.current) return;
+
+    const headerHeight = headerRef.current?.offsetHeight || 0;
+    const bodyHeight = bodyRef.current?.scrollHeight || 0;
+    const nextHeight = Math.max(
+      MIN_LEGEND_HEIGHT,
+      Math.min(maxLegendHeight, Math.ceil(headerHeight + bodyHeight + 8)),
+    );
+
+    setLegendSize((prev) => {
+      if (Math.abs((Number(prev.height) || 0) - nextHeight) < 1) return prev;
+      return { ...prev, height: nextHeight };
+    });
+  }, [collapsed, content, maxLegendHeight, title]);
+
   if (!content) return null;
 
   return (
@@ -1039,25 +1067,27 @@ export default function MapLegend({
           position={legendPosition}
           size={
             collapsed
-              ? { width: legendSize.width, height: "auto" }
-              : { width: legendSize.width, height: "auto" }
+              ? { width: legendSize.width, height: COLLAPSED_LEGEND_HEIGHT }
+              : { width: legendSize.width, height: legendSize.height }
           }
-          minWidth={240}
-          minHeight={collapsed ? COLLAPSED_LEGEND_HEIGHT : 0}
+          minWidth={MIN_LEGEND_WIDTH}
+          maxWidth={maxLegendWidth}
+          minHeight={collapsed ? COLLAPSED_LEGEND_HEIGHT : MIN_LEGEND_HEIGHT}
+          maxHeight={maxLegendHeight}
           bounds="parent"
           dragHandleClassName="map-legend-drag-handle"
           enableResizing={
             collapsed
               ? false
               : {
-                  top: false,
+                  top: true,
                   right: true,
-                  bottom: false,
+                  bottom: true,
                   left: true,
-                  topRight: false,
-                  bottomRight: false,
-                  bottomLeft: false,
-                  topLeft: false,
+                  topRight: true,
+                  bottomRight: true,
+                  bottomLeft: true,
+                  topLeft: true,
                 }
           }
           onDragStop={(event, data) => {
@@ -1070,9 +1100,10 @@ export default function MapLegend({
             );
           }}
           onResize={(event, direction, ref, delta, position) => {
+            hasManualResizeRef.current = true;
             const nextSize = {
               width: ref.offsetWidth,
-              height: legendSize.height,
+              height: ref.offsetHeight,
             };
             setLegendSize(nextSize);
             setLegendPosition(
@@ -1080,9 +1111,10 @@ export default function MapLegend({
             );
           }}
           onResizeStop={(event, direction, ref, delta, position) => {
+            hasManualResizeRef.current = true;
             const nextSize = {
               width: ref.offsetWidth,
-              height: legendSize.height,
+              height: ref.offsetHeight,
             };
             setLegendSize(nextSize);
             setLegendPosition(
@@ -1091,25 +1123,75 @@ export default function MapLegend({
           }}
           className="pointer-events-auto"
           resizeHandleStyles={{
-            bottomRight: {
-              bottom: "3px",
-              right: "3px",
+            top: {
+              top: "-3px",
+              left: "10px",
+              right: "10px",
+              height: "8px",
+              cursor: "ns-resize",
+            },
+            right: {
+              top: "10px",
+              right: "-3px",
+              bottom: "10px",
+              width: "8px",
+              cursor: "ew-resize",
+            },
+            bottom: {
+              left: "10px",
+              right: "10px",
+              bottom: "-3px",
+              height: "8px",
+              cursor: "ns-resize",
+            },
+            left: {
+              top: "10px",
+              left: "-3px",
+              bottom: "10px",
+              width: "8px",
+              cursor: "ew-resize",
+            },
+            topLeft: {
+              top: "-3px",
+              left: "-3px",
               width: "12px",
               height: "12px",
               cursor: "nwse-resize",
             },
+            topRight: {
+              top: "-3px",
+              right: "-3px",
+              width: "12px",
+              height: "12px",
+              cursor: "nesw-resize",
+            },
+            bottomRight: {
+              bottom: "-3px",
+              right: "-3px",
+              width: "12px",
+              height: "12px",
+              cursor: "nwse-resize",
+            },
+            bottomLeft: {
+              bottom: "-3px",
+              left: "-3px",
+              width: "12px",
+              height: "12px",
+              cursor: "nesw-resize",
+            },
           }}
         >
           <div
-            className={`flex flex-col bg-gray-900/95 backdrop-blur-lg border border-gray-700/40 rounded-lg shadow-xl shadow-black/20 transition-all duration-200 ${
+            className={`flex h-full flex-col overflow-hidden bg-gray-900/95 backdrop-blur-lg border border-gray-700/40 rounded-lg shadow-xl shadow-black/20 transition-all duration-200 ${
               collapsed ? "" : "min-w-[240px]"
             }`}
           >
             <button
+              ref={headerRef}
               onClick={() => setCollapsed(!collapsed)}
-              className="map-legend-drag-handle w-full px-3 py-2.5 flex items-center justify-between gap-3 hover:bg-white/5 rounded-lg transition-colors group cursor-move select-none"
+            className="map-legend-drag-handle w-full px-2 py-2 flex items-center justify-between gap-2 hover:bg-white/5 rounded-lg transition-colors group cursor-move select-none"
             >
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-1.5">
                 <Layers className="w-4 h-4 text-gray-400" />
                 <span className="text-sm font-medium text-gray-100">{title}</span>
                 {activeFilter && (
@@ -1117,7 +1199,7 @@ export default function MapLegend({
                 )}
               </div>
 
-              <div className="flex items-center gap-1">
+              <div className="flex items-center gap-0.5">
                 <div
                   onClick={openSettings}
                   className="p-1 hover:bg-white/10 rounded text-gray-400 hover:text-white"
@@ -1143,8 +1225,13 @@ export default function MapLegend({
             </button>
 
             {!collapsed && (
-              <div className="px-2 pb-2">
-                <div className="flex flex-col pt-1 border-t border-gray-700/40">{content}</div>
+              <div className="flex-1 overflow-hidden px-1.5 pb-1.5">
+                <div
+                  ref={bodyRef}
+                  className="flex h-full flex-col overflow-y-auto border-t border-gray-700/40 pt-0.5 custom-scrollbar"
+                >
+                  {content}
+                </div>
               </div>
             )}
           </div>
