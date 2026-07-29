@@ -53,6 +53,32 @@ const LTE_RECOMMENDATION_OPTIMIZED_DEFAULTS = Object.freeze({
   max_interference_sites: 10,
 });
 
+const normalizeLteRegion = (value) => {
+  const raw = String(value || "").trim().toLowerCase();
+  if (!raw) return "";
+  if (["tw", "twn", "taiwan"].includes(raw)) return "taiwan";
+  if (["in", "ind", "india"].includes(raw)) return "india";
+  return raw;
+};
+
+const normalizeCountryCode = (value) => {
+  const raw = String(value || "").trim().toUpperCase();
+  if (!raw) return "";
+  if (["TAIWAN", "TWN"].includes(raw)) return "TW";
+  if (["INDIA", "IND"].includes(raw)) return "IN";
+  return raw;
+};
+
+const getLteRegionFromParams = (params = {}) =>
+  normalizeLteRegion(params.region || params.country_code || params.countryCode);
+
+const addLteCountryContext = (payload, params = {}) => {
+  const region = getLteRegionFromParams(params);
+  const countryCode = normalizeCountryCode(params.country_code || params.countryCode || params.region);
+  if (region) payload.region = region;
+  if (countryCode) payload.country_code = countryCode;
+};
+
 const triggerBrowserDownload = (blob, filename) => {
   const blobUrl = window.URL.createObjectURL(blob);
   const link = document.createElement("a");
@@ -592,6 +618,7 @@ export const predictionApi = {
         radius_m: params.radius_m ?? 5000.0,
         building: params.building ?? true
       };
+      addLteCountryContext(payload, params);
 
       const operatorValue = String(params.operator || "").trim();
       if (operatorValue && operatorValue.toLowerCase() !== "auto" && operatorValue.toLowerCase() !== "all") {
@@ -661,6 +688,7 @@ export const predictionApi = {
         operator: operatorValue,
         operators: operatorValue ? [operatorValue] : [],
       };
+      addLteCountryContext(payload, params);
       if (params.polygon_ids) {
         payload.polygon_ids = params.polygon_ids;
       }
@@ -722,7 +750,7 @@ export const predictionApi = {
 
       const payload = {
         project_id: params.project_id,
-        region: params.region || LTE_RECOMMENDATION_OPTIMIZED_DEFAULTS.region,
+        region: getLteRegionFromParams(params) || LTE_RECOMMENDATION_OPTIMIZED_DEFAULTS.region,
         radius,
         grid_resolution: gridResolution,
         n_workers: params.n_workers ?? LTE_RECOMMENDATION_OPTIMIZED_DEFAULTS.n_workers,
@@ -741,6 +769,7 @@ export const predictionApi = {
           params.max_interference_sites ??
           LTE_RECOMMENDATION_OPTIMIZED_DEFAULTS.max_interference_sites,
       };
+      addLteCountryContext(payload, params);
 
       if (operatorValue && operatorValue.toLowerCase() !== "all") {
         payload.operator = operatorValue;
@@ -790,7 +819,6 @@ export const predictionApi = {
         : [];
       const hasFile = params.threshold_file instanceof File;
       const optionalFieldKeys = [
-        "region",
         "rsrp_weight",
         "rsrq_weight",
         "sinr_weight",
@@ -819,6 +847,14 @@ export const predictionApi = {
       if (hasFile) {
         const formData = new FormData();
         formData.append("project_id", String(params.project_id));
+        const region = getLteRegionFromParams(params);
+        const countryCode = normalizeCountryCode(params.country_code || params.countryCode || params.region);
+        if (region) {
+          formData.append("region", region);
+        }
+        if (countryCode) {
+          formData.append("country_code", countryCode);
+        }
         if (operator && operator.toLowerCase() !== "all") {
           formData.append("operator", operator);
         }
@@ -867,6 +903,7 @@ export const predictionApi = {
       }
 
       const payload = { project_id: params.project_id };
+      addLteCountryContext(payload, params);
       if (operator && operator.toLowerCase() !== "all") {
         payload.operator = operator;
       }

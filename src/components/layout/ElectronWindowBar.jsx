@@ -237,6 +237,7 @@ const ElectronWindowBar = () => {
           onHoverOpen={() => activeMenu && setActiveMenu("Utility")}
           onActionClick={() => setActiveMenu(null)}
           actions={[
+            { label: "Add Site", onClick: () => emitUtilityAction("add-site") },
             { label: "Opacity", onClick: () => emitUtilityAction("opacity") },
             { label: "Log Radius", onClick: () => emitUtilityAction("log-radius") },
             { label: "Secondary Radius", onClick: () => emitUtilityAction("neighbor-radius") },

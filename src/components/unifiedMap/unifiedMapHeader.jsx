@@ -864,6 +864,10 @@ function UnifiedHeader({
       }
       if (!isMapPage || !action) return;
 
+      if (action === "add-site") {
+        onAddSiteClick?.();
+        return;
+      }
       if (action === "opacity") {
         toggleQuickControl("opacity");
         return;
@@ -905,6 +909,7 @@ function UnifiedHeader({
   }, [
     isMapPage,
     neighborLogsAvailable,
+    onAddSiteClick,
     onSettingsSaved,
     onMapSnapshot,
     openSettings,

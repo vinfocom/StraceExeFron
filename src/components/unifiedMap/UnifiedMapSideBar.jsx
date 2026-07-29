@@ -44,6 +44,21 @@ const LTE_RECOMMENDATION_OPTIMIZED_DEFAULTS = Object.freeze({
   maxNeighborsPerUpdateCell: 2,
 });
 
+const normalizeLteCountryCode = (value) => {
+  const raw = String(value || "").trim().toUpperCase();
+  if (!raw) return "";
+  if (["TAIWAN", "TWN"].includes(raw)) return "TW";
+  if (["INDIA", "IND"].includes(raw)) return "IN";
+  return raw;
+};
+
+const getLteRegionFromCountryCode = (value) => {
+  const normalized = normalizeLteCountryCode(value);
+  if (normalized === "TW") return "taiwan";
+  if (normalized === "IN") return "india";
+  return "";
+};
+
 const Checkbox = memo(
   ({ checked, onChange, disabled = false, className = "" }) => (
     <button
@@ -623,6 +638,21 @@ const UnifiedMapSidebar = ({
   getCachedNetworkLogsForPrediction,
 }) => {
   const { user, refreshUser } = useAuth();
+  const lteCountryCode = useMemo(
+    () =>
+      normalizeLteCountryCode(
+        user?.country_code ??
+        user?.countryCode ??
+        user?.country ??
+        user?.source_db ??
+        user?.sourceDb,
+      ),
+    [user],
+  );
+  const lteRegion = useMemo(
+    () => getLteRegionFromCountryCode(lteCountryCode),
+    [lteCountryCode],
+  );
   const [storedGridScenarioMenuOpen, setStoredGridScenarioMenuOpen] = useState(false);
   const [showCurrentViewInfo, setShowCurrentViewInfo] = useState(false);
   const [sidebarWidth, setSidebarWidth] = useState(340);
@@ -1603,7 +1633,8 @@ const UnifiedMapSidebar = ({
       try {
         const response = await predictionApi.runLteRecommendationOptimisedPrediction({
           project_id: numericProjectId,
-          region: "india",
+          region: lteRegion || undefined,
+          country_code: lteCountryCode || undefined,
           operator: String(lteTiltRecommendationOperator || "").trim() || LTE_RECOMMENDATION_OPTIMIZED_DEFAULTS.operator,
           recommendation_scenario_id: options.recommendationScenarioId,
           radius: runRadiusMeters,
@@ -1670,6 +1701,8 @@ const UnifiedMapSidebar = ({
       lteTiltRecommendationOperator,
       lteTiltRecommendationRadiusMeters,
       lteTiltRecommendationGridResolutionMeters,
+      lteRegion,
+      lteCountryCode,
       stopLteOptimisedPredictionMonitoring,
       pollLteOptimisedPredictionStatus,
       activePolygonIdsParam,
@@ -1992,6 +2025,8 @@ const UnifiedMapSidebar = ({
       const response = await predictionApi.runLtePrediction({
         user_id: Number(user?.id) || 0,
         project_id: numericProjectId,
+        region: lteRegion || undefined,
+        country_code: lteCountryCode || undefined,
         session_ids: validSessionIds,
         grid_resolution_m: Number(lteGridSizeMeters) || 25,
         radius_m: Number(ltePredictionRadiusMeters) || 500,
@@ -2058,6 +2093,8 @@ const UnifiedMapSidebar = ({
     ltePredictionRadiusMeters,
     ltePredictionUseBuildings,
     ltePredictionOperator,
+    lteRegion,
+    lteCountryCode,
     resolveNetworkLogsForPython,
     stopLtePredictionMonitoring,
     pollLtePredictionStatus,
@@ -2102,6 +2139,8 @@ const UnifiedMapSidebar = ({
       const response = await predictionApi.runLteOptimisedPrediction({
         user_id: Number(user?.id) || 0,
         project_id: numericProjectId,
+        region: lteRegion || undefined,
+        country_code: lteCountryCode || undefined,
         grid_resolution: Number(lteGridSizeMeters) || 25,
         radius: Number(ltePredictionRadiusMeters) || 5000,
         operator: effectiveOperators.length > 0 ? effectiveOperators.join(",") : "all",
@@ -2171,6 +2210,8 @@ const UnifiedMapSidebar = ({
     lteOptimisedSelectedOperators,
     lteOptimisedOperatorOptions,
     sitePredictionScenarioId,
+    lteRegion,
+    lteCountryCode,
     stopLteOptimisedPredictionMonitoring,
     pollLteOptimisedPredictionStatus,
     activePolygonIdsParam,
@@ -2204,6 +2245,8 @@ const UnifiedMapSidebar = ({
     try {
       const response = await predictionApi.runLteTiltRecommendation({
         project_id: numericProjectId,
+        region: lteRegion || undefined,
+        country_code: lteCountryCode || undefined,
         session_ids: validSessionIds,
         operator: lteTiltRecommendationOperator,
         rsrp: lteTiltRecommendationRsrp,
@@ -2299,6 +2342,8 @@ const UnifiedMapSidebar = ({
     lteTiltRecommendationRadiusMeters,
     lteTiltRecommendationGridResolutionMeters,
     lteTiltRecommendationFile,
+    lteRegion,
+    lteCountryCode,
     stopLteTiltRecommendationMonitoring,
     pollLteTiltRecommendationStatus,
   ]);
