@@ -718,11 +718,11 @@ const UnifiedMapSidebar = ({
 
   // Draft for the "Log Grid Size" control. The slider edits this draft; the grid
   // only recomputes (and the value persists to the DB) when the user hits Save.
-  const appliedLogGridSize = Number(logSizeMeters) || Number(gridSizeMeters) || 25;
+  const appliedLogGridSize = Number(logSizeMeters) || 25;
   const [logGridDraft, setLogGridDraft] = useState(appliedLogGridSize);
   useEffect(() => {
-    setLogGridDraft(Number(logSizeMeters) || Number(gridSizeMeters) || 25);
-  }, [logSizeMeters, gridSizeMeters]);
+    setLogGridDraft(Number(logSizeMeters) || 25);
+  }, [logSizeMeters]);
   const logGridDirty = Math.round(Number(logGridDraft) || 0) !== Math.round(appliedLogGridSize);
   const normalizedLteGridAggregationMethod =
     lteGridAggregationMethod === "avg" ? "median" : lteGridAggregationMethod || "median";
@@ -2530,8 +2530,8 @@ const UnifiedMapSidebar = ({
                             color="cyan"
                           />
                           <InfoBadge
-                            label="Grid Size"
-                            value={`${Number(gridSizeMeters) || 25}m`}
+                            label="Log Size"
+                            value={`${Number(logSizeMeters) || 25}m`}
                             color="teal"
                           />
                         </div>

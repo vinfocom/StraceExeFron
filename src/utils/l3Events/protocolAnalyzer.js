@@ -448,6 +448,20 @@ function timeMs(item) {
   return item?.timestamp instanceof Date ? item.timestamp.getTime() : null;
 }
 
+function timeOfDayMsFromDate(date) {
+  if (!(date instanceof Date)) return null;
+  return (
+    date.getUTCHours() * 60 * 60 * 1000
+    + date.getUTCMinutes() * 60 * 1000
+    + date.getUTCSeconds() * 1000
+    + date.getUTCMilliseconds()
+  );
+}
+
+function formatRsrp(value) {
+  return typeof value === "number" && Number.isFinite(value) ? `${value.toFixed(1).replace(/\.0$/, "")} dBm` : "";
+}
+
 function sortTimeline(timeline = []) {
   return timeline
     .map((item, order) => ({ ...item, __analysisOrder: order }))
@@ -610,6 +624,11 @@ function createProcedure(definition, item, idNumber, callId) {
     tac: "",
     plmn: "",
     bandwidth: "",
+    rsrp: "",
+    rsrpValue: null,
+    rsrpSummary: "",
+    rsrpSampleCount: 0,
+    rsrpMatchedAt: "",
     color: COLOR_BY_PROTOCOL[protocol] || "blue",
     flowModel: getFlowModel(definition.flowModelId),
   };
@@ -819,7 +838,76 @@ function collectColumns(procedures) {
   return columns;
 }
 
-export function buildProtocolAnalysis(timeline = []) {
+function summarizeRsrp(samples = []) {
+  const values = samples.map((sample) => sample.rsrp).filter((value) => typeof value === "number" && Number.isFinite(value));
+  if (!values.length) return null;
+  const avg = values.reduce((sum, value) => sum + value, 0) / values.length;
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  return {
+    value: avg,
+    label: values.length === 1
+      ? formatRsrp(avg)
+      : `${formatRsrp(avg)} avg (${formatRsrp(min)} to ${formatRsrp(max)})`,
+    count: values.length,
+  };
+}
+
+function findNearestRsrpSample(targetMs, networkRows = []) {
+  if (targetMs === null || !networkRows.length) return null;
+  let best = null;
+  let bestDistance = Infinity;
+
+  for (const row of networkRows) {
+    if (row.timeOfDayMs === null || row.timeOfDayMs === undefined) continue;
+    const distance = Math.abs(row.timeOfDayMs - targetMs);
+    if (distance < bestDistance) {
+      best = row;
+      bestDistance = distance;
+    }
+  }
+
+  return best ? { sample: best, distanceMs: bestDistance } : null;
+}
+
+function annotateProceduresWithRsrp(procedures = [], networkRows = []) {
+  if (!networkRows.length) return procedures;
+  const orderedNetworkRows = [...networkRows].sort((left, right) => left.timeOfDayMs - right.timeOfDayMs);
+
+  procedures.forEach((procedure) => {
+    const startTod = timeOfDayMsFromDate(procedure.startTime);
+    const endTod = timeOfDayMsFromDate(procedure.endTime) ?? startTod;
+    if (startTod === null) return;
+
+    const inWindow = orderedNetworkRows.filter((row) => (
+      endTod >= startTod
+        ? row.timeOfDayMs >= startTod && row.timeOfDayMs <= endTod
+        : row.timeOfDayMs >= startTod || row.timeOfDayMs <= endTod
+    ));
+
+    const summary = summarizeRsrp(inWindow);
+    if (summary) {
+      procedure.rsrpValue = summary.value;
+      procedure.rsrp = summary.label;
+      procedure.rsrpSummary = summary.label;
+      procedure.rsrpSampleCount = summary.count;
+      procedure.rsrpMatchedAt = "Procedure window";
+      return;
+    }
+
+    const nearest = findNearestRsrpSample(startTod, orderedNetworkRows);
+    if (!nearest?.sample) return;
+    procedure.rsrpValue = nearest.sample.rsrp;
+    procedure.rsrp = `${formatRsrp(nearest.sample.rsrp)} nearest`;
+    procedure.rsrpSummary = `${formatRsrp(nearest.sample.rsrp)} nearest (${Math.round(nearest.distanceMs)} ms from start)`;
+    procedure.rsrpSampleCount = 1;
+    procedure.rsrpMatchedAt = nearest.sample.timestampLabel || "";
+  });
+
+  return procedures;
+}
+
+export function buildProtocolAnalysis(timeline = [], networkRows = []) {
   const ordered = sortTimeline(timeline);
   const membership = buildCallMembership(ordered);
   const completedCalls = membership.calls.filter((call) => call.status === "Connected").length;
@@ -856,6 +944,7 @@ export function buildProtocolAnalysis(timeline = []) {
   procedures.forEach(finalizeProcedure);
   correlateOrphanEvents(procedures, ordered.filter((item) => item.type === "event"), assignedIds);
   procedures.forEach(finalizeProcedure);
+  annotateProceduresWithRsrp(procedures, networkRows);
 
   return {
     procedures,
@@ -872,6 +961,7 @@ export function buildProtocolAnalysis(timeline = []) {
       droppedCalls,
       notConnectedCalls,
       failures: procedures.filter((procedure) => procedure.result === "Failure").length,
+      rsrpProcedures: procedures.filter((procedure) => procedure.rsrp).length,
       technologies: Array.from(new Set(procedures.map((procedure) => procedure.technology))).filter(Boolean),
     },
     formatDuration,

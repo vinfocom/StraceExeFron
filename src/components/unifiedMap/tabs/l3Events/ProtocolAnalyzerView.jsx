@@ -104,6 +104,10 @@ function buildCombinedProcedure(procedures) {
     band: firstTruthy(procedures, "band"),
     tac: firstTruthy(procedures, "tac"),
     plmn: firstTruthy(procedures, "plmn"),
+    rsrp: firstTruthy(procedures, "rsrp"),
+    rsrpSummary: firstTruthy(procedures, "rsrpSummary"),
+    rsrpSampleCount: firstTruthy(procedures, "rsrpSampleCount"),
+    rsrpMatchedAt: firstTruthy(procedures, "rsrpMatchedAt"),
     flowModel: single?.flowModel || null,
     color: "gray",
   };
@@ -210,6 +214,11 @@ function ProcedureTree({ procedures, selectedProcedureId, onSelect, query, setQu
                   <span className={`text-[10px] px-1.5 py-0.5 rounded border ${RESULT_CLASS[procedure.result] || RESULT_CLASS.Ongoing}`}>
                     {procedure.result}
                   </span>
+                  {procedure.rsrp && (
+                    <span className="text-[10px] px-1.5 py-0.5 rounded border border-cyan-500/30 bg-cyan-500/10 text-cyan-200">
+                      RSRP {procedure.rsrp}
+                    </span>
+                  )}
                 </div>
                 <div className="mt-2 grid grid-cols-2 gap-1 text-[10px] text-slate-400">
                   <span>{formatTime(procedure.startTime)}</span>
@@ -235,6 +244,7 @@ function ProcedureSummary({ procedure }) {
     ["Target Cell", procedure.targetCell || "N/A"],
     ["PCI", procedure.pci || "N/A"],
     ["EARFCN", procedure.earfcn || "N/A"],
+    ["RSRP", procedure.rsrp || "N/A"],
     ["Technology", procedure.technology || "N/A"],
   ];
 
@@ -559,6 +569,8 @@ function MessageDetails({ procedure, message }) {
             ["Band", procedure.band || "N/A"],
             ["TAC", procedure.tac || "N/A"],
             ["PLMN", procedure.plmn || "N/A"],
+            ["RSRP", procedure.rsrpSummary || procedure.rsrp || "N/A"],
+            ["RSRP Match", procedure.rsrpMatchedAt || "N/A"],
           ]}
         />
 
@@ -649,6 +661,7 @@ function AnalyzerStats({ analysis }) {
     ["Dropped", analysis.stats.droppedCalls || 0, AlertTriangle],
     ["Not Connected", analysis.stats.notConnectedCalls || 0, Phone],
     ["Failures", analysis.stats.failures, AlertTriangle],
+    ["RSRP Matched", analysis.stats.rsrpProcedures || 0, Radio],
     ["RRC State", state.rrc || "RRC_IDLE", Activity],
     ["NAS State", state.nas || "NAS Deregistered", CheckCircle2],
     ["IMS State", state.ims || "IMS Unregistered", CheckCircle2],

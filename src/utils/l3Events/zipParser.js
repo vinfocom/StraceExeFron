@@ -1,6 +1,7 @@
-// Extracts L3 signaling and Event data from uploaded CSV files, ZIP archives,
-// or Excel workbooks. CSV/ZIP modes match file names containing "L3" / "Event".
-// Excel mode matches worksheet names containing "L3" / "Event".
+// Extracts L3 signaling, Event data, and NetworkLog KPI data from uploaded CSV
+// files, ZIP archives, or Excel workbooks. CSV/ZIP modes match file names
+// containing "L3" / "Event" / "NetworkLog". Excel mode matches worksheet names
+// containing those same names.
 
 let jsZipModulePromise = null;
 const loadJSZip = async () => {
@@ -23,6 +24,7 @@ const isZip = (name) => /\.zip$/i.test(name);
 const isExcel = (name) => /\.xlsx$/i.test(name);
 const isL3File = (name) => /l3/i.test(name);
 const isEventFile = (name) => /event/i.test(name);
+const isNetworkLogFile = (name) => /network\W*log/i.test(name);
 
 const cellToString = (cellValue) => {
   if (cellValue == null) return "";
@@ -72,6 +74,7 @@ async function extractFromZip(zipFile) {
 
   const l3Files = [];
   const eventFiles = [];
+  const networkLogFiles = [];
 
   const entries = Object.values(zip.files).filter((entry) => !entry.dir && isCsv(entry.name));
 
@@ -79,14 +82,16 @@ async function extractFromZip(zipFile) {
     const baseName = entry.name.split("/").pop() || entry.name;
     const matchesL3 = isL3File(baseName);
     const matchesEvent = isEventFile(baseName);
-    if (!matchesL3 && !matchesEvent) continue;
+    const matchesNetworkLog = isNetworkLogFile(baseName);
+    if (!matchesL3 && !matchesEvent && !matchesNetworkLog) continue;
 
     const text = await entry.async("string");
     if (matchesL3) l3Files.push({ name: entry.name, text });
     if (matchesEvent) eventFiles.push({ name: entry.name, text });
+    if (matchesNetworkLog) networkLogFiles.push({ name: entry.name, text });
   }
 
-  return { l3Files, eventFiles };
+  return { l3Files, eventFiles, networkLogFiles };
 }
 
 async function extractFromCsv(csvFile) {
@@ -97,6 +102,7 @@ async function extractFromCsv(csvFile) {
   return {
     l3Files: isL3File(fileName) ? [fileRecord] : [],
     eventFiles: isEventFile(fileName) ? [fileRecord] : [],
+    networkLogFiles: isNetworkLogFile(fileName) ? [fileRecord] : [],
   };
 }
 
@@ -108,12 +114,14 @@ async function extractFromExcel(workbookFile) {
 
   const l3Files = [];
   const eventFiles = [];
+  const networkLogFiles = [];
 
   for (const worksheet of workbook.worksheets) {
     const sheetName = worksheet.name || "Sheet";
     const matchesL3 = isL3File(sheetName);
     const matchesEvent = isEventFile(sheetName);
-    if (!matchesL3 && !matchesEvent) continue;
+    const matchesNetworkLog = isNetworkLogFile(sheetName);
+    if (!matchesL3 && !matchesEvent && !matchesNetworkLog) continue;
 
     const text = worksheetToCsvText(worksheet);
     if (!text) continue;
@@ -121,9 +129,10 @@ async function extractFromExcel(workbookFile) {
     const fileRecord = { name: `${sheetName}.csv`, text };
     if (matchesL3) l3Files.push(fileRecord);
     if (matchesEvent) eventFiles.push(fileRecord);
+    if (matchesNetworkLog) networkLogFiles.push(fileRecord);
   }
 
-  return { l3Files, eventFiles };
+  return { l3Files, eventFiles, networkLogFiles };
 }
 
 export async function extractL3AndEventFiles(zipFile) {

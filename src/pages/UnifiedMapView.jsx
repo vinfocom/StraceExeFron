@@ -2347,12 +2347,11 @@ const UnifiedMapView = () => {
       passedProject?.log_grid ??
       passedProject?.logGrid ??
       passedProject?.LogGrid ??
-      passedProject?.LogGridSize ??
-      projectAreaGridSizeMeters;
+      passedProject?.LogGridSize;
     const parsed = Number(raw);
     if (!Number.isFinite(parsed) || parsed <= 0) return null;
     return Math.max(5, Math.round(parsed));
-  }, [project, passedProject, projectAreaGridSizeMeters]);
+  }, [project, passedProject]);
 
   useEffect(() => {
     setSiteLegendFilter(null);
@@ -2747,19 +2746,18 @@ const UnifiedMapView = () => {
   }, [enableGrid, canEnableUnifiedGridView]);
 
   // Default to grid view (logs rendered as grid cells) when the project has
-  // filtering polygons and a grid size already stored in the DB (grid_size).
+  // filtering polygons and a saved log grid size already stored in the DB.
   // Only applied once per project so a user's manual toggle afterwards sticks.
   useEffect(() => {
     if (!projectId) return;
     if (gridViewDefaultAppliedForProjectRef.current === projectId) return;
     if (!canEnableUnifiedGridView) return;
-    if (!Number.isFinite(projectAreaGridSizeMeters) || projectAreaGridSizeMeters <= 0) {
-      return;
-    }
 
     gridViewDefaultAppliedForProjectRef.current = projectId;
-    setEnableGrid(true);
-  }, [projectId, canEnableUnifiedGridView, projectAreaGridSizeMeters]);
+    setEnableGrid(
+      Number.isFinite(projectLogGridSizeMeters) && projectLogGridSizeMeters > 0,
+    );
+  }, [projectId, canEnableUnifiedGridView, projectLogGridSizeMeters]);
 
   const shouldFetchSamples =
     isSampleMode && sessionIds.length > 0;

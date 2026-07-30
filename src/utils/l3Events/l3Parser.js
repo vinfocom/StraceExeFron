@@ -1,7 +1,7 @@
 import { parseCSV, getField, findColumn } from "./csvParser.js";
 
 const TIMESTAMP_PATTERNS = ["timestamp", "time stamp", "datetime", "date time", "time", "date"];
-const LAYER_PATTERNS = ["layer", "protocol", "stack", "channel"];
+const LAYER_PATTERNS = ["category", "layer", "protocol", "stack", "channel"];
 const MESSAGE_PATTERNS = [
   "message name",
   "messagename",

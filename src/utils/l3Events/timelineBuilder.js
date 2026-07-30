@@ -58,6 +58,7 @@ function buildItem(row, type, decoded) {
     timestampLabel: row.timestamp || formatTimelineTimestamp(date),
     type,
     category: decoded.category,
+    sourceCategory: type === "l3" ? row.layer : row.category,
     domain: decoded.domain,
     title: decoded.title,
     icon: decoded.icon,

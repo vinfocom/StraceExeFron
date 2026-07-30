@@ -1,10 +1,12 @@
 // src/components/unifiedMap/TechHandoverMarkers.jsx
 import React, { useMemo, memo, useState, useCallback, useEffect, useRef } from "react";
-import { OverlayView, Polyline } from "@react-google-maps/api";
+import { MarkerClusterer } from "@googlemaps/markerclusterer";
+import { OverlayView, Polyline, useGoogleMap } from "@react-google-maps/api";
 import { ArrowRightLeft, Zap, Download } from "lucide-react";
 import { COLOR_SCHEMES, normalizeTechName, getBandColor } from "@/utils/colorUtils";
 
 const HANDOVER_POLYLINE_REGISTRY_KEY = "__stracer_handover_polylines__";
+const DEFAULT_CLUSTER_THRESHOLD = 80;
 
 const getPolylineRegistry = () => {
   if (typeof window === "undefined") return new Map();
@@ -48,6 +50,29 @@ const getColor = (value, type) => {
     const normalized = normalizeTechName(value);
     return COLOR_SCHEMES.technology[normalized] ?? COLOR_SCHEMES.technology.Unknown;
   }
+};
+
+const getMarkerColor = (transition, type) => {
+  if (type !== "technology") return type === "band" ? "#16A34A" : "#2563EB";
+  const handoverType = getHandoverType(transition?.from, transition?.to, type);
+  if (handoverType === "upgrade") return "#10B981";
+  if (handoverType === "downgrade") return "#EF4444";
+  return "#3B82F6";
+};
+
+const createMarkerIcon = (color, label) => {
+  const safeLabel = String(label || "").slice(0, 1).toUpperCase();
+  const svg = `
+    <svg xmlns="http://www.w3.org/2000/svg" width="34" height="34" viewBox="0 0 34 34">
+      <circle cx="17" cy="17" r="13" fill="${color}" stroke="white" stroke-width="3"/>
+      <text x="17" y="21" text-anchor="middle" font-size="12" font-family="Arial, sans-serif" font-weight="700" fill="white">${safeLabel}</text>
+    </svg>
+  `;
+  return {
+    url: `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`,
+    scaledSize: new window.google.maps.Size(34, 34),
+    anchor: new window.google.maps.Point(17, 17),
+  };
 };
 
 // ... (Keep downloadCSVFunc and DownloadButton unchanged) ...
@@ -334,6 +359,56 @@ const CompactHandoverMarker = memo(({ transition, onClick, isSelected, type }) =
 });
 CompactHandoverMarker.displayName = "CompactHandoverMarker";
 
+const HandoverClusterLayer = memo(({ transitions = [], type, onClick }) => {
+  const map = useGoogleMap();
+  const clustererRef = useRef(null);
+  const markersRef = useRef([]);
+  const listenersRef = useRef([]);
+
+  useEffect(() => {
+    if (!map || !window.google?.maps || !transitions.length) return undefined;
+
+    clustererRef.current?.clearMarkers?.();
+    listenersRef.current.forEach((listener) => listener?.remove?.());
+    markersRef.current.forEach((marker) => marker?.setMap?.(null));
+    listenersRef.current = [];
+    markersRef.current = [];
+
+    const label = type === "technology" ? "T" : type === "band" ? "B" : "P";
+    const markers = transitions
+      .map((transition) => {
+        const lat = Number(transition?._renderLat ?? transition?.lat);
+        const lng = Number(transition?._renderLng ?? transition?.lng);
+        if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+
+        const marker = new window.google.maps.Marker({
+          position: { lat, lng },
+          title: `${type} change: ${transition?.from ?? ""} -> ${transition?.to ?? ""}`,
+          icon: createMarkerIcon(getMarkerColor(transition, type), label),
+          optimized: true,
+        });
+        listenersRef.current.push(marker.addListener("click", () => onClick?.(transition)));
+        return marker;
+      })
+      .filter(Boolean);
+
+    markersRef.current = markers;
+    clustererRef.current = new MarkerClusterer({ markers, map });
+
+    return () => {
+      clustererRef.current?.clearMarkers?.();
+      listenersRef.current.forEach((listener) => listener?.remove?.());
+      markersRef.current.forEach((marker) => marker?.setMap?.(null));
+      clustererRef.current = null;
+      listenersRef.current = [];
+      markersRef.current = [];
+    };
+  }, [map, onClick, transitions, type]);
+
+  return null;
+});
+HandoverClusterLayer.displayName = "HandoverClusterLayer";
+
 const HandoverPopup = memo(({ transition, onClose, type }) => {
   if (!transition) return null;
   const { from, to, lat, lng, timestamp, session_id, atIndex } = transition;
@@ -383,7 +458,16 @@ const HandoverPopup = memo(({ transition, onClose, type }) => {
 HandoverPopup.displayName = "HandoverPopup";
 
 // Main Component
-const TechHandoverMarkers = ({ transitions = [], show = false, compactMode = false, showConnections = true, type = 'technology', onTransitionClick }) => {
+const TechHandoverMarkers = ({
+  transitions = [],
+  show = false,
+  compactMode = false,
+  showConnections = true,
+  type = 'technology',
+  onTransitionClick,
+  enableClustering = true,
+  clusterThreshold = DEFAULT_CLUSTER_THRESHOLD,
+}) => {
   const [selectedTransition, setSelectedTransition] = useState(null);
   const connectionRefs = useRef(new Set());
   const sortedTransitions = useMemo(
@@ -394,8 +478,12 @@ const TechHandoverMarkers = ({ transitions = [], show = false, compactMode = fal
     () => spreadOverlappingTransitions(sortedTransitions),
     [sortedTransitions],
   );
-  const handleMarkerClick = (transition) => { setSelectedTransition(transition); onTransitionClick?.(transition); };
-  const handlePopupClose = () => setSelectedTransition(null);
+  const shouldCluster = enableClustering && renderedTransitions.length > clusterThreshold;
+  const handleMarkerClick = useCallback((transition) => {
+    setSelectedTransition(transition);
+    onTransitionClick?.(transition);
+  }, [onTransitionClick]);
+  const handlePopupClose = useCallback(() => setSelectedTransition(null), []);
 
   const clearConnectionPolylines = useCallback(() => {
     connectionRefs.current.forEach((polyline) => {
@@ -484,7 +572,14 @@ const TechHandoverMarkers = ({ transitions = [], show = false, compactMode = fal
 
   return (
     <>
-      {showConnections && connectionPaths.map((c) => (
+      {shouldCluster && (
+        <HandoverClusterLayer
+          transitions={renderedTransitions}
+          type={type}
+          onClick={handleMarkerClick}
+        />
+      )}
+      {!shouldCluster && showConnections && connectionPaths.map((c) => (
         <Polyline 
             key={c.id} 
             path={c.path} 
@@ -493,7 +588,7 @@ const TechHandoverMarkers = ({ transitions = [], show = false, compactMode = fal
             options={{ strokeColor: "#F59E0B", strokeOpacity: 0.5, strokeWeight: 2, geodesic: true, icons: [{ icon: { path: window.google?.maps?.SymbolPath?.FORWARD_CLOSED_ARROW, scale: 3, fillColor: "#F59E0B", fillOpacity: 1, strokeWeight: 0 }, offset: "50%" }] }} 
         />
       ))}
-      {renderedTransitions.map((t, i) => (
+      {!shouldCluster && renderedTransitions.map((t, i) => (
         <MarkerComponent 
             // 👇 FIX: Ensure key is unique using type
            key={`handover-marker-${type}-${t.session_id}-${t.atIndex}-${i}`} 

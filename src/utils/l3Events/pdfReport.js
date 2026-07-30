@@ -55,6 +55,33 @@ function formatDuration(ms = 0) {
   return minutes > 0 ? `${minutes}m ${seconds}s` : `${seconds}s`;
 }
 
+const UNKNOWN_CATEGORY_VALUES = new Set([
+  "",
+  "-",
+  "--",
+  "n/a",
+  "na",
+  "null",
+  "undefined",
+  "unknown",
+  "unknown/no service",
+  "unknown / no service",
+  "no service",
+]);
+
+function isUnknownCategoryValue(value) {
+  return UNKNOWN_CATEGORY_VALUES.has(String(value ?? "").trim().toLowerCase());
+}
+
+function categoryValue(value, fallback = "N/A") {
+  const normalized = String(value ?? "").trim();
+  return normalized && !isUnknownCategoryValue(normalized) ? normalized : fallback;
+}
+
+function isCategoryLabel(label) {
+  return /\b(technology|band|operator|provider)\b/i.test(String(label ?? ""));
+}
+
 function wrapText(text, maxChars) {
   const normalized = String(text ?? "").trim();
   if (!normalized) return [""];
@@ -91,27 +118,35 @@ function truncate(value, length) {
 }
 
 function createProcedureParameterRows(procedure) {
-  return [
+  const rows = [
     ["Procedure ID", procedure.id],
     ["Procedure Name", procedure.name],
     ["Call ID", procedure.callId || "N/A"],
     ["Result", procedure.result],
     ["Protocol", procedure.protocol],
-    ["Technology", procedure.technology],
+    ["Technology", categoryValue(procedure.technology, "")],
     ["Start Time", formatTimestamp(procedure.startTime)],
     ["End Time", formatTimestamp(procedure.endTime)],
     ["Duration", formatDuration(procedure.durationMs)],
     ["Flow Model", procedure.flowModel?.name || "Generic Row Analysis"],
-    ["Access Type", procedure.flowModel?.access || procedure.technology || "N/A"],
+    ["Access Type", categoryValue(procedure.flowModel?.access || procedure.technology, "")],
     ["Serving Cell", procedure.servingCell || "N/A"],
     ["Target Cell", procedure.targetCell || "N/A"],
     ["PCI", procedure.pci || "N/A"],
     ["EARFCN", procedure.earfcn || "N/A"],
-    ["Band", procedure.band || "N/A"],
+    ["Band", categoryValue(procedure.band, "")],
     ["TAC", procedure.tac || "N/A"],
     ["PLMN", procedure.plmn || "N/A"],
     ["Bandwidth", procedure.bandwidth || "N/A"],
+    ["RSRP", procedure.rsrpSummary || procedure.rsrp || "N/A"],
     ["Message Count", procedure.items?.length ?? 0],
+  ];
+
+  return [
+    ...rows.filter(([label, value]) => {
+      if (!["Technology", "Access Type", "Band"].includes(label)) return true;
+      return !isUnknownCategoryValue(value);
+    }),
   ];
 }
 
@@ -123,6 +158,7 @@ function createEvidenceRows(procedure, maxLabels = 14, maxValuesPerLabel = 4) {
       const label = String(detail?.label || "").trim();
       const value = String(detail?.value || "").trim();
       if (!label || !value) continue;
+      if (isCategoryLabel(label) && isUnknownCategoryValue(value)) continue;
       if (!evidenceMap.has(label)) evidenceMap.set(label, new Map());
       const valueCounts = evidenceMap.get(label);
       valueCounts.set(value, (valueCounts.get(value) || 0) + 1);
@@ -157,8 +193,9 @@ function createProcedureOverviewRows(procedures = []) {
     procedure.id,
     procedure.name,
     procedure.result,
-    procedure.technology || "N/A",
+    categoryValue(procedure.technology),
     formatDuration(procedure.durationMs),
+    procedure.rsrp || "N/A",
     String(procedure.items?.length ?? 0),
   ]);
 }
@@ -211,7 +248,7 @@ function findDetailValue(item, labels = []) {
 function extractDashboardMetrics(timeline = [], procedures = [], summary = null) {
   const timestamps = timeline.map((item) => timeMs(item.timestamp)).filter((value) => value !== null);
   const durationMs = timestamps.length ? Math.max(0, Math.max(...timestamps) - Math.min(...timestamps)) : 0;
-  const technologies = uniqueNonEmpty(procedures.map((procedure) => procedure.technology));
+  const technologies = uniqueNonEmpty(procedures.map((procedure) => categoryValue(procedure.technology, "")).filter(Boolean));
   const protocols = uniqueNonEmpty(procedures.map((procedure) => procedure.protocol));
   const registrationCount = procedures.filter((procedure) => /registration|attach/i.test(procedure.name)).length;
   const tauCount = procedures.filter((procedure) => /tracking\W*area\W*update|tau/i.test(procedure.name)).length;
@@ -273,7 +310,7 @@ function createExecutiveSummaryLines(metrics, procedures = [], summary = null) {
 
 function createTechnologyTimelineRows(procedures = []) {
   const ordered = [...procedures]
-    .filter((procedure) => procedure.technology && procedure.startTime instanceof Date)
+    .filter((procedure) => !isUnknownCategoryValue(procedure.technology) && procedure.startTime instanceof Date)
     .sort((left, right) => timeMs(left.startTime) - timeMs(right.startTime));
 
   const rows = [];
@@ -331,7 +368,7 @@ function createServiceStateRows(timeline = []) {
 
 function createCellAnalysisRows(procedures = []) {
   return procedures
-    .filter((procedure) => procedure.servingCell || procedure.targetCell || procedure.pci || procedure.earfcn || procedure.tac || procedure.band || procedure.plmn)
+    .filter((procedure) => procedure.servingCell || procedure.targetCell || procedure.pci || procedure.earfcn || procedure.tac || !isUnknownCategoryValue(procedure.band) || procedure.plmn)
     .map((procedure) => [
       formatClock(procedure.startTime),
       procedure.name,
@@ -340,7 +377,7 @@ function createCellAnalysisRows(procedures = []) {
       procedure.pci || "N/A",
       procedure.earfcn || "N/A",
       procedure.tac || "N/A",
-      procedure.band || "N/A",
+      categoryValue(procedure.band),
     ]);
 }
 
@@ -352,7 +389,7 @@ function createRrcRows(procedures = []) {
       formatClock(procedure.startTime),
       formatDuration(procedure.durationMs),
       procedure.result,
-      procedure.technology || "N/A",
+      categoryValue(procedure.technology),
     ]);
 }
 
@@ -366,6 +403,128 @@ function createNasRows(procedures = []) {
       procedure.result,
       procedure.callId || "N/A",
     ]);
+}
+
+function createBreakdownRows(items = [], selector, maxRows = 20) {
+  const counts = new Map();
+  items.forEach((item) => {
+    const key = String(selector(item) || "Unknown").trim() || "Unknown";
+    counts.set(key, (counts.get(key) || 0) + 1);
+  });
+
+  return Array.from(counts, ([label, count]) => [label, String(count)])
+    .sort((left, right) => Number(right[1]) - Number(left[1]) || left[0].localeCompare(right[0]))
+    .slice(0, maxRows);
+}
+
+function addCallSummarySection(layout, summary = null) {
+  layout.addLine("Call Summary", { font: FONT_BOLD, size: 13, spacing: 5 });
+
+  if (!summary?.totalCalls) {
+    layout.addWrapped("No call sessions were detected in the available Event evidence.", { size: 10, spacing: 3 });
+    return;
+  }
+
+  [
+    `Calls Made: ${summary.totalCalls}`,
+    `Connected: ${summary.connected ?? 0}`,
+    `Dropped: ${summary.dropped ?? 0}`,
+    `Not Connected: ${summary.notConnected ?? 0}`,
+    `Busy: ${summary.busy ?? 0}`,
+    `Rejected: ${summary.rejected ?? 0}`,
+    `Setup Failures: ${summary.setupFailures ?? 0}`,
+    `Average Setup Time: ${formatDuration(summary.averageSetupTime ?? 0)}`,
+    `Total Duration: ${formatDuration(summary.totalDurationMs ?? 0)}`,
+  ].forEach((line) => layout.addWrapped(`- ${line}`, { size: 10, indent: 8, spacing: 3 }));
+
+  if (summary.calls?.length) {
+    layout.addSpacer(6);
+    layout.addLine("Call Inventory", { font: FONT_BOLD, size: 10, spacing: 3 });
+    layout.addTable(
+      ["Call ID", "Start", "End", "Status", "Setup", "Duration", "Reason"],
+      summary.calls.map((call) => [
+        call.id,
+        formatClock(call.startTime),
+        formatClock(call.endTime),
+        call.detailedStatus || call.status || "N/A",
+        formatDuration(call.setupTimeMs ?? 0),
+        formatDuration(call.durationMs ?? call.totalDurationMs ?? 0),
+        call.disconnectReason || call.dropReason || call.reason || "N/A",
+      ]),
+      [10, 8, 8, 14, 8, 8, 14],
+    );
+  }
+}
+
+function addL3EventSequenceSection(layout, messages = []) {
+  layout.addLine("L3 / Event Message Sequence", { font: FONT_BOLD, size: 13, spacing: 5 });
+  layout.addWrapped(
+    `All ${messages.length} L3/Event row${messages.length === 1 ? "" : "s"} are listed below in timestamp order.`,
+    { size: 10, spacing: 3 },
+  );
+
+  if (!messages.length) {
+    layout.addWrapped("No L3 or Event messages were found in the selected scope.", { size: 10, spacing: 3 });
+    return;
+  }
+
+  const typeRows = createBreakdownRows(messages, (item) => item.type?.toUpperCase());
+  const categoryRows = createBreakdownRows(messages, (item) => item.sourceCategory || item.category);
+  const sourceRows = createBreakdownRows(messages, (item) => item.sourceFile || item.originSource);
+
+  layout.addSpacer(6);
+  layout.addLine("Sequence Breakdown", { font: FONT_BOLD, size: 10, spacing: 3 });
+  if (typeRows.length) {
+    layout.addTable(["Type", "Count"], typeRows, [28, 8]);
+  }
+  if (categoryRows.length) {
+    layout.addSpacer(4);
+    layout.addTable(["Category", "Count"], categoryRows, [28, 8]);
+  }
+  if (sourceRows.length) {
+    layout.addSpacer(4);
+    layout.addTable(["Source", "Count"], sourceRows, [44, 8]);
+  }
+
+  const wrapTableCell = (value, width) => wrapText(value, width);
+  const formatWrappedRowLine = (values, widths) => values
+    .map((value, index) => truncate(value, widths[index]).padEnd(widths[index], " "))
+    .join("  ");
+  const addWrappedMessageTable = (rows) => {
+    const headers = ["Type", "Timestamp", "Category", "Detail"];
+    const widths = [6, 14, 16, 46];
+    layout.addLine(formatWrappedRowLine(headers, widths), { font: FONT_MONO, size: 8, spacing: 2 });
+    layout.addLine(widths.map((width) => "-".repeat(width)).join("  "), { font: FONT_MONO, size: 8, spacing: 2 });
+
+    rows.forEach((row) => {
+      const wrappedCells = row.map((value, index) => wrapTableCell(value, widths[index]));
+      const lineCount = Math.max(...wrappedCells.map((cellLines) => cellLines.length));
+
+      for (let lineIndex = 0; lineIndex < lineCount; lineIndex += 1) {
+        layout.addLine(
+          formatWrappedRowLine(wrappedCells.map((cellLines) => cellLines[lineIndex] || ""), widths),
+          { font: FONT_MONO, size: 8, spacing: 2 },
+        );
+      }
+      layout.addLine(widths.map((width) => "-".repeat(width)).join("  "), { font: FONT_MONO, size: 8, spacing: 2 });
+    });
+  };
+
+  const messageRows = messages.map((item) => {
+    const timestamp = item.timestampLabel || formatClock(item.timestamp);
+    const category = item.sourceCategory || item.category || "Unknown";
+    const detail = item.rawMessage || item.summary || item.title || "-";
+
+    return [
+      item.type?.toUpperCase() || "-",
+      timestamp,
+      category,
+      detail,
+    ];
+  });
+
+  layout.addSpacer(8);
+  addWrappedMessageTable(messageRows);
 }
 
 function createSectionIntro(title, countLabel, count) {
@@ -514,7 +673,7 @@ export function downloadL3EventPdfReport({
 
   const layout = new PdfLayout();
   const generatedAt = new Date();
-  const reportScope = selectedCall?.id ? `Selected call ${selectedCall.id}` : "Full uploaded dataset";
+  const reportScope = selectedCall?.id ? `Report Scope: Selected call ${selectedCall.id}` : "";
   const procedures = analysis.procedures;
   const dashboard = extractDashboardMetrics(timeline, procedures, summary);
   const executiveSummaryLines = createExecutiveSummaryLines(dashboard, procedures, summary);
@@ -524,6 +683,11 @@ export function downloadL3EventPdfReport({
   const cellAnalysisRows = createCellAnalysisRows(procedures);
   const rrcRows = createRrcRows(procedures);
   const nasRows = createNasRows(procedures);
+  const technologyMix = uniqueNonEmpty(
+    (analysis.stats?.technologies || [])
+      .map((technology) => categoryValue(technology, ""))
+      .filter(Boolean),
+  );
 
   layout.addLine("L3 Event Analyzer Report", { font: FONT_BOLD, size: 18, spacing: 6 });
   layout.addWrapped("Professional decoded report built from the currently available L3 and Event evidence. Sections are included only when the uploaded files provide enough data.", {
@@ -536,7 +700,7 @@ export function downloadL3EventPdfReport({
     `Source File: ${sourceFileName || "N/A"}`,
     `Report Scope: ${reportScope}`,
     `Generated At: ${formatTimestamp(generatedAt)}`,
-    `Technology Mix: ${(analysis.stats?.technologies || []).join(", ") || "N/A"}`,
+    `Technology Mix: ${technologyMix.join(", ") || "N/A"}`,
   ].forEach((line) => layout.addWrapped(line, { size: 10, spacing: 3 }));
 
   layout.addSpacer(10);
@@ -645,9 +809,9 @@ export function downloadL3EventPdfReport({
   layout.addSpacer(10);
   layout.addLine("Procedure Overview", { font: FONT_BOLD, size: 13, spacing: 5 });
   layout.addTable(
-    ["ID", "Name", "Result", "Tech", "Duration", "Rows"],
+    ["ID", "Name", "Result", "Tech", "Duration", "RSRP", "Rows"],
     createProcedureOverviewRows(procedures),
-    [6, 24, 10, 12, 10, 8],
+    [6, 20, 9, 10, 9, 18, 6],
   );
 
   const repeatedRows = createRepeatedRowSummaryRows(procedures);
@@ -662,10 +826,12 @@ export function downloadL3EventPdfReport({
   }
 
   procedures.forEach((procedure) => {
+    const procedureTechnology = categoryValue(procedure.technology, "");
     layout.addSpacer(12);
     layout.addLine(`${procedure.id} ${procedure.name}`, { font: FONT_BOLD, size: 12, spacing: 4 });
     layout.addWrapped(
-      `Outcome ${procedure.result}. Protocol ${procedure.protocol || "N/A"}. Technology ${procedure.technology || "N/A"}. `
+      `Outcome ${procedure.result}. Protocol ${procedure.protocol || "N/A"}. `
+        + (procedureTechnology ? `Technology ${procedureTechnology}. ` : "")
         + `Observed rows ${procedure.items?.length ?? 0}.`,
       { size: 10, spacing: 3 },
     );
@@ -687,4 +853,42 @@ export function downloadL3EventPdfReport({
   const fileStem = sanitizeFileSegment(sourceFileName.replace(/\.[^.]+$/, ""));
   const scopeStem = selectedCall?.id ? `-${sanitizeFileSegment(selectedCall.id)}` : "";
   blobDownload(blob, `l3-event-analyzer-report-${fileStem}${scopeStem}.pdf`);
+}
+
+export function downloadL3CallSummaryPdfReport({
+  sourceFileName = "",
+  summary = null,
+  messages = [],
+  selectedCall = null,
+}) {
+  const layout = new PdfLayout();
+  const generatedAt = new Date();
+  const reportScope = selectedCall?.id ? `Report Scope: Selected call ${selectedCall.id}` : "";
+  const l3Count = messages.filter((item) => item.type === "l3").length;
+  const eventCount = messages.filter((item) => item.type === "event").length;
+
+  layout.addLine("L3 / Event Call Summary Report", { font: FONT_BOLD, size: 18, spacing: 6 });
+  layout.addWrapped("Call summary with every L3 and Event row listed in timestamp sequence.", {
+    size: 10,
+    spacing: 4,
+  });
+  layout.addSpacer(8);
+
+  [
+    `Source File: ${sourceFileName || "N/A"}`,
+    reportScope,
+    `Generated At: ${formatTimestamp(generatedAt)}`,
+    `Sequence Rows: ${messages.length} (${l3Count} L3, ${eventCount} Event)`,
+  ].filter(Boolean).forEach((line) => layout.addWrapped(line, { size: 10, spacing: 3 }));
+
+  layout.addSpacer(10);
+  addCallSummarySection(layout, summary);
+
+  layout.addSpacer(12);
+  addL3EventSequenceSection(layout, messages);
+
+  const blob = buildPdfBlob(layout.pages);
+  const fileStem = sanitizeFileSegment(sourceFileName.replace(/\.[^.]+$/, ""));
+  const scopeStem = selectedCall?.id ? `-${sanitizeFileSegment(selectedCall.id)}` : "";
+  blobDownload(blob, `l3-call-summary-messages-${fileStem}${scopeStem}.pdf`);
 }

@@ -4,15 +4,16 @@ import React, {
   useCallback,
   useRef,
 } from "react";
-import { Upload, Loader2, AlertTriangle, X, Search, FileText } from "lucide-react";
+import { Upload, Loader2, AlertTriangle, X, Search, FileText, ListOrdered } from "lucide-react";
 import toast from "react-hot-toast";
 import { extractL3AndEventFiles } from "@/utils/l3Events/zipParser";
 import { parseL3CSV } from "@/utils/l3Events/l3Parser";
 import { parseEventCSV } from "@/utils/l3Events/eventParser";
+import { parseNetworkLogCSV } from "@/utils/l3Events/networkLogParser";
 import { mergeTimeline } from "@/utils/l3Events/timelineBuilder";
 import { buildCallSummary } from "@/utils/l3Events/callSummaryBuilder";
 import { buildProtocolAnalysis } from "@/utils/l3Events/protocolAnalyzer";
-import { downloadL3EventPdfReport } from "@/utils/l3Events/pdfReport";
+import { downloadL3CallSummaryPdfReport, downloadL3EventPdfReport } from "@/utils/l3Events/pdfReport";
 import { NETWORK_FLOW_MODELS } from "@/utils/l3Events/flowModels";
 import { CallSummaryPanel } from "./l3Events/CallSummaryPanel";
 import { FlowModelCatalog } from "./l3Events/FlowModelCatalog";
@@ -32,10 +33,12 @@ export const L3EventsTab = () => {
   const [warningMessage, setWarningMessage] = useState("");
   const [fileName, setFileName] = useState("");
   const [timeline, setTimeline] = useState([]);
+  const [networkLogRows, setNetworkLogRows] = useState([]);
   const [selectedCall, setSelectedCall] = useState(null);
   const [activeView, setActiveView] = useState("analyzer");
   const [search, setSearch] = useState("");
   const [isExportingReport, setIsExportingReport] = useState(false);
+  const [isExportingL3Summary, setIsExportingL3Summary] = useState(false);
 
   const fileInputRef = useRef(null);
 
@@ -60,6 +63,7 @@ export const L3EventsTab = () => {
 
       if (!l3Files.length && !eventFiles.length) {
         setTimeline([]);
+        setNetworkLogRows([]);
         setStatus("error");
         setErrorMessage("The selected files do not contain supported Layer 3 or Event logs.");
         return;
@@ -67,6 +71,9 @@ export const L3EventsTab = () => {
 
       const l3Rows = l3Files.flatMap((f) => parseL3CSV(f.text, f.name));
       const eventRows = eventFiles.flatMap((f) => parseEventCSV(f.text, f.name));
+      const networkRows = extractedFiles
+        .flatMap((entry) => entry.networkLogFiles || [])
+        .flatMap((f) => parseNetworkLogCSV(f.text, f.name));
       const merged = mergeTimeline(l3Rows, eventRows);
 
       let warning = "";
@@ -74,10 +81,12 @@ export const L3EventsTab = () => {
       else if (!eventFiles.length) warning = "No Event logs found.";
 
       setTimeline(merged);
+      setNetworkLogRows(networkRows);
       setWarningMessage(warning);
       setStatus("ready");
     } catch (error) {
       setTimeline([]);
+      setNetworkLogRows([]);
       setStatus("error");
       setErrorMessage("Failed to read the selected files. Please confirm they are valid CSV, ZIP, or .xlsx workbooks.");
     }
@@ -108,10 +117,14 @@ export const L3EventsTab = () => {
   }, []);
 
   const callSummary = useMemo(() => buildCallSummary(timeline), [timeline]);
-  const protocolAnalysis = useMemo(() => buildProtocolAnalysis(filteredProtocolTimeline), [filteredProtocolTimeline]);
+  const protocolAnalysis = useMemo(() => buildProtocolAnalysis(filteredProtocolTimeline, networkLogRows), [filteredProtocolTimeline, networkLogRows]);
   const l3Messages = useMemo(() => timeline.filter((item) => item.type === "l3"), [timeline]);
   const eventMessages = useMemo(() => timeline.filter((item) => item.type === "event"), [timeline]);
   const canExportReport = status === "ready" && protocolAnalysis.procedures.length > 0;
+  const scopedSequenceMessages = useMemo(() => (
+    selectedCall ? filteredProtocolTimeline : timeline
+  ), [filteredProtocolTimeline, selectedCall, timeline]);
+  const canGenerateL3Summary = status === "ready" && scopedSequenceMessages.length > 0;
   const reportSummary = useMemo(() => {
     if (!selectedCall) return callSummary;
 
@@ -172,6 +185,29 @@ export const L3EventsTab = () => {
     }
   }, [canExportReport, fileName, filteredProtocolTimeline, protocolAnalysis, reportSummary, selectedCall]);
 
+  const handleGenerateL3Summary = useCallback(async () => {
+    if (!canGenerateL3Summary) {
+      toast.error("No L3 messages available to summarize.");
+      return;
+    }
+
+    setIsExportingL3Summary(true);
+    try {
+      downloadL3CallSummaryPdfReport({
+        sourceFileName: fileName,
+        summary: reportSummary,
+        messages: scopedSequenceMessages,
+        selectedCall,
+      });
+      toast.success(selectedCall ? `L3 summary PDF generated for ${selectedCall.id}.` : "L3 summary PDF generated.");
+    } catch (error) {
+      console.error("Failed to export L3 summary PDF report:", error);
+      toast.error(error?.message || "Failed to generate L3 summary PDF.");
+    } finally {
+      setIsExportingL3Summary(false);
+    }
+  }, [canGenerateL3Summary, fileName, reportSummary, scopedSequenceMessages, selectedCall]);
+
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-3 bg-slate-800/60 border border-slate-700 rounded-lg p-3">
@@ -192,6 +228,15 @@ export const L3EventsTab = () => {
         >
           {isExportingReport ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileText className="h-4 w-4" />}
           {isExportingReport ? "Generating PDF..." : "Generate PDF Report"}
+        </button>
+        <button
+          type="button"
+          onClick={handleGenerateL3Summary}
+          disabled={!canGenerateL3Summary || isExportingL3Summary}
+          className="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-cyan-500/40 bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-100 text-sm font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {isExportingL3Summary ? <Loader2 className="h-4 w-4 animate-spin" /> : <ListOrdered className="h-4 w-4" />}
+          {isExportingL3Summary ? "Generating L3 PDF..." : "Generate L3 Summary PDF"}
         </button>
         {fileName && <span className="text-xs text-white truncate max-w-[240px]">{fileName}</span>}
         {status === "loading" && (
