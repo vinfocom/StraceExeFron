@@ -1,4 +1,4 @@
-import { extractRowInsights, mergeDetails } from "./rowInsights";
+import { extractRowInsights, mergeDetails } from "./rowInsights.js";
 
 // Converts raw Event/L3 rows into human-readable timeline entries: a
 // category (used for filter chips), a title + icon, a one-line summary,

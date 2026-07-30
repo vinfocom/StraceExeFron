@@ -12,6 +12,9 @@ import {
 } from "@/utils/colorUtils";
 import { getPciColor } from "@/utils/metrics";
 
+const COLOR_CODE_PATTERN =
+  /^(#(?:[0-9a-f]{3}|[0-9a-f]{4}|[0-9a-f]{6}|[0-9a-f]{8})|rgba?\([^)]{1,80}\)|hsla?\([^)]{1,80}\))$/i;
+
 const normalizeDeltaVariant = (value) => {
   const variant = String(value ?? "").trim().toLowerCase();
   if (variant === "optimised") return "optimized";
@@ -339,7 +342,7 @@ export default function SiteLegend({
                           onChange={(event) => {
                             const value = event.target.value;
                             setCustomColorValue(value);
-                            if (/^#[0-9a-f]{6}$/i.test(value)) {
+                            if (COLOR_CODE_PATTERN.test(value)) {
                               handleColorInputChange(item, value);
                             }
                           }}

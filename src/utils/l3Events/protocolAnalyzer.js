@@ -777,7 +777,9 @@ function buildStates(procedures) {
     if (/detach|deregister/i.test(text)) nas = "NAS Deregistered";
     if (/SIP REGISTER|IMS Registered/i.test(item.officialName || text)) ims = "IMS Registered";
     if (/IMS.*unregister|deregister/i.test(text)) ims = "IMS Unregistered";
-    if (/SIP INVITE|CALL_ACTIVE|Call Active/i.test(item.officialName || text)) call = "Call Active";
+    if (/\b200\b.*\bOK\b.*\bINVITE\b|\bSIP\b.*\bACK\b|\bcallType\s*=\s*3\b|\bconnected\b|\bestablished\b/i.test(item.officialName || text)) {
+      call = "Call Connected";
+    }
     if (/SIP BYE|CALL_DISCONNECTED|Call Release/i.test(item.officialName || text)) call = "Call Released";
 
     states.push({
@@ -820,6 +822,9 @@ function collectColumns(procedures) {
 export function buildProtocolAnalysis(timeline = []) {
   const ordered = sortTimeline(timeline);
   const membership = buildCallMembership(ordered);
+  const completedCalls = membership.calls.filter((call) => call.status === "Connected").length;
+  const droppedCalls = membership.calls.filter((call) => call.status === "Dropped").length;
+  const notConnectedCalls = membership.calls.filter((call) => call.status === "Not Connected").length;
   const procedures = [];
   const activeByKey = new Map();
   const assignedIds = new Set();
@@ -862,6 +867,10 @@ export function buildProtocolAnalysis(timeline = []) {
       analyzedRows: procedures.reduce((count, procedure) => count + procedure.items.length, 0),
       totalProcedures: procedures.length,
       callProcedures: procedures.filter((procedure) => procedure.callId).length,
+      totalCalls: membership.calls.length,
+      completedCalls,
+      droppedCalls,
+      notConnectedCalls,
       failures: procedures.filter((procedure) => procedure.result === "Failure").length,
       technologies: Array.from(new Set(procedures.map((procedure) => procedure.technology))).filter(Boolean),
     },

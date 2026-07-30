@@ -4,14 +4,21 @@ function safeDiffMs(startTime, endTime) {
 }
 
 export function calculateDurations(session) {
-  const setupTimeMs = safeDiffMs(session.startTime, session.answerTime);
-  const talkTimeMs = safeDiffMs(session.answerTime, session.endTime);
-  const totalDurationMs = safeDiffMs(session.startTime, session.endTime);
+  const dialTime = session.dialTime || session.startTime;
+  const connectedTime = session.connectedTime || session.answerTime;
+  const disconnectTime = session.disconnectTime || session.endTime;
+  const setupTimeMs = connectedTime ? safeDiffMs(dialTime, connectedTime) : 0;
+  const setupAttemptDurationMs = safeDiffMs(dialTime, disconnectTime);
+  const talkTimeMs = connectedTime ? safeDiffMs(connectedTime, disconnectTime) : 0;
+  const totalDurationMs = safeDiffMs(dialTime, disconnectTime);
+  const ringingDelayMs = safeDiffMs(dialTime, session.alertingTime);
 
   return {
     setupTimeMs,
+    setupAttemptDurationMs,
     talkTimeMs,
     totalDurationMs,
-    durationMs: totalDurationMs,
+    ringingDelayMs,
+    durationMs: talkTimeMs,
   };
 }

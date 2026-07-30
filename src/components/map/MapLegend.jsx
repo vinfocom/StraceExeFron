@@ -48,9 +48,11 @@ const DEFAULT_LEGEND_SIZE = {
 
 const LEGEND_VIEWPORT_MARGIN = 16;
 const DEFAULT_LEGEND_TOP = 140;
+const COLLAPSED_LEGEND_WIDTH = 52;
 const COLLAPSED_LEGEND_HEIGHT = 44;
-const MIN_LEGEND_WIDTH = 240;
-const MIN_LEGEND_HEIGHT = 180;
+const MIN_LEGEND_WIDTH = 200;
+const MIN_LEGEND_HEIGHT = 120;
+const LEGEND_CLICK_DRAG_THRESHOLD = 6;
 
 const isWifiLogRow = (log) => {
   const type = String(
@@ -851,6 +853,10 @@ export default function MapLegend({
   const headerRef = useRef(null);
   const bodyRef = useRef(null);
   const hasManualResizeRef = useRef(false);
+  const pointerStartRef = useRef(null);
+  const dragSuppressToggleRef = useRef(false);
+  const resizeSuppressToggleRef = useRef(false);
+  const skipNextHeaderClickRef = useRef(false);
   const [collapsed, setCollapsed] = useState(false);
   const [legendSize, setLegendSize] = useState(DEFAULT_LEGEND_SIZE);
   const [legendPosition, setLegendPosition] = useState(() =>
@@ -858,7 +864,7 @@ export default function MapLegend({
   );
   const visibleLegendSize = useMemo(
     () => ({
-      width: legendSize.width,
+      width: collapsed ? COLLAPSED_LEGEND_WIDTH : legendSize.width,
       height: collapsed ? COLLAPSED_LEGEND_HEIGHT : legendSize.height,
     }),
     [collapsed, legendSize],
@@ -923,6 +929,34 @@ export default function MapLegend({
   const clearFilter = (e) => {
     e.stopPropagation();
     onFilterChange(null);
+  };
+
+  const handleHeaderPointerDown = (event) => {
+    pointerStartRef.current = { x: event.clientX, y: event.clientY };
+    dragSuppressToggleRef.current = false;
+  };
+
+  const handleHeaderPointerMove = (event) => {
+    if (!pointerStartRef.current) return;
+    const deltaX = Math.abs(event.clientX - pointerStartRef.current.x);
+    const deltaY = Math.abs(event.clientY - pointerStartRef.current.y);
+    if (deltaX > LEGEND_CLICK_DRAG_THRESHOLD || deltaY > LEGEND_CLICK_DRAG_THRESHOLD) {
+      dragSuppressToggleRef.current = true;
+    }
+  };
+
+  const handleHeaderPointerUp = () => {
+    pointerStartRef.current = null;
+  };
+
+  const toggleCollapsed = () => {
+    if (skipNextHeaderClickRef.current) {
+      skipNextHeaderClickRef.current = false;
+      dragSuppressToggleRef.current = false;
+      resizeSuppressToggleRef.current = false;
+      return;
+    }
+    setCollapsed((prev) => !prev);
   };
 
   const openSettings = (e) => {
@@ -1067,11 +1101,11 @@ export default function MapLegend({
           position={legendPosition}
           size={
             collapsed
-              ? { width: legendSize.width, height: COLLAPSED_LEGEND_HEIGHT }
+              ? { width: COLLAPSED_LEGEND_WIDTH, height: COLLAPSED_LEGEND_HEIGHT }
               : { width: legendSize.width, height: legendSize.height }
           }
-          minWidth={MIN_LEGEND_WIDTH}
-          maxWidth={maxLegendWidth}
+          minWidth={collapsed ? COLLAPSED_LEGEND_WIDTH : MIN_LEGEND_WIDTH}
+          maxWidth={collapsed ? COLLAPSED_LEGEND_WIDTH : maxLegendWidth}
           minHeight={collapsed ? COLLAPSED_LEGEND_HEIGHT : MIN_LEGEND_HEIGHT}
           maxHeight={maxLegendHeight}
           bounds="parent"
@@ -1091,6 +1125,9 @@ export default function MapLegend({
                 }
           }
           onDragStop={(event, data) => {
+            if (dragSuppressToggleRef.current) {
+              skipNextHeaderClickRef.current = true;
+            }
             setLegendPosition(
               clampLegendPosition(
                 { x: data.x, y: data.y },
@@ -1101,6 +1138,8 @@ export default function MapLegend({
           }}
           onResize={(event, direction, ref, delta, position) => {
             hasManualResizeRef.current = true;
+            resizeSuppressToggleRef.current = true;
+            skipNextHeaderClickRef.current = true;
             const nextSize = {
               width: ref.offsetWidth,
               height: ref.offsetHeight,
@@ -1112,6 +1151,8 @@ export default function MapLegend({
           }}
           onResizeStop={(event, direction, ref, delta, position) => {
             hasManualResizeRef.current = true;
+            resizeSuppressToggleRef.current = true;
+            skipNextHeaderClickRef.current = true;
             const nextSize = {
               width: ref.offsetWidth,
               height: ref.offsetHeight,
@@ -1188,40 +1229,59 @@ export default function MapLegend({
           >
             <button
               ref={headerRef}
-              onClick={() => setCollapsed(!collapsed)}
-            className="map-legend-drag-handle w-full px-2 py-2 flex items-center justify-between gap-2 hover:bg-white/5 rounded-lg transition-colors group cursor-move select-none"
+              onClick={toggleCollapsed}
+              onPointerDown={handleHeaderPointerDown}
+              onPointerMove={handleHeaderPointerMove}
+              onPointerUp={handleHeaderPointerUp}
+              onPointerCancel={handleHeaderPointerUp}
+              className={`map-legend-drag-handle w-full hover:bg-white/5 rounded-lg transition-colors group cursor-move select-none ${
+                collapsed
+                  ? "flex h-full items-center justify-center p-0"
+                : "flex items-center justify-between gap-2 px-2 py-2"
+            }`}
             >
-              <div className="flex items-center gap-1.5">
-                <Layers className="w-4 h-4 text-gray-400" />
-                <span className="text-sm font-medium text-gray-100">{title}</span>
-                {activeFilter && (
-                  <span className="flex h-2 w-2 rounded-full bg-blue-500 animate-pulse ml-1" />
-                )}
-              </div>
-
-              <div className="flex items-center gap-0.5">
-                <div
-                  onClick={openSettings}
-                  className="p-1 hover:bg-white/10 rounded text-gray-400 hover:text-white"
-                  title="Settings"
-                >
-                  <Settings2 className="w-3.5 h-3.5" />
+              {collapsed ? (
+                <div className="relative flex items-center justify-center">
+                  <Layers className="h-4 w-4 text-gray-300" />
+                  {activeFilter && (
+                    <span className="absolute -right-1 -top-1 flex h-2 w-2 rounded-full bg-blue-500" />
+                  )}
                 </div>
-                {activeFilter && (
+              ) : (
+                <div className="flex items-center gap-1.5">
+                  <Layers className="w-4 h-4 text-gray-400" />
+                  <span className="text-sm font-medium text-gray-100">{title}</span>
+                  {activeFilter && (
+                    <span className="ml-1 flex h-2 w-2 rounded-full bg-blue-500 animate-pulse" />
+                  )}
+                </div>
+              )}
+
+              {!collapsed && (
+                <div className="flex items-center gap-0.5">
                   <div
-                    onClick={clearFilter}
-                    className="p-1 hover:bg-white/10 rounded text-gray-400 hover:text-white mr-1"
-                    title="Clear filter"
+                    onClick={openSettings}
+                    className="p-1 hover:bg-white/10 rounded text-gray-400 hover:text-white"
+                    title="Settings"
                   >
-                    <X className="w-3.5 h-3.5" />
+                    <Settings2 className="w-3.5 h-3.5" />
                   </div>
-                )}
-                <ChevronDown
-                  className={`w-4 h-4 text-gray-500 transition-transform duration-200 ${
-                    collapsed ? "" : "rotate-180"
-                  }`}
-                />
-              </div>
+                  {activeFilter && (
+                    <div
+                      onClick={clearFilter}
+                      className="mr-1 p-1 hover:bg-white/10 rounded text-gray-400 hover:text-white"
+                      title="Clear filter"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </div>
+                  )}
+                  <ChevronDown
+                    className={`w-4 h-4 text-gray-500 transition-transform duration-200 ${
+                      collapsed ? "" : "rotate-180"
+                    }`}
+                  />
+                </div>
+              )}
             </button>
 
             {!collapsed && (

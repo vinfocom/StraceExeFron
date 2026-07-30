@@ -31,7 +31,7 @@ export const CallDetailPanel = ({ call, onClose }) => {
             </span>
           </h3>
           <p className="text-xs text-white mt-0.5">
-            Duration: {formatDurationMs(call.durationMs)} | Messages: {l3Count} L3, {eventCount} Events
+            {call.detailedStatus || call.status} | Setup: {formatDurationMs(call.setupTimeMs)} | Duration: {formatDurationMs(call.durationMs)} | Messages: {l3Count} L3, {eventCount} Events
           </p>
         </div>
         <button

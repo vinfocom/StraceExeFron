@@ -1,4 +1,4 @@
-import { parseCSV, getField } from "./csvParser";
+import { parseCSV, getField } from "./csvParser.js";
 
 const TIMESTAMP_PATTERNS = ["timestamp", "time stamp", "datetime", "date time", "time", "date"];
 // "category" is the coarse bucket (CELL_MEAS, CONFIG, NSA_SA, IMS, CALL, HANDOVER, ...);

@@ -1,11 +1,16 @@
 import { getDisconnectCauseInfo } from "./disconnectCauseMapper.js";
 
-const MIN_TALK_TIME_MS = 1000;
-
 const IMS_FAILURE_RE = /\b(ims|sip)\b.*\b(fail|error|timeout|unreachable|blocked|deregister|forbidden)\b|\b403\b|\b404\b|\b480\b|\b486\b|\b500\b|\b503\b/i;
-const RADIO_FAILURE_RE = /\b(radio link failure|rlf|rrc release|reestablishment reject|lost signal|out of service|power off|emergency only|access blocked)\b/i;
+const RADIO_FAILURE_RE = /\b(radio link failure|rlf|rrc release|reestablishment reject|re[- ]?establishment failure|lost signal|out of service|power off|emergency only|access blocked|unexpected rrc release)\b/i;
 const HANDOVER_FAILURE_RE = /\b(hand(?: |-)?over|ho)\b.*\b(fail|failure|reject|drop|timeout)\b/i;
 const REJECTED_RE = /\b(reject|decline|answered elsewhere)\b/i;
+const BUSY_RE = /\bbusy\b/i;
+const SIP_CANCEL_RE = /\bSIP\b.*\bCANCEL\b|\b487\b.*\bRequest Terminated\b/i;
+const SIP_NOT_CONNECTED_RE = /\b(408|480|486)\b|\bRequest Timeout\b|\bTemporarily Unavailable\b|\bBusy Here\b/i;
+const WEAK_CONNECTED_EVIDENCE_LABELS = new Set([
+  "IMS profile transitioned to callType=3",
+]);
+const DEVICE_PROFILE_CAUSE_CODES = new Set([2, 3, 4]);
 
 function findSignalHints(events = []) {
   let hasImsFailure = false;
@@ -31,43 +36,109 @@ function pickPrimaryCause(causeCodes = []) {
   return getDisconnectCauseInfo(lastCode);
 }
 
+function mostSpecificReleaseReason(session, primaryCause, signalHints) {
+  if (primaryCause.classification !== "UNKNOWN") return primaryCause.description;
+  if (signalHints.hasHandoverFailure) return "Handover Failure";
+  if (signalHints.hasRadioFailure) return "Radio Failure";
+  if (signalHints.hasImsFailure) return "IMS Failure";
+  const l3ReleaseReason = session.l3Analysis?.releaseReason;
+  if (l3ReleaseReason) return l3ReleaseReason;
+  return primaryCause.description;
+}
+
+function inferNotConnectedDetail(session, primaryCause, signalHints) {
+  const reasonsText = session.rawDisconnectReasons.join(" ");
+  const l3Text = session.l3Analysis?.supportingMessages?.map((entry) => entry.message).join(" ") || "";
+  const combined = `${reasonsText} ${l3Text}`;
+
+  if (signalHints.hasHandoverFailure) return "Handover Failure";
+  if (BUSY_RE.test(combined) || primaryCause.status === "Busy") return "Busy";
+  if (REJECTED_RE.test(combined) || primaryCause.status === "Rejected") return "Rejected";
+  if (SIP_CANCEL_RE.test(combined) || primaryCause.status === "User Cancelled") return "User Cancelled";
+  if (DEVICE_PROFILE_CAUSE_CODES.has(primaryCause.code)) return "Call Setup Failure";
+  if (signalHints.hasImsFailure || primaryCause.status === "IMS Failure") return "IMS Failure";
+  if (signalHints.hasRadioFailure || primaryCause.status === "Radio Failure") return "Radio Failure";
+  if (SIP_NOT_CONNECTED_RE.test(combined)) return "Call Setup Failure";
+  return "Call Setup Failure";
+}
+
+function inferDroppedDetail(session, primaryCause, signalHints) {
+  if (signalHints.hasHandoverFailure) return "Handover Failure";
+  if (signalHints.hasRadioFailure || primaryCause.status === "Radio Failure") return "Radio Failure";
+  if (DEVICE_PROFILE_CAUSE_CODES.has(primaryCause.code)) return "Dropped";
+  if (signalHints.hasImsFailure || primaryCause.status === "IMS Failure") return "IMS Failure";
+  return "Dropped";
+}
+
+function hasOnlyWeakConnectionEvidence(session) {
+  const evidence = session.connectedEvidence || [];
+  if (!evidence.length) return false;
+  return evidence.every((entry) => WEAK_CONNECTED_EVIDENCE_LABELS.has(entry.label));
+}
+
+function canTreatCompletedCauseAsConnected(session, primaryCause, signalHints) {
+  if (primaryCause.classification !== "COMPLETED") return false;
+  if (signalHints.hasHandoverFailure || signalHints.hasImsFailure || signalHints.hasRadioFailure) return false;
+  if (SIP_CANCEL_RE.test(session.rawDisconnectReasons.join(" "))) return false;
+  return Boolean(session.alertingTime || session.dialingTime || session.talkTimeMs > 0 || session.totalDurationMs > 0);
+}
+
 export function classifyCall(session) {
   const signalHints = findSignalHints(session.events);
   const primaryCause = pickPrimaryCause(session.disconnectCauseHistory);
-  const talkTimeMs = session.talkTimeMs || 0;
-  const hasStableTalkTime = talkTimeMs >= MIN_TALK_TIME_MS;
-  const hadAnswer = session.answerTime instanceof Date;
-  const hasAbnormalCause = primaryCause.code !== null && !primaryCause.isNormal;
+  const weakOnlyConnected = hasOnlyWeakConnectionEvidence(session);
+  const connectedByEvidence = session.connectedTime instanceof Date;
+  const connectedByCompletedCause = !connectedByEvidence && canTreatCompletedCauseAsConnected(session, primaryCause, signalHints);
+  const connected = connectedByEvidence || connectedByCompletedCause;
+  const disconnected = session.hasDisconnectEvent || session.disconnectTime instanceof Date || session.idleTime instanceof Date;
+  const normalRelease = Boolean(session.l3Analysis?.normalReleaseConfirmed) || primaryCause.classification === "COMPLETED";
+  const abnormalRelease = Boolean(session.l3Analysis?.abnormalReleaseConfirmed) || primaryCause.classification === "DROPPED";
 
   let status = "Not Connected";
-  if (hadAnswer) {
-    status = !hasStableTalkTime || hasAbnormalCause ? "Dropped" : "Connected";
-  }
+  let detailedStatus = "Unknown";
 
-  let detailedStatus = status;
-  if (!session.hasDisconnectEvent) {
-    detailedStatus = hadAnswer ? "Ongoing" : "Unknown";
-  } else if (!hadAnswer) {
-    if (signalHints.hasHandoverFailure) detailedStatus = "Handover Failure";
-    else if (signalHints.hasImsFailure || primaryCause.status === "IMS Failure") detailedStatus = "IMS Failure";
-    else if (signalHints.hasRadioFailure || primaryCause.status === "Radio Failure") detailedStatus = "Radio Failure";
-    else if (primaryCause.status === "Busy") detailedStatus = "Busy";
-    else if (primaryCause.status === "Rejected" || REJECTED_RE.test(session.rawDisconnectReasons.join(" "))) detailedStatus = "Rejected";
-    else if (primaryCause.status === "User Cancelled") detailedStatus = "User Cancelled";
-    else if (primaryCause.status === "Call Setup Failure") detailedStatus = "Call Setup Failure";
-  } else if (status === "Dropped") {
-    if (signalHints.hasHandoverFailure) detailedStatus = "Handover Failure";
-    else if (signalHints.hasImsFailure || primaryCause.status === "IMS Failure") detailedStatus = "IMS Failure";
-    else if (signalHints.hasRadioFailure || primaryCause.status === "Radio Failure") detailedStatus = "Radio Failure";
-    else if (!hasStableTalkTime) detailedStatus = "Call Setup Failure";
+  if (!disconnected) {
+    status = connected ? "Dropped" : "Not Connected";
+    detailedStatus = connected ? "Ongoing" : "Unknown";
+  } else if (primaryCause.classification === "NOT_CONNECTED" && (!session.l3Analysis?.connectedConfirmed || weakOnlyConnected)) {
+    status = "Not Connected";
+    detailedStatus = inferNotConnectedDetail(session, primaryCause, signalHints);
+  } else if (primaryCause.classification === "DROPPED") {
+    if (connected) {
+      status = "Dropped";
+      detailedStatus = inferDroppedDetail(session, primaryCause, signalHints);
+    } else {
+      status = "Not Connected";
+      detailedStatus = inferNotConnectedDetail(session, primaryCause, signalHints);
+    }
+  } else if (primaryCause.classification === "COMPLETED") {
+    status = "Connected";
+    detailedStatus = "Completed";
+  } else if (!connected) {
+    status = "Not Connected";
+    detailedStatus = inferNotConnectedDetail(session, primaryCause, signalHints);
+  } else if (normalRelease && !abnormalRelease) {
+    status = "Connected";
+    detailedStatus = "Completed";
+  } else if (signalHints.hasHandoverFailure || signalHints.hasImsFailure || signalHints.hasRadioFailure || abnormalRelease) {
+    status = "Dropped";
+    detailedStatus = inferDroppedDetail(session, primaryCause, signalHints);
+  } else {
+    status = "Connected";
+    detailedStatus = "Completed";
   }
 
   return {
     ...signalHints,
     status,
     detailedStatus,
+    classification:
+      status === "Connected" ? "COMPLETED" : status === "Dropped" ? "DROPPED" : "NOT_CONNECTED",
     causeCode: primaryCause.code,
     causeName: primaryCause.name,
-    disconnectReason: session.rawDisconnectReasons.at(-1) || primaryCause.description,
+    disconnectReason: mostSpecificReleaseReason(session, primaryCause, signalHints),
+    disconnectClassification: primaryCause.classification,
+    connectedEvidence: session.connectedEvidence || [],
+    releaseEvidence: session.releaseEvidence || [],
   };
 }

@@ -7,9 +7,10 @@ function getTimestampMs(item) {
 
 export function collectWarnings(session) {
   const warnings = [];
+  const connectedTime = session.connectedTime || session.answerTime;
 
-  if (!session.answerTime) {
-    warnings.push("Missing ACTIVE event");
+  if (!connectedTime) {
+    warnings.push("Missing connection confirmation");
   }
 
   if (session.disconnectCauseHistory.length > 1) {
@@ -24,12 +25,12 @@ export function collectWarnings(session) {
     warnings.push("No disconnect event");
   }
 
-  if (session.answerTime && session.talkTimeMs > 0 && session.talkTimeMs < VERY_SHORT_CALL_MS) {
+  if (connectedTime && session.talkTimeMs > 0 && session.talkTimeMs < VERY_SHORT_CALL_MS) {
     warnings.push("Very short call");
   }
 
   const startMs = getTimestampMs(session.startTime ? { timestamp: session.startTime } : null);
-  const answerMs = getTimestampMs(session.answerTime ? { timestamp: session.answerTime } : null);
+  const answerMs = getTimestampMs(connectedTime ? { timestamp: connectedTime } : null);
   const endMs = getTimestampMs(session.endTime ? { timestamp: session.endTime } : null);
 
   if (answerMs !== null && startMs !== null && answerMs < startMs) {

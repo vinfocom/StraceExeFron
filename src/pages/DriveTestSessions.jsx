@@ -80,6 +80,21 @@ const sortSessionsByIdDescending = (rows = []) =>
     return bId - aId;
   });
 
+const DEFAULT_VISIBLE_COLUMNS = {
+  sessionId: true,
+  userDetails: true,
+  startDate: true,
+  startTime: true,
+  endDate: false,
+  endTime: false,
+  startLocation: true,
+  endLocation: false,
+  actions: true,
+  distance: false,
+  captureFrequency: false,
+  sessionRemarks: true,
+};
+
 const isSessionLiveToday = (session) => {
   if (!session?.start_time || session?.end_time) return false;
 
@@ -131,21 +146,7 @@ const [wifiSessions, setWifiSessions] = useState([]);
   const scopedCompanyId = resolveCompanyId(user);
   const isSuperAdmin = Number(user?.m_user_type_id ?? user?.UserTypeId ?? user?.role_id ?? 0) === 3;
 
-  const [visibleColumns, setVisibleColumns] = useState({
-    sessionId: true,
-    userDetails: true,
-    startDate: true,
-    startTime: true,
-    endDate: false,
-    endTime: false,
-    startLocation: true,
-    endLocation: false,
-    actions: true,
-    distance: false,
-    captureFrequency: false,
-    sessionRemarks: false,
-    
-  });
+  const [visibleColumns, setVisibleColumns] = useState(DEFAULT_VISIBLE_COLUMNS);
 
   const allColumns = {
     sessionId: { label: "Session ID", defaultVisible: true },
@@ -168,6 +169,14 @@ const [wifiSessions, setWifiSessions] = useState([]);
       [columnKey]: !prev[columnKey],
     }));
   };
+
+  useEffect(() => {
+    setVisibleColumns((prev) => (
+      prev.sessionId && prev.sessionRemarks
+        ? prev
+        : { ...prev, sessionId: true, sessionRemarks: true }
+    ));
+  }, []);
 
   const updateColumnFilter = (column, value) => {
     setColumnFilters((prev) => ({

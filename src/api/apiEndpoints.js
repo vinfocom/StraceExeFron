@@ -1423,6 +1423,14 @@ export const sitePredictionApi = {
   add: (payload) => api.post("/api/Mapview/AddSitePrediction", payload),
   uploadCsv: (formData) =>
     api.post("/api/MapView/UploadSitePredictionCsv", formData),
+  getClusterColors: (params, config = {}) =>
+    api.get("/api/MapView/GetSitePredictionClusterColors", {
+      ...config,
+      params: { ...params, _ts: Date.now() },
+      dedupe: false,
+    }),
+  saveClusterColor: (payload, config = {}) =>
+    api.post("/api/MapView/SaveSitePredictionClusterColor", payload, config),
   get: (params) =>
     api.get("/api/MapView/GetSitePrediction", {
       params: { ...params, _ts: Date.now() },

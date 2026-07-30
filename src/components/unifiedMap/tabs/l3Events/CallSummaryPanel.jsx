@@ -29,11 +29,17 @@ export const CallSummaryPanel = ({ summary, selectedCallId, onSelectCall }) => {
         </button>
       </div>
 
-      <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
+      <div className="grid grid-cols-2 sm:grid-cols-6 gap-2">
         <StatCard icon={Phone} label="Calls Made" value={summary.totalCalls} color="blue"  />
         <StatCard icon={Phone} label="Connected" value={summary.connected} color="green"  />
         <StatCard icon={PhoneOff} label="Dropped" value={summary.dropped} color="red"  />
         <StatCard icon={PhoneMissed} label="Not Connected" value={summary.notConnected} color="yellow"  />
+        <StatCard
+          icon={Clock}
+          label="Avg Setup Time"
+          value={formatDurationMs(summary.averageSetupTime)}
+          color="violet"
+        />
         <StatCard
           icon={Clock}
           label="Total Duration"
@@ -54,6 +60,7 @@ export const CallSummaryPanel = ({ summary, selectedCallId, onSelectCall }) => {
                 <th className="text-left py-1.5 pr-3 font-medium">Start</th>
                 <th className="text-left py-1.5 pr-3 font-medium">End</th>
                 <th className="text-left py-1.5 pr-3 font-medium">Status</th>
+                <th className="text-left py-1.5 pr-3 font-medium">Setup Time</th>
                 <th className="text-left py-1.5 font-medium">Duration</th>
               </tr>
              
@@ -95,6 +102,7 @@ export const CallSummaryPanel = ({ summary, selectedCallId, onSelectCall }) => {
                         {call.status}
                       </span>
                     </td>
+                    <td className="py-1.5 pr-3 text-slate-300">{formatDurationMs(call.setupTimeMs)}</td>
                     <td className="py-1.5 text-slate-300">{formatDurationMs(call.durationMs)}</td>
                   </tr>
                   

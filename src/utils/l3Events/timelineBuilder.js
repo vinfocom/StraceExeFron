@@ -1,4 +1,4 @@
-import { decodeL3Item, decodeEventItem } from "./eventDecoder";
+import { decodeL3Item, decodeEventItem } from "./eventDecoder.js";
 
 // Real exports often log a bare time-of-day like "17:34:50.306" with no date
 // at all. Anchor those to a fixed arbitrary date so same-session rows still

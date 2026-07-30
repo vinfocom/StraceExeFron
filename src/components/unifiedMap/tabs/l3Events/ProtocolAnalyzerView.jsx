@@ -644,7 +644,10 @@ function AnalyzerStats({ analysis }) {
   const stats = [
     ["Rows", `${analysis.stats.analyzedRows || 0}/${analysis.stats.totalRows || 0}`, FileText],
     ["Procedures", analysis.stats.totalProcedures, Radio],
-    ["Call Procedures", analysis.stats.callProcedures, Phone],
+    ["Calls", analysis.stats.totalCalls || 0, Phone],
+    ["Completed", analysis.stats.completedCalls || 0, CheckCircle2],
+    ["Dropped", analysis.stats.droppedCalls || 0, AlertTriangle],
+    ["Not Connected", analysis.stats.notConnectedCalls || 0, Phone],
     ["Failures", analysis.stats.failures, AlertTriangle],
     ["RRC State", state.rrc || "RRC_IDLE", Activity],
     ["NAS State", state.nas || "NAS Deregistered", CheckCircle2],

@@ -144,6 +144,33 @@ const DEFAULT_SITE_FILTERS = Object.freeze({
   pcis: [],
 });
 
+const SITE_CLUSTER_COLOR_PATTERN =
+  /^(#(?:[0-9a-f]{3}|[0-9a-f]{4}|[0-9a-f]{6}|[0-9a-f]{8})|rgba?\([^)]{1,80}\)|hsla?\([^)]{1,80}\))$/i;
+
+const SITE_OPERATOR_COLOR_PREFIX = "operator:";
+
+const normalizeSiteLegendOverrideKey = (mode, value) =>
+  `${String(mode || "").trim().toLowerCase()}:${String(value ?? "").trim().toLowerCase()}`;
+
+const mergeOperatorColorOverrides = (currentOverrides, rows = []) => {
+  const nextOverrides = {};
+
+  Object.entries(currentOverrides || {}).forEach(([key, value]) => {
+    if (!String(key).startsWith(SITE_OPERATOR_COLOR_PREFIX)) {
+      nextOverrides[key] = value;
+    }
+  });
+
+  rows.forEach((row) => {
+    const cluster = normalizeProviderName(row?.cluster || row?.Cluster || "");
+    const color = String(row?.site_color ?? row?.siteColor ?? row?.colorCode ?? "").trim();
+    if (!cluster || !SITE_CLUSTER_COLOR_PATTERN.test(color)) return;
+    nextOverrides[normalizeSiteLegendOverrideKey("operator", cluster)] = color;
+  });
+
+  return nextOverrides;
+};
+
 const buildIndoorOutdoorFromLogs = (logs = []) => {
   const indoor = [];
   const outdoor = [];
@@ -1844,6 +1871,10 @@ HandoverLegend.displayName = "HandoverLegend";
 const UnifiedMapView = () => {
   // ... (State hooks remain exactly the same) ...
   const [searchParams, setSearchParams] = useSearchParams();
+  const projectId = useMemo(() => {
+    const param = searchParams.get("project_id") ?? searchParams.get("project");
+    return param ? Number(param) : null;
+  }, [searchParams]);
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -2116,16 +2147,72 @@ const UnifiedMapView = () => {
     });
   }, []);
 
+  useEffect(() => {
+    const numericProjectId = Number(projectId);
+    if (!Number.isFinite(numericProjectId) || numericProjectId <= 0) {
+      setSiteColorOverrides((prev) => mergeOperatorColorOverrides(prev, []));
+      return undefined;
+    }
+
+    let cancelled = false;
+
+    const loadSiteClusterColors = async () => {
+      try {
+        const response = await sitePredictionApi.getClusterColors({
+          projectId: numericProjectId,
+        });
+        if (cancelled) return;
+        const rows = Array.isArray(response?.data?.Data)
+          ? response.data.Data
+          : Array.isArray(response?.data)
+            ? response.data
+            : Array.isArray(response?.Data)
+              ? response.Data
+              : [];
+        setSiteColorOverrides((prev) => mergeOperatorColorOverrides(prev, rows));
+      } catch (error) {
+        if (!cancelled) {
+          console.warn("[UnifiedMapView] Failed to load site prediction cluster colors", error);
+        }
+      }
+    };
+
+    loadSiteClusterColors();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId]);
+
   const handleSiteLegendColorChange = useCallback((item, color) => {
     const mode = String(item?.mode || "").trim().toLowerCase();
-    const value = String(item?.value ?? item?.label ?? "").trim().toLowerCase();
+    const rawValue = String(item?.value ?? item?.label ?? "").trim();
+    const value = rawValue.toLowerCase();
     const nextColor = String(color || "").trim();
-    if (!mode || !value || !/^#[0-9a-f]{6}$/i.test(nextColor)) return;
+    if (!mode || !value || !SITE_CLUSTER_COLOR_PATTERN.test(nextColor)) return;
+
+    const overrideKey = normalizeSiteLegendOverrideKey(mode, value);
     setSiteColorOverrides((prev) => ({
       ...prev,
-      [`${mode}:${value}`]: nextColor,
+      [overrideKey]: nextColor,
     }));
-  }, []);
+
+    if (mode !== "operator") return;
+
+    const numericProjectId = Number(projectId);
+    if (!Number.isFinite(numericProjectId) || numericProjectId <= 0) return;
+
+    sitePredictionApi
+      .saveClusterColor({
+        projectId: numericProjectId,
+        cluster: rawValue,
+        colorCode: nextColor,
+      })
+      .catch((error) => {
+        console.error("[UnifiedMapView] Failed to save site prediction cluster color", error);
+        toast.error("Failed to save site color");
+      });
+  }, [projectId]);
 
   useEffect(() => {
     setSelectedMetric((currentMetric) => {
@@ -2266,11 +2353,6 @@ const UnifiedMapView = () => {
     if (!Number.isFinite(parsed) || parsed <= 0) return null;
     return Math.max(5, Math.round(parsed));
   }, [project, passedProject, projectAreaGridSizeMeters]);
-
-  const projectId = useMemo(() => {
-    const param = searchParams.get("project_id") ?? searchParams.get("project");
-    return param ? Number(param) : null;
-  }, [searchParams]);
 
   useEffect(() => {
     setSiteLegendFilter(null);

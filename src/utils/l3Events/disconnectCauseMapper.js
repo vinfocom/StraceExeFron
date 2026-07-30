@@ -1,9 +1,36 @@
+const DEVICE_DISCONNECT_CAUSE_MAP = {
+  2: {
+    name: "ABNORMAL_RELEASE_AFTER_ESTABLISHMENT",
+    description: "Abnormal IMS or telephony release after call establishment.",
+    isNormal: false,
+    isDropped: true,
+    status: "Dropped",
+    classification: "DROPPED",
+  },
+  3: {
+    name: "NORMAL_COMPLETED_RELEASE",
+    description: "Normal call release after a completed call.",
+    isNormal: true,
+    isDropped: false,
+    status: "Connected",
+    classification: "COMPLETED",
+  },
+  4: {
+    name: "RELEASED_BEFORE_ESTABLISHMENT",
+    description: "Call released before establishment.",
+    isNormal: false,
+    isDropped: false,
+    status: "Not Connected",
+    classification: "NOT_CONNECTED",
+  },
+};
+
 const DISCONNECT_CAUSE_DEFINITIONS = [
-  { code: 0, name: "NOT_DISCONNECTED", description: "No disconnect cause was reported.", isNormal: true, isDropped: false, status: "Unknown" },
-  { code: 1, name: "INCOMING_MISSED", description: "Incoming call was not answered.", isNormal: false, isDropped: false, status: "Not Connected" },
-  { code: 2, name: "NORMAL", description: "Call ended normally by the network or remote party.", isNormal: true, isDropped: false, status: "Connected" },
-  { code: 3, name: "LOCAL", description: "Call ended locally by the user or device.", isNormal: true, isDropped: false, status: "User Cancelled" },
-  { code: 4, name: "BUSY", description: "Called party was busy.", isNormal: false, isDropped: false, status: "Busy" },
+  { code: 0, name: "NOT_DISCONNECTED", description: "No disconnect cause was reported.", isNormal: true, isDropped: false, status: "Unknown", classification: "UNKNOWN" },
+  { code: 1, name: "INCOMING_MISSED", description: "Incoming call was not answered.", isNormal: false, isDropped: false, status: "Not Connected", classification: "NOT_CONNECTED" },
+  { code: 2, name: "NORMAL", description: "Call ended normally by the network or remote party.", isNormal: true, isDropped: false, status: "Connected", classification: "COMPLETED" },
+  { code: 3, name: "LOCAL", description: "Call ended locally by the user or device.", isNormal: true, isDropped: false, status: "User Cancelled", classification: "COMPLETED" },
+  { code: 4, name: "BUSY", description: "Called party was busy.", isNormal: false, isDropped: false, status: "Busy", classification: "NOT_CONNECTED" },
   { code: 5, name: "CONGESTION", description: "Network congestion prevented call completion.", isNormal: false, isDropped: true, status: "Call Setup Failure" },
   { code: 6, name: "MMI", description: "MMI or supplementary-service handling interrupted the call.", isNormal: false, isDropped: false, status: "Call Setup Failure" },
   { code: 7, name: "INVALID_NUMBER", description: "Dialed number format was invalid.", isNormal: false, isDropped: false, status: "Call Setup Failure" },
@@ -73,20 +100,43 @@ const UNKNOWN_CAUSE = {
   isNormal: false,
   isDropped: false,
   status: "Unknown",
+  classification: "UNKNOWN",
 };
+
+function inferClassification(definition) {
+  if (definition.classification) return definition.classification;
+  if (definition.isNormal) return "COMPLETED";
+  if (definition.isDropped) return "DROPPED";
+  if (definition.status === "Not Connected" || definition.status === "Busy" || definition.status === "Rejected" || definition.status === "User Cancelled" || definition.status === "Call Setup Failure") {
+    return "NOT_CONNECTED";
+  }
+  return "UNKNOWN";
+}
 
 export function getDisconnectCauseInfo(code) {
   if (typeof code !== "number" || Number.isNaN(code)) {
     return UNKNOWN_CAUSE;
   }
 
-  return DISCONNECT_CAUSE_MAP.get(code) || {
+  const baseDefinition = DISCONNECT_CAUSE_MAP.get(code);
+  if (!baseDefinition) {
+    return {
+      code,
+      name: `UNKNOWN_${code}`,
+      description: `Disconnect cause code ${code} is not mapped yet.`,
+      isNormal: false,
+      isDropped: false,
+      status: "Unknown",
+      classification: "UNKNOWN",
+    };
+  }
+
+  const override = DEVICE_DISCONNECT_CAUSE_MAP[code];
+  const definition = override ? { ...baseDefinition, ...override } : { ...baseDefinition };
+  return {
+    ...definition,
     code,
-    name: `UNKNOWN_${code}`,
-    description: `Disconnect cause code ${code} is not mapped yet.`,
-    isNormal: false,
-    isDropped: false,
-    status: "Unknown",
+    classification: inferClassification(definition),
   };
 }
 

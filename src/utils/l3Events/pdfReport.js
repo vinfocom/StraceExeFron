@@ -563,15 +563,16 @@ export function downloadL3EventPdfReport({
     layout.addSpacer(10);
     layout.addLine("Call Inventory", { font: FONT_BOLD, size: 13, spacing: 5 });
     layout.addTable(
-      ["Call ID", "Start", "End", "Status", "Duration"],
+      ["Call ID", "Start", "End", "Status", "Setup Time", "Duration"],
       summary.calls.map((call) => [
         call.id,
         formatClock(call.startTime),
         formatClock(call.endTime),
         call.status || "N/A",
+        formatDuration(call.setupTimeMs ?? 0),
         formatDuration(call.durationMs ?? call.totalDurationMs ?? 0),
       ]),
-      [12, 10, 10, 14, 10],
+      [12, 9, 9, 12, 10, 10],
     );
   }
 
