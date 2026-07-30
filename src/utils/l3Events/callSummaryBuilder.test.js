@@ -217,6 +217,26 @@ test("keeps cause=4 sessions as not connected even if late callType=3 appears", 
   assert.equal(summary.calls[0].status, "Not Connected");
 });
 
+test("uses ImsPhoneConnection disconnect cause rows attached just after the end marker", () => {
+  const summary = buildCallSummary([
+    event({ seconds: 0, eventKey: "CALL_DIAL_INITIATED", rawMessage: "Outgoing" }),
+    event({ seconds: 1, eventKey: "CALL_ACTIVE", rawMessage: "active" }),
+    event({ seconds: 5, category: "IMS", type: "l3", rawMessage: "SIP 404 unrelated stale response", title: "IMS Status" }),
+    event({ seconds: 10, eventKey: "CALL_DISCONNECTED", rawMessage: "disconnect" }),
+    event({
+      seconds: 11,
+      eventKey: "CALL_DISCONNECT_NONZERO_CAUSE",
+      rawMessage: "07-30 12:20:59.523  4799  4799 D ImsPhoneConnection: getDisconnectCause: cause=3",
+    }),
+  ]);
+
+  assert.equal(summary.connected, 1);
+  assert.equal(summary.dropped, 0);
+  assert.equal(summary.calls[0].causeCode, 3);
+  assert.equal(summary.calls[0].status, "Connected");
+  assert.equal(summary.calls[0].disconnectReason, "Normal call release after a completed call.");
+});
+
 test("treats cause=3 as completed for this device profile when the call ran normally", () => {
   const summary = buildCallSummary([
     event({ seconds: 0, eventKey: "CALL_DIAL_INITIATED", rawMessage: "Outgoing" }),
