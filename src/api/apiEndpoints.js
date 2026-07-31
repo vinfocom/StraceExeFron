@@ -107,7 +107,7 @@ const downloadUrlAsBlob = async (url, filename, headers = {}) => {
 const TEMPLATE_DOWNLOAD_FILENAMES = {
   1: "Session_Template.zip",
   2: "Template_NetworkLog.csv",
-  3: "Site_Prediction_Data.csv",
+  3: "Site_db_Template.csv",
   4: "python-runtime-v5-win-x64.zip",
 };
 

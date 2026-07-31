@@ -120,7 +120,16 @@ const getLegendCategoryKeyFromLog = (log, colorBy) => {
   }
 
   if (key === "pci") {
-    const pci = Number.parseInt(log?.pci ?? log?.PCI ?? log?.best_pci, 10);
+    const pci = Number.parseInt(
+      log?.neighbourPci ??
+        log?.neighborPci ??
+        log?.neighbour_pci ??
+        log?.neighbor_pci ??
+        log?.pci ??
+        log?.PCI ??
+        log?.best_pci,
+      10,
+    );
     return Number.isFinite(pci) ? String(pci) : "Unknown";
   }
 
@@ -1707,17 +1716,28 @@ const MapWithMultipleCircles = ({
       .map((n, idx) => {
         const lat = parseFloat(n.lat ?? n.latitude ?? n.Lat);
         const lng = parseFloat(n.lng ?? n.longitude ?? n.Lng ?? n.lon);
-        
-        const rsrp = parseFloat(n.primaryRsrp ?? n.primary_rsrp ?? n.rsrp) || null;
-        const rsrq = parseFloat(n.primaryRsrq ?? n.primary_rsrq ?? n.rsrq) || null;
-        const sinr = parseFloat(n.primarySinr ?? n.primary_sinr ?? n.sinr) || null;
+
+        const toFiniteNumber = (value) => {
+          const parsed = Number.parseFloat(value);
+          return Number.isFinite(parsed) ? parsed : null;
+        };
+
+        const rsrp = toFiniteNumber(n.primaryRsrp ?? n.primary_rsrp ?? n.rsrp);
+        const rsrq = toFiniteNumber(n.primaryRsrq ?? n.primary_rsrq ?? n.rsrq);
+        const sinr = toFiniteNumber(n.primarySinr ?? n.primary_sinr ?? n.sinr);
         const pci = n.primaryPci ?? n.primary_pci ?? n.pci;
         const band = n.primaryBand ?? n.primary_band ?? n.band;
-        const neighbourRsrp = n.neighbourRsrp ?? n.neighbour_rsrp;
-        const neighbourRsrq = n.neighbourRsrq ?? n.neighbour_rsrq;
+        const neighbourRsrp = toFiniteNumber(n.neighbourRsrp ?? n.neighbour_rsrp);
+        const neighbourRsrq = toFiniteNumber(n.neighbourRsrq ?? n.neighbour_rsrq);
         const neighbourPci = n.neighbourPci ?? n.neighbour_pci;
         const neighbourBand = n.neighbourBand ?? n.neighbour_band;
-        const neighbourSinr = n.neighbourSinr ?? n.neighbour_sinr;
+        const neighbourSinr = toFiniteNumber(n.neighbourSinr ?? n.neighbour_sinr);
+        const neighbourDlTpt = toFiniteNumber(
+          n.neighbourDlTpt ?? n.neighbour_dl_tpt ?? n.neighborDlTpt ?? n.neighbor_dl_tpt,
+        );
+        const neighbourUlTpt = toFiniteNumber(
+          n.neighbourUlTpt ?? n.neighbour_ul_tpt ?? n.neighborUlTpt ?? n.neighbor_ul_tpt,
+        );
 
         let metricValue = null;
         let metricType = 'rsrp';
@@ -1725,13 +1745,22 @@ const MapWithMultipleCircles = ({
         const targetMetric = selectedMetric?.toLowerCase();
 
         if (targetMetric === 'rsrq') {
-            metricValue = neighbourRsrq !== null ? parseFloat(neighbourRsrq) : null;
+            metricValue = neighbourRsrq;
             metricType = 'rsrq';
         } else if (targetMetric === 'sinr') {
-            metricValue = neighbourSinr !== null ? parseFloat(neighbourSinr) : null;
+            metricValue = neighbourSinr;
             metricType = 'sinr';
+        } else if (['pci'].includes(targetMetric)) {
+            metricValue = toFiniteNumber(neighbourPci);
+            metricType = 'pci';
+        } else if (['dl_thpt', 'dl_tpt', 'dl_rpt', 'dl_throughput', 'throughput_dl', 'tpt_dl'].includes(targetMetric)) {
+            metricValue = neighbourDlTpt;
+            metricType = 'dl_thpt';
+        } else if (['ul_thpt', 'ul_tpt', 'ul_rpt', 'ul_throughput', 'throughput_ul', 'tpt_ul'].includes(targetMetric)) {
+            metricValue = neighbourUlTpt;
+            metricType = 'ul_thpt';
         } else {
-            metricValue = neighbourRsrp !== null ? parseFloat(neighbourRsrp) : null;
+            metricValue = neighbourRsrp;
             metricType = 'rsrp';
         }
 
@@ -1743,16 +1772,22 @@ const MapWithMultipleCircles = ({
           id: n.id || idx,
           lat,
           lng,
-          rsrp: isNaN(rsrp) ? null : rsrp,
-          rsrq: isNaN(rsrq) ? null : rsrq,
-          sinr: isNaN(sinr) ? null : sinr,
+          rsrp,
+          rsrq,
+          sinr,
           pci,
           band,
-          neighbourRsrp: neighbourRsrp !== null ? parseFloat(neighbourRsrp) : null,
-          neighbourRsrq: neighbourRsrq !== null ? parseFloat(neighbourRsrq) : null,
-          neighbourSinr: neighbourSinr !== null ? parseFloat(neighbourSinr) : null,
+          dl_tpt: neighbourDlTpt,
+          dl_thpt: neighbourDlTpt,
+          ul_tpt: neighbourUlTpt,
+          ul_thpt: neighbourUlTpt,
+          neighbourRsrp,
+          neighbourRsrq,
+          neighbourSinr,
           neighbourPci,
           neighbourBand,
+          neighbourDlTpt,
+          neighbourUlTpt,
           metricValue,
           metricType,
           quality,

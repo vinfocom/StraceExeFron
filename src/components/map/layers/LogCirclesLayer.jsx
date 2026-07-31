@@ -5,6 +5,38 @@ import CanvasPointsOverlay from "@/components/map/overlays/CanvasPointsOverlay";
 import { resolveMetricConfig, getColorForMetric, getMetricValueFromLog } from "@/utils/metrics";
 import { getLogColor,normalizeTechName } from "@/utils/colorUtils";
 
+const resolveLogProvider = (log) =>
+  log?.provider ??
+  log?.Provider ??
+  log?.m_alpha_long ??
+  log?.m_alpha_short ??
+  log?.carrier;
+
+const resolveLogBand = (log) =>
+  log?.band ??
+  log?.Band ??
+  log?.neighbourBand ??
+  log?.neighborBand ??
+  log?.neighbour_band;
+
+const resolveLogTechnology = (log) =>
+  log?.network ??
+  log?.Network ??
+  log?.technology ??
+  log?.Technology ??
+  log?.networkType ??
+  log?.connection_type;
+
+const resolveLogPci = (log) =>
+  log?.pci ??
+  log?.Pci ??
+  log?.PCI ??
+  log?.best_pci ??
+  log?.neighbourPci ??
+  log?.neighborPci ??
+  log?.neighbour_pci ??
+  log?.neighbor_pci;
+
 export default function LogCirclesLayer({
   map,
   logs = [],
@@ -60,20 +92,25 @@ export default function LogCirclesLayer({
   const getColorForLog = useCallback(
     (log, metricValue) => {
       if (colorBy === "provider") {
-        const providerValue = log.provider || log.Provider;
+        const providerValue = resolveLogProvider(log);
         return getLogColor("provider", providerValue);
       }
       
       if (colorBy === "technology") {
-        const techValue = log.network || log.Network;
-        const bandRaw = log.band || log.Band;
+        const techValue = resolveLogTechnology(log);
+        const bandRaw = resolveLogBand(log);
         const normalizedTech = normalizeTechName(techValue, bandRaw);
         return getLogColor("technology", normalizedTech);
       }
       
       if (colorBy === "band") {
-        const bandValue = log.band || log.Band;
+        const bandValue = resolveLogBand(log);
         return getLogColor("band", bandValue);
+      }
+
+      if (colorBy === "pci") {
+        const pciValue = resolveLogPci(log);
+        return getLogColor("pci", pciValue);
       }
 
       return getColorForMetric(selectedMetric, metricValue, thresholds);
