@@ -854,6 +854,7 @@ export default function MapLegend({
   const containerRef = useRef(null);
   const headerRef = useRef(null);
   const bodyRef = useRef(null);
+  const contentRef = useRef(null);
   const hasManualResizeRef = useRef(false);
   const pointerStartRef = useRef(null);
   const dragSuppressToggleRef = useRef(false);
@@ -1072,7 +1073,7 @@ export default function MapLegend({
     if (collapsed || hasManualResizeRef.current) return;
 
     const headerHeight = headerRef.current?.offsetHeight || 0;
-    const bodyHeight = bodyRef.current?.scrollHeight || 0;
+    const bodyHeight = contentRef.current?.scrollHeight || 0;
     const nextHeight = Math.max(
       MIN_LEGEND_HEIGHT,
       Math.min(maxLegendHeight, Math.ceil(headerHeight + bodyHeight + 8)),
@@ -1292,7 +1293,9 @@ export default function MapLegend({
                   ref={bodyRef}
                   className="flex h-full flex-col overflow-y-auto border-t border-gray-700/40 pt-0.5 custom-scrollbar"
                 >
-                  {content}
+                  <div ref={contentRef} className="flex flex-col">
+                    {content}
+                  </div>
                 </div>
               </div>
             )}

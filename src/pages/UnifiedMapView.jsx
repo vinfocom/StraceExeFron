@@ -6361,6 +6361,31 @@ const UnifiedMapView = () => {
     });
   }, [showSessionNeighbors, filteredNeighbors]);
 
+  const secondaryMetricAvailability = useMemo(() => {
+    const hasFiniteNumber = (value) => Number.isFinite(Number.parseFloat(value));
+    const hasPciValue = (value) => {
+      if (value === null || value === undefined) return false;
+      const text = String(value).trim();
+      if (!text || text.toLowerCase() === "n/a" || text.toLowerCase() === "null") return false;
+      return Number.isFinite(Number.parseInt(text, 10));
+    };
+
+    return {
+      rsrp: Array.isArray(filteredNeighbors) && filteredNeighbors.some((neighbor) =>
+        hasFiniteNumber(neighbor?.neighbourRsrp ?? neighbor?.neighbour_rsrp),
+      ),
+      rsrq: Array.isArray(filteredNeighbors) && filteredNeighbors.some((neighbor) =>
+        hasFiniteNumber(neighbor?.neighbourRsrq ?? neighbor?.neighbour_rsrq),
+      ),
+      sinr: Array.isArray(filteredNeighbors) && filteredNeighbors.some((neighbor) =>
+        hasFiniteNumber(neighbor?.neighbourSinr ?? neighbor?.neighbour_sinr),
+      ),
+      pci: Array.isArray(filteredNeighbors) && filteredNeighbors.some((neighbor) =>
+        hasPciValue(neighbor?.neighbourPci ?? neighbor?.neighbour_pci),
+      ),
+    };
+  }, [filteredNeighbors]);
+
   const effectiveLegendLogs = useMemo(() => {
     if (Array.isArray(legendLogs) && legendLogs.length > 0) return legendLogs;
     if (showSessionNeighbors) return secondaryLegendLogs;
@@ -7065,6 +7090,7 @@ const UnifiedMapView = () => {
         setShowNeighbors={setShowNeighbors}
         showSubSession={showSubSession}
         setShowSubSession={setShowSubSession}
+        secondaryMetricAvailability={secondaryMetricAvailability}
         subSessionMarkerCount={subSessionMarkers?.length || 0}
         subSessionLoading={subSessionLoading}
         subSessionError={subSessionError}

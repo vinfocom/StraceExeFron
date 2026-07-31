@@ -193,7 +193,12 @@ const SelectRow = memo(
         </SelectTrigger>
         <SelectContent className="max-w-[340px] min-w-[240px] bg-slate-900 border-slate-700 text-white">
           {options.map((opt) => (
-            <SelectItem key={opt.value} value={opt.value} className="pr-8 text-xs text-white focus:text-white">
+            <SelectItem
+              key={opt.value}
+              value={opt.value}
+              disabled={Boolean(opt.disabled)}
+              className="pr-8 text-xs text-white focus:text-white data-[disabled]:pointer-events-none data-[disabled]:opacity-40"
+            >
               {opt.label}
             </SelectItem>
           ))}
@@ -586,6 +591,7 @@ const UnifiedMapSidebar = ({
   setShowSubSession,
   showSessionNeighbors,
   setShowSessionNeighbors,
+  secondaryMetricAvailability = {},
   neighborLogsAvailable = false,
   sessionNeighborLoading = false,
   gridCellStats = { total: 0, populated: 0 },
@@ -774,6 +780,11 @@ const UnifiedMapSidebar = ({
     [],
   );
 
+  const isSecondaryOnlyMode = useMemo(
+    () => !enableDataToggle && Boolean(showSessionNeighbors),
+    [enableDataToggle, showSessionNeighbors],
+  );
+
   // Metric options
   const metricOptions = useMemo(
     () => {
@@ -798,13 +809,37 @@ const UnifiedMapSidebar = ({
         { value: "coverage_violation", label: "Coverage Violation" },
       ];
 
-      if (!enableGrid) return allOptions;
-      return allOptions.filter((option) =>
+      const baseOptions = !enableGrid
+        ? allOptions
+        : allOptions.filter((option) =>
         GRID_VIEW_ALLOWED_METRICS.includes(option.value),
       );
+
+      if (!isSecondaryOnlyMode) return baseOptions;
+
+      const secondaryOnlyMetrics = new Set(["rsrp", "rsrq", "sinr", "pci"]);
+      return baseOptions
+        .filter((option) => secondaryOnlyMetrics.has(option.value))
+        .map((option) => ({
+          ...option,
+          disabled: !Boolean(secondaryMetricAvailability?.[option.value]),
+        }));
     },
-    [enableGrid],
+    [enableGrid, isSecondaryOnlyMode, secondaryMetricAvailability],
   );
+
+  useEffect(() => {
+    if (!isSecondaryOnlyMode) return;
+
+    const currentMetric = String(metric || "").trim().toLowerCase();
+    const currentOption = metricOptions.find((option) => option.value === currentMetric);
+    if (currentOption && !currentOption.disabled) return;
+
+    const fallbackMetric = metricOptions.find((option) => !option.disabled)?.value;
+    if (fallbackMetric) {
+      setMetric?.(fallbackMetric);
+    }
+  }, [isSecondaryOnlyMode, metric, metricOptions, setMetric]);
 
   const colorOptions = useMemo(
     () => {
