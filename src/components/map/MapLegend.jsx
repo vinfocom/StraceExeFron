@@ -303,6 +303,8 @@ const ColorSchemeLegend = ({ colorBy, logs, activeFilter, onFilterChange }) => {
           ? getMetricPciColor(key)
           : colorBy === "earfcn"
           ? getEarfcnColor(key)
+          : colorBy === "technology"
+          ? getLogColor(colorBy, key)
           : scheme[key] || getLogColor(colorBy, key)),
       ]);
 

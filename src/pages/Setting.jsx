@@ -33,6 +33,27 @@ const SPECIAL_FIELDS = {
 };
 
 const DEFAULT_COVERAGE_HOLE = -110;
+const DEFAULT_TECHNOLOGY_COLORS = {
+    twoG: "#6B7280",
+    threeG: "#10B981",
+    fourG: "#8B5CF6",
+    fiveG: "#EC4899",
+};
+const TECHNOLOGY_COLOR_LABELS = {
+    default: "Default",
+    fiveG: "5G",
+    fourG: "4G",
+    threeG: "3G",
+    twoG: "2G",
+};
+const THRESHOLD_BUCKET_KEYS = ["default", "5g", "4g", "3g", "2g"];
+const TECHNOLOGY_TAB_TO_BUCKET_KEY = {
+    default: "default",
+    fiveG: "5g",
+    fourG: "4g",
+    threeG: "3g",
+    twoG: "2g",
+};
 
 const generateId = () => {
     return `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
@@ -78,6 +99,73 @@ const createNewRow = () => ({
 
 const extractResponseData = (response) => {
     return response?.data || response;
+};
+
+const createEmptyThresholdBuckets = () => ({
+    default: [],
+    "5g": [],
+    "4g": [],
+    "3g": [],
+    "2g": [],
+});
+
+const createEmptyScalarBuckets = (fallback = DEFAULT_COVERAGE_HOLE) => ({
+    default: fallback,
+    "5g": fallback,
+    "4g": fallback,
+    "3g": fallback,
+    "2g": fallback,
+});
+
+const parseBucketedRangeValue = (rawValue) => {
+    if (!rawValue) return createEmptyThresholdBuckets();
+
+    try {
+        const parsed = typeof rawValue === "string" ? JSON.parse(rawValue) : rawValue;
+
+        if (Array.isArray(parsed)) {
+            return {
+                ...createEmptyThresholdBuckets(),
+                default: parsed,
+            };
+        }
+
+        if (parsed && typeof parsed === "object") {
+            return THRESHOLD_BUCKET_KEYS.reduce((acc, key) => {
+                acc[key] = Array.isArray(parsed[key]) ? parsed[key] : [];
+                return acc;
+            }, createEmptyThresholdBuckets());
+        }
+    } catch (error) {
+        console.error("Error parsing threshold bucket payload:", error);
+    }
+
+    return createEmptyThresholdBuckets();
+};
+
+const parseBucketedScalarValue = (rawValue, fallback = DEFAULT_COVERAGE_HOLE) => {
+    if (rawValue === null || rawValue === undefined || rawValue === "") {
+        return createEmptyScalarBuckets(fallback);
+    }
+
+    try {
+        const parsed = typeof rawValue === "string" ? JSON.parse(rawValue) : rawValue;
+
+        if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+            return THRESHOLD_BUCKET_KEYS.reduce((acc, key) => {
+                const nextValue = parsed[key];
+                acc[key] = nextValue === undefined || nextValue === null || nextValue === ""
+                    ? fallback
+                    : parseNumber(nextValue);
+                return acc;
+            }, createEmptyScalarBuckets(fallback));
+        }
+    } catch {
+        const parsedNumber = parseNumber(rawValue);
+        return createEmptyScalarBuckets(parsedNumber || fallback);
+    }
+
+    return createEmptyScalarBuckets(parseNumber(rawValue) || fallback);
 };
 
 const ThresholdRow = memo(({ row, index, onChange, onDelete }) => {
@@ -220,55 +308,77 @@ const ThresholdRow = memo(({ row, index, onChange, onDelete }) => {
 ThresholdRow.displayName = 'ThresholdRow';
 
 const ThresholdForm = memo(({ paramKey, paramName, initialData, onUpdate, onClose }) => {
-    const [localData, setLocalData] = useState([]);
+    const [localBuckets, setLocalBuckets] = useState(createEmptyThresholdBuckets());
+    const [activeTechTab, setActiveTechTab] = useState("default");
     const isInitialMount = useRef(true);
     const pendingUpdate = useRef(false);
 
     useEffect(() => {
-        const normalized = (initialData || []).map(row => normalizeRow(row));
-        setLocalData(normalized);
+        const normalizedBuckets = THRESHOLD_BUCKET_KEYS.reduce((acc, key) => {
+            acc[key] = Array.isArray(initialData?.[key])
+                ? initialData[key].map(row => normalizeRow(row))
+                : [];
+            return acc;
+        }, createEmptyThresholdBuckets());
+        setLocalBuckets(normalizedBuckets);
+        setActiveTechTab("default");
         isInitialMount.current = false;
         pendingUpdate.current = false;
     }, [paramKey]);
 
+    const activeBucketKey = TECHNOLOGY_TAB_TO_BUCKET_KEY[activeTechTab] || "default";
+    const currentRows = localBuckets[activeBucketKey] || [];
+
     const handleChange = useCallback((index, updatedRow) => {
         pendingUpdate.current = true;
-        setLocalData(prev => {
-            const updated = [...prev];
+        setLocalBuckets(prev => {
+            const updated = [...(prev[activeBucketKey] || [])];
             updated[index] = normalizeRow(updatedRow);
-            return updated;
+            return {
+                ...prev,
+                [activeBucketKey]: updated,
+            };
         });
-    }, []);
+    }, [activeBucketKey]);
 
     const addRow = useCallback(() => {
         pendingUpdate.current = true;
-        setLocalData(prev => [...prev, createNewRow()]);
-    }, []);
+        setLocalBuckets(prev => ({
+            ...prev,
+            [activeBucketKey]: [...(prev[activeBucketKey] || []), createNewRow()],
+        }));
+    }, [activeBucketKey]);
 
     const deleteRow = useCallback((index) => {
         pendingUpdate.current = true;
-        setLocalData(prev => prev.filter((_, i) => i !== index));
-    }, []);
+        setLocalBuckets(prev => ({
+            ...prev,
+            [activeBucketKey]: (prev[activeBucketKey] || []).filter((_, i) => i !== index),
+        }));
+    }, [activeBucketKey]);
 
     const sortByMin = useCallback(() => {
         pendingUpdate.current = true;
-        setLocalData(prev => [...prev].sort((a, b) => a.min - b.min));
-    }, []);
+        setLocalBuckets(prev => ({
+            ...prev,
+            [activeBucketKey]: [...(prev[activeBucketKey] || [])].sort((a, b) => a.min - b.min),
+        }));
+    }, [activeBucketKey]);
 
     useEffect(() => {
         if (isInitialMount.current) return;
         if (!pendingUpdate.current) return;
-        onUpdate(localData);
+        onUpdate(localBuckets);
         pendingUpdate.current = false;
-    }, [localData, onUpdate]);
+    }, [localBuckets, onUpdate]);
 
     return (
-        <div className="mt-5 p-5 border border-slate-700 rounded-2xl bg-gradient-to-b from-slate-900 to-slate-950 shadow-lg">
-            <div className="flex justify-between items-start mb-5">
+        <div className="mt-5 border border-slate-700 rounded-2xl bg-gradient-to-b from-slate-900 to-slate-950 shadow-lg overflow-hidden">
+            <div className="flex justify-between items-start px-5 pt-5 mb-5">
                 <div>
                     <h3 className="text-lg font-semibold tracking-wide text-white">{paramName}</h3>
                     <p className="text-xs text-slate-400 mt-1">
-                        {localData.length} threshold range(s) configured
+                        {currentRows.length} threshold range(s) configured
                     </p>
                 </div>
                 <div className="flex items-center gap-2">
@@ -277,7 +387,7 @@ const ThresholdForm = memo(({ paramKey, paramName, initialData, onUpdate, onClos
                         size="sm" 
                         onClick={sortByMin}
                         className="text-slate-300 hover:text-white hover:bg-slate-800 rounded-lg"
-                        disabled={localData.length < 2}
+                        disabled={currentRows.length < 2}
                     >
                         <ArrowUpDown className="h-4 w-4 mr-1" />
                         Sort
@@ -288,52 +398,87 @@ const ThresholdForm = memo(({ paramKey, paramName, initialData, onUpdate, onClos
                 </div>
             </div>
 
-            <div className="space-y-2 max-h-96 overflow-y-auto">
-                {localData.map((row, index) => (
-                    <ThresholdRow
-                        key={row.id}
-                        row={row}
-                        index={index}
-                        onChange={handleChange}
-                        onDelete={deleteRow}
-                    />
-                ))}
-            </div>
+            <div className="px-5">
+                <div className="inline-flex overflow-hidden rounded-t-2xl border border-slate-700 border-b-0 bg-slate-950/50">
+                    {Object.entries(TECHNOLOGY_COLOR_LABELS).map(([techKey, techLabel], index, arr) => {
+                        const isActive = activeTechTab === techKey;
+                        const isFirst = index === 0;
+                        const isLast = index === arr.length - 1;
 
-            {localData.length === 0 && (
-                <div className="text-center py-8 text-slate-400 border-2 border-dashed border-slate-600/70 rounded-xl bg-slate-900/40">
-                    <p>No thresholds configured</p>
-                    <p className="text-xs mt-1">Click "Add Row" to create a threshold range</p>
-                </div>
-            )}
-
-            <div className="flex gap-2 mt-4">
-                <Button onClick={addRow} variant="outline" className="flex-1 border-slate-500 bg-slate-800 hover:bg-slate-700 text-slate-100 rounded-lg">
-                    <Plus className="h-4 w-4 mr-1" />
-                    Add Row
-                </Button>
-            </div>
-
-            {localData.length > 0 && (
-                <div className="mt-4 pt-4 border-t border-slate-700">
-                    <p className="text-xs text-slate-400 mb-2 uppercase tracking-wide">Preview</p>
-                    <div className="flex flex-wrap gap-1">
-                        {localData.map((row) => (
-                            <div
-                                key={row.id}
-                                className="px-2 py-1 rounded-lg text-xs font-semibold"
-                                style={{ 
-                                    backgroundColor: row.color + '30', 
-                                    color: row.color,
-                                    border: `1px solid ${row.color}`
-                                }}
+                        return (
+                            <button
+                                key={techKey}
+                                type="button"
+                                onClick={() => setActiveTechTab(techKey)}
+                                className={[
+                                    "px-5 py-3 text-sm font-semibold transition-all focus:outline-none",
+                                    "border-r border-slate-700 last:border-r-0",
+                                    isActive
+                                        ? "bg-slate-800 text-white"
+                                        : "bg-transparent text-slate-300 hover:bg-slate-900 hover:text-white",
+                                    isFirst ? "rounded-tl-2xl" : "",
+                                    isLast ? "rounded-tr-2xl" : "",
+                                ].filter(Boolean).join(" ")}
                             >
-                                {row.label || row.range}
-                            </div>
+                                {techLabel}
+                            </button>
+                        );
+                    })}
+                </div>
+            </div>
+
+            <div className="mx-5 mb-5 rounded-b-2xl rounded-tr-2xl border border-slate-700 bg-slate-800">
+                
+
+                <div className="p-4">
+                    <div className="space-y-2 max-h-96 overflow-y-auto">
+                        {currentRows.map((row, index) => (
+                            <ThresholdRow
+                                key={row.id}
+                                row={row}
+                                index={index}
+                                onChange={handleChange}
+                                onDelete={deleteRow}
+                            />
                         ))}
                     </div>
+
+                    {currentRows.length === 0 && (
+                        <div className="text-center py-8 text-slate-400 border-2 border-dashed border-slate-600/70 rounded-xl bg-slate-900/40">
+                            <p>No thresholds configured</p>
+                            <p className="text-xs mt-1">Click "Add Row" to create a threshold range</p>
+                        </div>
+                    )}
+
+                    <div className="flex gap-2 mt-4">
+                        <Button onClick={addRow} variant="outline" className="flex-1 border-slate-500 bg-slate-800 hover:bg-slate-700 text-slate-100 rounded-lg">
+                            <Plus className="h-4 w-4 mr-1" />
+                            Add Row
+                        </Button>
+                    </div>
+
+                    {currentRows.length > 0 && (
+                        <div className="mt-4 pt-4 border-t border-slate-700">
+                            <p className="text-xs text-slate-400 mb-2 uppercase tracking-wide">Preview</p>
+                            <div className="flex flex-wrap gap-1">
+                                {currentRows.map((row) => (
+                                    <div
+                                        key={row.id}
+                                        className="px-2 py-1 rounded-lg text-xs font-semibold"
+                                        style={{ 
+                                            backgroundColor: row.color + '30', 
+                                            color: row.color,
+                                            border: `1px solid ${row.color}`
+                                        }}
+                                    >
+                                        {row.label || row.range}
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    )}
                 </div>
-            )}
+            </div>
         </div>
     );
 });
@@ -341,57 +486,66 @@ const ThresholdForm = memo(({ paramKey, paramName, initialData, onUpdate, onClos
 ThresholdForm.displayName = 'ThresholdForm';
 
 const VoLTECallForm = memo(({ value, setValue, onClose }) => {
-    const [localData, setLocalData] = useState([]);
+    const [localBuckets, setLocalBuckets] = useState(createEmptyThresholdBuckets());
+    const [activeTechTab, setActiveTechTab] = useState("default");
     const isInitialMount = useRef(true);
     const pendingUpdate = useRef(false);
 
     useEffect(() => {
-        let parsed = [];
-        if (value) {
-            if (Array.isArray(value)) {
-                parsed = value;
-            } else if (typeof value === 'string') {
-                try {
-                    parsed = JSON.parse(value);
-                } catch {
-                    parsed = [];
-                }
-            }
-        }
-        setLocalData((Array.isArray(parsed) ? parsed : []).map(normalizeRow));
+        const nextBuckets = THRESHOLD_BUCKET_KEYS.reduce((acc, key) => {
+            acc[key] = Array.isArray(value?.[key]) ? value[key].map(normalizeRow) : [];
+            return acc;
+        }, createEmptyThresholdBuckets());
+        setLocalBuckets(nextBuckets);
+        setActiveTechTab("default");
         isInitialMount.current = false;
-    }, []);
+    }, [value]);
+
+    const activeBucketKey = TECHNOLOGY_TAB_TO_BUCKET_KEY[activeTechTab] || "default";
+    const currentRows = localBuckets[activeBucketKey] || [];
 
     const handleChange = useCallback((index, updatedRow) => {
         pendingUpdate.current = true;
-        setLocalData(prev => {
-            const updated = [...prev];
+        setLocalBuckets(prev => {
+            const updated = [...(prev[activeBucketKey] || [])];
             updated[index] = normalizeRow(updatedRow);
-            return updated;
+            return {
+                ...prev,
+                [activeBucketKey]: updated,
+            };
         });
-    }, []);
+    }, [activeBucketKey]);
 
     const addRow = useCallback(() => {
         pendingUpdate.current = true;
-        setLocalData(prev => [...prev, createNewRow()]);
-    }, []);
+        setLocalBuckets(prev => ({
+            ...prev,
+            [activeBucketKey]: [...(prev[activeBucketKey] || []), createNewRow()],
+        }));
+    }, [activeBucketKey]);
 
     const deleteRow = useCallback((index) => {
         pendingUpdate.current = true;
-        setLocalData(prev => prev.filter((_, i) => i !== index));
-    }, []);
+        setLocalBuckets(prev => ({
+            ...prev,
+            [activeBucketKey]: (prev[activeBucketKey] || []).filter((_, i) => i !== index),
+        }));
+    }, [activeBucketKey]);
 
     const sortByMin = useCallback(() => {
         pendingUpdate.current = true;
-        setLocalData(prev => [...prev].sort((a, b) => a.min - b.min));
-    }, []);
+        setLocalBuckets(prev => ({
+            ...prev,
+            [activeBucketKey]: [...(prev[activeBucketKey] || [])].sort((a, b) => a.min - b.min),
+        }));
+    }, [activeBucketKey]);
 
     useEffect(() => {
         if (isInitialMount.current) return;
         if (!pendingUpdate.current) return;
-        setValue(localData);
+        setValue(localBuckets);
         pendingUpdate.current = false;
-    }, [localData, setValue]);
+    }, [localBuckets, setValue]);
 
     return (
         <div className="mt-5 p-5 border border-slate-700 rounded-2xl bg-gradient-to-b from-slate-900 to-slate-950 shadow-lg">
@@ -399,7 +553,7 @@ const VoLTECallForm = memo(({ value, setValue, onClose }) => {
                 <div>
                     <h3 className="text-lg font-semibold tracking-wide text-white">VoLTE Call</h3>
                     <p className="text-xs text-slate-400 mt-1">
-                        {localData.length} threshold range(s) configured
+                        {currentRows.length} threshold range(s) configured
                     </p>
                 </div>
                 <div className="flex items-center gap-2">
@@ -408,7 +562,7 @@ const VoLTECallForm = memo(({ value, setValue, onClose }) => {
                         size="sm" 
                         onClick={sortByMin}
                         className="text-slate-300 hover:text-white hover:bg-slate-800 rounded-lg"
-                        disabled={localData.length < 2}
+                        disabled={currentRows.length < 2}
                     >
                         <ArrowUpDown className="h-4 w-4 mr-1" />
                         Sort
@@ -419,8 +573,31 @@ const VoLTECallForm = memo(({ value, setValue, onClose }) => {
                 </div>
             </div>
 
+            <div className="mb-5">
+                <div className="inline-flex overflow-hidden rounded-2xl border border-slate-700 bg-slate-900/80 p-1 shadow-inner">
+                    {Object.entries(TECHNOLOGY_COLOR_LABELS).map(([techKey, techLabel]) => {
+                        const isActive = activeTechTab === techKey;
+                        return (
+                            <button
+                                key={techKey}
+                                type="button"
+                                onClick={() => setActiveTechTab(techKey)}
+                                className={[
+                                    "px-4 py-2 text-sm font-semibold transition-all focus:outline-none",
+                                    isActive
+                                        ? "bg-slate-800 text-white rounded-xl"
+                                        : "bg-transparent text-slate-300 hover:bg-slate-800 hover:text-white rounded-xl",
+                                ].join(" ")}
+                            >
+                                {techLabel}
+                            </button>
+                        );
+                    })}
+                </div>
+            </div>
+
             <div className="space-y-2 max-h-96 overflow-y-auto">
-                {localData.map((row, index) => (
+                {currentRows.map((row, index) => (
                     <ThresholdRow
                         key={row.id}
                         row={row}
@@ -431,7 +608,7 @@ const VoLTECallForm = memo(({ value, setValue, onClose }) => {
                 ))}
             </div>
 
-            {localData.length === 0 && (
+            {currentRows.length === 0 && (
                 <div className="text-center py-8 text-slate-400 border-2 border-dashed border-slate-600/70 rounded-xl bg-slate-900/40">
                     <p>No thresholds configured</p>
                 </div>
@@ -444,11 +621,11 @@ const VoLTECallForm = memo(({ value, setValue, onClose }) => {
                 </Button>
             </div>
 
-            {localData.length > 0 && (
+            {currentRows.length > 0 && (
                 <div className="mt-4 pt-4 border-t border-slate-700">
                     <p className="text-xs text-slate-400 mb-2 uppercase tracking-wide">Preview</p>
                     <div className="flex flex-wrap gap-1">
-                        {localData.map((row) => (
+                        {currentRows.map((row) => (
                             <div
                                 key={row.id}
                                 className="px-2 py-1 rounded-lg text-xs font-semibold"
@@ -471,18 +648,38 @@ const VoLTECallForm = memo(({ value, setValue, onClose }) => {
 VoLTECallForm.displayName = 'VoLTECallForm';
 
 const CoverageHoleForm = memo(({ value, setValue, onClose }) => {
-    const [localValueStr, setLocalValueStr] = useState(String(value ?? DEFAULT_COVERAGE_HOLE));
+    const [localValues, setLocalValues] = useState(createEmptyScalarBuckets(DEFAULT_COVERAGE_HOLE));
+    const [activeTechTab, setActiveTechTab] = useState("default");
+
+    const activeBucketKey = TECHNOLOGY_TAB_TO_BUCKET_KEY[activeTechTab] || "default";
+    const activeValue = localValues[activeBucketKey] ?? DEFAULT_COVERAGE_HOLE;
+    const [localValueStr, setLocalValueStr] = useState(String(activeValue));
 
     useEffect(() => {
-        setLocalValueStr(String(value ?? DEFAULT_COVERAGE_HOLE));
+        const nextValues = createEmptyScalarBuckets(DEFAULT_COVERAGE_HOLE);
+        THRESHOLD_BUCKET_KEYS.forEach((key) => {
+            nextValues[key] = value?.[key] ?? DEFAULT_COVERAGE_HOLE;
+        });
+        setLocalValues(nextValues);
+        setActiveTechTab("default");
+        setLocalValueStr(String(nextValues.default));
     }, [value]);
+
+    useEffect(() => {
+        setLocalValueStr(String(localValues[activeBucketKey] ?? DEFAULT_COVERAGE_HOLE));
+    }, [activeBucketKey, localValues]);
 
     const handleBlur = useCallback(() => {
         const num = parseNumber(localValueStr);
         const finalValue = num > 0 ? -num : num;
         setLocalValueStr(String(finalValue));
-        setValue(finalValue);
-    }, [localValueStr, setValue]);
+        const nextValues = {
+            ...localValues,
+            [activeBucketKey]: finalValue,
+        };
+        setLocalValues(nextValues);
+        setValue(nextValues);
+    }, [activeBucketKey, localValueStr, localValues, setValue]);
 
     const currentValue = parseNumber(localValueStr);
 
@@ -501,6 +698,26 @@ const CoverageHoleForm = memo(({ value, setValue, onClose }) => {
             </div>
 
             <div className="flex items-center gap-3">
+                <div className="inline-flex overflow-hidden rounded-2xl border border-slate-700 bg-slate-900/80 p-1 shadow-inner">
+                    {Object.entries(TECHNOLOGY_COLOR_LABELS).map(([techKey, techLabel]) => {
+                        const isActive = activeTechTab === techKey;
+                        return (
+                            <button
+                                key={techKey}
+                                type="button"
+                                onClick={() => setActiveTechTab(techKey)}
+                                className={[
+                                    "px-4 py-2 text-sm font-semibold transition-all focus:outline-none",
+                                    isActive
+                                        ? "bg-slate-800 text-white rounded-xl"
+                                        : "bg-transparent text-slate-300 hover:bg-slate-800 hover:text-white rounded-xl",
+                                ].join(" ")}
+                            >
+                                {techLabel}
+                            </button>
+                        );
+                    })}
+                </div>
                 <Input
                     type="number"
                     step="any"
@@ -530,68 +747,42 @@ const parseThresholdData = (data) => {
         id: data.id,
         userId: data.user_id,
         isDefault: data.is_default,
+        _bucketPayloads: {},
     };
 
     Object.keys(PARAMETERS).forEach(key => {
         if (key === "coveragehole") {
-            parsedData[key] = parseNumber(data.coveragehole_json || data.coveragehole) || DEFAULT_COVERAGE_HOLE;
+            const scalarBuckets = parseBucketedScalarValue(data.coveragehole_json || data.coveragehole, DEFAULT_COVERAGE_HOLE);
+            parsedData._bucketPayloads[key] = scalarBuckets;
+            parsedData[key] = scalarBuckets;
         } else if (key === "num_cells" || key === "level" || key === "jitter" || key === "latency" || key === "packet_loss" || key === "tac" || key === "dominance" || key === "coverage_violation" ) {
-      
-            const jsonString = data[key]; 
-            let parsed = [];
-            
-            if (jsonString) {
-                try {
-                    parsed = typeof jsonString === 'object' 
-                        ? (Array.isArray(jsonString) ? jsonString : [jsonString])
-                        : JSON.parse(jsonString);
-                } catch (error) {
-                    console.error(`Error parsing ${key}:`, error);
-                    parsed = [];
-                }
-            }
-            
-            parsedData[key] = (Array.isArray(parsed) ? parsed : [parsed])
-                .map(normalizeRow)
-                .filter(row => {
-                    // Make sure row has valid min/max
-                    return row.min !== undefined && 
-                           row.max !== undefined && 
-                           row.min !== null && 
-                           row.max !== null;
-                });
+            const bucketedRanges = parseBucketedRangeValue(data[key]);
+            parsedData._bucketPayloads[key] = bucketedRanges;
+            parsedData[key] = THRESHOLD_BUCKET_KEYS.reduce((acc, bucketKey) => {
+                acc[bucketKey] = (Array.isArray(bucketedRanges[bucketKey]) ? bucketedRanges[bucketKey] : [])
+                    .map(normalizeRow)
+                    .filter(row => row.min !== undefined && row.max !== undefined && row.min !== null && row.max !== null);
+                return acc;
+            }, createEmptyThresholdBuckets());
         }
         else {
-            const jsonString = data[`${key}_json`];
-            let parsed = [];
-            
-            if (jsonString) {
-                try {
-                    parsed = typeof jsonString === 'object' 
-                        ? (Array.isArray(jsonString) ? jsonString : [jsonString])
-                        : JSON.parse(jsonString);
-                } catch {
-                    parsed = [];
-                }
-            }
-            
-            parsedData[key] = (Array.isArray(parsed) ? parsed : [parsed])
-                .map(normalizeRow)
-                .filter(row => row.min !== undefined && row.max !== undefined);
+            const bucketedRanges = parseBucketedRangeValue(data[`${key}_json`]);
+            parsedData._bucketPayloads[key] = bucketedRanges;
+            parsedData[key] = THRESHOLD_BUCKET_KEYS.reduce((acc, bucketKey) => {
+                acc[bucketKey] = (Array.isArray(bucketedRanges[bucketKey]) ? bucketedRanges[bucketKey] : [])
+                    .map(normalizeRow)
+                    .filter(row => row.min !== undefined && row.max !== undefined);
+                return acc;
+            }, createEmptyThresholdBuckets());
         }
     });
 
-    let volteCallData = [];
-    if (data.volte_call) {
-        try {
-            volteCallData = typeof data.volte_call === 'string' 
-                ? JSON.parse(data.volte_call) 
-                : (Array.isArray(data.volte_call) ? data.volte_call : []);
-        } catch {
-            volteCallData = [];
-        }
-    }
-    parsedData.volte_call = (Array.isArray(volteCallData) ? volteCallData : []).map(normalizeRow);
+    const volteCallBuckets = parseBucketedRangeValue(data.volte_call);
+    parsedData._bucketPayloads.volte_call = volteCallBuckets;
+    parsedData.volte_call = THRESHOLD_BUCKET_KEYS.reduce((acc, bucketKey) => {
+        acc[bucketKey] = (Array.isArray(volteCallBuckets[bucketKey]) ? volteCallBuckets[bucketKey] : []).map(normalizeRow);
+        return acc;
+    }, createEmptyThresholdBuckets());
 
     return parsedData;
 };
@@ -607,28 +798,47 @@ const buildSavePayload = (thresholds, userId) => {
         }));
     };
 
+    const normalizeBucketedRanges = (key, sourceBuckets) => {
+        const existingBuckets = thresholds?._bucketPayloads?.[key] || createEmptyThresholdBuckets();
+        const nextBuckets = { ...createEmptyThresholdBuckets(), ...existingBuckets };
+        THRESHOLD_BUCKET_KEYS.forEach((bucketKey) => {
+            nextBuckets[bucketKey] = normalizeArray(sourceBuckets?.[bucketKey] || []);
+        });
+        return JSON.stringify(nextBuckets);
+    };
+
+    const normalizeBucketedScalar = (key, sourceValues, fallback = DEFAULT_COVERAGE_HOLE) => {
+        const existingBuckets = thresholds?._bucketPayloads?.[key] || createEmptyScalarBuckets(fallback);
+        const nextBuckets = { ...createEmptyScalarBuckets(fallback), ...existingBuckets };
+        THRESHOLD_BUCKET_KEYS.forEach((bucketKey) => {
+            const parsedValue = parseNumber(sourceValues?.[bucketKey]);
+            nextBuckets[bucketKey] = Number.isFinite(parsedValue) ? parsedValue : fallback;
+        });
+        return JSON.stringify(nextBuckets);
+    };
+
     const payload = { 
         id: thresholds.id || 0,
         user_id: userId || 0,
         is_default: 0,
-        rsrp_json: JSON.stringify(normalizeArray(thresholds.rsrp)),
-        rsrq_json: JSON.stringify(normalizeArray(thresholds.rsrq)),
-        sinr_json: JSON.stringify(normalizeArray(thresholds.sinr)),
-        dl_thpt_json: JSON.stringify(normalizeArray(thresholds.dl_thpt)),
-        ul_thpt_json: JSON.stringify(normalizeArray(thresholds.ul_thpt)),
-        delta_json: JSON.stringify(normalizeArray(thresholds.delta)),
-        lte_bler_json: JSON.stringify(normalizeArray(thresholds.lte_bler)),
-        mos_json: JSON.stringify(normalizeArray(thresholds.mos)),
-        volte_call: JSON.stringify(normalizeArray(thresholds.volte_call)),
-        coveragehole_json: String(thresholds.coveragehole ?? DEFAULT_COVERAGE_HOLE),
-        num_cells: JSON.stringify(normalizeArray(thresholds.num_cells)),
-        level: JSON.stringify(normalizeArray(thresholds.level)),
-        jitter: JSON.stringify(normalizeArray(thresholds.jitter)),
-        latency: JSON.stringify(normalizeArray(thresholds.latency)),
-        packet_loss: JSON.stringify(normalizeArray(thresholds.packet_loss)),
-        tac: JSON.stringify(normalizeArray(thresholds.tac)),
-        dominance: JSON.stringify(normalizeArray(thresholds.dominance)),
-        coverage_violation: JSON.stringify(normalizeArray(thresholds.coverage_violation)),
+        rsrp_json: normalizeBucketedRanges("rsrp", thresholds.rsrp),
+        rsrq_json: normalizeBucketedRanges("rsrq", thresholds.rsrq),
+        sinr_json: normalizeBucketedRanges("sinr", thresholds.sinr),
+        dl_thpt_json: normalizeBucketedRanges("dl_thpt", thresholds.dl_thpt),
+        ul_thpt_json: normalizeBucketedRanges("ul_thpt", thresholds.ul_thpt),
+        delta_json: normalizeBucketedRanges("delta", thresholds.delta),
+        lte_bler_json: normalizeBucketedRanges("lte_bler", thresholds.lte_bler),
+        mos_json: normalizeBucketedRanges("mos", thresholds.mos),
+        volte_call: normalizeBucketedRanges("volte_call", thresholds.volte_call),
+        coveragehole_json: normalizeBucketedScalar("coveragehole", thresholds.coveragehole, DEFAULT_COVERAGE_HOLE),
+        num_cells: normalizeBucketedRanges("num_cells", thresholds.num_cells),
+        level: normalizeBucketedRanges("level", thresholds.level),
+        jitter: normalizeBucketedRanges("jitter", thresholds.jitter),
+        latency: normalizeBucketedRanges("latency", thresholds.latency),
+        packet_loss: normalizeBucketedRanges("packet_loss", thresholds.packet_loss),
+        tac: normalizeBucketedRanges("tac", thresholds.tac),
+        dominance: normalizeBucketedRanges("dominance", thresholds.dominance),
+        coverage_violation: normalizeBucketedRanges("coverage_violation", thresholds.coverage_violation),
     };
 
     return payload;
@@ -738,7 +948,7 @@ const SettingsPage = ({ onSaveSuccess }) => {
     const getParamCount = (key) => {
         if (key === "coveragehole") return null;
         const data = thresholds?.[key];
-        return Array.isArray(data) ? data.length : 0;
+        return Array.isArray(data?.default) ? data.default.length : 0;
     };
 
     if (loading) {
@@ -766,9 +976,7 @@ const SettingsPage = ({ onSaveSuccess }) => {
                 <Card className="bg-slate-900/80 border-slate-700/80 rounded-2xl shadow-xl overflow-hidden">
                     <CardHeader className="border-b border-slate-700/70 bg-slate-900/90">
                         <CardTitle className="text-white text-xl tracking-tight">Settings</CardTitle>
-                        <CardDescription className="text-slate-400">
-                            Configure map thresholds
-                        </CardDescription>
+                        
                     </CardHeader>
 
                     <CardContent className="pt-5">
@@ -820,7 +1028,7 @@ const SettingsPage = ({ onSaveSuccess }) => {
                                         key={activeParam}
                                         paramKey={activeParam}
                                         paramName={allParameters[activeParam]}
-                                        initialData={thresholds[activeParam] || []}
+                                        initialData={thresholds[activeParam] || createEmptyThresholdBuckets()}
                                         onUpdate={data => updateParam(activeParam, data)}
                                         onClose={handleClose}
                                     />
@@ -842,12 +1050,12 @@ const SettingsPage = ({ onSaveSuccess }) => {
                                                         >
                                                             <div className="text-xs text-slate-400">{name}</div>
                                                             <div className="text-lg font-bold text-white">
-                                                                {thresholds.coveragehole} dBm
+                                                                {thresholds.coveragehole?.default ?? DEFAULT_COVERAGE_HOLE} dBm
                                                             </div>
                                                         </div>
                                                     );
                                                 }
-                                                
+
                                                 const data = thresholds[key] || [];
                                                 return (
                                                     <div 
@@ -857,19 +1065,19 @@ const SettingsPage = ({ onSaveSuccess }) => {
                                                     >
                                                         <div className="text-xs text-slate-400">{name}</div>
                                                         <div className="text-lg font-bold text-white">
-                                                            {data.length} range{data.length !== 1 ? 's' : ''}
+                                                            {(data.default || []).length} range{(data.default || []).length !== 1 ? 's' : ''}
                                                         </div>
-                                                        {data.length > 0 && (
+                                                        {(data.default || []).length > 0 && (
                                                             <div className="flex gap-1 mt-2">
-                                                                {data.slice(0, 4).map((row, i) => (
+                                                                {(data.default || []).slice(0, 4).map((row, i) => (
                                                                     <div
                                                                         key={row.id || i}
                                                                         className="w-4 h-4 rounded"
                                                                         style={{ backgroundColor: row.color }}
                                                                     />
                                                                 ))}
-                                                                {data.length > 4 && (
-                                                                    <span className="text-xs text-slate-400">+{data.length - 4}</span>
+                                                                {(data.default || []).length > 4 && (
+                                                                    <span className="text-xs text-slate-400">+{(data.default || []).length - 4}</span>
                                                                 )}
                                                             </div>
                                                         )}

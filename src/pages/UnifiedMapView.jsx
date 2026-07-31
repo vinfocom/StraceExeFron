@@ -1973,6 +1973,7 @@ const UnifiedMapView = () => {
       searchParams.get("secondary");
     return ["1", "true", "yes"].includes(String(value || "").toLowerCase());
   }, [searchParams]);
+  const buildingsVisible = showPolygons && polygonSource === "save";
 
   const [bestNetworkEnabled, setBestNetworkEnabled] = useState(false);
   const [bestNetworkWeights, setBestNetworkWeights] = useState(DEFAULT_WEIGHTS);
@@ -2690,8 +2691,13 @@ const UnifiedMapView = () => {
   const {
     thresholds: baseThresholds,
     getMetricColor: getMetricColorForLog,
+    resolveThresholdsForTechnologies,
     refetch: refetchColors,
   } = useColorForLog();
+  const effectiveGetMetricColorForLog = useCallback(
+    (value, metricName) => getMetricColorForLog(value, metricName, dataFilters?.technologies || []),
+    [getMetricColorForLog, dataFilters?.technologies],
+  );
   // Always load polygons when a project is open so boundary always draws and polygon-based filtering works
   const shouldLoadProjectPolygons = Boolean(projectId);
   const {
@@ -2780,9 +2786,18 @@ const UnifiedMapView = () => {
     projectId,
   );
 
-  const sampleLocations = Array.isArray(fetchedSamples) && fetchedSamples.length > 0
-    ? fetchedSamples
-    : (hasPassedLocations ? passedLocations : fetchedSamples);
+  const sampleLocations = useMemo(() => {
+    if (shouldFetchSamples) {
+      if (sampleLoading) return EMPTY_LIST;
+      return Array.isArray(fetchedSamples) ? fetchedSamples : EMPTY_LIST;
+    }
+
+    if (Array.isArray(fetchedSamples) && fetchedSamples.length > 0) {
+      return fetchedSamples;
+    }
+
+    return hasPassedLocations ? passedLocations : fetchedSamples;
+  }, [shouldFetchSamples, sampleLoading, fetchedSamples, hasPassedLocations, passedLocations]);
 
   const getCachedNetworkLogsForPrediction = useCallback(
     ({ projectId: requestedProjectId, sessionIds: requestedSessionIds } = {}) => {
@@ -3402,7 +3417,7 @@ const UnifiedMapView = () => {
 
     const resolveGridColor = (value, metricName, isDeltaMetric) => {
       if (Number.isFinite(value) && typeof getMetricColorForLog === "function") {
-        const color = getMetricColorForLog(value, metricName);
+        const color = effectiveGetMetricColorForLog(value, metricName);
         if (color && color !== "#808080") {
           return hexToRgbaArray(color, 190);
         }
@@ -3549,7 +3564,7 @@ const UnifiedMapView = () => {
     sitePredictionVersion,
     lteGridSizeMeters,
     baseThresholds,
-    getMetricColorForLog,
+    effectiveGetMetricColorForLog,
   ]);
 
   const isFetchedStoredGridVisible = useMemo(
@@ -4068,9 +4083,14 @@ const UnifiedMapView = () => {
     return isSitePredictionMode;
   }, [enableDataToggle, dataToggle, isSitePredictionMode]);
 
+  const technologyAwareThresholds = useMemo(
+    () => resolveThresholdsForTechnologies(dataFilters?.technologies || []),
+    [resolveThresholdsForTechnologies, dataFilters?.technologies],
+  );
+
   const effectiveThresholds = useMemo(() => {
     if (!predictionColorSettings?.length || !shouldUsePredictionThresholds) {
-      return baseThresholds;
+      return technologyAwareThresholds;
     }
 
     const thresholdKey = getThresholdKey(selectedMetric);
@@ -4083,17 +4103,17 @@ const UnifiedMapView = () => {
       .filter((range) => Number.isFinite(range.min) && Number.isFinite(range.max))
       .sort((a, b) => a.min - b.min);
 
-    if (!normalizedPredictionThresholds.length) return baseThresholds;
+    if (!normalizedPredictionThresholds.length) return technologyAwareThresholds;
 
     return {
-      ...baseThresholds,
+      ...technologyAwareThresholds,
       [thresholdKey]: normalizedPredictionThresholds,
     };
   }, [
-    baseThresholds,
     predictionColorSettings,
     selectedMetric,
     shouldUsePredictionThresholds,
+    technologyAwareThresholds,
   ]);
 
   const {
@@ -5475,9 +5495,13 @@ const UnifiedMapView = () => {
   const triangleSizeAvailable =
     Boolean(enableSiteToggle) && Boolean(showSiteSectors) && shouldRenderSiteLayer;
   const shouldShowLegend = useMemo(() => {
-    if (!Array.isArray(legendLogs) || legendLogs.length === 0) return false;
-    return Boolean(showDataCircles || shouldRenderLtePredictionLayer);
-  }, [legendLogs, showDataCircles, shouldRenderLtePredictionLayer]);
+    if ((!Array.isArray(legendLogs) || legendLogs.length === 0) && !showSessionNeighbors) {
+      return false;
+    }
+    return Boolean(
+      showDataCircles || shouldRenderLtePredictionLayer || showSessionNeighbors,
+    );
+  }, [legendLogs, showDataCircles, shouldRenderLtePredictionLayer, showSessionNeighbors]);
 
   const locationsToDisplay = useMemo(() => {
     if (!showDataCircles) return [];
@@ -6301,6 +6325,48 @@ const UnifiedMapView = () => {
     dataFilters,
   ]);
 
+  const secondaryLegendLogs = useMemo(() => {
+    if (!showSessionNeighbors || !Array.isArray(filteredNeighbors) || filteredNeighbors.length === 0) {
+      return EMPTY_LIST;
+    }
+
+    return filteredNeighbors.map((neighbor, index) => {
+      const neighborRsrp = Number.parseFloat(
+        neighbor?.neighbourRsrp ?? neighbor?.neighbour_rsrp,
+      );
+      const neighborRsrq = Number.parseFloat(
+        neighbor?.neighbourRsrq ?? neighbor?.neighbour_rsrq,
+      );
+      const neighborSinr = Number.parseFloat(
+        neighbor?.neighbourSinr ?? neighbor?.neighbour_sinr,
+      );
+      const pci = neighbor?.neighbourPci ?? neighbor?.neighbour_pci ?? neighbor?.pci;
+      const band =
+        neighbor?.neighbourBand ?? neighbor?.neighborBand ?? neighbor?.neighbour_band ?? neighbor?.band;
+      const technology =
+        neighbor?.technology ?? neighbor?.networkType ?? neighbor?.network ?? "";
+
+      return {
+        ...neighbor,
+        id: neighbor?.id ?? `secondary-legend-${index}`,
+        rsrp: Number.isFinite(neighborRsrp) ? neighborRsrp : null,
+        rsrq: Number.isFinite(neighborRsrq) ? neighborRsrq : null,
+        sinr: Number.isFinite(neighborSinr) ? neighborSinr : null,
+        pci,
+        band,
+        technology,
+        networkType: technology,
+        neighbourBand: band,
+      };
+    });
+  }, [showSessionNeighbors, filteredNeighbors]);
+
+  const effectiveLegendLogs = useMemo(() => {
+    if (Array.isArray(legendLogs) && legendLogs.length > 0) return legendLogs;
+    if (showSessionNeighbors) return secondaryLegendLogs;
+    return EMPTY_LIST;
+  }, [legendLogs, showSessionNeighbors, secondaryLegendLogs]);
+
   const neighborLogsAvailable = useMemo(() => {
     const statsTotal =
       Number(sessionNeighborStats?.total) ||
@@ -6332,6 +6398,10 @@ const UnifiedMapView = () => {
       setShowSessionNeighbors(true);
     }
   }, [autoShowSessionNeighbors, neighborLogsAvailable]);
+
+  useEffect(() => {
+    setOpacity(buildingsVisible ? 0 : 0.8);
+  }, [buildingsVisible]);
 
   const handlePolygonMouseOver = useCallback((poly, e) => {
     setHoveredPolygon(poly);
@@ -7068,7 +7138,7 @@ const UnifiedMapView = () => {
             showTechnologies={legendColorBy === "technology"}
             showSignalQuality={!legendColorBy || legendColorBy === "metric"}
             availableFilterOptions={availableFilterOptions}
-            logs={legendLogs}
+            logs={effectiveLegendLogs}
             activeFilter={legendFilter}
             onFilterChange={setLegendFilter}
           />
@@ -7193,7 +7263,7 @@ const UnifiedMapView = () => {
               neighborData={filteredNeighbors}
               showNeighbors={showSessionNeighbors}
               neighborSquareSize={neighborSquareSize}
-              neighborOpacity={0.45}
+              neighborOpacity={opacity}
               onNeighborClick={(neighbor) => { }}
               onGridCellsStatsChange={setGridCellStats}
               onGridLegendLocationsChange={setRenderedGridLegendLogs}
@@ -7229,7 +7299,7 @@ const UnifiedMapView = () => {
                   locations={lteLayerLocations}
                   selectedMetric={selectedMetric}
                   thresholds={effectiveThresholds}
-                  getMetricColor={getMetricColorForLog}
+                  getMetricColor={effectiveGetMetricColorForLog}
                   filterPolygons={rawFilteringPolygons}
                   filterInsidePolygons={onlyInsidePolygons}
                   maxPoints={sectorPredictionGridPoints.length > 0 ? 120000 : 20000}
@@ -7334,7 +7404,7 @@ const UnifiedMapView = () => {
                   siteLabelField={siteLabelField}
                   viewport={viewport}
                   thresholds={effectiveThresholds}
-                  getMetricColor={getMetricColorForLog}
+                  getMetricColor={effectiveGetMetricColorForLog}
                   onSiteSelect={setSelectedSites}
                   onSectorPredictionPointsChange={setSectorPredictionGridPoints}
                   triangleScaleMultiplier={triangleScaleMultiplier}

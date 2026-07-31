@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import { adminApi, mapViewApi, offlineApi } from "../api/apiEndpoints";
 import { toast } from "react-toastify";
 import Spinner from "../components/common/Spinner";
@@ -24,7 +24,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuItem,
 } from "@/components/ui/dropdown-menu";
-import { Trash2, Map, ChevronLeft, ChevronRight, MapPin } from "lucide-react";
+import { Trash2, Map as MapIcon, ChevronLeft, ChevronRight, MapPin } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { upsertProjectInProjectsCache } from "@/utils/projectsCache";
@@ -110,14 +110,166 @@ const isSessionLiveToday = (session) => {
   );
 };
 
+const formatDateOnlyValue = (dateString) => {
+  if (!dateString) return "N/A";
+  const date = new Date(dateString);
+  return Number.isNaN(date.getTime()) ? "N/A" : date.toLocaleDateString();
+};
+
+const formatTimeOnlyValue = (dateString) => {
+  if (!dateString) return "N/A";
+  const date = new Date(dateString);
+  return Number.isNaN(date.getTime()) ? "N/A" : date.toLocaleTimeString();
+};
+
+const matchesSelectedType = (session, selectedType) => {
+  if (!selectedType || selectedType === "all") return true;
+  return String(session?.type ?? "").toLowerCase() === selectedType.toLowerCase();
+};
+
+const matchesLocalSessionFilters = (
+  session,
+  { searchTerm, columnFilters, startDate, endDate, selectedType },
+) => {
+  if (!matchesSelectedType(session, selectedType)) return false;
+
+  const lowerCaseSearchTerm = String(searchTerm || "").toLowerCase();
+  const matchesGlobalSearch =
+    !searchTerm ||
+    String(session?.id ?? "").toLowerCase().includes(lowerCaseSearchTerm) ||
+    String(session?.CreatedBy ?? "").toLowerCase().includes(lowerCaseSearchTerm) ||
+    String(session?.mobile ?? "").toLowerCase().includes(lowerCaseSearchTerm) ||
+    String(session?.start_address ?? "").toLowerCase().includes(lowerCaseSearchTerm) ||
+    String(session?.end_address ?? "").toLowerCase().includes(lowerCaseSearchTerm);
+
+  const matchesSessionId =
+    !columnFilters.sessionId ||
+    String(session?.id ?? "")
+      .toLowerCase()
+      .includes(columnFilters.sessionId.toLowerCase());
+
+  const matchesUserDetails =
+    !columnFilters.userDetails ||
+    String(session?.CreatedBy ?? "")
+      .toLowerCase()
+      .includes(columnFilters.userDetails.toLowerCase()) ||
+    String(session?.mobile ?? "")
+      .toLowerCase()
+      .includes(columnFilters.userDetails.toLowerCase()) ||
+    String(session?.make ?? "")
+      .toLowerCase()
+      .includes(columnFilters.userDetails.toLowerCase()) ||
+    String(session?.model ?? "")
+      .toLowerCase()
+      .includes(columnFilters.userDetails.toLowerCase()) ||
+    String(session?.os ?? "")
+      .toLowerCase()
+      .includes(columnFilters.userDetails.toLowerCase()) ||
+    String(session?.operator_name ?? "")
+      .toLowerCase()
+      .includes(columnFilters.userDetails.toLowerCase());
+
+  const matchesStartDate =
+    !columnFilters.startDate ||
+    formatDateOnlyValue(session?.start_time)
+      .toLowerCase()
+      .includes(columnFilters.startDate.toLowerCase());
+
+  const matchesStartTime =
+    !columnFilters.startTime ||
+    formatTimeOnlyValue(session?.start_time)
+      .toLowerCase()
+      .includes(columnFilters.startTime.toLowerCase());
+
+  const matchesEndDate =
+    !columnFilters.endDate ||
+    formatDateOnlyValue(session?.end_time)
+      .toLowerCase()
+      .includes(columnFilters.endDate.toLowerCase());
+
+  const matchesEndTime =
+    !columnFilters.endTime ||
+    formatTimeOnlyValue(session?.end_time)
+      .toLowerCase()
+      .includes(columnFilters.endTime.toLowerCase());
+
+  const matchesStartLocation =
+    !columnFilters.startLocation ||
+    String(session?.start_address ?? "")
+      .toLowerCase()
+      .includes(columnFilters.startLocation.toLowerCase());
+
+  const matchesEndLocation =
+    !columnFilters.endLocation ||
+    String(session?.end_address ?? "")
+      .toLowerCase()
+      .includes(columnFilters.endLocation.toLowerCase());
+
+  const matchesDistance =
+    !columnFilters.distance ||
+    String(session?.distance_km ?? "").includes(columnFilters.distance);
+
+  const matchesCaptureFrequency =
+    !columnFilters.captureFrequency ||
+    String(session?.capture_frequency ?? "")
+      .toLowerCase()
+      .includes(columnFilters.captureFrequency.toLowerCase());
+
+  const matchesSessionRemarks =
+    !columnFilters.sessionRemarks ||
+    String(session?.notes ?? "")
+      .toLowerCase()
+      .includes(columnFilters.sessionRemarks.toLowerCase());
+
+  let matchesDateRange = true;
+  if (startDate || endDate) {
+    const sessionDate = session?.start_time ? new Date(session.start_time) : null;
+
+    if (sessionDate && !Number.isNaN(sessionDate.getTime())) {
+      sessionDate.setHours(0, 0, 0, 0);
+
+      if (startDate) {
+        const start = new Date(startDate);
+        start.setHours(0, 0, 0, 0);
+        if (sessionDate < start) matchesDateRange = false;
+      }
+
+      if (endDate) {
+        const end = new Date(endDate);
+        end.setHours(23, 59, 59, 999);
+        if (sessionDate > end) matchesDateRange = false;
+      }
+    } else {
+      matchesDateRange = false;
+    }
+  }
+
+  return (
+    matchesGlobalSearch &&
+    matchesSessionId &&
+    matchesUserDetails &&
+    matchesStartDate &&
+    matchesStartTime &&
+    matchesEndDate &&
+    matchesEndTime &&
+    matchesStartLocation &&
+    matchesEndLocation &&
+    matchesDistance &&
+    matchesCaptureFrequency &&
+    matchesSessionRemarks &&
+    matchesDateRange
+  );
+};
+
 const DriveTestSessionsPage = () => {
   const { user } = useAuth();
   const [sessions, setSessions] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [isFetching, setIsFetching] = useState(false);
   const [selectedSessions, setSelectedSessions] = useState([]);
   const navigate = useNavigate();
   const [searchTerm, setSearchTerm] = useState("");
-const [selectedType, setSelectedType] = useState("all");
+  const [selectedType, setSelectedType] = useState("all");
   const [columnFilters, setColumnFilters] = useState({
     sessionId: "",
     userDetails: "",
@@ -130,21 +282,22 @@ const [selectedType, setSelectedType] = useState("all");
     distance: "",
     captureFrequency: "",
     sessionRemarks: "",
-    Type:"",
   });
 
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
-  const [networkSessions, setNetworkSessions] = useState([]);
-const [wifiSessions, setWifiSessions] = useState([]);
-
   const [currentPage, setCurrentPage] = useState(1);
-  const [sessionsPerPage, setSessionsPerPage] = useState(10); 
+  const [sessionsPerPage, setSessionsPerPage] = useState(10);
+  const [totalCount, setTotalCount] = useState(0);
+  const [totalPages, setTotalPages] = useState(0);
 
   const [projectName, setProjectName] = useState("");
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const scopedCompanyId = resolveCompanyId(user);
   const isSuperAdmin = Number(user?.m_user_type_id ?? user?.UserTypeId ?? user?.role_id ?? 0) === 3;
+  const responseCacheRef = useRef(new Map());
+  const latestRequestRef = useRef(0);
+  const prefetchedKeysRef = useRef(new Set());
 
   const [visibleColumns, setVisibleColumns] = useState(DEFAULT_VISIBLE_COLUMNS);
 
@@ -178,6 +331,40 @@ const [wifiSessions, setWifiSessions] = useState([]);
     ));
   }, []);
 
+  const [debouncedFilters, setDebouncedFilters] = useState({
+    searchTerm: "",
+    startDate: "",
+    endDate: "",
+    selectedType: "all",
+    columnFilters: {
+      sessionId: "",
+      userDetails: "",
+      startDate: "",
+      startTime: "",
+      endDate: "",
+      endTime: "",
+      startLocation: "",
+      endLocation: "",
+      distance: "",
+      captureFrequency: "",
+      sessionRemarks: "",
+    },
+  });
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setDebouncedFilters({
+        searchTerm,
+        startDate,
+        endDate,
+        selectedType,
+        columnFilters,
+      });
+    }, 300);
+
+    return () => window.clearTimeout(timer);
+  }, [searchTerm, startDate, endDate, selectedType, columnFilters]);
+
   const updateColumnFilter = (column, value) => {
     setColumnFilters((prev) => ({
       ...prev,
@@ -208,64 +395,214 @@ const [wifiSessions, setWifiSessions] = useState([]);
     });
   };
 
-  const fetchSessions = useCallback(async () => {
-    try {
-      setLoading(true);
-      let cloudRows = [];
-      let cloudError = null;
+  const buildRequestParams = useCallback(
+    (pageOverride = currentPage) => ({
+      page: pageOverride,
+      pageSize: sessionsPerPage,
+      ...(debouncedFilters.searchTerm
+        ? { search: debouncedFilters.searchTerm }
+        : {}),
+      ...(debouncedFilters.selectedType !== "all"
+        ? { type: debouncedFilters.selectedType }
+        : {}),
+      ...(debouncedFilters.startDate ? { fromDate: debouncedFilters.startDate } : {}),
+      ...(debouncedFilters.endDate ? { toDate: debouncedFilters.endDate } : {}),
+      ...(debouncedFilters.columnFilters.sessionId
+        ? { sessionId: debouncedFilters.columnFilters.sessionId }
+        : {}),
+      ...(debouncedFilters.columnFilters.userDetails
+        ? { userDetails: debouncedFilters.columnFilters.userDetails }
+        : {}),
+      ...(debouncedFilters.columnFilters.startDate
+        ? { startDate: debouncedFilters.columnFilters.startDate }
+        : {}),
+      ...(debouncedFilters.columnFilters.startTime
+        ? { startTime: debouncedFilters.columnFilters.startTime }
+        : {}),
+      ...(debouncedFilters.columnFilters.endDate
+        ? { endDate: debouncedFilters.columnFilters.endDate }
+        : {}),
+      ...(debouncedFilters.columnFilters.endTime
+        ? { endTime: debouncedFilters.columnFilters.endTime }
+        : {}),
+      ...(debouncedFilters.columnFilters.startLocation
+        ? { startLocation: debouncedFilters.columnFilters.startLocation }
+        : {}),
+      ...(debouncedFilters.columnFilters.endLocation
+        ? { endLocation: debouncedFilters.columnFilters.endLocation }
+        : {}),
+      ...(debouncedFilters.columnFilters.distance
+        ? { distance: debouncedFilters.columnFilters.distance }
+        : {}),
+      ...(debouncedFilters.columnFilters.captureFrequency
+        ? { captureFrequency: debouncedFilters.columnFilters.captureFrequency }
+        : {}),
+      ...(debouncedFilters.columnFilters.sessionRemarks
+        ? { sessionRemarks: debouncedFilters.columnFilters.sessionRemarks }
+        : {}),
+      ...(!isSuperAdmin && scopedCompanyId > 0
+        ? { company_id: scopedCompanyId }
+        : {}),
+    }),
+    [currentPage, sessionsPerPage, debouncedFilters, isSuperAdmin, scopedCompanyId],
+  );
 
+  const applyServerPage = useCallback((data, fallbackPage) => {
+    const cloudRows = extractSessionRows(data);
+    setSessions(cloudRows);
+    setTotalCount(Number(data?.TotalCount ?? cloudRows.length) || 0);
+    setTotalPages(Number(data?.TotalPages ?? 0) || 0);
+
+    const responsePage = Number(data?.Page ?? fallbackPage) || fallbackPage;
+    if (responsePage !== fallbackPage) {
+      setCurrentPage(responsePage);
+    }
+  }, []);
+
+  const prefetchSessionsPage = useCallback(
+    async (pageToPrefetch) => {
+      if (pageToPrefetch <= 0) return;
+
+      const requestParams = buildRequestParams(pageToPrefetch);
+      const cacheKey = JSON.stringify(requestParams);
+
+      if (
+        responseCacheRef.current.has(cacheKey) ||
+        prefetchedKeysRef.current.has(cacheKey)
+      ) {
+        return;
+      }
+
+      prefetchedKeysRef.current.add(cacheKey);
       try {
-        const data = await adminApi.getSessions();
-        cloudRows = data?.Data || [];
-      } catch (error) {
-        cloudError = error;
+        const data = await adminApi.getSessions(requestParams);
+        responseCacheRef.current.set(cacheKey, data);
+      } catch {
+        // Prefetch is best-effort only.
+      } finally {
+        prefetchedKeysRef.current.delete(cacheKey);
+      }
+    },
+    [buildRequestParams],
+  );
+
+  const fetchSessions = useCallback(async ({ force = false } = {}) => {
+    const requestParams = buildRequestParams();
+    const cacheKey = JSON.stringify(requestParams);
+    const cached = responseCacheRef.current.get(cacheKey);
+    const requestId = latestRequestRef.current + 1;
+    latestRequestRef.current = requestId;
+
+    if (cached && !force) {
+      applyServerPage(cached, currentPage);
+      setLoading(false);
+      setIsFetching(false);
+      return;
+    }
+
+    try {
+      if (sessions.length === 0) {
+        setLoading(true);
+      } else {
+        setIsFetching(true);
       }
 
       let localRows = [];
+      let cloudError = null;
+
       try {
+        const data = await adminApi.getSessions(requestParams);
+        responseCacheRef.current.set(cacheKey, data);
+
+        if (latestRequestRef.current !== requestId) {
+          return;
+        }
+
+        applyServerPage(data, currentPage);
+      } catch (error) {
+        cloudError = error;
         const localData = await offlineApi.getSessions();
         localRows = Array.isArray(localData?.Data) ? localData.Data : [];
-      } catch (error) {
-        if (cloudError) {
-          throw cloudError;
-        }
       }
 
-      const localPendingRows = localRows.filter((row) => {
-        const sync = String(row?.sync_status || "").toLowerCase();
-        return sync === "pending" || sync === "failed" || sync === "ready-to-sync";
-      });
+      if (cloudError) {
+        const localPendingRows = localRows.filter((row) => {
+          const sync = String(row?.sync_status || "").toLowerCase();
+          return (
+            sync === "pending" || sync === "failed" || sync === "ready-to-sync"
+          );
+        });
+        const sortedRows = sortSessionsByIdDescending(
+          mergeSessionsById([], localPendingRows),
+        );
+        const filteredRows = sortedRows.filter((session) =>
+          matchesLocalSessionFilters(session, {
+            searchTerm: debouncedFilters.searchTerm,
+            columnFilters: debouncedFilters.columnFilters,
+            startDate: debouncedFilters.startDate,
+            endDate: debouncedFilters.endDate,
+            selectedType: debouncedFilters.selectedType,
+          }),
+        );
 
-      const useLocalFallback = cloudError || cloudRows.length === 0;
-      const rowsToShow = useLocalFallback
-        ? mergeSessionsById(cloudRows, localPendingRows)
-        : cloudRows;
+        const nextTotalCount = filteredRows.length;
+        const nextTotalPages =
+          nextTotalCount === 0
+            ? 0
+            : Math.ceil(nextTotalCount / sessionsPerPage);
+        const safePage =
+          nextTotalPages > 0 ? Math.min(currentPage, nextTotalPages) : 1;
+        const startIndex = (safePage - 1) * sessionsPerPage;
+        const pageRows = filteredRows.slice(
+          startIndex,
+          startIndex + sessionsPerPage,
+        );
 
-        const sortedRows = sortSessionsByIdDescending(rowsToShow);
+        if (latestRequestRef.current !== requestId) {
+          return;
+        }
 
-        const networkData = sortedRows.filter(
-  (session) => session.type?.toLowerCase() === "network"
-);
+        setSessions(pageRows);
+        setTotalCount(nextTotalCount);
+        setTotalPages(nextTotalPages);
+        if (safePage !== currentPage) {
+          setCurrentPage(safePage);
+        }
 
-const wifiData = sortedRows.filter(
-  (session) => session.type?.toLowerCase() === "wifi"
-);
-
-setNetworkSessions(networkData);
-setWifiSessions(wifiData);
-      setSessions(sortedRows);
-
-      if (cloudError && localRows.length > 0) {
-        toast.info("Cloud sessions are unavailable. Showing local cached sessions.");
-      } else if (useLocalFallback && !cloudError && localPendingRows.length > 0) {
-        toast.info(`${localPendingRows.length} local session(s) are pending cloud sync.`);
+        if (localRows.length > 0) {
+          toast.info(
+            "Cloud sessions are unavailable. Showing local cached sessions.",
+          );
+        } else {
+          throw cloudError;
+        }
+      } else {
+        const safeCurrentPage =
+          Number(responseCacheRef.current.get(cacheKey)?.Page ?? currentPage) || currentPage;
+        const nextPage = safeCurrentPage + 1;
+        const knownTotalPages =
+          Number(responseCacheRef.current.get(cacheKey)?.TotalPages ?? totalPages) || 0;
+        if (knownTotalPages === 0 || nextPage <= knownTotalPages) {
+          void prefetchSessionsPage(nextPage);
+        }
       }
     } catch (error) {
       toast.error(`Failed to fetch sessions: ${error.message}`);
     } finally {
       setLoading(false);
+      if (latestRequestRef.current === requestId) {
+        setIsFetching(false);
+      }
     }
-  }, []);
+  }, [
+    applyServerPage,
+    buildRequestParams,
+    currentPage,
+    prefetchSessionsPage,
+    sessions.length,
+    sessionsPerPage,
+    totalPages,
+  ]);
 
   useEffect(() => {
     fetchSessions();
@@ -273,7 +610,7 @@ setWifiSessions(wifiData);
 
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchTerm, startDate, endDate, columnFilters]);
+  }, [searchTerm, startDate, endDate, columnFilters, selectedType]);
 
   const toggleSessionSelection = (sessionId) => {
     setSelectedSessions((prev) =>
@@ -283,191 +620,13 @@ setWifiSessions(wifiData);
     );
   };
 
-
-  const formatDateOnly = (dateString) => {
-    if (!dateString) return "N/A";
-    const date = new Date(dateString);
-    return date.toLocaleDateString();
-  };
-
-  const formatTimeOnly = (dateString) => {
-    if (!dateString) return "N/A";
-    const date = new Date(dateString);
-    return date.toLocaleTimeString();
-  };
-  const typeFilteredSessions =
-  selectedType === "all"
-    ? sessions
-    : sessions.filter(
-        (session) =>
-          session.type?.toLowerCase() === selectedType.toLowerCase()
-      );
-
- 
-
-  const filteredSessions = typeFilteredSessions.filter((session) => {
-    const lowerCaseSearchTerm = searchTerm.toLowerCase();
-
-    const matchesGlobalSearch =
-      !searchTerm ||
-      session.id.toString().toLowerCase().includes(lowerCaseSearchTerm) ||
-      (session.CreatedBy &&
-        session.CreatedBy.toLowerCase().includes(lowerCaseSearchTerm)) ||
-      (session.mobile &&
-        session.mobile.toLowerCase().includes(lowerCaseSearchTerm)) ||
-      (session.start_address &&
-        session.start_address.toLowerCase().includes(lowerCaseSearchTerm)) ||
-      (session.end_address &&
-        session.end_address.toLowerCase().includes(lowerCaseSearchTerm));
-
-    const matchesSessionId =
-      !columnFilters.sessionId ||
-      session.id
-        .toString()
-        .toLowerCase()
-        .includes(columnFilters.sessionId.toLowerCase());
-
-    const matchesUserDetails =
-      !columnFilters.userDetails ||
-      (session.CreatedBy &&
-        session.CreatedBy.toLowerCase().includes(
-          columnFilters.userDetails.toLowerCase(),
-        )) ||
-      (session.mobile &&
-        session.mobile
-          .toLowerCase()
-          .includes(columnFilters.userDetails.toLowerCase())) ||
-      (session.make &&
-        session.make
-          .toLowerCase()
-          .includes(columnFilters.userDetails.toLowerCase())) ||
-      (session.model &&
-        session.model
-          .toLowerCase()
-          .includes(columnFilters.userDetails.toLowerCase())) ||
-      (session.os &&
-        session.os
-          .toLowerCase()
-          .includes(columnFilters.userDetails.toLowerCase())) ||
-      (session.operator_name &&
-        session.operator_name
-          .toLowerCase()
-          .includes(columnFilters.userDetails.toLowerCase()));
-
-    const matchesStartDate =
-      !columnFilters.startDate ||
-      (session.start_time &&
-        formatDateOnly(session.start_time)
-          .toLowerCase()
-          .includes(columnFilters.startDate.toLowerCase()));
-
-    const matchesStartTime =
-      !columnFilters.startTime ||
-      (session.start_time &&
-        formatTimeOnly(session.start_time)
-          .toLowerCase()
-          .includes(columnFilters.startTime.toLowerCase()));
-
-    const matchesEndDate =
-      !columnFilters.endDate ||
-      (session.end_time &&
-        formatDateOnly(session.end_time)
-          .toLowerCase()
-          .includes(columnFilters.endDate.toLowerCase()));
-
-    const matchesEndTime =
-      !columnFilters.endTime ||
-      (session.end_time &&
-        formatTimeOnly(session.end_time)
-          .toLowerCase()
-          .includes(columnFilters.endTime.toLowerCase()));
-
-    const matchesStartLocation =
-      !columnFilters.startLocation ||
-      (session.start_address &&
-        session.start_address
-          .toLowerCase()
-          .includes(columnFilters.startLocation.toLowerCase()));
-
-    const matchesEndLocation =
-      !columnFilters.endLocation ||
-      (session.end_address &&
-        session.end_address
-          .toLowerCase()
-          .includes(columnFilters.endLocation.toLowerCase()));
-
-    const matchesDistance =
-      !columnFilters.distance ||
-      (session.distance_km &&
-        session.distance_km.toString().includes(columnFilters.distance));
-
-    const matchesCaptureFrequency =
-      !columnFilters.captureFrequency ||
-      (session.capture_frequency &&
-        session.capture_frequency
-          .toLowerCase()
-          .includes(columnFilters.captureFrequency.toLowerCase()));
-
-    const matchesSessionRemarks =
-      !columnFilters.sessionRemarks ||
-      (session.notes &&
-        session.notes
-          .toLowerCase()
-          .includes(columnFilters.sessionRemarks.toLowerCase()));
-
-    let matchesDateRange = true;
-    if (startDate || endDate) {
-      const sessionDate = session.start_time
-        ? new Date(session.start_time)
-        : null;
-
-      if (sessionDate) {
-        sessionDate.setHours(0, 0, 0, 0);
-
-        if (startDate) {
-          const start = new Date(startDate);
-          start.setHours(0, 0, 0, 0);
-          if (sessionDate < start) {
-            matchesDateRange = false;
-          }
-        }
-
-        if (endDate) {
-          const end = new Date(endDate);
-          end.setHours(23, 59, 59, 999);
-          if (sessionDate > end) {
-            matchesDateRange = false;
-          }
-        }
-      } else {
-        matchesDateRange = false;
-      }
-    }
-
-    return (
-      matchesGlobalSearch &&
-      matchesSessionId &&
-      matchesUserDetails &&
-      matchesStartDate &&
-      matchesStartTime &&
-      matchesEndDate &&
-      matchesEndTime &&
-      matchesStartLocation &&
-      matchesEndLocation &&
-      matchesDistance &&
-      matchesCaptureFrequency &&
-      matchesSessionRemarks &&
-      matchesDateRange
-    );
-  });
-
-  const indexOfLastSession = currentPage * sessionsPerPage;
-  const indexOfFirstSession = indexOfLastSession - sessionsPerPage;
-  const currentSessions = filteredSessions.slice(
-    indexOfFirstSession,
-    indexOfLastSession,
-  );
-  const totalPages = Math.ceil(filteredSessions.length / sessionsPerPage);
+  const formatDateOnly = formatDateOnlyValue;
+  const formatTimeOnly = formatTimeOnlyValue;
+  const currentSessions = sessions;
+  const indexOfFirstSession =
+    totalCount === 0 ? 0 : (currentPage - 1) * sessionsPerPage + 1;
+  const indexOfLastSession =
+    totalCount === 0 ? 0 : indexOfFirstSession + currentSessions.length - 1;
 
   const allCurrentPageSelected =
     currentSessions.length > 0 &&
@@ -506,9 +665,10 @@ setWifiSessions(wifiData);
     ) {
       try {
         await adminApi.deleteSession(sessionId);
+        responseCacheRef.current.clear();
         toast.success("Session deleted successfully");
         setSelectedSessions((prev) => prev.filter((id) => id !== sessionId));
-        fetchSessions();
+        fetchSessions({ force: true });
       } catch (error) {
         toast.error(`Failed to delete session: ${error.message}`);
       }
@@ -527,9 +687,10 @@ setWifiSessions(wifiData);
 
     try {
       await Promise.all(selectedSessions.map((id) => adminApi.deleteSession(id)));
+      responseCacheRef.current.clear();
       toast.success(`${selectedSessions.length} session(s) deleted successfully`);
       setSelectedSessions([]);
-      fetchSessions();
+      fetchSessions({ force: true });
     } catch (error) {
       toast.error(`Failed to delete selected sessions: ${error.message}`);
     }
@@ -614,7 +775,8 @@ setWifiSessions(wifiData);
         toast.success(hasLocalSessions ? "Local project created successfully" : "Project created successfully");
         setSelectedSessions([]);
         setIsDialogOpen(false);
-        fetchSessions();
+        responseCacheRef.current.clear();
+        fetchSessions({ force: true });
       } else {
         toast.error(res?.Message || "Failed to create project.");
       }
@@ -641,7 +803,7 @@ setWifiSessions(wifiData);
     (filter) => filter !== "",
   );
 
-  if (loading) {
+  if (loading && sessions.length === 0) {
     return (
       <div className="flex items-center justify-center h-full">
         <Spinner />
@@ -653,27 +815,36 @@ setWifiSessions(wifiData);
     <div className="p-6 h-full flex flex-col bg-white">
       <div className="flex items-center justify-between mb-4 gap-4">
         <div className="flex items-center gap-3 w-full justify-end flex-wrap">
-        <DropdownMenu>
-  <DropdownMenuTrigger asChild>
-    <Button variant="outline" size="sm" className="h-9">
-      {selectedType}
-    </Button>
-  </DropdownMenuTrigger>
+          <div className="relative min-w-[240px]">
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              placeholder="Search sessions, users, mobile, location..."
+              className="h-9 pl-9"
+            />
+          </div>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline" size="sm" className="h-9 capitalize">
+                {selectedType}
+              </Button>
+            </DropdownMenuTrigger>
 
-  <DropdownMenuContent>
-    <DropdownMenuItem onClick={() => setSelectedType("all")}>
-      All
-    </DropdownMenuItem>
+            <DropdownMenuContent>
+              <DropdownMenuItem onClick={() => setSelectedType("all")}>
+                All
+              </DropdownMenuItem>
 
-    <DropdownMenuItem onClick={() => setSelectedType("network")}>
-      Network
-    </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => setSelectedType("network")}>
+                Network
+              </DropdownMenuItem>
 
-    <DropdownMenuItem onClick={() => setSelectedType("wifi")}>
-      WiFi
-    </DropdownMenuItem>
-  </DropdownMenuContent>
-</DropdownMenu>
+              <DropdownMenuItem onClick={() => setSelectedType("wifi")}>
+                WiFi
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button variant="outline" size="sm" className="h-9">
@@ -799,6 +970,11 @@ setWifiSessions(wifiData);
           {(startDate || endDate) && (
             <span className="bg-purple-100 dark:bg-purple-900 text-purple-800 dark:text-purple-200 px-2 py-1 rounded">
               Date: {startDate || "..."} to {endDate || "..."}
+            </span>
+          )}
+          {selectedType !== "all" && (
+            <span className="bg-amber-100 dark:bg-amber-900 text-amber-800 dark:text-amber-200 px-2 py-1 rounded capitalize">
+              Type: {selectedType}
             </span>
           )}
           {Object.entries(columnFilters).map(([key, value]) => {
@@ -1282,7 +1458,7 @@ setWifiSessions(wifiData);
                           size="sm"
                           onClick={() => handleViewOnMap(session.id)}
                         >
-                          <Map className="h-4 w-4" />
+                          <MapIcon className="h-4 w-4" />
                         </Button>
                         <Button
                           variant="outline"
@@ -1327,9 +1503,7 @@ setWifiSessions(wifiData);
             </DropdownMenuContent>
           </DropdownMenu>
           <span>
-            Showing {indexOfFirstSession + 1} to{" "}
-            {Math.min(indexOfLastSession, filteredSessions.length)} of{" "}
-            {filteredSessions.length} entries.
+            Showing {indexOfFirstSession} to {indexOfLastSession} of {totalCount} entries.
           </span>
           {selectedSessions.length > 0 && (
             <span className="ml-2 text-blue-400">
@@ -1348,7 +1522,7 @@ setWifiSessions(wifiData);
             Previous
           </Button>
           <span className="text-sm">
-            Page {currentPage} of {totalPages}
+            Page {totalPages === 0 ? 0 : currentPage} of {totalPages}
           </span>
           <Button
             variant="outline"

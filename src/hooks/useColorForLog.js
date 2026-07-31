@@ -1,8 +1,16 @@
 // src/hooks/useColorForLog.js
 import { settingApi } from "@/api/apiEndpoints";
-import { useCallback, useEffect, useState } from "react";
-import { getLogColor } from "@/utils/colorUtils"; 
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { applyTechnologyColorSettings, getLogColor } from "@/utils/colorUtils"; 
 import { getPciColor } from "@/utils/metrics";
+import {
+    createEmptyScalarBuckets,
+    createEmptyThresholdBuckets,
+    parseBucketedRangeValue,
+    parseBucketedScalarValue,
+    pickThresholdBucketValue,
+    resolveSelectedTechnologyBucket,
+} from "@/utils/thresholdBuckets";
 
 const EMPTY_THRESHOLD_STATE = {
     id: null,
@@ -27,6 +35,65 @@ const EMPTY_THRESHOLD_STATE = {
     dominance: [],
     coverage_violation: [],
     cell_id: [],
+    technologyColorSettings: {
+        twoG: [],
+        threeG: [],
+        fourG: [],
+        fiveG: [],
+    },
+};
+
+const EMPTY_BUCKETED_THRESHOLDS = {
+    coverageHole: createEmptyScalarBuckets(-110),
+    rsrp: createEmptyThresholdBuckets(),
+    rsrq: createEmptyThresholdBuckets(),
+    sinr: createEmptyThresholdBuckets(),
+    dl_thpt: createEmptyThresholdBuckets(),
+    ul_thpt: createEmptyThresholdBuckets(),
+    delta: createEmptyThresholdBuckets(),
+    volteCall: createEmptyThresholdBuckets(),
+    lte_bler: createEmptyThresholdBuckets(),
+    mos: createEmptyThresholdBuckets(),
+    num_cells: createEmptyThresholdBuckets(),
+    level: createEmptyThresholdBuckets(),
+    jitter: createEmptyThresholdBuckets(),
+    latency: createEmptyThresholdBuckets(),
+    packet_loss: createEmptyThresholdBuckets(),
+    tac: createEmptyThresholdBuckets(),
+    dominance: createEmptyThresholdBuckets(),
+    coverage_violation: createEmptyThresholdBuckets(),
+};
+
+const buildEffectiveThresholdState = (source, selectedTechnologies) => {
+    const selectedBucket = resolveSelectedTechnologyBucket(selectedTechnologies);
+    const bucketed = source?.bucketed || EMPTY_BUCKETED_THRESHOLDS;
+
+    return {
+        id: source?.id ?? null,
+        userId: source?.userId ?? null,
+        isDefault: source?.isDefault ?? false,
+        coverageHole: pickThresholdBucketValue(bucketed.coverageHole, selectedBucket, -110),
+        rsrp: pickThresholdBucketValue(bucketed.rsrp, selectedBucket, []),
+        rsrq: pickThresholdBucketValue(bucketed.rsrq, selectedBucket, []),
+        sinr: pickThresholdBucketValue(bucketed.sinr, selectedBucket, []),
+        dl_thpt: pickThresholdBucketValue(bucketed.dl_thpt, selectedBucket, []),
+        ul_thpt: pickThresholdBucketValue(bucketed.ul_thpt, selectedBucket, []),
+        delta: pickThresholdBucketValue(bucketed.delta, selectedBucket, []),
+        volteCall: pickThresholdBucketValue(bucketed.volteCall, selectedBucket, []),
+        lte_bler: pickThresholdBucketValue(bucketed.lte_bler, selectedBucket, []),
+        mos: pickThresholdBucketValue(bucketed.mos, selectedBucket, []),
+        num_cells: pickThresholdBucketValue(bucketed.num_cells, selectedBucket, []),
+        level: pickThresholdBucketValue(bucketed.level, selectedBucket, []),
+        jitter: pickThresholdBucketValue(bucketed.jitter, selectedBucket, []),
+        latency: pickThresholdBucketValue(bucketed.latency, selectedBucket, []),
+        packet_loss: pickThresholdBucketValue(bucketed.packet_loss, selectedBucket, []),
+        tac: pickThresholdBucketValue(bucketed.tac, selectedBucket, []),
+        dominance: pickThresholdBucketValue(bucketed.dominance, selectedBucket, []),
+        coverage_violation: pickThresholdBucketValue(bucketed.coverage_violation, selectedBucket, []),
+        technologyColorSettings: source?.technologyColorSettings || EMPTY_THRESHOLD_STATE.technologyColorSettings,
+        __bucketed: bucketed,
+        __selectedTechnologyBucket: selectedBucket,
+    };
 };
 
 const withTimeout = (promise, timeoutMs = 8000) =>
@@ -42,66 +109,117 @@ const withTimeout = (promise, timeoutMs = 8000) =>
     ]);
 
 function useColorForLog() {
-    const [parsedData, setParsedData] = useState(EMPTY_THRESHOLD_STATE);
+    const [thresholdSource, setThresholdSource] = useState({
+        id: null,
+        userId: null,
+        isDefault: false,
+        technologyColorSettings: EMPTY_THRESHOLD_STATE.technologyColorSettings,
+        bucketed: EMPTY_BUCKETED_THRESHOLDS,
+    });
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
+
+    const parsedData = useMemo(
+        () => buildEffectiveThresholdState(thresholdSource, []),
+        [thresholdSource],
+    );
 
     const fetchThreshold = useCallback(async () => {
         try {
             setLoading(true);
             setError(null);
             const res = await withTimeout(settingApi.getThresholdSettings());
-            
-            if (res?.Status === 1 && res?.Data) {
-                const data = res.Data;
+            const payload = res?.data || res;
+
+            if (payload?.Status === 1 && payload?.Data) {
+                const data = payload.Data;
                 
-                // ✅ Safe parsing with fallback to empty array
-                const safeParse = (jsonString) => {
-                    try {
-                        if (!jsonString) return [];
-                        const parsed = typeof jsonString === 'string' 
-                            ? JSON.parse(jsonString) 
-                            : jsonString;
-                        return Array.isArray(parsed) ? parsed : [];
-                    } catch (e) {
-                        console.error('Parse error:', e);
-                        return [];
-                    }
+                const technologyColorSettings = {
+                    twoG: Array.isArray(data?.technologyColorSettings?.twoG)
+                        ? data.technologyColorSettings.twoG
+                        : [],
+                    threeG: Array.isArray(data?.technologyColorSettings?.threeG)
+                        ? data.technologyColorSettings.threeG
+                        : [],
+                    fourG: Array.isArray(data?.technologyColorSettings?.fourG)
+                        ? data.technologyColorSettings.fourG
+                        : [],
+                    fiveG: Array.isArray(data?.technologyColorSettings?.fiveG)
+                        ? data.technologyColorSettings.fiveG
+                        : [],
+                    };
+
+                const rsrpBuckets = parseBucketedRangeValue(data.rsrp_json);
+                const rsrqBuckets = parseBucketedRangeValue(data.rsrq_json);
+                const sinrBuckets = parseBucketedRangeValue(data.sinr_json);
+                const dlBuckets = parseBucketedRangeValue(data.dl_thpt_json);
+                const ulBuckets = parseBucketedRangeValue(data.ul_thpt_json);
+                const deltaBuckets = parseBucketedRangeValue(data.delta_json ?? data.delta);
+                const volteBuckets = parseBucketedRangeValue(data.volte_call);
+                const blerBuckets = parseBucketedRangeValue(data.lte_bler_json);
+                const mosBuckets = parseBucketedRangeValue(data.mos_json);
+                const numCellsBuckets = parseBucketedRangeValue(data.num_cells);
+                const levelBuckets = parseBucketedRangeValue(data.level);
+                const jitterBuckets = parseBucketedRangeValue(data.jitter);
+                const latencyBuckets = parseBucketedRangeValue(data.latency);
+                const packetLossBuckets = parseBucketedRangeValue(data.packet_loss);
+                const tacBuckets = parseBucketedRangeValue(data.tac);
+                const dominanceBuckets = parseBucketedRangeValue(data.dominance);
+                const coverageViolationBuckets = parseBucketedRangeValue(data.coverage_violation);
+                const coverageHoleBuckets = parseBucketedScalarValue(data.coveragehole_json, -110);
+
+                const bucketed = {
+                    coverageHole: coverageHoleBuckets,
+                    rsrp: rsrpBuckets,
+                    rsrq: rsrqBuckets,
+                    sinr: sinrBuckets,
+                    dl_thpt: dlBuckets,
+                    ul_thpt: ulBuckets,
+                    delta: deltaBuckets,
+                    volteCall: volteBuckets,
+                    lte_bler: blerBuckets,
+                    mos: mosBuckets,
+                    num_cells: numCellsBuckets,
+                    level: levelBuckets,
+                    jitter: jitterBuckets,
+                    latency: latencyBuckets,
+                    packet_loss: packetLossBuckets,
+                    tac: tacBuckets,
+                    dominance: dominanceBuckets,
+                    coverage_violation: coverageViolationBuckets,
                 };
 
                 const parsed = {
                     id: data.id,
                     userId: data.user_id,
                     isDefault: data.is_default,
-                    coverageHole: data.coveragehole_json ? parseFloat(data.coveragehole_json) : -110,
-                    rsrp: safeParse(data.rsrp_json),
-                    rsrq: safeParse(data.rsrq_json),
-                    sinr: safeParse(data.sinr_json),
-                    dl_thpt: safeParse(data.dl_thpt_json),
-                    ul_thpt: safeParse(data.ul_thpt_json),
-                    delta: safeParse(data.delta_json ?? data.delta),
-                    volteCall: safeParse(data.volte_call),
-                    lte_bler: safeParse(data.lte_bler_json),
-                    mos: safeParse(data.mos_json),
-                    num_cells: safeParse(data.num_cells),
-                    level: safeParse(data.level),
-                    jitter: safeParse(data.jitter),
-                    latency: safeParse(data.latency),
-                    packet_loss: safeParse(data.packet_loss),
-                    tac: safeParse(data.tac),
-                    dominance: safeParse(data.dominance),
-                    coverage_violation: safeParse(data.coverage_violation),
-
+                    technologyColorSettings,
+                    bucketed,
                 };
                 
-                setParsedData(parsed);
+                applyTechnologyColorSettings(technologyColorSettings);
+                setThresholdSource(parsed);
             } else {
-                setParsedData(EMPTY_THRESHOLD_STATE);
+                applyTechnologyColorSettings({});
+                setThresholdSource({
+                    id: null,
+                    userId: null,
+                    isDefault: false,
+                    technologyColorSettings: EMPTY_THRESHOLD_STATE.technologyColorSettings,
+                    bucketed: EMPTY_BUCKETED_THRESHOLDS,
+                });
             }
         } catch (err) {
             console.error("Error fetching thresholds:", err);
             setError(err);
-            setParsedData(EMPTY_THRESHOLD_STATE);
+            applyTechnologyColorSettings({});
+            setThresholdSource({
+                id: null,
+                userId: null,
+                isDefault: false,
+                technologyColorSettings: EMPTY_THRESHOLD_STATE.technologyColorSettings,
+                bucketed: EMPTY_BUCKETED_THRESHOLDS,
+            });
         } finally {
             setLoading(false);
         }
@@ -121,8 +239,16 @@ function useColorForLog() {
         };
     }, [fetchThreshold]);
 
-    const getMetricColor = useCallback((value, metric) => {
+    const resolveThresholdsForTechnologies = useCallback(
+        (selectedTechnologies) => buildEffectiveThresholdState(thresholdSource, selectedTechnologies),
+        [thresholdSource],
+    );
+
+    const getMetricColor = useCallback((value, metric, selectedTechnologies = []) => {
         const lowerMetric = metric?.toLowerCase();
+        const effectiveParsedData = selectedTechnologies?.length
+            ? resolveThresholdsForTechnologies(selectedTechnologies)
+            : parsedData;
 
         // 1. Handle Categorical Coloring (Provider, Technology, Band)
         if (['provider', 'technology', 'band', 'nodebid', 'cell_id', 'earfcn'].includes(lowerMetric)) {
@@ -145,7 +271,7 @@ function useColorForLog() {
             return "#808080";
         }
 
-        if (!parsedData) {
+        if (!effectiveParsedData) {
             return "#808080";
         }
 
@@ -175,7 +301,7 @@ function useColorForLog() {
         };
 
         const key = metricKeyMap[lowerMetric] || lowerMetric;
-        const thresholds = parsedData[key];
+        const thresholds = effectiveParsedData[key];
 
         // ✅ Validate thresholds array
         if (!thresholds || !Array.isArray(thresholds) || thresholds.length === 0) {
@@ -226,10 +352,14 @@ function useColorForLog() {
         // If the value falls in a gap between configured ranges,
         // keep it neutral instead of forcing nearest-range color.
         return "#808080";
-    }, [parsedData]);
+    }, [parsedData, resolveThresholdsForTechnologies]);
 
-    const getThresholdInfo = useCallback((value, metric) => {
-        if (!parsedData || value === null || value === undefined) {
+    const getThresholdInfo = useCallback((value, metric, selectedTechnologies = []) => {
+        const effectiveParsedData = selectedTechnologies?.length
+            ? resolveThresholdsForTechnologies(selectedTechnologies)
+            : parsedData;
+
+        if (!effectiveParsedData || value === null || value === undefined) {
             return null;
         }
 
@@ -262,7 +392,7 @@ function useColorForLog() {
         };
 
         const key = metricKeyMap[metric?.toLowerCase()] || metric?.toLowerCase();
-        const thresholds = parsedData[key];
+        const thresholds = effectiveParsedData[key];
 
         if (!thresholds || !Array.isArray(thresholds) || thresholds.length === 0) {
             return null;
@@ -303,10 +433,14 @@ function useColorForLog() {
         }
 
         return null;
-    }, [parsedData]);
+    }, [parsedData, resolveThresholdsForTechnologies]);
 
-    const getThresholdsForMetric = useCallback((metric) => {
-        if (!parsedData) return null;
+    const getThresholdsForMetric = useCallback((metric, selectedTechnologies = []) => {
+        const effectiveParsedData = selectedTechnologies?.length
+            ? resolveThresholdsForTechnologies(selectedTechnologies)
+            : parsedData;
+
+        if (!effectiveParsedData) return null;
 
         const metricKeyMap = {
             'rsrp': 'rsrp',
@@ -334,7 +468,7 @@ function useColorForLog() {
         };
 
         const key = metricKeyMap[metric?.toLowerCase()] || metric?.toLowerCase();
-        const thresholds = parsedData[key];
+        const thresholds = effectiveParsedData[key];
         
         // ✅ Return valid thresholds only
         if (!thresholds || !Array.isArray(thresholds)) {
@@ -346,13 +480,14 @@ function useColorForLog() {
             const max = parseFloat(t.max);
             return !isNaN(min) && !isNaN(max) && t.color;
         });
-    }, [parsedData]);
+    }, [parsedData, resolveThresholdsForTechnologies]);
 
     return {
         getMetricColor,
         getThresholdInfo,
         getThresholdsForMetric,
         thresholds: parsedData,
+        resolveThresholdsForTechnologies,
         loading,
         error,
         isReady: !loading,

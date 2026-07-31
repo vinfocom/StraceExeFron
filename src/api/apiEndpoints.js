@@ -1228,7 +1228,7 @@ export const adminApi = {
   inactivateUser: (id) => api.post(`/Admin/InactivateUser`, { id }),
   userResetPassword: (data) => api.post("/Admin/UserResetPassword", data),
   changePassword: (data) => api.post("/Admin/ChangePassword", data),
-  getSessions: () => api.get("/Admin/GetSessions"),
+  getSessions: (params = {}) => api.get("/Admin/GetSessions", { params }),
   getAllNetworkLogs: (params) =>
     api.get("/Admin/GetAllNetworkLogs", { params }),
   deleteSession: (sessionId) =>

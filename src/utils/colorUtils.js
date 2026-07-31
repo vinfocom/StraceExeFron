@@ -286,8 +286,11 @@ export const COLOR_SCHEMES = {
   },
   technology: {
     "5G": "#EC4899",
+    "NR (5G NSA)": "#EC4899",
+    "NR (5G SA)": "#EC4899",
     "4G(LTE-ANCHOR NSA)": "#6366F1",
     "4G": "#8B5CF6",
+    LTE: "#8B5CF6",
     "3G": "#10B981",
     "2G": "#6B7280",
     Unknown: "#a8a6a2",
@@ -332,6 +335,54 @@ export const COLOR_SCHEMES = {
   pci: {
     Unknown: "#a8a6a2",
   },
+};
+
+const DEFAULT_TECHNOLOGY_SCHEME = {
+  ...COLOR_SCHEMES.technology,
+};
+
+const isValidHexColor = (value) =>
+  /^#[0-9a-f]{6}$/i.test(String(value ?? "").trim());
+
+const extractConfiguredTechnologyColor = (entries, fallbackColor) => {
+  const list = Array.isArray(entries) ? entries : [];
+  const match = list.find((entry) => isValidHexColor(entry?.color));
+  return match?.color || fallbackColor;
+};
+
+export const applyTechnologyColorSettings = (settings = {}) => {
+  const technologyScheme = COLOR_SCHEMES.technology;
+  const twoGColor = extractConfiguredTechnologyColor(
+    settings.twoG,
+    DEFAULT_TECHNOLOGY_SCHEME["2G"],
+  );
+  const threeGColor = extractConfiguredTechnologyColor(
+    settings.threeG,
+    DEFAULT_TECHNOLOGY_SCHEME["3G"],
+  );
+  const fourGColor = extractConfiguredTechnologyColor(
+    settings.fourG,
+    DEFAULT_TECHNOLOGY_SCHEME["4G"],
+  );
+  const fiveGColor = extractConfiguredTechnologyColor(
+    settings.fiveG,
+    DEFAULT_TECHNOLOGY_SCHEME["5G"],
+  );
+
+  Object.keys(technologyScheme).forEach((key) => {
+    delete technologyScheme[key];
+  });
+
+  Object.assign(technologyScheme, DEFAULT_TECHNOLOGY_SCHEME, {
+    "2G": twoGColor,
+    "3G": threeGColor,
+    "4G": fourGColor,
+    LTE: fourGColor,
+    "4G(LTE-ANCHOR NSA)": fourGColor,
+    "5G": fiveGColor,
+    "NR (5G NSA)": fiveGColor,
+    "NR (5G SA)": fiveGColor,
+  });
 };
 
 export const getLogColor = (colorBy, value, defaultColor = "#a8a6a2") => {

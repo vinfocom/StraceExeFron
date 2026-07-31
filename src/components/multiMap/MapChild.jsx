@@ -10,6 +10,10 @@ import MapChildFooter from "./MapChildFooter";
 import DrawingToolsLayer from "@/components/map/tools/DrawingToolsLayer";
 import { PolygonF } from "@react-google-maps/api";
 import { useLtePrediction } from "@/hooks/useLtePrediction";
+import {
+  pickThresholdBucketValue,
+  resolveSelectedTechnologyBucket,
+} from "@/utils/thresholdBuckets";
 
 
 const EMPTY_SESSIONS = [];
@@ -147,6 +151,34 @@ const MapChild = ({
   const [selectedSiteIds, setSelectedSiteIds] = useState([]);
   const currentLogRadius = clampNumber(logRadius, 4, 40, 10);
   const currentSiteSize = clampNumber(siteSize, 0.25, 5, 1);
+  const effectiveThresholds = useMemo(() => {
+    const bucketed = thresholds?.__bucketed;
+    if (!bucketed) return thresholds;
+
+    const selectedBucket = resolveSelectedTechnologyBucket(tech);
+    return {
+      ...thresholds,
+      coverageHole: pickThresholdBucketValue(bucketed.coverageHole, selectedBucket, -110),
+      rsrp: pickThresholdBucketValue(bucketed.rsrp, selectedBucket, []),
+      rsrq: pickThresholdBucketValue(bucketed.rsrq, selectedBucket, []),
+      sinr: pickThresholdBucketValue(bucketed.sinr, selectedBucket, []),
+      dl_thpt: pickThresholdBucketValue(bucketed.dl_thpt, selectedBucket, []),
+      ul_thpt: pickThresholdBucketValue(bucketed.ul_thpt, selectedBucket, []),
+      delta: pickThresholdBucketValue(bucketed.delta, selectedBucket, []),
+      volteCall: pickThresholdBucketValue(bucketed.volteCall, selectedBucket, []),
+      lte_bler: pickThresholdBucketValue(bucketed.lte_bler, selectedBucket, []),
+      mos: pickThresholdBucketValue(bucketed.mos, selectedBucket, []),
+      num_cells: pickThresholdBucketValue(bucketed.num_cells, selectedBucket, []),
+      level: pickThresholdBucketValue(bucketed.level, selectedBucket, []),
+      jitter: pickThresholdBucketValue(bucketed.jitter, selectedBucket, []),
+      latency: pickThresholdBucketValue(bucketed.latency, selectedBucket, []),
+      packet_loss: pickThresholdBucketValue(bucketed.packet_loss, selectedBucket, []),
+      tac: pickThresholdBucketValue(bucketed.tac, selectedBucket, []),
+      dominance: pickThresholdBucketValue(bucketed.dominance, selectedBucket, []),
+      coverage_violation: pickThresholdBucketValue(bucketed.coverage_violation, selectedBucket, []),
+      __selectedTechnologyBucket: selectedBucket,
+    };
+  }, [thresholds, tech]);
 
   const shouldFetchSiteLtePrediction =
     isSiteMode && Number(projectId) > 0 && selectedSiteIds.length > 0;
@@ -561,7 +593,7 @@ const MapChild = ({
           isLoaded={true}
           locations={isSiteMode ? EMPTY_POINTS : isSecondaryView ? EMPTY_POINTS : primaryDataForRender}
           selectedMetric={metric}
-          thresholds={thresholds}
+          thresholds={effectiveThresholds}
           colorBy={colorBy}
           pointRadius={currentLogRadius}
           neighborData={isSiteMode ? EMPTY_POINTS : isSecondaryView || isAllView ? neighborDataForRender : EMPTY_POINTS}
@@ -615,7 +647,7 @@ const MapChild = ({
             map={mapRef}
             locations={siteLtePredictionLocations || EMPTY_POINTS}
             selectedMetric={metric}
-            thresholds={thresholds}
+            thresholds={effectiveThresholds}
             filterPolygons={sharedPolygons}
             filterInsidePolygons={sharedPolygons.length > 0}
             legendFilter={legendFilter}
@@ -653,7 +685,7 @@ const MapChild = ({
             logs={drawingData}
             sessions={EMPTY_SESSIONS}
             selectedMetric={metric}
-            thresholds={thresholds}
+            thresholds={effectiveThresholds}
             clearSignal={drawClearSignal}
             onSummary={onDrawingComplete}
             onUIChange={onDrawingUiChange}
@@ -664,7 +696,7 @@ const MapChild = ({
 
         {!isSiteMode && (
           <MapLegend
-            thresholds={thresholds}
+            thresholds={effectiveThresholds}
             selectedMetric={metric}
             colorBy={colorBy}
             logs={legendData}
@@ -679,7 +711,7 @@ const MapChild = ({
             <MapChildFooter
               data={legendData}
               metric={metric}
-              thresholds={thresholds}
+            thresholds={effectiveThresholds}
             />
           </div>
         )}

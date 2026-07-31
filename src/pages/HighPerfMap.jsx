@@ -39,11 +39,19 @@ import { Button } from "@/components/ui/button";
 import { loadSavedViewport, saveViewport } from "@/utils/viewport";
 import { parseWKTToCoordinates } from "@/utils/wkt";
 import {
+  createEmptyScalarBuckets,
+  createEmptyThresholdBuckets,
+  parseBucketedRangeValue,
+  parseBucketedScalarValue,
+  pickThresholdBucketValue,
+  resolveSelectedTechnologyBucket,
+} from "@/utils/thresholdBuckets";
+import {
   GOOGLE_MAPS_LOADER_OPTIONS,
   getGoogleMapsConfigError,
   getGoogleMapsErrorMessage,
 } from "@/lib/googleMapsLoader";
-import { normalizeBandName, normalizeProviderName, normalizeTechName } from "@/utils/colorUtils";
+import { applyTechnologyColorSettings, normalizeBandName, normalizeProviderName, normalizeTechName } from "@/utils/colorUtils";
 import { COLOR_SCHEMES } from "@/utils/metrics";
 
 const MAP_ID = "5e49cd40d6e8c2f7f896f084";
@@ -142,6 +150,17 @@ const normalizeMetric = (metric) => {
   if (["dl_tpt", "dl_throughput", "tpt_dl", "throughput_dl"].includes(lower)) return "dl_thpt";
   if (["ul_tpt", "ul_throughput", "tpt_ul", "throughput_ul"].includes(lower)) return "ul_thpt";
   return lower;
+};
+
+const EMPTY_THRESHOLD_BUCKET_STATE = {
+  coveragehole: createEmptyScalarBuckets(-110),
+  rsrp: createEmptyThresholdBuckets(),
+  rsrq: createEmptyThresholdBuckets(),
+  sinr: createEmptyThresholdBuckets(),
+  dl_thpt: createEmptyThresholdBuckets(),
+  ul_thpt: createEmptyThresholdBuckets(),
+  mos: createEmptyThresholdBuckets(),
+  lte_bler: createEmptyThresholdBuckets(),
 };
 
 const getColorForMetricValue = (value, metric, thresholds) => {
@@ -346,7 +365,7 @@ export default function HighPerfMap() {
   const [map, setMap] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
   const [logsLoading, setLogsLoading] = useState(false);
-  const [thresholds, setThresholds] = useState({});
+  const [thresholdBuckets, setThresholdBuckets] = useState(EMPTY_THRESHOLD_BUCKET_STATE);
   const [allSessions, setAllSessions] = useState([]);
   const [projectPolygons, setProjectPolygons] = useState([]);
   const [activeFilters, setActiveFilters] = useState(null);
@@ -394,6 +413,25 @@ export default function HighPerfMap() {
   const [neighbourAppSummary, setNeighbourAppSummary] = useState(null);
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [legendFilter, setLegendFilter] = useState(null);
+
+  const effectiveThresholdBucket = useMemo(
+    () => resolveSelectedTechnologyBucket(activeFilters?.technology),
+    [activeFilters?.technology],
+  );
+
+  const thresholds = useMemo(
+    () => ({
+      rsrp: pickThresholdBucketValue(thresholdBuckets.rsrp, effectiveThresholdBucket, []),
+      rsrq: pickThresholdBucketValue(thresholdBuckets.rsrq, effectiveThresholdBucket, []),
+      sinr: pickThresholdBucketValue(thresholdBuckets.sinr, effectiveThresholdBucket, []),
+      dl_thpt: pickThresholdBucketValue(thresholdBuckets.dl_thpt, effectiveThresholdBucket, []),
+      ul_thpt: pickThresholdBucketValue(thresholdBuckets.ul_thpt, effectiveThresholdBucket, []),
+      mos: pickThresholdBucketValue(thresholdBuckets.mos, effectiveThresholdBucket, []),
+      lte_bler: pickThresholdBucketValue(thresholdBuckets.lte_bler, effectiveThresholdBucket, []),
+      coveragehole: pickThresholdBucketValue(thresholdBuckets.coveragehole, effectiveThresholdBucket, -110),
+    }),
+    [thresholdBuckets, effectiveThresholdBucket],
+  );
 
   const combinedDisplayedLogs = useMemo(() => {
     const processLogs = (logs, isNeighbour) => {
@@ -472,17 +510,19 @@ export default function HighPerfMap() {
     const fetchThresholds = async () => {
       try {
         const res = await settingApi.getThresholdSettings();
-        if (res?.Data) {
-          const d = res.Data;
-          setThresholds({
-            rsrp: JSON.parse(d.rsrp_json || "[]"),
-            rsrq: JSON.parse(d.rsrq_json || "[]"),
-            sinr: JSON.parse(d.sinr_json || "[]"),
-            dl_thpt: JSON.parse(d.dl_tpt_json || d.dl_thpt_json || "[]"),
-            ul_thpt: JSON.parse(d.ul_thpt_json || d.ul_tpt_json || "[]"),
-            mos: JSON.parse(d.mos_json || "[]"),
-            lte_bler: JSON.parse(d.lte_bler_json || "[]"),
-            coveragehole: parseFloat(d.coveragehole_json) || -110,
+        const payload = res?.data || res;
+        if (payload?.Data) {
+          const d = payload.Data;
+          applyTechnologyColorSettings(d.technologyColorSettings || {});
+          setThresholdBuckets({
+            rsrp: parseBucketedRangeValue(d.rsrp_json),
+            rsrq: parseBucketedRangeValue(d.rsrq_json),
+            sinr: parseBucketedRangeValue(d.sinr_json),
+            dl_thpt: parseBucketedRangeValue(d.dl_tpt_json || d.dl_thpt_json),
+            ul_thpt: parseBucketedRangeValue(d.ul_thpt_json || d.ul_tpt_json),
+            mos: parseBucketedRangeValue(d.mos_json),
+            lte_bler: parseBucketedRangeValue(d.lte_bler_json),
+            coveragehole: parseBucketedScalarValue(d.coveragehole_json, -110),
           });
         }
       } catch (err) {
@@ -495,8 +535,19 @@ export default function HighPerfMap() {
   const fetchAllSessions = useCallback(async (mapInstance) => {
     setIsLoading(true);
     try {
-      const data = await adminApi.getSessions();
-      const valid = (data?.Data || []).filter(
+      const pageSize = 100;
+      let page = 1;
+      let totalPages = 1;
+      const rows = [];
+
+      do {
+        const data = await adminApi.getSessions({ page, pageSize });
+        rows.push(...(Array.isArray(data?.Data) ? data.Data : []));
+        totalPages = Number(data?.TotalPages ?? totalPages) || totalPages;
+        page += 1;
+      } while (page <= totalPages);
+
+      const valid = rows.filter(
         (s) => Number.isFinite(parseFloat(s.start_lat)) && Number.isFinite(parseFloat(s.start_lon))
       );
       setAllSessions(valid);
