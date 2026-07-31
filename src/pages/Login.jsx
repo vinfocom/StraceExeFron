@@ -8,7 +8,7 @@ import comlog from "/logo.svg";
 import axios from "axios";
 import { Eye, EyeOff } from "lucide-react";
 
-const APP_VERSION = "2.0.1";
+const APP_VERSION = "2.1.0";
 
 const LoginPage = () => {
   const [email, setEmail] = useState("");
