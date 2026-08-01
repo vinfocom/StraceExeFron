@@ -473,7 +473,11 @@ const ExportDropdown = ({
   }, []);
 
   const getTimestamp = () => new Date().toISOString().split("T")[0];
+  const getTimestampWithTime = () =>
+    new Date().toISOString().replace(/[:.]/g, "-").replace("T", "_").slice(0, 19);
   const hasNetworkSiteExportSource = Boolean(siteData?.length || locations?.length);
+  const exportContextLabel =
+    indoor && !outdoor ? "indoor" : outdoor && !indoor ? "outdoor" : "mixed";
 
   const getFirstTextValue = (source, aliases = []) => {
     for (const alias of aliases) {
@@ -977,18 +981,19 @@ Technologies: ${dataFilters.technologies?.join(", ") || "None"}
     setExportType("excel");
 
     try {
+      const timestamp = getTimestampWithTime();
       const excelBlob = await reportApi.generateUnifiedMapExcel({
         projectId: Number(projectId),
         sessionIds: sessionIds.map((id) => Number(id)).filter(Number.isFinite),
       });
 
-      downloadPdfBlob(
+      downloadBlob(
         excelBlob instanceof Blob
           ? excelBlob
           : new Blob([excelBlob], {
               type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             }),
-        `UnifiedMap_Report_${projectId}_${new Date().toISOString().split("T")[0]}.xlsx`,
+        `${exportContextLabel}_report_${projectId}_${timestamp}.xlsx`,
       );
 
       toast.success("Excel report downloaded successfully!");
