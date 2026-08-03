@@ -2,6 +2,7 @@
 import React, { useMemo, useState, useEffect, useCallback } from "react";
 import { X } from "lucide-react";
 import { normalizeProviderName, normalizeTechName } from "@/utils/colorUtils";
+import { debounce } from "@/utils/unifiedMapConfig";
 import MapwithMultipleCircle from "../unifiedMap/MapwithMultipleCircle";
 import NetworkPlannerMap from "@/components/unifiedMap/NetworkPlannerMap";
 import LtePredictionLocationLayer from "@/components/unifiedMap/LtePredictionLocationLayer";
@@ -148,7 +149,36 @@ const MapChild = ({
   const [colorBy, setColorBy] = useState(null);
   const [legendFilter, setLegendFilter] = useState(null);
   const [mapRef, setMapRef] = useState(null);
+  const [viewport, setViewport] = useState(null);
   const [selectedSiteIds, setSelectedSiteIds] = useState([]);
+
+  // Bbox-cull the site/sector data NetworkPlannerMap renders, same idle-based
+  // bounds wiring UnifiedMapView.jsx uses — without this, NetworkPlannerMap
+  // falls back to rendering everything with no viewport culling at all.
+  useEffect(() => {
+    if (!mapRef || typeof mapRef.getBounds !== "function") return undefined;
+
+    const updateViewport = () => {
+      const bounds = mapRef.getBounds();
+      if (!bounds) return;
+      setViewport({
+        north: bounds.getNorthEast().lat(),
+        south: bounds.getSouthWest().lat(),
+        east: bounds.getNorthEast().lng(),
+        west: bounds.getSouthWest().lng(),
+      });
+    };
+
+    const debouncedUpdateViewport = debounce(updateViewport, 300);
+    const listener = mapRef.addListener("idle", debouncedUpdateViewport);
+    updateViewport();
+
+    return () => {
+      if (window.google?.maps?.event?.removeListener) {
+        window.google.maps.event.removeListener(listener);
+      }
+    };
+  }, [mapRef]);
   const currentLogRadius = clampNumber(logRadius, 4, 40, 10);
   const currentSiteSize = clampNumber(siteSize, 0.25, 5, 1);
   const effectiveThresholds = useMemo(() => {
@@ -620,6 +650,7 @@ const MapChild = ({
           <NetworkPlannerMap
             projectId={projectId}
             map={mapRef}
+            viewport={viewport}
             siteToggle="Cell"
             sitePredictionVersion={sitePredictionVersion}
             enableSiteToggle

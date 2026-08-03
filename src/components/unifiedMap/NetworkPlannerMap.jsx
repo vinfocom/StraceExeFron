@@ -10,12 +10,14 @@ import {
   normalizeBandName,
   normalizeTechName,
 } from "@/utils/colorUtils";
+import { hexToRgbaArray } from "@/utils/unifiedMapConfig";
 import { getPciColor } from "@/utils/metrics";
 import { useSiteData } from "@/hooks/useSiteData";
 import { mapViewApi, sitePredictionApi } from "@/api/apiEndpoints";
 import { clearProjectSessionCacheByProjectResource } from "@/utils/projectSessionCache";
 import { toast } from "react-toastify";
 import EditSiteFormDialog from "@/components/unifiedMap/EditSiteFormDialog";
+import NetworkSectorGLLayer from "@/components/unifiedMap/NetworkSectorGLLayer";
 
 function computeOffset(center, distanceMeters, headingDegrees) {
   const earthRadius = 6371000;
@@ -829,7 +831,15 @@ function isSiteLteDebugEnabled() {
 const MIN_TRIANGLE_SCALE_MULTIPLIER = 0.25;
 const MAX_TRIANGLE_SCALE_MULTIPLIER = 5;
 const SQUARE_MARKER_PATH = "M -1 -1 L 1 -1 L 1 1 L -1 1 Z";
-const MAX_RENDERED_SITE_SECTORS = 4000;
+// Sector triangles now render on a GPU (deck.gl) layer instead of one
+// <PolygonF> DOM overlay per sector, so this ceiling only needs to guard
+// against pathological data volumes, not DOM/browser overlay limits — mirrors
+// the tiered limit DeckGLOverlay.jsx already uses for its own point layers.
+function getMaxRenderedSiteSectors(totalCount) {
+  if (totalCount > 100000) return 20000;
+  if (totalCount > 60000) return 25000;
+  return 30000;
+}
 const MAX_RENDERED_SITE_LABELS = 450;
 const MIN_SITE_LABEL_ZOOM = 14;
 const MAX_SITE_LABEL_CHARS = 14;
@@ -1039,7 +1049,7 @@ function resolveSiteSectorColor({ deltaVariant, colorField, band, tech, network,
   return getProviderColor(network);
 }
 
-function downsampleItems(items = [], maxCount = MAX_RENDERED_SITE_SECTORS, keepPredicate = null) {
+function downsampleItems(items = [], maxCount = 30000, keepPredicate = null) {
   if (!Array.isArray(items)) return [];
   if (items.length <= maxCount) return items;
 
@@ -2742,27 +2752,46 @@ const NetworkPlannerMap = ({
   const shouldRenderLegacySectorPredictionMarkers =
     typeof onSectorPredictionPointsChange !== "function";
 
+  // Pad the viewport bbox before culling sectors/sites so panning doesn't pop
+  // triangles in/out right at the screen edge — the GPU layer can afford to
+  // keep a margin of off-screen sectors ready, unlike the old per-item DOM
+  // overlays this replaced.
+  const paddedViewport = useMemo(() => {
+    if (!viewport) return null;
+    const latSpan = Number(viewport.north) - Number(viewport.south);
+    const lngSpan = Number(viewport.east) - Number(viewport.west);
+    if (!Number.isFinite(latSpan) || !Number.isFinite(lngSpan)) return viewport;
+    const latPad = Math.max(0, latSpan) * 0.2;
+    const lngPad = Math.max(0, lngSpan) * 0.2;
+    return {
+      north: Number(viewport.north) + latPad,
+      south: Number(viewport.south) - latPad,
+      east: Number(viewport.east) + lngPad,
+      west: Number(viewport.west) - lngPad,
+    };
+  }, [viewport]);
+
   const visibleSectors = useMemo(() => {
-    if (!viewport) return sectorsToRender;
+    if (!paddedViewport) return sectorsToRender;
     return sectorsToRender.filter(
       (s) =>
-        s.lat >= viewport.south &&
-        s.lat <= viewport.north &&
-        s.lng >= viewport.west &&
-        s.lng <= viewport.east,
+        s.lat >= paddedViewport.south &&
+        s.lat <= paddedViewport.north &&
+        s.lng >= paddedViewport.west &&
+        s.lng <= paddedViewport.east,
     );
-  }, [sectorsToRender, viewport]);
+  }, [sectorsToRender, paddedViewport]);
 
   const visibleSiteMarkers = useMemo(() => {
-    if (!viewport) return siteMarkers;
+    if (!paddedViewport) return siteMarkers;
     return siteMarkers.filter(
       (s) =>
-        s.lat >= viewport.south &&
-        s.lat <= viewport.north &&
-        s.lng >= viewport.west &&
-        s.lng <= viewport.east,
+        s.lat >= paddedViewport.south &&
+        s.lat <= paddedViewport.north &&
+        s.lng >= paddedViewport.west &&
+        s.lng <= paddedViewport.east,
     );
-  }, [siteMarkers, viewport]);
+  }, [siteMarkers, paddedViewport]);
 
   const movedDeltaLinks = useMemo(() => {
     if (String(sitePredictionVersion || "").trim().toLowerCase() !== "delta") return [];
@@ -2910,7 +2939,7 @@ const NetworkPlannerMap = ({
     const selectedRenderKey = selectedSectorInfo?.renderKey;
     const hoveredPci = extractPciValue(hoveredLog);
     const hoveredNodebId = extractNodebId(hoveredLog);
-    return downsampleItems(visibleSectors, MAX_RENDERED_SITE_SECTORS, (sector) => {
+    return downsampleItems(visibleSectors, getMaxRenderedSiteSectors(visibleSectors.length), (sector) => {
       if (selectedRenderKey && sector.renderKey === selectedRenderKey) return true;
       if (!hoveredLog) return false;
       return isSectorMatchingHoveredLog(sector, hoveredPci, hoveredNodebId);
@@ -2959,6 +2988,157 @@ const NetworkPlannerMap = ({
     if (!hoveredLog) return null;
     return extractNodebId(hoveredLog);
   }, [hoveredLog]);
+
+  const canEditSitePrediction = String(siteToggle || "").toLowerCase() === "cell";
+  const selectedSectorRenderKeyValue = selectedSectorInfo?.renderKey || null;
+
+  // Per-sector triangle geometry + interaction flags, computed once here instead
+  // of inline inside a JSX .map() (previous behavior) so the same values can
+  // feed both the bulk GPU (deck.gl) layer and the single native overlay used
+  // for whichever sector is currently selected.
+  const sectorGeometryList = useMemo(() => {
+    return renderedSectors.map((sector, index) => {
+      const sectorRenderKey = buildSectorRenderKey(sector, index);
+      const sectorOverride = sectorOverridesByRenderKey?.[sectorRenderKey] || null;
+      const effectiveSector = sectorOverride
+        ? { ...sector, ...sectorOverride, renderKey: sectorRenderKey }
+        : { ...sector, renderKey: sectorRenderKey };
+      const p0 = { lat: effectiveSector.lat, lng: effectiveSector.lng };
+      const sectorBandValue = resolveSiteBandValue(effectiveSector);
+      const bandSizeMultiplier = getSectorBandSizeMultiplier(sectorBandValue);
+      const r = (effectiveSector.range || radius) * effectiveRenderedSectorScale * bandSizeMultiplier;
+      const safeBeamwidth = normalizeBeamwidth(effectiveSector.beamwidth, 30);
+      const p1 = computeOffset(p0, r, effectiveSector.azimuth - safeBeamwidth / 2);
+      const p2 = computeOffset(p0, r, effectiveSector.azimuth + safeBeamwidth / 2);
+      const infoPos = {
+        lat: (p0.lat + p1.lat + p2.lat) / 3,
+        lng: (p0.lng + p1.lng + p2.lng) / 3,
+      };
+      const labelPos = computeOffset(
+        p0,
+        r + Math.max(12, Math.min(40, r * 0.16)),
+        effectiveSector.azimuth,
+      );
+
+      const isHoveredMatch = isSectorMatchingHoveredLog(effectiveSector, logPci, logNodebId);
+      const isSelectedSector = selectedSectorRenderKeyValue === sectorRenderKey;
+      const isSectorDataActive =
+        Array.isArray(sectorPredictionRowsByRenderKey?.[sectorRenderKey]) &&
+        sectorPredictionRowsByRenderKey[sectorRenderKey].length > 0;
+      const bandZIndex = getSectorBandZIndex(sectorBandValue, 50000);
+      const sectorLabelText = shouldRenderSectorLabels
+        ? truncateSiteLabelText(getSiteLabelText(effectiveSector, siteLabelField))
+        : "";
+
+      return {
+        sectorRenderKey,
+        effectiveSector,
+        p0,
+        p1,
+        p2,
+        infoPos,
+        labelPos,
+        isHoveredMatch,
+        isSelectedSector,
+        isSectorDataActive,
+        bandZIndex,
+        sectorLabelText,
+      };
+    });
+  }, [
+    renderedSectors,
+    sectorOverridesByRenderKey,
+    radius,
+    effectiveRenderedSectorScale,
+    logPci,
+    logNodebId,
+    selectedSectorRenderKeyValue,
+    sectorPredictionRowsByRenderKey,
+    shouldRenderSectorLabels,
+    siteLabelField,
+  ]);
+
+  // The selected sector (opened via right-click) keeps its InfoWindow + drag
+  // handle on the native react-google-maps/api layer, so it's excluded from
+  // the GPU dataset and rendered once, standalone, below.
+  const selectedSectorGeometry = useMemo(
+    () => sectorGeometryList.find((item) => item.isSelectedSector) || null,
+    [sectorGeometryList],
+  );
+
+  const hoveredMatchGeometry = useMemo(
+    () => sectorGeometryList.find((item) => item.isHoveredMatch) || null,
+    [sectorGeometryList],
+  );
+
+  const bulkSectorFeatures = useMemo(() => {
+    return sectorGeometryList
+      .filter((item) => !item.isSelectedSector)
+      .map((item) => {
+        const { effectiveSector, p0, p1, p2, infoPos, isHoveredMatch, isSectorDataActive, bandZIndex, sectorRenderKey } = item;
+        const fillAlpha = Math.round(
+          255 * (isSectorDataActive ? 0.22 : isHoveredMatch ? 0.9 : options.opacity || 0.6),
+        );
+        const lineAlpha = Math.round(255 * (isSectorDataActive ? 0.95 : 1));
+        return {
+          id: sectorRenderKey,
+          polygon: [
+            [p0.lng, p0.lat],
+            [p1.lng, p1.lat],
+            [p2.lng, p2.lat],
+            [p0.lng, p0.lat],
+          ],
+          fillColor: hexToRgbaArray(effectiveSector.color, fillAlpha),
+          lineColor: isHoveredMatch ? [255, 0, 0, 255] : hexToRgbaArray(effectiveSector.color, lineAlpha),
+          lineWidth: isSectorDataActive ? 2 : 1,
+          sortRank: bandZIndex * 10 + (isSectorDataActive ? 3 : isHoveredMatch ? 1 : 0),
+          source: effectiveSector,
+          infoPos,
+        };
+      });
+  }, [sectorGeometryList, options.opacity]);
+
+  const bulkSectorLabelFeatures = useMemo(() => {
+    return sectorGeometryList
+      .filter((item) => !item.isSelectedSector && item.sectorLabelText)
+      .map((item) => ({
+        position: [item.labelPos.lng, item.labelPos.lat],
+        text: item.sectorLabelText,
+      }));
+  }, [sectorGeometryList]);
+
+  const bulkSiteFeatures = useMemo(() => {
+    return visibleSiteMarkers.map((site) => {
+      const isSelected = selectedSiteIdSet.has(site.siteId);
+      return {
+        markerKey: site.markerKey || site.siteId,
+        position: [site.lng, site.lat],
+        fillColor: hexToRgbaArray(getSiteMarkerFillColor(site, isSelected), 242),
+        radiusPx: isSelected ? 7 : 5,
+        strokeWidthPx: isSelected ? 2 : 1.5,
+        source: site,
+      };
+    });
+  }, [visibleSiteMarkers, selectedSiteIdSet]);
+
+  const bulkSiteLabelFeatures = useMemo(() => {
+    return visibleSiteMarkers
+      .map((site) => {
+        const siteMarkerKey = site.markerKey || site.siteId;
+        if (!visibleSiteLabelKeys.has(siteMarkerKey)) return null;
+        const text = truncateSiteLabelText(getSiteLabelText(site, siteLabelField));
+        if (!text) return null;
+        return { position: [site.lng, site.lat], text };
+      })
+      .filter(Boolean);
+  }, [visibleSiteMarkers, visibleSiteLabelKeys, siteLabelField]);
+
+  const handleGpuSiteClick = useCallback(
+    (site) => {
+      void handleSiteMarkerClick(site);
+    },
+    [handleSiteMarkerClick],
+  );
 
   const openSectorInfo = useCallback((sector, infoPos) => {
     const next = {
@@ -3381,6 +3561,20 @@ const NetworkPlannerMap = ({
       openSectorInfo({ ...sector, renderKey: clickedRenderKey }, infoPos);
     },
     [openSectorInfo],
+  );
+
+  const handleGpuSectorClick = useCallback(
+    (sector, infoPos) => {
+      void handleSectorLeftClick(sector, infoPos);
+    },
+    [handleSectorLeftClick],
+  );
+
+  const handleGpuSectorRightClick = useCallback(
+    (sector, infoPos) => {
+      void handleSectorRightClick(sector, infoPos);
+    },
+    [handleSectorRightClick],
   );
 
   const startDragMove = useCallback((mode) => {
@@ -4172,6 +4366,17 @@ const NetworkPlannerMap = ({
 
   return (
     <>
+      <NetworkSectorGLLayer
+        map={map}
+        sectorFeatures={bulkSectorFeatures}
+        siteFeatures={showSiteMarkers ? bulkSiteFeatures : []}
+        sectorLabelFeatures={bulkSectorLabelFeatures}
+        siteLabelFeatures={bulkSiteLabelFeatures}
+        onSectorClick={handleGpuSectorClick}
+        onSectorRightClick={handleGpuSectorRightClick}
+        onSiteClick={handleGpuSiteClick}
+      />
+
       {selectedSectorInfo && (
         <div className="absolute right-3 top-12 z-[2100] w-[290px] rounded border border-slate-300 bg-white p-2 text-xs shadow-lg">
           <div className="mb-2 flex items-center justify-between border-b border-slate-200 pb-1">
@@ -4285,52 +4490,6 @@ const NetworkPlannerMap = ({
           )}
         </div>
       )}
-
-      {showSiteMarkers &&
-        visibleSiteMarkers.map((site) => {
-          const isSelected = selectedSiteIdSet.has(site.siteId);
-          const siteMarkerKey = site.markerKey || site.siteId;
-          const siteLabelText = visibleSiteLabelKeys.has(siteMarkerKey)
-            ? truncateSiteLabelText(getSiteLabelText(site, siteLabelField))
-            : "";
-
-          return (
-            <MarkerF
-              key={`site-${siteMarkerKey}`}
-              position={{ lat: site.lat, lng: site.lng }}
-              optimized={false}
-              icon={{
-                path: window.google.maps.SymbolPath.CIRCLE,
-                scale: 5,
-                fillColor: getSiteMarkerFillColor(site, isSelected),
-                fillOpacity: 0.95,
-                strokeColor: "#ffffff",
-                strokeWeight: isSelected ? 2 : 1.5,
-              }}
-              label={
-                siteLabelText
-                  ? {
-                      text: siteLabelText,
-                      color: "#111827",
-                      fontSize: "11px",
-                      fontWeight: "700",
-                    }
-                  : undefined
-              }
-              zIndex={isSelected ? 4001 : 3001}
-              title={site.isUpdated ? `Updated site: ${site.siteId}` : `Baseline site: ${site.siteId}`}
-              onClick={() => {
-                void handleSiteMarkerClick(site);
-              }}
-              onLoad={(marker) => {
-                if (marker) markerRefs.current.add(marker);
-              }}
-              onUnmount={(marker) => {
-                if (marker) markerRefs.current.delete(marker);
-              }}
-            />
-          );
-        })}
 
       {loadingSitesQueue.size > 0 && (
         <div className="absolute top-4 left-1/2 -translate-x-1/2 z-[2100] rounded bg-blue-600 px-3 py-1 text-xs font-semibold text-white shadow-md">
@@ -4515,51 +4674,39 @@ const NetworkPlannerMap = ({
         );
       })}
 
-      {renderedSectors.map((sector, index) => {
-        const sectorRenderKey =
-          sector.renderKey ||
-          [
-            sector.id || `sector-${index}`,
-            Number(sector.lat).toFixed(7),
-            Number(sector.lng).toFixed(7),
-            Number(sector.azimuth).toFixed(2),
-            Number(sector.beamwidth).toFixed(2),
-            index,
-          ].join("|");
-        const sectorOverride = sectorOverridesByRenderKey?.[sectorRenderKey] || null;
-        const effectiveSector = sectorOverride
-          ? { ...sector, ...sectorOverride, renderKey: sectorRenderKey }
-          : { ...sector, renderKey: sectorRenderKey };
-        const p0 = { lat: effectiveSector.lat, lng: effectiveSector.lng };
-        const sectorBandValue = resolveSiteBandValue(effectiveSector);
-        const bandSizeMultiplier = getSectorBandSizeMultiplier(sectorBandValue);
-        const r = (effectiveSector.range || radius) * effectiveRenderedSectorScale * bandSizeMultiplier;
-        const safeBeamwidth = normalizeBeamwidth(effectiveSector.beamwidth, 30);
-        const p1 = computeOffset(p0, r, effectiveSector.azimuth - safeBeamwidth / 2);
-        const p2 = computeOffset(p0, r, effectiveSector.azimuth + safeBeamwidth / 2);
-        const infoPos = {
-          lat: (p0.lat + p1.lat + p2.lat) / 3,
-          lng: (p0.lng + p1.lng + p2.lng) / 3,
-        };
-        const labelPos = computeOffset(
-          p0,
-          r + Math.max(12, Math.min(40, r * 0.16)),
-          effectiveSector.azimuth,
-        );
+      {hoveredMatchGeometry && logCoords && (
+        <PolylineF
+          path={[hoveredMatchGeometry.p0, logCoords]}
+          options={{
+            strokeColor: "#000000",
+            strokeOpacity: 1.0,
+            strokeWeight: 2,
+            zIndex: 999999,
+          }}
+          onLoad={(polyline) => {
+            if (polyline) polylineRefs.current.add(polyline);
+          }}
+          onUnmount={(polyline) => {
+            if (polyline) polylineRefs.current.delete(polyline);
+          }}
+        />
+      )}
 
-        const activeCoords = logCoords;
-        const isHoveredMatch = isSectorMatchingHoveredLog(effectiveSector, logPci, logNodebId);
-        const isSelectedSector = selectedSectorInfo?.renderKey === sectorRenderKey;
-        const isSectorDataActive =
-          Array.isArray(sectorPredictionRowsByRenderKey?.[sectorRenderKey]) &&
-          sectorPredictionRowsByRenderKey[sectorRenderKey].length > 0;
-        const bandZIndex = getSectorBandZIndex(sectorBandValue, 50000);
-        const infoSector = isSelectedSector ? selectedSectorInfo || effectiveSector : effectiveSector;
+      {selectedSectorGeometry && (() => {
+        const {
+          sectorRenderKey,
+          effectiveSector,
+          p0,
+          p1,
+          p2,
+          infoPos,
+          labelPos,
+          isSectorDataActive,
+          bandZIndex,
+          sectorLabelText,
+        } = selectedSectorGeometry;
+        const infoSector = selectedSectorInfo || effectiveSector;
         const infoSectorSiteId = getDisplaySiteId(infoSector);
-        const canEditSitePrediction = String(siteToggle || "").toLowerCase() === "cell";
-        const sectorLabelText = shouldRenderSectorLabels
-          ? truncateSiteLabelText(getSiteLabelText(effectiveSector, siteLabelField))
-          : "";
 
         return (
           <React.Fragment key={sectorRenderKey}>
@@ -4567,25 +4714,18 @@ const NetworkPlannerMap = ({
               paths={[p0, p1, p2]}
               options={{
                 fillColor: effectiveSector.color,
-                fillOpacity: isSectorDataActive
-                  ? 0.22
-                  : isSelectedSector
-                    ? 0.95
-                    : isHoveredMatch
-                      ? 0.9
-                      : options.opacity || 0.6,
-                strokeWeight: isSectorDataActive ? 2 : isSelectedSector ? 2 : 1,
-                strokeColor: isSelectedSector ? "#111827" : isHoveredMatch ? "#FF0000" : effectiveSector.color,
+                // This is always the selected sector, so opacity/stroke only ever
+                // need to account for whether prediction-grid data is loaded for it.
+                fillOpacity: isSectorDataActive ? 0.22 : 0.95,
+                strokeWeight: 2,
+                strokeColor: "#111827",
                 strokeOpacity: isSectorDataActive ? 0.95 : 1,
-                // Size must always win the stacking order: a selected/active/hovered
+                // Size must always win the stacking order: a selected/active
                 // sector must never rise above a smaller sibling cell (e.g. clicking the
                 // bigger 900 MHz triangle must not cover/hide the smaller 1800 MHz one),
                 // or that sibling becomes permanently unclickable. So the size-derived
-                // bandZIndex is the dominant term, and selection state only breaks ties
-                // between sectors that render at the same size.
-                zIndex:
-                  bandZIndex * 10 +
-                  (isSectorDataActive ? 3 : isSelectedSector ? 2 : isHoveredMatch ? 1 : 0),
+                // bandZIndex is the dominant term.
+                zIndex: bandZIndex * 10 + (isSectorDataActive ? 3 : 2),
               }}
               onClick={() => {
                 void handleSectorLeftClick(effectiveSector, infoPos);
@@ -4617,30 +4757,12 @@ const NetworkPlannerMap = ({
                   fontSize: "11px",
                   fontWeight: "700",
                 }}
-                zIndex={isSelectedSector ? 5400 : 5300}
+                zIndex={5400}
                 title={getSiteLabelText(effectiveSector, siteLabelField)}
               />
             )}
 
-            {isHoveredMatch && activeCoords && (
-              <PolylineF
-                path={[p0, activeCoords]}
-                options={{
-                  strokeColor: "#000000",
-                  strokeOpacity: 1.0,
-                  strokeWeight: 2,
-                  zIndex: 999999,
-                }}
-                onLoad={(polyline) => {
-                  if (polyline) polylineRefs.current.add(polyline);
-                }}
-                onUnmount={(polyline) => {
-                  if (polyline) polylineRefs.current.delete(polyline);
-                }}
-              />
-            )}
-
-            {isSelectedSector && !isEditDialogOpen && selectedSectorInfo?.infoPos && (
+            {!isEditDialogOpen && selectedSectorInfo?.infoPos && (
               <InfoWindowF
                 position={selectedSectorInfo.infoPos}
                 onCloseClick={closeSectorTooltipOnly}
@@ -4802,7 +4924,7 @@ const NetworkPlannerMap = ({
               </InfoWindowF>
             )}
 
-            {isSelectedSector && dragMode && pendingMovePosition && (
+            {dragMode && pendingMovePosition && (
               <MarkerF
                 position={pendingMovePosition}
                 draggable
@@ -4826,7 +4948,7 @@ const NetworkPlannerMap = ({
             )}
           </React.Fragment>
         );
-      })}
+      })()}
 
       <EditSiteFormDialog
         open={isEditDialogOpen}
