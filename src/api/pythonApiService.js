@@ -1,6 +1,8 @@
 // src/api/pythonApiService.js
 import axios from 'axios';
 
+const DEFAULT_PYTHON_API_URL = "https://stracerservices.vinfocom.co.in";
+
 const isElectronRuntime =
   typeof navigator !== "undefined" &&
   /electron/i.test(navigator.userAgent || "");
@@ -42,7 +44,7 @@ const getConfiguredPythonBaseUrl = () => {
     : import.meta.env.VITE_PYTHON_API_URL;
   if (envBaseUrl) return normalizeBaseUrl(envBaseUrl);
 
-  return "";
+  return DEFAULT_PYTHON_API_URL;
 };
 
 const PYTHON_BASE_URL = getConfiguredPythonBaseUrl();

@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { 
   ArrowRightLeft, 
   Activity, 
@@ -19,6 +19,9 @@ const TYPE_STYLES = {
   downgrade: "text-white bg-red-500/20",
   lateral: "text-white bg-blue-500/20"
 };
+
+const INITIAL_VISIBLE_TRANSITIONS = 100;
+const VISIBLE_TRANSITIONS_STEP = 100;
 
 const getHandoverType = (from, to) => {
   const fromOrder = TECH_ORDER[from?.toUpperCase()] || 0;
@@ -108,6 +111,45 @@ const formatAverage = (value, unit) =>
 const averageValues = (values) =>
   values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : null;
 
+const buildTransitionStats = (items = []) => {
+  const result = {
+    total: items.length,
+    upgrade: 0,
+    downgrade: 0,
+    lateral: 0,
+    avgRsrpBefore: null,
+    avgRsrpAfter: null,
+    avgSinrBefore: null,
+    avgSinrAfter: null,
+    topPairs: [],
+  };
+
+  if (!items.length) return result;
+
+  const rsrpBefore = [];
+  const rsrpAfter = [];
+  const sinrBefore = [];
+  const sinrAfter = [];
+
+  items.forEach((transition) => {
+    const type = getHandoverType(transition.from, transition.to);
+    result[type]++;
+
+    if (Number.isFinite(transition.rsrp)) rsrpBefore.push(transition.rsrp);
+    if (Number.isFinite(transition.nextRsrp)) rsrpAfter.push(transition.nextRsrp);
+    if (Number.isFinite(transition.sinr)) sinrBefore.push(transition.sinr);
+    if (Number.isFinite(transition.nextSinr)) sinrAfter.push(transition.nextSinr);
+  });
+
+  result.avgRsrpBefore = averageValues(rsrpBefore);
+  result.avgRsrpAfter = averageValues(rsrpAfter);
+  result.avgSinrBefore = averageValues(sinrBefore);
+  result.avgSinrAfter = averageValues(sinrAfter);
+  result.topPairs = summarizeTransitionPairs(items);
+
+  return result;
+};
+
 const is2GTech = (value = "") => {
   const tech = String(value).toUpperCase();
   return tech.includes("2G") || tech.includes("GSM") || tech.includes("EDGE");
@@ -164,9 +206,58 @@ const PairSummaryCard = ({ item }) => (
   </div>
 );
 
-const HandoverDetailSection = ({ title, label, transitions = [], onRowClick }) => {
+const HandoverStatsGrid = ({
+  stats,
+  has2G = false,
+  className = "",
+  showTypeBreakdown = true,
+}) => (
+  <div className={className}>
+    <div className="rounded-md border border-slate-700 bg-slate-800/60 p-3 text-center">
+      <p className="text-2xl font-bold text-white">{stats.total}</p>
+      <p className="text-xs text-white">Total</p>
+    </div>
+    {showTypeBreakdown && (
+      <div className="rounded-md border border-slate-700 bg-slate-800/60 p-3 text-center">
+        <p className="text-2xl font-bold text-white">{stats.upgrade}</p>
+        <p className="text-xs text-white">Upgrades</p>
+      </div>
+    )}
+    {showTypeBreakdown && (
+      <div className="rounded-md border border-slate-700 bg-slate-800/60 p-3 text-center">
+        <p className="text-2xl font-bold text-white">{stats.downgrade}</p>
+        <p className="text-xs text-white">Downgrades</p>
+      </div>
+    )}
+    {showTypeBreakdown && (
+      <div className="rounded-md border border-slate-700 bg-slate-800/60 p-3 text-center">
+        <p className="text-2xl font-bold text-white">{stats.lateral}</p>
+        <p className="text-xs text-white">Lateral</p>
+      </div>
+    )}
+    <div className="rounded-md border border-slate-700 bg-slate-800/60 p-3 text-center">
+      <p className="text-lg font-bold text-white">{formatAverage(stats.avgRsrpBefore, "dBm")}</p>
+      <p className="text-xs text-white">{has2G ? "RXLEVEL Before" : "RSRP Before"}</p>
+    </div>
+    <div className="rounded-md border border-slate-700 bg-slate-800/60 p-3 text-center">
+      <p className="text-lg font-bold text-white">{formatAverage(stats.avgRsrpAfter, "dBm")}</p>
+      <p className="text-xs text-white">{has2G ? "RXLEVEL After" : "RSRP After"}</p>
+    </div>
+    <div className="rounded-md border border-slate-700 bg-slate-800/60 p-3 text-center">
+      <p className="text-lg font-bold text-white">{formatAverage(stats.avgSinrBefore, "dB")}</p>
+      <p className="text-xs text-white">{has2G ? "RXQUAL Before" : "SINR Before"}</p>
+    </div>
+    <div className="rounded-md border border-slate-700 bg-slate-800/60 p-3 text-center">
+      <p className="text-lg font-bold text-white">{formatAverage(stats.avgSinrAfter, "dB")}</p>
+      <p className="text-xs text-white">{has2G ? "RXQUAL After" : "SINR After"}</p>
+    </div>
+  </div>
+);
+
+const HandoverDetailSection = ({ title, label, transitions = [], onRowClick, expanded = false }) => {
   const [pairFilter, setPairFilter] = useState("all");
   const [sortOrder, setSortOrder] = useState("desc");
+  const [visibleCount, setVisibleCount] = useState(INITIAL_VISIBLE_TRANSITIONS);
   const pairOptions = useMemo(() => getPairOptions(transitions), [transitions]);
   const filteredTransitions = useMemo(() => {
     if (pairFilter === "all") return transitions;
@@ -176,6 +267,11 @@ const HandoverDetailSection = ({ title, label, transitions = [], onRowClick }) =
     () => summarizeTransitionPairs(filteredTransitions, Number.POSITIVE_INFINITY),
     [filteredTransitions]
   );
+  const stats = useMemo(() => buildTransitionStats(filteredTransitions), [filteredTransitions]);
+  const has2GInFilteredTransitions = useMemo(
+    () => filteredTransitions.some((transition) => transitionIncludes2G(transition)),
+    [filteredTransitions]
+  );
   const sortedTransitions = useMemo(() => {
     return [...filteredTransitions].sort((a, b) => {
       const dateA = new Date(a.timestamp || 0);
@@ -183,8 +279,30 @@ const HandoverDetailSection = ({ title, label, transitions = [], onRowClick }) =
       return sortOrder === "desc" ? dateB - dateA : dateA - dateB;
     });
   }, [filteredTransitions, sortOrder]);
+  const visibleTransitions = useMemo(
+    () => sortedTransitions.slice(0, visibleCount),
+    [sortedTransitions, visibleCount]
+  );
+  const hasMoreTransitions = sortedTransitions.length > visibleTransitions.length;
+
+  useEffect(() => {
+    setVisibleCount(INITIAL_VISIBLE_TRANSITIONS);
+  }, [pairFilter, sortOrder, transitions]);
 
   if (!transitions.length) return null;
+
+  const controlsClass = expanded
+    ? "flex w-full flex-col gap-2 lg:w-auto lg:flex-row lg:items-center"
+    : "flex w-full flex-col gap-2";
+  const filterRowClass = expanded
+    ? "flex w-full min-w-0 items-center gap-2 lg:w-auto"
+    : "flex w-full min-w-0 flex-col gap-1";
+  const pairGridClass = expanded
+    ? "mt-3 grid grid-cols-1 gap-2 xl:grid-cols-2 2xl:grid-cols-3"
+    : "mt-3 grid grid-cols-1 gap-2";
+  const statsGridClass = expanded
+    ? "mt-3 grid grid-cols-2 gap-2 xl:grid-cols-3 2xl:grid-cols-5"
+    : "mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2";
 
   return (
     <section className="rounded-lg border border-slate-700 bg-slate-900/40 p-4">
@@ -195,14 +313,14 @@ const HandoverDetailSection = ({ title, label, transitions = [], onRowClick }) =
             Showing {filteredTransitions.length} of {transitions.length} events
           </p>
         </div>
-        <div className="flex w-full flex-col gap-2 md:w-auto md:flex-row md:items-center">
+        <div className={controlsClass}>
           {pairOptions.length > 1 && (
-            <div className="flex w-full items-center gap-2 md:w-auto">
+            <div className={filterRowClass}>
               <div className="text-[11px] font-semibold uppercase text-white">Filter</div>
               <select
                 value={pairFilter}
                 onChange={(event) => setPairFilter(event.target.value)}
-                className="h-8 w-full rounded border border-slate-700 bg-slate-800 px-2 text-xs text-white outline-none focus:border-blue-500 md:w-[190px]"
+                className="h-8 min-w-0 w-full rounded border border-slate-700 bg-slate-800 px-2 text-xs text-white outline-none focus:border-blue-500 lg:w-[190px]"
               >
                 <option value="all">All {label} handovers</option>
                 {pairOptions.map((option) => (
@@ -215,7 +333,7 @@ const HandoverDetailSection = ({ title, label, transitions = [], onRowClick }) =
           )}
           <button 
             onClick={() => setSortOrder(prev => prev === "desc" ? "asc" : "desc")}
-            className="flex h-8 w-fit items-center gap-1 rounded border border-slate-700 px-2 text-xs text-white transition-colors hover:border-slate-600 hover:text-white"
+            className="flex h-8 w-full items-center justify-center gap-1 rounded border border-slate-700 px-2 text-xs text-white transition-colors hover:border-slate-600 hover:text-white lg:w-fit"
           >
             {sortOrder === "desc" ? "Newest first" : "Oldest first"}
             {sortOrder === "desc" ? <ChevronDown className="w-3 h-3" /> : <ChevronUp className="w-3 h-3" />}
@@ -223,8 +341,15 @@ const HandoverDetailSection = ({ title, label, transitions = [], onRowClick }) =
         </div>
       </div>
 
+      <HandoverStatsGrid
+        stats={stats}
+        has2G={has2GInFilteredTransitions}
+        className={statsGridClass}
+        showTypeBreakdown={false}
+      />
+
       {detailPairs.length > 0 && (
-        <div className="mt-3 grid grid-cols-1 gap-2 lg:grid-cols-2 2xl:grid-cols-3">
+        <div className={pairGridClass}>
           {detailPairs.map((item) => (
             <PairSummaryCard key={item.pair} item={item} />
           ))}
@@ -232,7 +357,7 @@ const HandoverDetailSection = ({ title, label, transitions = [], onRowClick }) =
       )}
 
       <div className="mt-3 flex flex-col gap-2">
-        {sortedTransitions.map((t, idx) => (
+        {visibleTransitions.map((t, idx) => (
           <TransitionCard 
             key={`${title}-${t.session_id ?? "handover"}-${idx}`}
             transition={t}
@@ -243,6 +368,18 @@ const HandoverDetailSection = ({ title, label, transitions = [], onRowClick }) =
           />
         ))}
       </div>
+
+      {hasMoreTransitions && (
+        <div className="mt-3 flex justify-center">
+          <button
+            type="button"
+            onClick={() => setVisibleCount((current) => current + VISIBLE_TRANSITIONS_STEP)}
+            className="rounded border border-slate-700 px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:border-slate-500"
+          >
+            Load more {label.toLowerCase()} handovers
+          </button>
+        </div>
+      )}
     </section>
   );
 };
@@ -409,9 +546,14 @@ export const HandoverAnalysisTab = ({
   bandTransitions = [],
   pciTransitions = [],
   onRowClick,
+  expanded = false,
+  showTechnology = true,
+  showBand = true,
+  showPci = true,
 }) => {
   const [sortOrder, setSortOrder] = useState("desc");
   const [technologyPairFilter, setTechnologyPairFilter] = useState("all");
+  const [visibleCount, setVisibleCount] = useState(INITIAL_VISIBLE_TRANSITIONS);
 
   const technologyPairOptions = useMemo(() => getPairOptions(transitions), [transitions]);
   const filteredTechnologyTransitions = useMemo(() => {
@@ -423,44 +565,10 @@ export const HandoverAnalysisTab = ({
     [filteredTechnologyTransitions]
   );
 
-  const stats = useMemo(() => {
-    const result = {
-      total: filteredTechnologyTransitions.length,
-      upgrade: 0,
-      downgrade: 0,
-      lateral: 0,
-      avgRsrpBefore: null,
-      avgRsrpAfter: null,
-      avgSinrBefore: null,
-      avgSinrAfter: null,
-      topPairs: []
-    };
-
-    if (!filteredTechnologyTransitions.length) return result;
-
-    const rsrpBefore = [];
-    const rsrpAfter = [];
-    const sinrBefore = [];
-    const sinrAfter = [];
-
-    filteredTechnologyTransitions.forEach((t) => {
-      const type = getHandoverType(t.from, t.to);
-      result[type]++;
-
-      if (Number.isFinite(t.rsrp)) rsrpBefore.push(t.rsrp);
-      if (Number.isFinite(t.nextRsrp)) rsrpAfter.push(t.nextRsrp);
-      if (Number.isFinite(t.sinr)) sinrBefore.push(t.sinr);
-      if (Number.isFinite(t.nextSinr)) sinrAfter.push(t.nextSinr);
-    });
-
-    result.avgRsrpBefore = averageValues(rsrpBefore);
-    result.avgRsrpAfter = averageValues(rsrpAfter);
-    result.avgSinrBefore = averageValues(sinrBefore);
-    result.avgSinrAfter = averageValues(sinrAfter);
-    result.topPairs = summarizeTransitionPairs(filteredTechnologyTransitions);
-
-    return result;
-  }, [filteredTechnologyTransitions]);
+  const stats = useMemo(
+    () => buildTransitionStats(filteredTechnologyTransitions),
+    [filteredTechnologyTransitions]
+  );
 
   const sortedTransitions = useMemo(() => {
     return [...filteredTechnologyTransitions].sort((a, b) => {
@@ -469,55 +577,60 @@ export const HandoverAnalysisTab = ({
       return sortOrder === "desc" ? dateB - dateA : dateA - dateB;
     });
   }, [filteredTechnologyTransitions, sortOrder]);
+  const visibleTransitions = useMemo(
+    () => sortedTransitions.slice(0, visibleCount),
+    [sortedTransitions, visibleCount]
+  );
+  const hasMoreTransitions = sortedTransitions.length > visibleTransitions.length;
 
-  if (!transitions.length && !bandTransitions.length && !pciTransitions.length) {
+  useEffect(() => {
+    setVisibleCount(INITIAL_VISIBLE_TRANSITIONS);
+  }, [technologyPairFilter, sortOrder, transitions]);
+
+  const visibleTechnologyTransitions = showTechnology ? transitions : [];
+  const visibleBandTransitions = showBand ? bandTransitions : [];
+  const visiblePciTransitions = showPci ? pciTransitions : [];
+
+  if (
+    !visibleTechnologyTransitions.length &&
+    !visibleBandTransitions.length &&
+    !visiblePciTransitions.length
+  ) {
     return <EmptyState />;
   }
 
+  const statsGridClass = expanded
+    ? "grid grid-cols-2 gap-2 xl:grid-cols-4 2xl:grid-cols-4"
+    : "grid grid-cols-1 gap-2 sm:grid-cols-2";
+  const pairGridClass = expanded
+    ? "grid grid-cols-1 gap-2 xl:grid-cols-2 2xl:grid-cols-3"
+    : "grid grid-cols-1 gap-2";
+  const controlsClass = expanded
+    ? "flex w-full flex-col gap-2 lg:w-auto lg:flex-row lg:items-center"
+    : "flex w-full flex-col gap-2";
+  const filterRowClass = expanded
+    ? "flex w-full min-w-0 items-center gap-2 lg:w-auto"
+    : "flex w-full min-w-0 flex-col gap-1";
+
   return (
     <div className="flex flex-col gap-4">
-      {transitions.length > 0 && (
-      <div className="grid grid-cols-2 gap-2 md:grid-cols-4 xl:grid-cols-7">
-        <div className="rounded-md border border-slate-700 bg-slate-800/60 p-3 text-center">
-          <p className="text-2xl font-bold text-white">{stats.total}</p>
-          <p className="text-xs text-white">Total</p>
-        </div>
-        <div className="rounded-md border border-slate-700 bg-slate-800/60 p-3 text-center">
-          <p className="text-2xl font-bold text-white">{stats.upgrade}</p>
-          <p className="text-xs text-white">Upgrades</p>
-        </div>
-        <div className="rounded-md border border-slate-700 bg-slate-800/60 p-3 text-center">
-          <p className="text-2xl font-bold text-white">{stats.downgrade}</p>
-          <p className="text-xs text-white">Downgrades</p>
-        </div>
-        <div className="rounded-md border border-slate-700 bg-slate-800/60 p-3 text-center">
-          <p className="text-lg font-bold text-white">{formatAverage(stats.avgRsrpBefore, "dBm")}</p>
-          <p className="text-xs text-white">{has2GInFilteredTechnologyTransitions ? "RXLEVEL Before" : "RSRP Before"}</p>
-        </div>
-        <div className="rounded-md border border-slate-700 bg-slate-800/60 p-3 text-center">
-          <p className="text-lg font-bold text-white">{formatAverage(stats.avgRsrpAfter, "dBm")}</p>
-          <p className="text-xs text-white">{has2GInFilteredTechnologyTransitions ? "RXLEVEL After" : "RSRP After"}</p>
-        </div>
-        <div className="rounded-md border border-slate-700 bg-slate-800/60 p-3 text-center">
-          <p className="text-lg font-bold text-white">{formatAverage(stats.avgSinrBefore, "dB")}</p>
-          <p className="text-xs text-white">{has2GInFilteredTechnologyTransitions ? "RXQUAL Before" : "SINR Before"}</p>
-        </div>
-        <div className="rounded-md border border-slate-700 bg-slate-800/60 p-3 text-center">
-          <p className="text-lg font-bold text-white">{formatAverage(stats.avgSinrAfter, "dB")}</p>
-          <p className="text-xs text-white">{has2GInFilteredTechnologyTransitions ? "RXQUAL After" : "SINR After"}</p>
-        </div>
-      </div>
+      {showTechnology && transitions.length > 0 && (
+        <HandoverStatsGrid
+          stats={stats}
+          has2G={has2GInFilteredTechnologyTransitions}
+          className={statsGridClass}
+        />
       )}
 
-      {filteredTechnologyTransitions.length > 0 && stats.topPairs.length > 0 && (
-        <div className="grid grid-cols-1 gap-2 lg:grid-cols-2 2xl:grid-cols-3">
+      {showTechnology && filteredTechnologyTransitions.length > 0 && stats.topPairs.length > 0 && (
+        <div className={pairGridClass}>
           {stats.topPairs.map((item) => (
             <PairSummaryCard key={item.pair} item={item} />
           ))}
         </div>
       )}
 
-      {filteredTechnologyTransitions.length > 0 && (
+      {showTechnology && filteredTechnologyTransitions.length > 0 && (
         <section className="rounded-lg border border-slate-700 bg-slate-900/40 p-4">
           <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
             <div>
@@ -526,14 +639,14 @@ export const HandoverAnalysisTab = ({
                 Showing {filteredTechnologyTransitions.length} of {transitions.length} events
               </p>
             </div>
-            <div className="flex w-full flex-col gap-2 md:w-auto md:flex-row md:items-center">
+            <div className={controlsClass}>
             {technologyPairOptions.length > 1 && (
-              <div className="flex w-full items-center gap-2 md:w-auto">
+              <div className={filterRowClass}>
                 <div className="text-[11px] font-semibold uppercase text-white">Filter</div>
                 <select
                   value={technologyPairFilter}
                   onChange={(event) => setTechnologyPairFilter(event.target.value)}
-                  className="h-8 w-full rounded border border-slate-700 bg-slate-800 px-2 text-xs text-white outline-none focus:border-blue-500 md:w-[190px]"
+                  className="h-8 min-w-0 w-full rounded border border-slate-700 bg-slate-800 px-2 text-xs text-white outline-none focus:border-blue-500 lg:w-[190px]"
                 >
                   <option value="all">All technology handovers</option>
                   {technologyPairOptions.map((option) => (
@@ -546,7 +659,7 @@ export const HandoverAnalysisTab = ({
             )}
             <button 
               onClick={() => setSortOrder(prev => prev === "desc" ? "asc" : "desc")}
-              className="flex h-8 w-fit items-center gap-1 rounded border border-slate-700 px-2 text-xs text-white transition-colors hover:border-slate-600 hover:text-white"
+              className="flex h-8 w-full items-center justify-center gap-1 rounded border border-slate-700 px-2 text-xs text-white transition-colors hover:border-slate-600 hover:text-white lg:w-fit"
             >
               {sortOrder === "desc" ? "Newest first" : "Oldest first"}
               {sortOrder === "desc" ? <ChevronDown className="w-3 h-3" /> : <ChevronUp className="w-3 h-3" />}
@@ -555,7 +668,7 @@ export const HandoverAnalysisTab = ({
           </div>
 
           <div className="mt-3 flex flex-col gap-2">
-            {sortedTransitions.map((t, idx) => (
+            {visibleTransitions.map((t, idx) => (
               <TransitionCard 
                 key={`${t.session_id}-${idx}`}
                 transition={t}
@@ -564,40 +677,55 @@ export const HandoverAnalysisTab = ({
               />
             ))}
           </div>
+
+          {hasMoreTransitions && (
+            <div className="mt-3 flex justify-center">
+              <button
+                type="button"
+                onClick={() => setVisibleCount((current) => current + VISIBLE_TRANSITIONS_STEP)}
+                className="rounded border border-slate-700 px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:border-slate-500"
+              >
+                Load more technology handovers
+              </button>
+            </div>
+          )}
         </section>
       )}
 
       <HandoverDetailSection
         title="Band Handover Details"
         label="Band"
-        transitions={bandTransitions}
+        transitions={visibleBandTransitions}
         onRowClick={onRowClick}
+        expanded={expanded}
       />
 
       <HandoverDetailSection
         title="PCI Handover Details"
         label="PCI"
-        transitions={pciTransitions}
+        transitions={visiblePciTransitions}
         onRowClick={onRowClick}
+        expanded={expanded}
       />
 
-      <div className="flex items-center justify-center gap-6 py-2 border-t border-slate-700">
-        <div className="flex items-center gap-1.5 text-xs text-white">
-          <div className="w-2 h-2 rounded-full bg-green-500" />
-          Upgrade
+      {showTechnology && (
+        <div className="flex items-center justify-center gap-6 border-t border-slate-700 py-2">
+          <div className="flex items-center gap-1.5 text-xs text-white">
+            <div className="w-2 h-2 rounded-full bg-green-500" />
+            Upgrade
+          </div>
+          <div className="flex items-center gap-1.5 text-xs text-white">
+            <div className="w-2 h-2 rounded-full bg-red-500" />
+            Downgrade
+          </div>
+          <div className="flex items-center gap-1.5 text-xs text-white">
+            <div className="w-2 h-2 rounded-full bg-blue-500" />
+            Lateral
+          </div>
         </div>
-        <div className="flex items-center gap-1.5 text-xs text-white">
-          <div className="w-2 h-2 rounded-full bg-red-500" />
-          Downgrade
-        </div>
-        <div className="flex items-center gap-1.5 text-xs text-white">
-          <div className="w-2 h-2 rounded-full bg-blue-500" />
-          Lateral
-        </div>
-      </div>
+      )}
     </div>
   );
 };
 
 export default HandoverAnalysisTab;
-

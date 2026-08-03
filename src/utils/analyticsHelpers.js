@@ -1,9 +1,18 @@
 export const calculateStats = (locations, metric) => {
   if (!locations?.length) return null;
 
+  const normalizedMetric = String(metric || "").trim().toLowerCase();
+  const shouldExcludeZeroValues =
+    normalizedMetric === "dl_thpt" || normalizedMetric === "ul_thpt";
+
   const values = locations
     .map(loc => loc[metric])
-    .filter(val => val != null && !isNaN(val) && val !== '');
+    .filter((val) => {
+      if (val == null || val === '' || isNaN(val)) return false;
+      const numericValue = Number(val);
+      if (shouldExcludeZeroValues && numericValue === 0) return false;
+      return true;
+    });
 
   if (!values.length) return null;
 

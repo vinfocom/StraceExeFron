@@ -2051,6 +2051,10 @@ function UnifiedDetailLogs({
               transitions={technologyTransitions}
               bandTransitions={bandTransitions}
               pciTransitions={pciTransitions}
+              expanded={expanded}
+              showTechnology={techHandOver}
+              showBand={bandHandover}
+              showPci={pciHandover}
             />
           )}
 

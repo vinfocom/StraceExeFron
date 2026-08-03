@@ -210,6 +210,38 @@ const parseMapInfoRegionToWkt = (raw) => {
     .join(", ")})`;
 };
 
+const parseLatLonTextToWkt = (raw) => {
+  const lines = String(raw || "")
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  if (lines.length < 3) {
+    throw new Error("Enter at least 3 coordinate lines in lat, lon format.");
+  }
+
+  const ring = lines.map((line) => {
+    const parts = line.split(",").map((part) => part.trim());
+    if (parts.length !== 2) {
+      throw new Error("Each coordinate line must be in lat, lon format.");
+    }
+
+    const lat = Number.parseFloat(parts[0]);
+    const lon = Number.parseFloat(parts[1]);
+
+    if (!Number.isFinite(lat) || lat < -90 || lat > 90) {
+      throw new Error("Latitude must be a valid number between -90 and 90.");
+    }
+    if (!Number.isFinite(lon) || lon < -180 || lon > 180) {
+      throw new Error("Longitude must be a valid number between -180 and 180.");
+    }
+
+    return [lon, lat];
+  });
+
+  return `POLYGON(${ringToWkt(ring)})`;
+};
+
 const normalizePolygonInput = (raw) => {
   const text = String(raw || "").trim();
   if (!text) throw new Error("Paste a WKT polygon or upload a GeoJSON/WKT/MIF/TAB file.");
@@ -218,6 +250,9 @@ const normalizePolygonInput = (raw) => {
   if (/^Region\s+\d+/im.test(text)) return parseMapInfoRegionToWkt(text);
   if (/^(Version|Charset|Delimiter|CoordSys|Columns|Data|!table|Definition\s+Table|Type\s+NATIVE)\b/im.test(text)) {
     return parseMapInfoRegionToWkt(text);
+  }
+  if (/^-?\d+(?:\.\d+)?\s*,\s*-?\d+(?:\.\d+)?(?:\s*\r?\n\s*-?\d+(?:\.\d+)?\s*,\s*-?\d+(?:\.\d+)?)+$/m.test(text)) {
+    return parseLatLonTextToWkt(text);
   }
 
   const parsed = JSON.parse(text);
@@ -955,7 +990,7 @@ const UploadDataPage = () => {
               <Textarea
                 value={polygonText}
                 onChange={(e) => setPolygonText(e.target.value)}
-                placeholder="Paste WKT POLYGON/MULTIPOLYGON, GeoJSON Polygon/MultiPolygon, or MapInfo MIF Region data"
+                placeholder={"Paste WKT/GeoJSON/MapInfo data, or enter one coordinate per line as lat, lon\nExample:\n24.998122, 121.448283\n24.998500, 121.449100\n24.997800, 121.449700"}
                 className="min-h-[220px] bg-white text-black placeholder:text-gray-500"
               />
             </div>
