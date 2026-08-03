@@ -16,10 +16,13 @@ import "react-toastify/dist/ReactToastify.css";
 import AuthProvider, { useAuth } from "./context/AuthContext";
 import { SettingsDialogProvider } from "./context/SettingsDialogContext";
 import { indexedDBProvider } from "./utils/indexedDBProvider";
-import Spinner from "./components/common/Spinner";
 import { MapProvider } from './context/MapContext';
 import ElectronWindowBar from "./components/layout/ElectronWindowBar";
 import { tryAutoSyncOfflineQueue } from "./api/apiEndpoints";
+import appLogo from "/favicon.svg";
+import comlog from "/logo.svg";
+
+const TRANSITION_INTENT_KEY = "authTransitionIntent";
 
 // --- Lazy Load Pages for Optimization ---
 const LoginPage = lazy(() => import("./pages/Login"));
@@ -46,15 +49,68 @@ const DataDeletionPage = lazy(() => import("./pages/DataDeletion"));
 const L3EventAnalyzerPage = lazy(() => import("./pages/L3EventAnalyzer"));
 
 // Loading Component for Suspense
-const PageLoader = () => (
-  <div className="flex h-screen w-full items-center justify-center">
-    <Spinner />
+const PageLoader = ({ mode = "dashboard" }) => {
+  const title =
+    mode === "logout" ? "Signing You Out" : "Opening Your Dashboard";
+  const description =
+    mode === "logout"
+      ? "Closing your active session and returning to sign in."
+      : "Loading your workspace with a smooth handoff from sign in.";
+
+  return (
+  <div className="relative flex min-h-screen w-full items-center justify-center overflow-hidden bg-[#edf5fb]">
+    <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(14,165,233,0.16),transparent_32%),radial-gradient(circle_at_bottom_right,rgba(24,77,140,0.14),transparent_36%)]" />
+    <div className="absolute left-4 top-4 z-20 sm:left-8 sm:top-6">
+      <img src={comlog} alt="Vinfocom" className="h-[110px] w-auto sm:h-[140px]" />
+    </div>
+
+    <div className="relative z-10 grid min-h-[calc(100vh-2rem)] w-full max-w-6xl overflow-hidden rounded-[30px] bg-white shadow-[0_32px_90px_rgba(15,23,42,0.14)] lg:max-h-[920px] lg:grid-cols-[1.02fr_0.98fr]">
+      <section className="relative hidden overflow-hidden bg-[#0b2240] lg:flex">
+        <div className="absolute inset-0 bg-[radial-gradient(circle_at_18%_14%,rgba(34,197,246,0.18),transparent_22%),linear-gradient(160deg,#0b2240_0%,#0f2f57_52%,#0a1d35_100%)]" />
+        <div className="absolute -left-24 -top-12 h-[280px] w-[280px] rounded-full border-[48px] border-[#1d5ca8] opacity-90" />
+        <div className="absolute bottom-14 left-44 h-40 w-16 rotate-[-33deg] rounded-full bg-[#1490e3]" />
+        <div className="absolute bottom-6 left-64 h-48 w-16 rotate-[-33deg] rounded-full bg-[#2d6fb7]" />
+        <img
+          src={appLogo}
+          alt=""
+          aria-hidden="true"
+          className="pointer-events-none absolute right-[-6rem] top-1/2 h-[24rem] w-[24rem] -translate-y-1/2 rotate-[-18deg] opacity-[0.08] saturate-0 brightness-200"
+        />
+      </section>
+
+      <section className="relative flex items-center justify-center px-6 py-10 sm:px-10 lg:px-14">
+        <div className="flex w-full max-w-[380px] flex-col items-center text-center">
+          <div className="relative mb-8 flex h-24 w-24 items-center justify-center rounded-[2rem] bg-[#eef6ff] ring-1 ring-[#d6e7fb] shadow-[0_18px_38px_rgba(20,144,227,0.16)]">
+            <div className="absolute inset-[-10px] rounded-[2.4rem] border border-sky-200/70 animate-[spin_5s_linear_infinite]" />
+            <img
+              src={appLogo}
+              alt="S-Tracer"
+              className="h-16 w-16 object-contain animate-pulse"
+            />
+          </div>
+
+          <div className="mb-6 flex items-center gap-2" aria-hidden="true">
+            <span className="h-2.5 w-2.5 rounded-full bg-sky-300 animate-[bounce_1s_ease-in-out_infinite]" />
+            <span className="h-2.5 w-2.5 rounded-full bg-sky-500 animate-[bounce_1s_ease-in-out_infinite] [animation-delay:0.12s]" />
+            <span className="h-2.5 w-2.5 rounded-full bg-sky-700 animate-[bounce_1s_ease-in-out_infinite] [animation-delay:0.24s]" />
+          </div>
+
+          <h2 className="text-[2rem] font-bold tracking-[-0.02em] text-slate-900">
+            {title}
+          </h2>
+          <p className="mt-3 max-w-sm text-sm leading-6 text-slate-500">
+            {description}
+          </p>
+        </div>
+      </section>
+    </div>
   </div>
-);
+  );
+};
 
 const SuperAdminRoute = ({ children }) => {
   const { user, isAuthenticated, loading } = useAuth();
-  if (loading) return <Spinner />;
+  if (loading) return <PageLoader />;
   if (!isAuthenticated()) return <Navigate to="/" replace />;
   if (user?.m_user_type_id !== 3) return <Navigate to="/dashboard" replace />;
   return <AppLayout>{children}</AppLayout>;
@@ -62,14 +118,20 @@ const SuperAdminRoute = ({ children }) => {
 
 const PrivateRoute = ({ children }) => {
   const { isAuthenticated, loading } = useAuth();
-  if (loading) return <Spinner />;
+  if (loading) return <PageLoader />;
   if (!isAuthenticated()) return <Navigate to="/" replace />;
   return <AppLayout>{children}</AppLayout>;
 };
 
 const PublicRoute = ({ children }) => {
   const { isAuthenticated, loading } = useAuth();
-  if (loading) return <Spinner />;
+  if (loading) {
+    const mode =
+      sessionStorage.getItem(TRANSITION_INTENT_KEY) === "logout"
+        ? "logout"
+        : "dashboard";
+    return <PageLoader mode={mode} />;
+  }
   return isAuthenticated() ? <Navigate to="/dashboard" replace /> : children;
 };
 
@@ -95,6 +157,10 @@ const swrConfig = {
 function AppShell({ isElectronRuntime }) {
   const location = useLocation();
   const isStandaloneDeletion = location.pathname.startsWith("/uSeR-daTa-dEleTion");
+  const pageLoaderMode =
+    sessionStorage.getItem(TRANSITION_INTENT_KEY) === "logout"
+      ? "logout"
+      : "dashboard";
 
   return (
     <>
@@ -102,7 +168,7 @@ function AppShell({ isElectronRuntime }) {
       <ToastContainer position="top-right" autoClose={3000} theme="colored" />
 
       <div className={isElectronRuntime && !isStandaloneDeletion ? "electron-content pt-8" : ""}>
-        <Suspense fallback={<PageLoader />}>
+        <Suspense fallback={<PageLoader mode={pageLoaderMode} />}>
           <Routes>
             <Route path="/" element={<PublicRoute><LoginPage /></PublicRoute>} />
             <Route path="/login" element={<PublicRoute><LoginPage /></PublicRoute>} />

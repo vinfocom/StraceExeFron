@@ -1427,11 +1427,7 @@ function UnifiedHeader({
           <div className="w-7 h-7 rounded-full bg-blue-600 flex items-center justify-center text-xs font-bold">
             {user?.name?.charAt(0)?.toUpperCase() || "U"}
           </div>
-          <span className="text-sm text-gray-300">
-            <span className="font-medium text-white">
-              {user?.name || "User"}
-            </span>
-          </span>
+          
         </div>
 
         

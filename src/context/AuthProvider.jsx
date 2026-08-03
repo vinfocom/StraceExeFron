@@ -8,6 +8,8 @@ import {
   setProjectSessionCacheUserScope,
 } from '../utils/projectSessionCache';
 
+const TRANSITION_INTENT_KEY = 'authTransitionIntent';
+
 const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -151,7 +153,28 @@ if (isSuccessResponse(response)) {
         response?.Data?.Message ||
         'Login failed';
       setAuthError(errorMessage);
-      return { success: false, message: errorMessage };
+      return {
+        success: false,
+        message: errorMessage,
+        already_logged_in:
+          response?.already_logged_in ??
+          response?.AlreadyLoggedIn ??
+          response?.data?.already_logged_in ??
+          response?.data?.AlreadyLoggedIn ??
+          false,
+        can_force_logout:
+          response?.can_force_logout ??
+          response?.CanForceLogout ??
+          response?.data?.can_force_logout ??
+          response?.data?.CanForceLogout ??
+          false,
+        active_login:
+          response?.active_login ??
+          response?.ActiveLogin ??
+          response?.data?.active_login ??
+          response?.data?.ActiveLogin ??
+          null,
+      };
     } catch (error) {
       const errorMessage =
         error.data?.message ||
@@ -163,6 +186,14 @@ if (isSuccessResponse(response)) {
         error.message ||
         'Login failed';
       setAuthError(errorMessage);
+      error.active_login =
+        error?.response?.data?.active_login ??
+        error?.response?.data?.ActiveLogin ??
+        null;
+      error.already_logged_in =
+        error?.response?.data?.already_logged_in ??
+        error?.response?.data?.AlreadyLoggedIn ??
+        false;
       throw error;
     } finally {
       setLoading(false);
@@ -171,6 +202,7 @@ if (isSuccessResponse(response)) {
 
   const logout = async () => {
     try {
+      sessionStorage.setItem(TRANSITION_INTENT_KEY, 'logout');
       setLoading(true);
 
       await homeApi.logout();
