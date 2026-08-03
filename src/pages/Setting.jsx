@@ -844,94 +844,180 @@ const buildSavePayload = (thresholds, userId) => {
     return payload;
 };
 
-const createImportableSettingsSnapshot = (thresholds) => {
-    if (!thresholds) return null;
+const SETTING_EXPORT_KEYS = [
+    "rsrp",
+    "rsrq",
+    "sinr",
+    "dl_thpt",
+    "ul_thpt",
+    "delta",
+    "lte_bler",
+    "mos",
+    "volte_call",
+    "coveragehole",
+    "num_cells",
+    "level",
+    "jitter",
+    "latency",
+    "packet_loss",
+    "tac",
+    "dominance",
+    "coverage_violation",
+];
 
-    const cloneBucketedRanges = (sourceBuckets) => THRESHOLD_BUCKET_KEYS.reduce((acc, bucketKey) => {
-        acc[bucketKey] = (sourceBuckets?.[bucketKey] || []).map((row) => ({
-            min: parseNumber(row.min),
-            max: parseNumber(row.max),
-            color: row.color || '#00ff00',
-            label: row.label || '',
-            range: generateRangeString(parseNumber(row.min), parseNumber(row.max)),
-        }));
-        return acc;
-    }, createEmptyThresholdBuckets());
-
-    const cloneBucketedScalar = (sourceValues, fallback = DEFAULT_COVERAGE_HOLE) => THRESHOLD_BUCKET_KEYS.reduce((acc, bucketKey) => {
-        const parsedValue = parseNumber(sourceValues?.[bucketKey]);
-        acc[bucketKey] = Number.isFinite(parsedValue) ? parsedValue : fallback;
-        return acc;
-    }, createEmptyScalarBuckets(fallback));
-
-    return {
-        version: 1,
-        exportedAt: new Date().toISOString(),
-        settings: {
-            rsrp: cloneBucketedRanges(thresholds.rsrp),
-            rsrq: cloneBucketedRanges(thresholds.rsrq),
-            sinr: cloneBucketedRanges(thresholds.sinr),
-            dl_thpt: cloneBucketedRanges(thresholds.dl_thpt),
-            ul_thpt: cloneBucketedRanges(thresholds.ul_thpt),
-            delta: cloneBucketedRanges(thresholds.delta),
-            lte_bler: cloneBucketedRanges(thresholds.lte_bler),
-            mos: cloneBucketedRanges(thresholds.mos),
-            volte_call: cloneBucketedRanges(thresholds.volte_call),
-            coveragehole: cloneBucketedScalar(thresholds.coveragehole, DEFAULT_COVERAGE_HOLE),
-            num_cells: cloneBucketedRanges(thresholds.num_cells),
-            level: cloneBucketedRanges(thresholds.level),
-            jitter: cloneBucketedRanges(thresholds.jitter),
-            latency: cloneBucketedRanges(thresholds.latency),
-            packet_loss: cloneBucketedRanges(thresholds.packet_loss),
-            tac: cloneBucketedRanges(thresholds.tac),
-            dominance: cloneBucketedRanges(thresholds.dominance),
-            coverage_violation: cloneBucketedRanges(thresholds.coverage_violation),
-        },
-    };
+const escapeCsvValue = (value) => {
+    const stringValue = value === null || value === undefined ? "" : String(value);
+    if (/[",\n\r]/.test(stringValue)) {
+        return `"${stringValue.replace(/"/g, '""')}"`;
+    }
+    return stringValue;
 };
 
-const buildThresholdsFromImportedSettings = (importedSettings, currentThresholds) => {
-    if (!importedSettings || typeof importedSettings !== "object") {
-        throw new Error("Invalid settings file");
+const createSettingsCsv = (thresholds) => {
+    if (!thresholds) return "";
+
+    const rows = [[
+        "parameter",
+        "bucket",
+        "type",
+        "min",
+        "max",
+        "color",
+        "label_optional",
+        "value_only_for_scalar",
+        "notes",
+    ]];
+
+    SETTING_EXPORT_KEYS.forEach((key) => {
+        if (key === "coveragehole") {
+            THRESHOLD_BUCKET_KEYS.forEach((bucketKey) => {
+                rows.push([
+                    key,
+                    bucketKey,
+                    "scalar",
+                    "",
+                    "",
+                    "",
+                    "",
+                    thresholds.coveragehole?.[bucketKey] ?? DEFAULT_COVERAGE_HOLE,
+                    "Only value_only_for_scalar is used for scalar rows",
+                ]);
+            });
+            return;
+        }
+
+        THRESHOLD_BUCKET_KEYS.forEach((bucketKey) => {
+            (thresholds?.[key]?.[bucketKey] || []).forEach((row) => {
+                rows.push([
+                    key,
+                    bucketKey,
+                    "range",
+                    parseNumber(row.min),
+                    parseNumber(row.max),
+                    row.color || "#00ff00",
+                    row.label || "",
+                    "",
+                    "Use min,max,color. Leave value_only_for_scalar blank for range rows",
+                ]);
+            });
+        });
+    });
+
+    return rows.map((row) => row.map(escapeCsvValue).join(",")).join("\n");
+};
+
+const parseCsvLine = (line) => {
+    const values = [];
+    let current = "";
+    let inQuotes = false;
+
+    for (let i = 0; i < line.length; i += 1) {
+        const char = line[i];
+
+        if (char === '"') {
+            if (inQuotes && line[i + 1] === '"') {
+                current += '"';
+                i += 1;
+            } else {
+                inQuotes = !inQuotes;
+            }
+            continue;
+        }
+
+        if (char === "," && !inQuotes) {
+            values.push(current);
+            current = "";
+            continue;
+        }
+
+        current += char;
     }
 
-    const normalizeImportedRanges = (sourceBuckets) => THRESHOLD_BUCKET_KEYS.reduce((acc, bucketKey) => {
-        acc[bucketKey] = Array.isArray(sourceBuckets?.[bucketKey])
-            ? sourceBuckets[bucketKey].map(normalizeRow)
-            : [];
-        return acc;
-    }, createEmptyThresholdBuckets());
+    values.push(current);
+    return values;
+};
 
-    const normalizeImportedScalar = (sourceValues, fallback = DEFAULT_COVERAGE_HOLE) => THRESHOLD_BUCKET_KEYS.reduce((acc, bucketKey) => {
-        const rawValue = sourceValues?.[bucketKey];
-        acc[bucketKey] = rawValue === undefined || rawValue === null || rawValue === ""
-            ? fallback
-            : parseNumber(rawValue);
-        return acc;
-    }, createEmptyScalarBuckets(fallback));
+const buildThresholdsFromCsv = (csvText, currentThresholds) => {
+    if (!csvText || !csvText.trim()) {
+        throw new Error("CSV file is empty");
+    }
 
-    return {
+    const lines = csvText
+        .replace(/^\uFEFF/, "")
+        .split(/\r?\n/)
+        .map((line) => line.trim())
+        .filter(Boolean);
+
+    if (lines.length < 2) {
+        throw new Error("CSV file has no settings rows");
+    }
+
+    const headers = parseCsvLine(lines[0]).map((header) => header.trim());
+    const getColumn = (rowValues, name) => {
+        const index = headers.indexOf(name);
+        return index >= 0 ? rowValues[index] ?? "" : "";
+    };
+    const getValueColumn = (rowValues) => {
+        return getColumn(rowValues, "value_only_for_scalar") || getColumn(rowValues, "value");
+    };
+
+    const nextThresholds = {
         ...currentThresholds,
-        rsrp: normalizeImportedRanges(importedSettings.rsrp),
-        rsrq: normalizeImportedRanges(importedSettings.rsrq),
-        sinr: normalizeImportedRanges(importedSettings.sinr),
-        dl_thpt: normalizeImportedRanges(importedSettings.dl_thpt),
-        ul_thpt: normalizeImportedRanges(importedSettings.ul_thpt),
-        delta: normalizeImportedRanges(importedSettings.delta),
-        lte_bler: normalizeImportedRanges(importedSettings.lte_bler),
-        mos: normalizeImportedRanges(importedSettings.mos),
-        volte_call: normalizeImportedRanges(importedSettings.volte_call),
-        coveragehole: normalizeImportedScalar(importedSettings.coveragehole, DEFAULT_COVERAGE_HOLE),
-        num_cells: normalizeImportedRanges(importedSettings.num_cells),
-        level: normalizeImportedRanges(importedSettings.level),
-        jitter: normalizeImportedRanges(importedSettings.jitter),
-        latency: normalizeImportedRanges(importedSettings.latency),
-        packet_loss: normalizeImportedRanges(importedSettings.packet_loss),
-        tac: normalizeImportedRanges(importedSettings.tac),
-        dominance: normalizeImportedRanges(importedSettings.dominance),
-        coverage_violation: normalizeImportedRanges(importedSettings.coverage_violation),
         _bucketPayloads: {},
     };
+
+    SETTING_EXPORT_KEYS.forEach((key) => {
+        nextThresholds[key] = key === "coveragehole"
+            ? createEmptyScalarBuckets(DEFAULT_COVERAGE_HOLE)
+            : createEmptyThresholdBuckets();
+    });
+
+    lines.slice(1).forEach((line) => {
+        const values = parseCsvLine(line);
+        const parameter = getColumn(values, "parameter").trim();
+        const bucket = getColumn(values, "bucket").trim();
+        const type = getColumn(values, "type").trim();
+
+        if (!SETTING_EXPORT_KEYS.includes(parameter)) return;
+        if (!THRESHOLD_BUCKET_KEYS.includes(bucket)) return;
+
+        if (parameter === "coveragehole" || type === "scalar") {
+            const rawValue = getValueColumn(values).trim();
+            nextThresholds.coveragehole[bucket] = rawValue === ""
+                ? DEFAULT_COVERAGE_HOLE
+                : parseNumber(rawValue);
+            return;
+        }
+
+        nextThresholds[parameter][bucket].push(normalizeRow({
+            min: getColumn(values, "min"),
+            max: getColumn(values, "max"),
+            color: getColumn(values, "color") || "#00ff00",
+            label: getColumn(values, "label") || "",
+        }));
+    });
+
+    return nextThresholds;
 };
 
 const SettingsPage = ({ onSaveSuccess }) => {
@@ -1038,13 +1124,13 @@ const SettingsPage = ({ onSaveSuccess }) => {
             return;
         }
 
-        const snapshot = createImportableSettingsSnapshot(thresholds);
-        const blob = new Blob([JSON.stringify(snapshot, null, 2)], { type: 'application/json' });
+        const csvContent = createSettingsCsv(thresholds);
+        const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
         const url = URL.createObjectURL(blob);
         const anchor = document.createElement('a');
         const datePart = new Date().toISOString().slice(0, 10);
         anchor.href = url;
-        anchor.download = `settings-backup-${datePart}.json`;
+        anchor.download = `settings-backup-${datePart}.csv`;
         document.body.appendChild(anchor);
         anchor.click();
         document.body.removeChild(anchor);
@@ -1061,9 +1147,7 @@ const SettingsPage = ({ onSaveSuccess }) => {
 
         try {
             const rawText = await file.text();
-            const parsedFile = JSON.parse(rawText);
-            const importedSettings = parsedFile?.settings || parsedFile;
-            const nextThresholds = buildThresholdsFromImportedSettings(importedSettings, thresholds);
+            const nextThresholds = buildThresholdsFromCsv(rawText, thresholds);
             setThresholds(nextThresholds);
             setActiveParam(null);
             await persistThresholds(nextThresholds, "Settings imported and updated successfully!");
@@ -1112,8 +1196,38 @@ const SettingsPage = ({ onSaveSuccess }) => {
             <div className="max-w-6xl mx-auto">
                 <Card className="bg-slate-900/80 border-slate-700/80 rounded-2xl shadow-xl overflow-hidden">
                     <CardHeader className="border-b border-slate-700/70 bg-slate-900/90">
-                        <CardTitle className="text-white text-xl tracking-tight">Settings</CardTitle>
-                        
+                        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                            <CardTitle className="text-white text-xl tracking-tight">Settings</CardTitle>
+                            <div className="flex flex-wrap items-center gap-2">
+                                <input
+                                    ref={fileInputRef}
+                                    type="file"
+                                    accept=".csv,text/csv"
+                                    onChange={handleUploadSettings}
+                                    className="hidden"
+                                />
+                                <Button
+                                    type="button"
+                                    variant="outline"
+                                    onClick={handleDownloadSettings}
+                                    disabled={saving}
+                                    className="border-slate-500 bg-slate-800 hover:bg-slate-700 text-slate-100 rounded-lg"
+                                >
+                                    <Download className="h-4 w-4 mr-2" />
+                                    Download CSV
+                                </Button>
+                                <Button
+                                    type="button"
+                                    variant="outline"
+                                    onClick={handleUploadButtonClick}
+                                    disabled={saving}
+                                    className="border-slate-500 bg-slate-800 hover:bg-slate-700 text-slate-100 rounded-lg"
+                                >
+                                    <Upload className="h-4 w-4 mr-2" />
+                                    Upload CSV
+                                </Button>
+                            </div>
+                        </div>
                     </CardHeader>
 
                     <CardContent className="pt-5">
@@ -1228,39 +1342,17 @@ const SettingsPage = ({ onSaveSuccess }) => {
                     </CardContent>
 
                     <CardFooter className="justify-between border-t border-slate-700/70 pt-4 bg-slate-900/90">
-                        <div className="text-xs text-slate-400">
-                            User: {user?.name || 'Unknown'} (ID: {user?.id || 'N/A'}) | 
-                            Threshold ID: {thresholds?.id || 'New'}
-                            {thresholds?.isDefault === 1 ? ' (Default)' : ' (Custom)'}
+                        <div className="text-xs text-slate-400 space-y-1">
+                            <div>
+                                User: {user?.name || 'Unknown'} (ID: {user?.id || 'N/A'}) |
+                                Threshold ID: {thresholds?.id || 'New'}
+                                {thresholds?.isDefault === 1 ? ' (Default)' : ' (Custom)'}
+                            </div>
+                            <div>
+                                In CSV, `value_only_for_scalar` is only for scalar rows like Coverage Hole. For range rows, keep that column blank.
+                            </div>
                         </div>
                         <div className="flex flex-wrap items-center gap-2">
-                            <input
-                                ref={fileInputRef}
-                                type="file"
-                                accept="application/json,.json"
-                                onChange={handleUploadSettings}
-                                className="hidden"
-                            />
-                            <Button
-                                type="button"
-                                variant="outline"
-                                onClick={handleDownloadSettings}
-                                disabled={saving}
-                                className="border-slate-500 bg-slate-800 hover:bg-slate-700 text-slate-100 rounded-lg"
-                            >
-                                <Download className="h-4 w-4 mr-2" />
-                                Download Settings
-                            </Button>
-                            <Button
-                                type="button"
-                                variant="outline"
-                                onClick={handleUploadButtonClick}
-                                disabled={saving}
-                                className="border-slate-500 bg-slate-800 hover:bg-slate-700 text-slate-100 rounded-lg"
-                            >
-                                <Upload className="h-4 w-4 mr-2" />
-                                Upload Settings
-                            </Button>
                             <Button 
                                 onClick={handleSave} 
                                 disabled={saving}

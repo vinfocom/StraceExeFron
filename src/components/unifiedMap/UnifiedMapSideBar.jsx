@@ -536,6 +536,10 @@ const UnifiedMapSidebar = ({
   setModeMethod,
   siteLabelField = "none",
   setSiteLabelField,
+  showSiteMarkers = true,
+  setShowSiteMarkers,
+  showSiteSectors = true,
+  setShowSiteSectors,
   projectId,
   sessionIds,
   metric,
@@ -2826,6 +2830,26 @@ const UnifiedMapSidebar = ({
                   onChange={handleSiteToggleChange}
                   useSwitch={true}
                 />
+
+                {enableSiteToggle && (
+                  <div className="ml-3 rounded-lg border border-slate-700/50 bg-slate-900/40 p-2.5 space-y-2">
+                    <div className="text-xs font-medium text-slate-200">Show Site</div>
+                    <ToggleRow
+                      label="Circle"
+                      description="Show site circle markers"
+                      checked={Boolean(showSiteMarkers)}
+                      onChange={(checked) => setShowSiteMarkers?.(checked)}
+                      useSwitch={true}
+                    />
+                    <ToggleRow
+                      label="Sector"
+                      description="Show network planner sector triangles"
+                      checked={Boolean(showSiteSectors)}
+                      onChange={(checked) => setShowSiteSectors?.(checked)}
+                      useSwitch={true}
+                    />
+                  </div>
+                )}
 
                 
 
