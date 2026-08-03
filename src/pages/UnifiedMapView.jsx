@@ -3817,10 +3817,7 @@ const UnifiedMapView = () => {
       try {
         const sessionCsv = sessionIds.join(",");
         const res = await mapViewApi.getIOAnalysis({
-          sessionIds: sessionCsv,
-          session_ids: sessionCsv,
-          session_Ids: sessionCsv,
-          sessionId: sessionCsv,
+          SessionIds: sessionCsv,
         });
 
         const payload =

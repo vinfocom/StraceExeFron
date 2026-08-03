@@ -37,6 +37,24 @@ const debugUnifiedMapApi = (event, payload = {}) => {
   console.log(`[UnifiedMapApi] ${event}`, payload);
 };
 
+const toSessionIdCsv = (...values) => {
+  for (const value of values) {
+    if (Array.isArray(value)) {
+      const csv = value
+        .map((id) => String(id ?? "").trim())
+        .filter(Boolean)
+        .join(",");
+      if (csv) return csv;
+      continue;
+    }
+
+    const csv = String(value ?? "").trim();
+    if (csv) return csv;
+  }
+
+  return "";
+};
+
 const getPublicApiHeaders = () => {
   const key = String(import.meta.env.VITE_PUBLIC_API_KEY || "").trim();
   return key ? { "X-Public-Api-Key": key } : {};
@@ -1522,8 +1540,26 @@ export const mapViewApi = {
   endSession: (data) =>
     api.post("/api/MapView/end_session", data, { headers: getPublicApiHeaders() }),
   getDuration: ({ sessionIds }) => api.get(`/api/MapView/session/provider-network-time/combined`, { params: { sessionIds } }),
-  getIOAnalysis: (params) =>
-    api.get(`/api/MapView/GetIndoorOutdoorSessionAnalytics`, { params }),
+  getIOAnalysis: ({ signal, ...params } = {}) => {
+    const sessionCsv = toSessionIdCsv(
+      params.SessionIds,
+      params.sessionIds,
+      params.session_ids,
+      params.session_Ids,
+      params.sessionId,
+    );
+
+    const payload = {
+      SessionIds: sessionCsv,
+      IndoorOutdoor: params.IndoorOutdoor ?? "",
+      Operator: params.Operator ?? "",
+      Technology: params.Technology ?? "",
+    };
+
+    return api.post(`/api/MapView/GetIndoorOutdoorSessionAnalytics`, payload, {
+      signal,
+    });
+  },
 
   // ==================== Polygon Management ====================
   getProjectPolygons: (projectId) =>
@@ -1731,6 +1767,10 @@ export const mapViewApi = {
   // In apiEndpoints.js
   getNetworkLog: async ({
     session_ids,
+    sessionIds,
+    SessionIds,
+    session_Ids,
+    sessionId,
     page = 1,
     limit = 20000,
     signal,
@@ -1739,7 +1779,13 @@ export const mapViewApi = {
     NetworkType,
     networkType,
   }) => {
-    const sid = Array.isArray(session_ids) ? session_ids.join(",") : session_ids;
+    const sid = toSessionIdCsv(
+      session_ids,
+      sessionIds,
+      SessionIds,
+      session_Ids,
+      sessionId,
+    );
 
     debugUnifiedMapApi("getNetworkLog:start", { sid, page, limit, force_refresh });
 
@@ -1757,17 +1803,16 @@ export const mapViewApi = {
       }, { signal });
     }
 
-    const response = await api.get("/api/MapView/GetNetworkLog", {
-      params: {
-        session_Ids: sid,
-        session_ids: sid,
-        sessionId: sid,
-        project_id: project_id ?? undefined,
-        NetworkType: NetworkType ?? networkType ?? undefined,
-        page: page,
-        limit: limit,
-        force_refresh: force_refresh ? true : undefined,
-      },
+    const payload = {
+      session_ids: sid,
+      page,
+      limit,
+      project_id: project_id ?? undefined,
+      NetworkType: NetworkType ?? networkType ?? undefined,
+      force_refresh: force_refresh ? true : undefined,
+    };
+
+    const response = await api.post("/api/MapView/GetNetworkLog", payload, {
       signal: signal,
       dedupe: false,
     });

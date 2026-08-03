@@ -26,6 +26,7 @@ import {
 } from '@/hooks/useDashboardData.js';
 
 import { usePersistedFilters } from '@/hooks/usePersistedFilters';
+import { useAuth } from '@/hooks/useAuth';
 
 const MemoizedStatCard = memo(StatCard);
 const MemoizedMonthlySamplesChart = memo(MonthlySamplesChart);
@@ -40,6 +41,7 @@ const MemoizedHolesScatterChart = memo(HolesScatterChart);
 const DashboardPage = () => {
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [chartStage, setChartStage] = useState(1);
+  const { user } = useAuth();
 
   const [monthlySamplesFilters, setMonthlySamplesFilters] = usePersistedFilters('monthlySamples');
   const [operatorSamplesFilters, setOperatorSamplesFilters] = usePersistedFilters('operatorSamples');
@@ -70,6 +72,21 @@ const DashboardPage = () => {
   }, [indoorCount, outdoorCount]);
 
   const isKPILoading = isTotalsLoading || isOperatorsLoading || isBandCountLoading || isIndoorLoading || isOutdoorLoading;
+
+  const firstName = useMemo(() => {
+    const rawName =
+      user?.firstName ||
+      user?.firstname ||
+      user?.first_name ||
+      user?.FirstName ||
+      user?.name ||
+      user?.Name ||
+      user?.username ||
+      user?.Username ||
+      'User';
+
+    return String(rawName).trim().split(/\s+/)[0] || 'User';
+  }, [user]);
 
   const stats = useMemo(() => {
     const totals = totalsData || {};
@@ -167,40 +184,53 @@ const DashboardPage = () => {
   }, [setCoverageRankingFilters]);
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-50 via-blue-50 to-indigo-50">
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-sky-50 to-blue-100/70">
       <div className="mx-auto max-w-[1920px] space-y-4 p-3 sm:space-y-6 sm:p-4 lg:p-6">
-        <div className="mb-4 flex flex-wrap items-center justify-end gap-3 sm:mb-6 sm:gap-4">
-          <button
-            onClick={handleRefreshAll}
-            disabled={isRefreshing}
-            className={`
-              px-5 py-2.5 rounded-lg border-2 flex items-center gap-2
-              transition-all font-medium shadow-sm
-              ${isRefreshing
-                ? 'border-gray-200 bg-gray-100 text-gray-400 cursor-not-allowed'
-                : 'border-gray-300 hover:border-blue-500 hover:bg-blue-50 hover:shadow-md'
-              }
-            `}
-          >
-            <RefreshCw className={`h-4 w-4 ${isRefreshing ? 'animate-spin' : ''}`} />
-            {isRefreshing ? 'Refreshing...' : 'Refresh All'}
-          </button>
-        </div>
+        <div className="overflow-hidden rounded-[2rem] border border-sky-100 bg-[linear-gradient(135deg,rgba(255,255,255,0.96)_0%,rgba(240,249,255,0.98)_52%,rgba(224,242,254,0.92)_100%)] p-4 shadow-[0_18px_55px_rgba(14,165,233,0.10)] sm:p-5 lg:p-6">
+          <div className="mb-5 flex flex-wrap items-start justify-between gap-4">
+            <div className="space-y-1">
+              <p className="text-3xl font-bold tracking-tight text-slate-900 sm:text-4xl">
+                Hey {firstName}
+              </p>
+              <p className="text-sm font-medium text-slate-600 sm:text-base">
+                Your latest insights are ready.
+              </p>
+            </div>
 
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4 2xl:grid-cols-5 sm:gap-6">
-          {isKPILoading ? (
-            Array.from({ length: 8 }).map((_, i) => (
-              <div key={i} className="min-w-0">
-                <StatCardSkeleton />
-              </div>
-            ))
-          ) : (
-            stats.map(s => (
-              <div key={s.title} className="min-w-0">
-                <MemoizedStatCard {...s} />
-              </div>
-            ))
-          )}
+            <button
+              onClick={handleRefreshAll}
+              disabled={isRefreshing}
+              className={`
+                inline-flex items-center gap-2 rounded-full border px-4 py-2.5
+                text-sm font-semibold shadow-sm transition-all
+                ${isRefreshing
+                  ? 'border-slate-200 bg-slate-100 text-slate-400 cursor-not-allowed'
+                  : 'border-sky-200 bg-white/90 text-slate-700 hover:border-sky-400 hover:bg-sky-50 hover:text-sky-700'
+                }
+              `}
+            >
+              <RefreshCw className={`h-4 w-4 ${isRefreshing ? 'animate-spin' : ''}`} />
+              {isRefreshing ? 'Refreshing...' : 'Refresh All'}
+            </button>
+          </div>
+
+          <div className="rounded-[1.5rem] border border-white/80 bg-white/70 p-3 backdrop-blur-sm sm:p-4 lg:p-5">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4 2xl:grid-cols-5 sm:gap-6">
+              {isKPILoading ? (
+                Array.from({ length: 8 }).map((_, i) => (
+                  <div key={i} className="min-w-0">
+                    <StatCardSkeleton />
+                  </div>
+                ))
+              ) : (
+                stats.map(s => (
+                  <div key={s.title} className="min-w-0">
+                    <MemoizedStatCard {...s} />
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6">

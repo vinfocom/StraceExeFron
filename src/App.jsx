@@ -23,6 +23,10 @@ import appLogo from "/favicon.svg";
 import comlog from "/logo.svg";
 
 const TRANSITION_INTENT_KEY = "authTransitionIntent";
+const getTransitionMode = () =>
+  sessionStorage.getItem(TRANSITION_INTENT_KEY) === "logout"
+    ? "logout"
+    : "dashboard";
 
 // --- Lazy Load Pages for Optimization ---
 const LoginPage = lazy(() => import("./pages/Login"));
@@ -110,7 +114,7 @@ const PageLoader = ({ mode = "dashboard" }) => {
 
 const SuperAdminRoute = ({ children }) => {
   const { user, isAuthenticated, loading } = useAuth();
-  if (loading) return <PageLoader />;
+  if (loading) return <PageLoader mode={getTransitionMode()} />;
   if (!isAuthenticated()) return <Navigate to="/" replace />;
   if (user?.m_user_type_id !== 3) return <Navigate to="/dashboard" replace />;
   return <AppLayout>{children}</AppLayout>;
@@ -118,7 +122,7 @@ const SuperAdminRoute = ({ children }) => {
 
 const PrivateRoute = ({ children }) => {
   const { isAuthenticated, loading } = useAuth();
-  if (loading) return <PageLoader />;
+  if (loading) return <PageLoader mode={getTransitionMode()} />;
   if (!isAuthenticated()) return <Navigate to="/" replace />;
   return <AppLayout>{children}</AppLayout>;
 };
@@ -126,11 +130,7 @@ const PrivateRoute = ({ children }) => {
 const PublicRoute = ({ children }) => {
   const { isAuthenticated, loading } = useAuth();
   if (loading) {
-    const mode =
-      sessionStorage.getItem(TRANSITION_INTENT_KEY) === "logout"
-        ? "logout"
-        : "dashboard";
-    return <PageLoader mode={mode} />;
+    return <PageLoader mode={getTransitionMode()} />;
   }
   return isAuthenticated() ? <Navigate to="/dashboard" replace /> : children;
 };
@@ -157,10 +157,7 @@ const swrConfig = {
 function AppShell({ isElectronRuntime }) {
   const location = useLocation();
   const isStandaloneDeletion = location.pathname.startsWith("/uSeR-daTa-dEleTion");
-  const pageLoaderMode =
-    sessionStorage.getItem(TRANSITION_INTENT_KEY) === "logout"
-      ? "logout"
-      : "dashboard";
+  const pageLoaderMode = getTransitionMode();
 
   return (
     <>

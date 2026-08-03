@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import Spinner from '../components/common/Spinner';
-import { X, Plus, Save, RefreshCw, ArrowUpDown } from 'lucide-react';
+import { X, Plus, Save, RefreshCw, ArrowUpDown, Download, Upload } from 'lucide-react';
 import { settingApi } from '../api/apiEndpoints';
 import { useAuth } from '@/context/AuthContext';
 
@@ -844,12 +844,103 @@ const buildSavePayload = (thresholds, userId) => {
     return payload;
 };
 
+const createImportableSettingsSnapshot = (thresholds) => {
+    if (!thresholds) return null;
+
+    const cloneBucketedRanges = (sourceBuckets) => THRESHOLD_BUCKET_KEYS.reduce((acc, bucketKey) => {
+        acc[bucketKey] = (sourceBuckets?.[bucketKey] || []).map((row) => ({
+            min: parseNumber(row.min),
+            max: parseNumber(row.max),
+            color: row.color || '#00ff00',
+            label: row.label || '',
+            range: generateRangeString(parseNumber(row.min), parseNumber(row.max)),
+        }));
+        return acc;
+    }, createEmptyThresholdBuckets());
+
+    const cloneBucketedScalar = (sourceValues, fallback = DEFAULT_COVERAGE_HOLE) => THRESHOLD_BUCKET_KEYS.reduce((acc, bucketKey) => {
+        const parsedValue = parseNumber(sourceValues?.[bucketKey]);
+        acc[bucketKey] = Number.isFinite(parsedValue) ? parsedValue : fallback;
+        return acc;
+    }, createEmptyScalarBuckets(fallback));
+
+    return {
+        version: 1,
+        exportedAt: new Date().toISOString(),
+        settings: {
+            rsrp: cloneBucketedRanges(thresholds.rsrp),
+            rsrq: cloneBucketedRanges(thresholds.rsrq),
+            sinr: cloneBucketedRanges(thresholds.sinr),
+            dl_thpt: cloneBucketedRanges(thresholds.dl_thpt),
+            ul_thpt: cloneBucketedRanges(thresholds.ul_thpt),
+            delta: cloneBucketedRanges(thresholds.delta),
+            lte_bler: cloneBucketedRanges(thresholds.lte_bler),
+            mos: cloneBucketedRanges(thresholds.mos),
+            volte_call: cloneBucketedRanges(thresholds.volte_call),
+            coveragehole: cloneBucketedScalar(thresholds.coveragehole, DEFAULT_COVERAGE_HOLE),
+            num_cells: cloneBucketedRanges(thresholds.num_cells),
+            level: cloneBucketedRanges(thresholds.level),
+            jitter: cloneBucketedRanges(thresholds.jitter),
+            latency: cloneBucketedRanges(thresholds.latency),
+            packet_loss: cloneBucketedRanges(thresholds.packet_loss),
+            tac: cloneBucketedRanges(thresholds.tac),
+            dominance: cloneBucketedRanges(thresholds.dominance),
+            coverage_violation: cloneBucketedRanges(thresholds.coverage_violation),
+        },
+    };
+};
+
+const buildThresholdsFromImportedSettings = (importedSettings, currentThresholds) => {
+    if (!importedSettings || typeof importedSettings !== "object") {
+        throw new Error("Invalid settings file");
+    }
+
+    const normalizeImportedRanges = (sourceBuckets) => THRESHOLD_BUCKET_KEYS.reduce((acc, bucketKey) => {
+        acc[bucketKey] = Array.isArray(sourceBuckets?.[bucketKey])
+            ? sourceBuckets[bucketKey].map(normalizeRow)
+            : [];
+        return acc;
+    }, createEmptyThresholdBuckets());
+
+    const normalizeImportedScalar = (sourceValues, fallback = DEFAULT_COVERAGE_HOLE) => THRESHOLD_BUCKET_KEYS.reduce((acc, bucketKey) => {
+        const rawValue = sourceValues?.[bucketKey];
+        acc[bucketKey] = rawValue === undefined || rawValue === null || rawValue === ""
+            ? fallback
+            : parseNumber(rawValue);
+        return acc;
+    }, createEmptyScalarBuckets(fallback));
+
+    return {
+        ...currentThresholds,
+        rsrp: normalizeImportedRanges(importedSettings.rsrp),
+        rsrq: normalizeImportedRanges(importedSettings.rsrq),
+        sinr: normalizeImportedRanges(importedSettings.sinr),
+        dl_thpt: normalizeImportedRanges(importedSettings.dl_thpt),
+        ul_thpt: normalizeImportedRanges(importedSettings.ul_thpt),
+        delta: normalizeImportedRanges(importedSettings.delta),
+        lte_bler: normalizeImportedRanges(importedSettings.lte_bler),
+        mos: normalizeImportedRanges(importedSettings.mos),
+        volte_call: normalizeImportedRanges(importedSettings.volte_call),
+        coveragehole: normalizeImportedScalar(importedSettings.coveragehole, DEFAULT_COVERAGE_HOLE),
+        num_cells: normalizeImportedRanges(importedSettings.num_cells),
+        level: normalizeImportedRanges(importedSettings.level),
+        jitter: normalizeImportedRanges(importedSettings.jitter),
+        latency: normalizeImportedRanges(importedSettings.latency),
+        packet_loss: normalizeImportedRanges(importedSettings.packet_loss),
+        tac: normalizeImportedRanges(importedSettings.tac),
+        dominance: normalizeImportedRanges(importedSettings.dominance),
+        coverage_violation: normalizeImportedRanges(importedSettings.coverage_violation),
+        _bucketPayloads: {},
+    };
+};
+
 const SettingsPage = ({ onSaveSuccess }) => {
     const { user } = useAuth();
     const [thresholds, setThresholds] = useState(null);
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
     const [activeParam, setActiveParam] = useState(null);
+    const fileInputRef = useRef(null);
 
     const allParameters = { ...PARAMETERS, ...SPECIAL_FIELDS };
 
@@ -887,8 +978,8 @@ const SettingsPage = ({ onSaveSuccess }) => {
         setThresholds(prev => prev ? { ...prev, [key]: data } : null);
     }, []);
 
-    const handleSave = useCallback(async () => {
-        if (!thresholds) {
+    const persistThresholds = useCallback(async (nextThresholds, successMessage = "Settings saved successfully!") => {
+        if (!nextThresholds) {
             toast.error("No thresholds to save");
             return;
         }
@@ -901,13 +992,13 @@ const SettingsPage = ({ onSaveSuccess }) => {
         
         setSaving(true);
         try {
-            const payload = buildSavePayload(thresholds, user?.id);
+            const payload = buildSavePayload(nextThresholds, user?.id);
             const response = await settingApi.saveThreshold(payload);
             if (!response) return;
             const data = extractResponseData(response);
             
             if (data?.Status === 1) {
-                toast.success("Settings saved successfully!");
+                toast.success(successMessage);
                 if (onSaveSuccess) onSaveSuccess();
                 
                 const refetchResponse = await settingApi.getThresholdSettings();
@@ -935,7 +1026,53 @@ const SettingsPage = ({ onSaveSuccess }) => {
         } finally {
             setSaving(false);
         }
-    }, [thresholds, user?.id, onSaveSuccess]);
+    }, [user?.id, onSaveSuccess]);
+
+    const handleSave = useCallback(async () => {
+        await persistThresholds(thresholds, "Settings saved successfully!");
+    }, [persistThresholds, thresholds]);
+
+    const handleDownloadSettings = useCallback(() => {
+        if (!thresholds) {
+            toast.error("No settings available to download");
+            return;
+        }
+
+        const snapshot = createImportableSettingsSnapshot(thresholds);
+        const blob = new Blob([JSON.stringify(snapshot, null, 2)], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const anchor = document.createElement('a');
+        const datePart = new Date().toISOString().slice(0, 10);
+        anchor.href = url;
+        anchor.download = `settings-backup-${datePart}.json`;
+        document.body.appendChild(anchor);
+        anchor.click();
+        document.body.removeChild(anchor);
+        URL.revokeObjectURL(url);
+    }, [thresholds]);
+
+    const handleUploadButtonClick = useCallback(() => {
+        fileInputRef.current?.click();
+    }, []);
+
+    const handleUploadSettings = useCallback(async (event) => {
+        const file = event.target.files?.[0];
+        if (!file) return;
+
+        try {
+            const rawText = await file.text();
+            const parsedFile = JSON.parse(rawText);
+            const importedSettings = parsedFile?.settings || parsedFile;
+            const nextThresholds = buildThresholdsFromImportedSettings(importedSettings, thresholds);
+            setThresholds(nextThresholds);
+            setActiveParam(null);
+            await persistThresholds(nextThresholds, "Settings imported and updated successfully!");
+        } catch (error) {
+            toast.error(`Import failed: ${error.message}`);
+        } finally {
+            event.target.value = '';
+        }
+    }, [persistThresholds, thresholds]);
 
     const handleClose = useCallback(() => {
         setActiveParam(null);
@@ -1096,23 +1233,52 @@ const SettingsPage = ({ onSaveSuccess }) => {
                             Threshold ID: {thresholds?.id || 'New'}
                             {thresholds?.isDefault === 1 ? ' (Default)' : ' (Custom)'}
                         </div>
-                        <Button 
-                            onClick={handleSave} 
-                            disabled={saving}
-                            className="bg-blue-600 hover:bg-blue-700 rounded-lg shadow-md"
-                        >
-                            {saving ? (
-                                <>
-                                    <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
-                                    Saving...
-                                </>
-                            ) : (
-                                <>
-                                    <Save className="h-4 w-4 mr-2" />
-                                    Save Settings
-                                </>
-                            )}
-                        </Button>
+                        <div className="flex flex-wrap items-center gap-2">
+                            <input
+                                ref={fileInputRef}
+                                type="file"
+                                accept="application/json,.json"
+                                onChange={handleUploadSettings}
+                                className="hidden"
+                            />
+                            <Button
+                                type="button"
+                                variant="outline"
+                                onClick={handleDownloadSettings}
+                                disabled={saving}
+                                className="border-slate-500 bg-slate-800 hover:bg-slate-700 text-slate-100 rounded-lg"
+                            >
+                                <Download className="h-4 w-4 mr-2" />
+                                Download Settings
+                            </Button>
+                            <Button
+                                type="button"
+                                variant="outline"
+                                onClick={handleUploadButtonClick}
+                                disabled={saving}
+                                className="border-slate-500 bg-slate-800 hover:bg-slate-700 text-slate-100 rounded-lg"
+                            >
+                                <Upload className="h-4 w-4 mr-2" />
+                                Upload Settings
+                            </Button>
+                            <Button 
+                                onClick={handleSave} 
+                                disabled={saving}
+                                className="bg-blue-600 hover:bg-blue-700 rounded-lg shadow-md"
+                            >
+                                {saving ? (
+                                    <>
+                                        <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
+                                        Saving...
+                                    </>
+                                ) : (
+                                    <>
+                                        <Save className="h-4 w-4 mr-2" />
+                                        Save Settings
+                                    </>
+                                )}
+                            </Button>
+                        </div>
                     </CardFooter>
                 </Card>
             </div>
