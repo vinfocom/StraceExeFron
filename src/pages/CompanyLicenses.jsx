@@ -7,11 +7,6 @@ import Spinner from "../components/common/Spinner";
 import { Button } from "@/components/ui/button";
 import { ChevronLeft } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
-import {
-  FEATURE_OPTIONS,
-  buildFeaturePayload,
-  getEnabledFeaturesFromSource,
-} from "@/utils/featureAccess";
 
 const CompanyLicensesPage = () => {
   const [searchParams] = useSearchParams();
@@ -20,18 +15,19 @@ const CompanyLicensesPage = () => {
 
   const [users, setUsers] = useState([]);
   const [licenseEdits, setLicenseEdits] = useState({});
-  const [featureEdits, setFeatureEdits] = useState({});
   const [updatingLicenseId, setUpdatingLicenseId] = useState(null);
   const [loading, setLoading] = useState(true);
+  const companyName = users[0]?.company_name || "";
 
-  const toDateInputValue = (value) => {
-    if (!value) return "";
+  const formatDate = (value) => {
+    if (!value) return "-";
     const d = new Date(value);
-    if (Number.isNaN(d.getTime())) return String(value).split("T")[0];
-    const year = d.getFullYear();
-    const month = `${d.getMonth() + 1}`.padStart(2, "0");
-    const day = `${d.getDate()}`.padStart(2, "0");
-    return `${year}-${month}-${day}`;
+    if (Number.isNaN(d.getTime())) return "-";
+    return d.toLocaleDateString();
+  };
+
+  const getCompanyValidTill = (row) => {
+    return formatDate(row?.company_valid_till);
   };
 
   const fetchUsers = useCallback(async () => {
@@ -45,23 +41,17 @@ const CompanyLicensesPage = () => {
       setUsers(userData);
 
       const nextEdits = {};
-      const nextFeatureEdits = {};
       userData.forEach((row) => {
         if (row?.license_id == null) return;
         nextEdits[row.license_id] = {
-          valid_till: toDateInputValue(row.valid_till),
           status: String(row.license_status ?? 0),
-          password: "",
         };
-        nextFeatureEdits[row.license_id] = getEnabledFeaturesFromSource(row);
       });
       setLicenseEdits(nextEdits);
-      setFeatureEdits(nextFeatureEdits);
     } catch (error) {
       toast.error(error?.message || "Failed to fetch users.");
       setUsers([]);
       setLicenseEdits({});
-      setFeatureEdits({});
     } finally {
       setLoading(false);
     }
@@ -143,13 +133,7 @@ const CompanyLicensesPage = () => {
     if (!licenseId) return;
 
     const edit = licenseEdits[licenseId] || {};
-    const selectedFeatures = featureEdits[licenseId] || [];
     const status = Number(edit.status);
-
-    if (!edit.valid_till) {
-      toast.error("Please select valid till date.");
-      return;
-    }
 
     if (![0, 1, 2].includes(status)) {
       toast.error("Invalid status value.");
@@ -158,16 +142,7 @@ const CompanyLicensesPage = () => {
 
     try {
       setUpdatingLicenseId(licenseId);
-      const payload = {
-        valid_till: edit.valid_till,
-        status,
-        ...buildFeaturePayload(selectedFeatures),
-      };
-
-      const password = String(edit.password || "").trim();
-      if (password) payload.password = password;
-
-      await companyApi.updateIssuedLicense(licenseId, payload);
+      await companyApi.updateIssuedLicense(licenseId, { status });
       toast.success("License updated successfully.");
       await fetchUsers();
     } catch (error) {
@@ -198,19 +173,6 @@ const CompanyLicensesPage = () => {
     }
   };
 
-  const toggleFeature = (licenseId, featureKey) => {
-    setFeatureEdits((prev) => {
-      const current = Array.isArray(prev[licenseId]) ? prev[licenseId] : [];
-      const exists = current.includes(featureKey);
-      return {
-        ...prev,
-        [licenseId]: exists
-          ? current.filter((item) => item !== featureKey)
-          : [...current, featureKey],
-      };
-    });
-  };
-
   const columns = [
     {
       header: "S. No.",
@@ -224,7 +186,7 @@ const CompanyLicensesPage = () => {
       render: (row) => <span className="text-gray-700">{row.license_id || "-"}</span>,
     },
     {
-      header: "User Name",
+      header: "Name",
       accessor: "name",
       render: (row) => (
         <span className="text-gray-800 font-medium">{row.user_name || "-"}</span>
@@ -236,32 +198,14 @@ const CompanyLicensesPage = () => {
       render: (row) => <span className="text-gray-700">{row.user_mobile || "-"}</span>,
     },
     {
-      header: "Company",
-      accessor: "company_name",
-      render: (row) => <span className="text-gray-700">{row.company_name || "-"}</span>,
-    },
-    {
       header: "Created On",
       accessor: "created_on",
-      render: (row) =>
-        row.created_on ? new Date(row.created_on).toLocaleDateString() : "-",
+      render: (row) => formatDate(row.created_on),
     },
     {
       header: "Valid Till",
       accessor: "valid_till",
-      render: (row) => {
-        const edit = licenseEdits[row.license_id] || {};
-        return (
-          <input
-            type="date"
-            value={edit.valid_till || ""}
-            onChange={(e) =>
-              onChangeLicenseField(row.license_id, "valid_till", e.target.value)
-            }
-            className="border rounded px-2 py-1 text-sm bg-white"
-          />
-        );
-      },
+      render: (row) => <span className="text-gray-700">{getCompanyValidTill(row)}</span>,
     },
     {
       header: "License Code",
@@ -288,53 +232,6 @@ const CompanyLicensesPage = () => {
               <option value="2">Revoked</option>
             </select>
             {getLicenseStatusBadge(row.license_status)}
-          </div>
-        );
-      },
-    },
-    {
-      header: "New Password",
-      accessor: "password",
-      render: (row) => {
-        const edit = licenseEdits[row.license_id] || {};
-        return (
-          <input
-            type="password"
-            autoComplete="new-password"
-            value={edit.password || ""}
-            onChange={(e) =>
-              onChangeLicenseField(row.license_id, "password", e.target.value)
-            }
-            placeholder="Leave blank"
-            className="border rounded px-2 py-1 text-sm bg-white min-w-[150px]"
-          />
-        );
-      },
-    },
-    {
-      header: "Feature Access",
-      accessor: "features",
-      render: (row) => {
-        const licenseId = row?.license_id;
-        const selected = Array.isArray(featureEdits[licenseId])
-          ? featureEdits[licenseId]
-          : [];
-        return (
-          <div className="space-y-1.5 min-w-[220px]">
-            {FEATURE_OPTIONS.map((feature) => (
-              <label
-                key={feature.key}
-                className="flex items-center gap-2 text-xs text-gray-700 cursor-pointer"
-              >
-                <input
-                  type="checkbox"
-                  checked={selected.includes(feature.key)}
-                  onChange={() => toggleFeature(licenseId, feature.key)}
-                  className="h-3.5 w-3.5"
-                />
-                <span>{feature.label}</span>
-              </label>
-            ))}
           </div>
         );
       },
@@ -385,7 +282,10 @@ const CompanyLicensesPage = () => {
           >
             <ChevronLeft className="h-5 w-5" />
           </Button>
-          <h1 className="text-3xl font-bold text-gray-800">Company Licenses</h1>
+          <div>
+            <h1 className="text-3xl font-bold text-gray-800">{companyName ? companyName : null}</h1>
+            
+          </div>
         </div>
       </div>
 

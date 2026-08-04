@@ -35,6 +35,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
+import Spinner from "@/components/common/Spinner";
 
 import { loadSavedViewport, saveViewport } from "@/utils/viewport";
 import { parseWKTToCoordinates } from "@/utils/wkt";
@@ -1314,9 +1315,10 @@ const rectCoords = [
 
         {(isLoading || logsLoading) && (
           <div className="absolute inset-0 z-40 flex items-center justify-center bg-white/80 backdrop-blur-sm">
-            <div className="bg-white rounded-xl shadow-2xl p-6 flex items-center gap-4 border border-gray-200">
-              <div className="animate-spin rounded-full h-10 w-10 border-4 border-blue-600 border-t-transparent"></div>
-              <span className="text-lg font-medium text-gray-700">Loading...</span>
+            <div className="bg-white rounded-xl shadow-2xl p-6 flex items-center justify-center border border-gray-200">
+              <div className="flex h-10 w-10 items-center justify-center overflow-hidden">
+                <Spinner size={40} />
+              </div>
             </div>
           </div>
         )}

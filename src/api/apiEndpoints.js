@@ -2426,6 +2426,8 @@ export const companyApi = {
 
   createCompany: (data) => api.post("/api/company/SaveCompanyDetails", data),
 
+  createUser: (data) => api.post("/api/company/createUser", data),
+
   deleteCompany: (id) => api.delete("/api/company/deleteCompany", { params: { id } }),
 
   updateCompanyStatus: (companyId, status) =>

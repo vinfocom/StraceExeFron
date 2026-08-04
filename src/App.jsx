@@ -21,12 +21,15 @@ import ElectronWindowBar from "./components/layout/ElectronWindowBar";
 import { tryAutoSyncOfflineQueue } from "./api/apiEndpoints";
 import appLogo from "/favicon.svg";
 import comlog from "/logo.svg";
+import Spinner from "./components/common/Spinner";
 
 const TRANSITION_INTENT_KEY = "authTransitionIntent";
 const getTransitionMode = () =>
   sessionStorage.getItem(TRANSITION_INTENT_KEY) === "logout"
     ? "logout"
-    : "dashboard";
+    : sessionStorage.getItem(TRANSITION_INTENT_KEY) === "dashboard"
+      ? "dashboard"
+      : null;
 
 // --- Lazy Load Pages for Optimization ---
 const LoginPage = lazy(() => import("./pages/Login"));
@@ -112,9 +115,16 @@ const PageLoader = ({ mode = "dashboard" }) => {
   );
 };
 
+const RouteFallback = () => <Spinner />;
+
+const AuthLoader = () => {
+  const mode = getTransitionMode();
+  return mode ? <PageLoader mode={mode} /> : <RouteFallback />;
+};
+
 const SuperAdminRoute = ({ children }) => {
   const { user, isAuthenticated, loading } = useAuth();
-  if (loading) return <PageLoader mode={getTransitionMode()} />;
+  if (loading) return <AuthLoader />;
   if (!isAuthenticated()) return <Navigate to="/" replace />;
   if (user?.m_user_type_id !== 3) return <Navigate to="/dashboard" replace />;
   return <AppLayout>{children}</AppLayout>;
@@ -122,7 +132,7 @@ const SuperAdminRoute = ({ children }) => {
 
 const PrivateRoute = ({ children }) => {
   const { isAuthenticated, loading } = useAuth();
-  if (loading) return <PageLoader mode={getTransitionMode()} />;
+  if (loading) return <AuthLoader />;
   if (!isAuthenticated()) return <Navigate to="/" replace />;
   return <AppLayout>{children}</AppLayout>;
 };
@@ -130,7 +140,7 @@ const PrivateRoute = ({ children }) => {
 const PublicRoute = ({ children }) => {
   const { isAuthenticated, loading } = useAuth();
   if (loading) {
-    return <PageLoader mode={getTransitionMode()} />;
+    return <AuthLoader />;
   }
   return isAuthenticated() ? <Navigate to="/dashboard" replace /> : children;
 };
@@ -157,7 +167,6 @@ const swrConfig = {
 function AppShell({ isElectronRuntime }) {
   const location = useLocation();
   const isStandaloneDeletion = location.pathname.startsWith("/uSeR-daTa-dEleTion");
-  const pageLoaderMode = getTransitionMode();
 
   return (
     <>
@@ -165,7 +174,7 @@ function AppShell({ isElectronRuntime }) {
       <ToastContainer position="top-right" autoClose={3000} theme="colored" />
 
       <div className={isElectronRuntime && !isStandaloneDeletion ? "electron-content pt-8" : ""}>
-        <Suspense fallback={<PageLoader mode={pageLoaderMode} />}>
+        <Suspense fallback={<RouteFallback />}>
           <Routes>
             <Route path="/" element={<PublicRoute><LoginPage /></PublicRoute>} />
             <Route path="/login" element={<PublicRoute><LoginPage /></PublicRoute>} />
