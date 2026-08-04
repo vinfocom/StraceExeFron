@@ -344,6 +344,8 @@ const UploadDataPage = () => {
   const [selectedBands, setSelectedBands] = useState([]);
   const [reportTitle, setReportTitle] = useState("");
   const [reportType, setReportType] = useState("pdf");
+  const [reportMode, setReportMode] = useState("separate");
+  const [filterByImageName, setFilterByImageName] = useState(false);
   const [reportLoading, setReportLoading] = useState(false);
   const [reportError, setReportError] = useState(null);
 
@@ -551,6 +553,8 @@ const UploadDataPage = () => {
       setSelectedBands([]);
       setReportTitle("");
       setReportType("pdf");
+      setReportMode("separate");
+      setFilterByImageName(false);
       setReportError(null);
     }
   };
@@ -567,6 +571,8 @@ const UploadDataPage = () => {
       setDiscoveredBands([]); // Reset on new file
       setSelectedBands([]);
       setReportTitle("");
+      setReportMode("separate");
+      setFilterByImageName(false);
       setReportError(null);
     }
   }, []);
@@ -595,6 +601,7 @@ const UploadDataPage = () => {
     try {
       const formData = new FormData();
       formData.append("LogZip", reportFile);
+      formData.append("FilterByImageName", String(filterByImageName));
 
       const reportHandler = REPORT_TYPE_OPTIONS[reportType] || REPORT_TYPE_OPTIONS.pdf;
       const response = await reportHandler.discover(formData);
@@ -620,8 +627,8 @@ const UploadDataPage = () => {
   };
 
   const handleGenerateReport = async () => {
-    if (!selectedBands.length) {
-      toast.warn("Please select at least one band first.");
+    if (!reportFile) {
+      toast.warn("Please upload a ZIP file first.");
       return;
     }
     setReportLoading(true);
@@ -631,10 +638,16 @@ const UploadDataPage = () => {
       const formData = new FormData();
       formData.append("LogZip", reportFile);
       formData.append("Title", reportTitle || "");
-      formData.append("BandFilter", selectedBands.join(","));
-      selectedBands.forEach((band) => {
-        formData.append("Bands", band);
-      });
+      formData.append("ProjectName", reportTitle || "");
+      formData.append("ReportMode", reportMode);
+      formData.append("FilterByImageName", String(filterByImageName));
+
+      if (selectedBands.length) {
+        formData.append("BandFilter", selectedBands.join(","));
+        selectedBands.forEach((band) => {
+          formData.append("Bands", band);
+        });
+      }
 
       const reportHandler = REPORT_TYPE_OPTIONS[reportType] || REPORT_TYPE_OPTIONS.pdf;
       const blob = await reportHandler.generate(formData);
@@ -1055,6 +1068,8 @@ const UploadDataPage = () => {
                   setReportType(value);
                   setDiscoveredBands([]);
                   setSelectedBands([]);
+                  setReportMode("separate");
+                  setFilterByImageName(false);
                   setReportError(null);
                 }}
                 disabled={reportLoading}
@@ -1072,6 +1087,46 @@ const UploadDataPage = () => {
                 Excel report endpoints.
               </p>
             </div>
+
+            {reportType === "excel" && (
+              <div className="space-y-4 rounded-md border border-white/20 bg-white/5 p-4">
+                <div className="space-y-2">
+                  <label className="block text-sm font-semibold">Report Mode</label>
+                  <Select
+                    value={reportMode}
+                    onValueChange={setReportMode}
+                    disabled={reportLoading}
+                  >
+                    <SelectTrigger className="bg-white text-black">
+                      <SelectValue placeholder="Select report mode" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="separate">Separate</SelectItem>
+                      <SelectItem value="combined">Combined</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <p className="text-xs text-gray-200">
+                    Sends <code>ReportMode</code> as <code>separate</code> or <code>combined</code>.
+                  </p>
+                </div>
+
+                <label className="flex cursor-pointer items-start gap-3 rounded border border-white/20 bg-white/5 px-3 py-3">
+                  <input
+                    type="checkbox"
+                    checked={filterByImageName}
+                    onChange={(event) => setFilterByImageName(event.target.checked)}
+                    disabled={reportLoading}
+                    className="mt-1 h-4 w-4"
+                  />
+                  <span className="text-sm">
+                    Filter by image name
+                    <span className="mt-1 block text-xs text-gray-200">
+                      Sends <code>FilterByImageName</code> as true or false to band discovery and report generation.
+                    </span>
+                  </span>
+                </label>
+              </div>
+            )}
 
             {reportError && (
               <div className="p-3 bg-red-100 text-red-700 border border-red-300 rounded text-sm">
@@ -1137,7 +1192,7 @@ const UploadDataPage = () => {
 
                 <Button
                   onClick={handleGenerateReport}
-                  disabled={reportLoading || !selectedBands.length}
+                  disabled={reportLoading}
                   className="w-full bg-green-600 hover:bg-green-700 text-white font-medium py-2 px-4 rounded-md transition"
                 >
                   {reportLoading ? (
