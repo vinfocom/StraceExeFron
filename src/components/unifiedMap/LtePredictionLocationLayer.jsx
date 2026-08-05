@@ -575,9 +575,15 @@ const LtePredictionLocationLayer = ({
           bestOperator: String(cell?.bestOperator || "").trim() || null,
           lat: Number(cell?.lat),
           lng: Number(cell?.lng),
+          provider: cell?.provider ?? cell?.bestOperator ?? null,
+          band: cell?.band ?? cell?.Band ?? null,
+          technology: cell?.technology ?? cell?.Technology ?? null,
+          pci: cell?.pci ?? cell?.PCI ?? null,
+          selectedMetric,
           color: Array.isArray(cell?.color) ? cell.color : [107, 114, 128, 190],
         }))
         .filter((cell) => Array.isArray(cell.polygon) && cell.polygon.length >= 3)
+        .filter((cell) => matchesLegendFilter(cell, legendFilter, selectedMetric))
         .filter((cell) => {
           if (!filterInsidePolygons || polygonPaths.length === 0) return true;
           if (!Number.isFinite(cell.lat) || !Number.isFinite(cell.lng)) return false;
@@ -740,6 +746,7 @@ const LtePredictionLocationLayer = ({
     resolveMetricColor,
     deltaComparisonMode,
     externalGridCells,
+    legendFilter,
   ]);
 
   const isGridMode = enableGrid && gridLayerData.length > 0;

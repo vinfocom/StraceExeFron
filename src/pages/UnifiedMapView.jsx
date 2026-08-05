@@ -149,6 +149,79 @@ const SITE_CLUSTER_COLOR_PATTERN =
 
 const SITE_OPERATOR_COLOR_PREFIX = "operator:";
 
+const normalizeStoredGridDeltaVariant = (value) => {
+  const variant = String(value ?? "").trim().toLowerCase();
+  if (variant === "optimised") return "optimized";
+  return variant;
+};
+
+const getStoredGridSiteLegendFilterValue = (
+  row,
+  colorMode = "Operator",
+  sitePredictionVersion = "original",
+) => {
+  const version = String(sitePredictionVersion || "").trim().toLowerCase();
+  const variant = normalizeStoredGridDeltaVariant(
+    row?.deltaVariant ?? row?.delta_variant ?? row?.deltaClass ?? row?.delta_class ?? "",
+  );
+  const isDeltaMode =
+    version === "delta" || variant === "baseline" || variant === "optimized";
+
+  if (isDeltaMode) {
+    return {
+      mode: "delta",
+      value: variant || "unknown",
+    };
+  }
+
+  const mode = String(colorMode || "Operator").trim().toLowerCase();
+  if (mode === "pci") {
+    return {
+      mode,
+      value: String(row?.pci ?? row?.PCI ?? "Unknown").trim() || "Unknown",
+    };
+  }
+  if (mode === "band") {
+    return {
+      mode,
+      value: normalizeBandName(row?.band ?? row?.Band ?? "Unknown"),
+    };
+  }
+  if (mode === "technology") {
+    return {
+      mode,
+      value: normalizeTechName(row?.technology ?? row?.Technology ?? row?.tech ?? "Unknown"),
+    };
+  }
+
+  return {
+    mode: "operator",
+    value:
+      normalizeProviderName(
+        row?.provider ??
+          row?.bestOperator ??
+          row?.operator ??
+          row?.network ??
+          row?.Network ??
+          "Unknown",
+      ) || "Unknown",
+  };
+};
+
+const matchesStoredGridSiteLegendFilter = (
+  row,
+  activeFilter,
+  colorMode = "Operator",
+  sitePredictionVersion = "original",
+) => {
+  if (!activeFilter?.value) return true;
+  const category = getStoredGridSiteLegendFilterValue(row, colorMode, sitePredictionVersion);
+  return (
+    String(category.mode || "").toLowerCase() === String(activeFilter.mode || "").toLowerCase() &&
+    String(category.value || "").toLowerCase() === String(activeFilter.value || "").toLowerCase()
+  );
+};
+
 const normalizeSiteLegendOverrideKey = (mode, value) =>
   `${String(mode || "").trim().toLowerCase()}:${String(value ?? "").trim().toLowerCase()}`;
 
@@ -1966,6 +2039,11 @@ const UnifiedMapView = () => {
   const [triangleScaleMultiplier, setTriangleScaleMultiplier] = useState(1);
   const [defaultSiteBeamwidth, setDefaultSiteBeamwidth] = useState(30);
   const [showSessionNeighbors, setShowSessionNeighbors] = useState(false);
+  const siteLegendColorMode = useMemo(() => {
+    const labelField = String(siteLabelField || "").trim().toLowerCase();
+    if (["pci", "band", "technology"].includes(labelField)) return labelField;
+    return modeMethod;
+  }, [siteLabelField, modeMethod]);
   const autoShowSessionNeighbors = useMemo(() => {
     const value =
       searchParams.get("showSecondary") ||
@@ -3577,6 +3655,33 @@ const UnifiedMapView = () => {
     () => Boolean(isFetchedStoredGridVisible),
     [isFetchedStoredGridVisible],
   );
+  const filteredStoredDeltaGridCells = useMemo(() => {
+    if (!Array.isArray(storedDeltaGridCells) || storedDeltaGridCells.length === 0) {
+      return EMPTY_LIST;
+    }
+    if (!siteLegendFilter?.value) {
+      return storedDeltaGridCells;
+    }
+
+    const effectiveStoredGridVersion =
+      deltaGridApiState?.storedGridVersion || storedGridVersion || sitePredictionVersion || "";
+
+    return storedDeltaGridCells.filter((cell) =>
+      matchesStoredGridSiteLegendFilter(
+        cell,
+        siteLegendFilter,
+        siteLegendColorMode,
+        effectiveStoredGridVersion,
+      ),
+    );
+  }, [
+    storedDeltaGridCells,
+    siteLegendFilter,
+    siteLegendColorMode,
+    deltaGridApiState?.storedGridVersion,
+    storedGridVersion,
+    sitePredictionVersion,
+  ]);
 
   
   useEffect(() => {
@@ -4542,7 +4647,7 @@ const UnifiedMapView = () => {
         normalizedVersion === "optimized" ||
         normalizedVersion === "optimised";
 
-      return storedDeltaGridCells.map((cell) => {
+      return filteredStoredDeltaGridCells.map((cell) => {
         const deltaValue = Number(cell?.difference);
         const deltaClass = isDeltaView
           ? Number.isFinite(deltaValue)
@@ -4611,7 +4716,7 @@ const UnifiedMapView = () => {
     gridDisplayData.gridLocations,
     renderedGridLegendLogs,
     isStoredGridOverlayVisible,
-    storedDeltaGridCells,
+    filteredStoredDeltaGridCells,
     deltaGridApiState?.storedGridVersion,
     storedGridVersion,
     sitePredictionVersion,
@@ -4673,14 +4778,6 @@ const UnifiedMapView = () => {
     }
     return effectiveGridColorBy;
   }, [isStoredGridOverlayVisible, storedGridMetricMode, effectiveGridColorBy, selectedMetric]);
-
-  const siteLegendColorMode = useMemo(() => {
-    const labelField = String(siteLabelField || "").trim().toLowerCase();
-    if (["pci", "band", "technology"].includes(labelField)) return labelField;
-    return modeMethod;
-  }, [siteLabelField, modeMethod]);
-
-  
 
   const {
     technologyTransitions,
@@ -4760,7 +4857,7 @@ const UnifiedMapView = () => {
 
   const polygonGridColorSource = useMemo(() => {
     if (isStoredGridOverlayVisible) {
-      return Array.isArray(storedDeltaGridCells) ? storedDeltaGridCells : EMPTY_LIST;
+      return filteredStoredDeltaGridCells;
     }
 
     if (isUnifiedGridView) {
@@ -4776,7 +4873,7 @@ const UnifiedMapView = () => {
     return EMPTY_LIST;
   }, [
     isStoredGridOverlayVisible,
-    storedDeltaGridCells,
+    filteredStoredDeltaGridCells,
     isUnifiedGridView,
     renderedGridLegendLogs,
     gridFilteredData?.gridLocations,
@@ -7335,7 +7432,7 @@ const UnifiedMapView = () => {
                   deltaComparisonMode={isDeltaSiteGridMode}
                   externalGridCells={
                     isStoredGridOverlayVisible && !buildingBorderEnabled
-                      ? storedDeltaGridCells
+                      ? filteredStoredDeltaGridCells
                       : EMPTY_LIST
                   }
                   mlGridEnabled={mlGridEnabled}
