@@ -13,6 +13,8 @@ const MESSAGE_PATTERNS = [
   "name",
 ];
 const DECODE_PATTERNS = ["decode", "decoded", "detail", "details", "text", "content", "info", "description"];
+const LATITUDE_PATTERNS = ["latitude", "lat", "y"];
+const LONGITUDE_PATTERNS = ["longitude", "long", "lon", "lng", "x"];
 
 // Parses an L3 signaling CSV (LTE-RRC / NR-RRC / NAS) into normalized rows.
 // Header names vary between exports, so columns are located by alias rather
@@ -28,6 +30,8 @@ export function parseL3CSV(text, sourceName = "") {
       const message = getField(row, headers, MESSAGE_PATTERNS);
       const decodeColumn = findColumn(headers, DECODE_PATTERNS);
       const decodedText = decodeColumn ? String(row[decodeColumn] ?? "").trim() : "";
+      const latitude = getField(row, headers, LATITUDE_PATTERNS);
+      const longitude = getField(row, headers, LONGITUDE_PATTERNS);
 
       return {
         sourceType: "l3",
@@ -37,6 +41,8 @@ export function parseL3CSV(text, sourceName = "") {
         layer,
         message,
         decodedText: decodedText || message,
+        latitude,
+        longitude,
         raw: row,
       };
     })

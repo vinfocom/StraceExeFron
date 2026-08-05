@@ -9,12 +9,19 @@ import {
   GitBranch,
   Info,
   Layers,
+  MapPin,
   Phone,
   Radio,
   Search,
 } from "lucide-react";
+import { GoogleMap, MarkerF, useJsApiLoader } from "@react-google-maps/api";
 import { getDirectionInfo } from "@/utils/l3Events/direction";
 import { getMatchedFlowSteps } from "@/utils/l3Events/flowModels";
+import {
+  GOOGLE_MAPS_LOADER_OPTIONS,
+  getGoogleMapsConfigError,
+  getGoogleMapsErrorMessage,
+} from "@/lib/googleMapsLoader";
 
 const RESULT_CLASS = {
   Success: "bg-emerald-500/15 text-emerald-300 border-emerald-500/30",
@@ -46,6 +53,10 @@ function formatDuration(ms = 0) {
   return `${(ms / 1000).toFixed(2)} s`;
 }
 
+function formatCoordinate(value) {
+  return Number.isFinite(Number(value)) ? Number(value).toFixed(6) : "N/A";
+}
+
 function firstProcedure(procedures) {
   return procedures?.[0] || null;
 }
@@ -57,6 +68,9 @@ const MESSAGE_TYPE_FILTERS = [
   { id: "l3", label: "L3" },
   { id: "event", label: "Events" },
 ];
+
+const MAP_CONTAINER_STYLE = { width: "100%", height: "320px" };
+const DEFAULT_MAP_CENTER = { lat: 20.5937, lng: 78.9629 };
 
 function combineProcedureResults(procedures) {
   if (procedures.some((procedure) => procedure.result === "Failure")) return "Failure";
@@ -528,6 +542,120 @@ function LadderDiagram({ procedure, columns, selectedMessageId, onSelectMessage,
   );
 }
 
+function ProcedureLocationMap({ procedure, selectedMessage, onSelectMessage, typeFilter }) {
+  const { isLoaded, loadError } = useJsApiLoader(GOOGLE_MAPS_LOADER_OPTIONS);
+  const [map, setMap] = useState(null);
+  const mapsError = getGoogleMapsConfigError() || (loadError ? getGoogleMapsErrorMessage(loadError) : null);
+
+  const mapItems = useMemo(() => {
+    const sourceItems = typeFilter && typeFilter !== "all"
+      ? procedure.items.filter((item) => item.type === typeFilter)
+      : procedure.items;
+
+    return sourceItems
+      .filter((item) => Number.isFinite(item.latitude) && Number.isFinite(item.longitude))
+      .map((item, index) => ({
+        ...item,
+        markerLabel: String(index + 1),
+      }));
+  }, [procedure.items, typeFilter]);
+
+  useEffect(() => {
+    if (!map || !window.google?.maps || mapItems.length === 0) return;
+    const bounds = new window.google.maps.LatLngBounds();
+    mapItems.forEach((item) => bounds.extend({ lat: item.latitude, lng: item.longitude }));
+    map.fitBounds(bounds, 48);
+  }, [map, mapItems]);
+
+  return (
+    <div className="rounded-lg border border-slate-700 bg-slate-900/70 overflow-hidden">
+      <div className="px-3 py-2 border-b border-slate-700 bg-slate-800/70 flex items-center justify-between gap-3">
+        <div>
+          <div className="flex items-center gap-2 text-sm font-semibold text-white">
+            <MapPin className="h-4 w-4 text-blue-300" />
+            Event Location Map
+          </div>
+          <p className="text-[11px] text-slate-400 mt-1">
+            Visible L3/Event rows are plotted from the uploaded `latitude` and `longitude` columns.
+          </p>
+        </div>
+        <span className="rounded border border-slate-600 bg-slate-900 px-2 py-1 text-[10px] text-slate-300">
+          {mapItems.length} located rows
+        </span>
+      </div>
+
+      {!mapsError && !isLoaded && (
+        <div className="flex h-[320px] items-center justify-center bg-slate-950 text-sm text-slate-400">
+          Loading map...
+        </div>
+      )}
+
+      {mapsError && (
+        <div className="flex h-[320px] items-center justify-center px-6 text-center text-sm text-amber-300 bg-amber-500/10">
+          {mapsError}
+        </div>
+      )}
+
+      {!mapsError && isLoaded && mapItems.length === 0 && (
+        <div className="flex h-[320px] items-center justify-center bg-slate-950 text-sm text-slate-400">
+          No visible rows have valid latitude/longitude values.
+        </div>
+      )}
+
+      {!mapsError && isLoaded && mapItems.length > 0 && (
+        <div className="relative">
+          <GoogleMap
+            mapContainerStyle={MAP_CONTAINER_STYLE}
+            center={DEFAULT_MAP_CENTER}
+            zoom={5}
+            onLoad={setMap}
+            onUnmount={() => setMap(null)}
+            options={{
+              streetViewControl: false,
+              mapTypeControl: false,
+              fullscreenControl: false,
+            }}
+          >
+            {mapItems.map((item) => {
+              const isSelected = item.id === selectedMessage?.id;
+              return (
+                <MarkerF
+                  key={item.id}
+                  position={{ lat: item.latitude, lng: item.longitude }}
+                  onClick={() => onSelectMessage(item)}
+                  title={`${item.officialName || item.title || "Message"} • ${item.absoluteTimestamp || item.timestampLabel || ""}`}
+                  label={{
+                    text: item.markerLabel,
+                    color: "#ffffff",
+                    fontSize: "10px",
+                    fontWeight: "700",
+                  }}
+                  zIndex={isSelected ? 200 : 100}
+                  icon={window.google?.maps ? {
+                    path: window.google.maps.SymbolPath.CIRCLE,
+                    fillColor: isSelected ? "#2563eb" : item.type === "event" ? "#dc2626" : "#059669",
+                    fillOpacity: 1,
+                    strokeColor: "#ffffff",
+                    strokeOpacity: 0.95,
+                    strokeWeight: isSelected ? 3 : 2,
+                    scale: isSelected ? 9 : 7,
+                  } : undefined}
+                />
+              );
+            })}
+          </GoogleMap>
+
+          <div className="border-t border-slate-800 bg-slate-950/95 px-3 py-2 text-[11px] text-slate-400">
+            {selectedMessage && Number.isFinite(selectedMessage.latitude) && Number.isFinite(selectedMessage.longitude)
+              ? `Selected: ${selectedMessage.officialName || selectedMessage.title || "Message"} at ${formatCoordinate(selectedMessage.latitude)}, ${formatCoordinate(selectedMessage.longitude)}`
+              : "Click a marker to sync the map with the ladder details."}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function MessageDetails({ procedure, message }) {
   const selected = message || procedure.items[0];
   const direction = getDirectionInfo(selected);
@@ -571,6 +699,15 @@ function MessageDetails({ procedure, message }) {
             ["PLMN", procedure.plmn || "N/A"],
             ["RSRP", procedure.rsrpSummary || procedure.rsrp || "N/A"],
             ["RSRP Match", procedure.rsrpMatchedAt || "N/A"],
+          ]}
+        />
+
+        <DetailSection
+          title="Location"
+          rows={[
+            ["Latitude", formatCoordinate(selected?.latitude)],
+            ["Longitude", formatCoordinate(selected?.longitude)],
+            ["Source File", selected?.sourceFile || "N/A"],
           ]}
         />
 
@@ -706,15 +843,21 @@ export function ProtocolAnalyzerView({ analysis, callScoped = false }) {
   const selectedProcedure = isAllSelected
     ? buildCombinedProcedure(analysis.procedures)
     : analysis.procedures.find((procedure) => procedure.id === selectedProcedureId) || firstProcedure(analysis.procedures);
+  const selectedProcedureVisibleItems = useMemo(() => {
+    if (!selectedProcedure) return [];
+    return messageTypeFilter && messageTypeFilter !== "all"
+      ? selectedProcedure.items.filter((item) => item.type === messageTypeFilter)
+      : selectedProcedure.items;
+  }, [messageTypeFilter, selectedProcedure]);
 
   useEffect(() => {
     if (!selectedProcedure) return;
-    const items = selectedProcedure.items || [];
+    const items = selectedProcedureVisibleItems || [];
     const stillValid = selectedMessage && items.some((item) => item.id === selectedMessage.id);
     if (!stillValid) {
       setSelectedMessage(items[0] || null);
     }
-  }, [selectedProcedure, selectedMessage]);
+  }, [selectedProcedure, selectedMessage, selectedProcedureVisibleItems]);
 
   if (!analysis.procedures.length) {
     return (
@@ -746,14 +889,23 @@ export function ProtocolAnalyzerView({ analysis, callScoped = false }) {
           setQuery={setQuery}
         />
 
-        <LadderDiagram
-          procedure={selectedProcedure}
-          columns={analysis.columns}
-          selectedMessageId={selectedMessage?.id}
-          onSelectMessage={setSelectedMessage}
-          typeFilter={messageTypeFilter}
-          onTypeFilterChange={setMessageTypeFilter}
-        />
+        <div className="space-y-3 min-w-0">
+          <ProcedureLocationMap
+            procedure={selectedProcedure}
+            selectedMessage={selectedMessage}
+            onSelectMessage={setSelectedMessage}
+            typeFilter={messageTypeFilter}
+          />
+
+          <LadderDiagram
+            procedure={selectedProcedure}
+            columns={analysis.columns}
+            selectedMessageId={selectedMessage?.id}
+            onSelectMessage={setSelectedMessage}
+            typeFilter={messageTypeFilter}
+            onTypeFilterChange={setMessageTypeFilter}
+          />
+        </div>
 
         <MessageDetails procedure={selectedProcedure} message={selectedMessage} />
       </div>

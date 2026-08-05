@@ -131,6 +131,29 @@ const AXIS_TICK_STYLE = { fill: '#FFFFFF', fontSize: 11 };
 const AXIS_TICK_STYLE_SM = { fill: '#FFFFFF', fontSize: 10 };
 const TECHNOLOGY_FIELDS = ['technology', 'networkType', 'network', 'Network', 'primary_network'];
 
+const isNrBand = (band) => /^n\d+/i.test(String(band ?? '').trim());
+
+const resolveN78AnchorTechnology = (neighbor = {}) => {
+  const primaryBand = neighbor?.primaryBand ?? neighbor?.primary_band ?? neighbor?.band ?? '';
+  const neighborBand =
+    neighbor?.neighbourBand ?? neighbor?.neighborBand ?? neighbor?.neighbour_band ?? '';
+  const rawTech =
+    neighbor?.technology ??
+    neighbor?.networkType ??
+    neighbor?.network ??
+    neighbor?.Network ??
+    '';
+
+  const primaryBandNormalized = normalizeBandName(primaryBand);
+  const neighborBandNormalized = normalizeBandName(neighborBand);
+
+  if (isNrBand(neighborBandNormalized) && primaryBandNormalized && !isNrBand(primaryBandNormalized)) {
+    return '4G(LTE-ANCHOR NSA)';
+  }
+
+  return normalizeTechName(rawTech, primaryBandNormalized || neighborBandNormalized);
+};
+
 const getTechLabel = (records = []) => {
   const techs = new Set();
 
@@ -195,7 +218,7 @@ const N78AnalysisTab = ({
 
       const provider = normalizeProviderName(neighbor.provider || 'Unknown');
       const band = normalizeBandName(neighbor.neighbourBand || neighbor.primaryBand || '');
-      const tech = normalizeTechName(neighbor.networkType || '');
+      const tech = resolveN78AnchorTechnology(neighbor);
 
       providers[provider] = (providers[provider] || 0) + 1;
       bands[band] = (bands[band] || 0) + 1;

@@ -18,6 +18,14 @@ export const calculateStats = (locations, metric) => {
 
   // Convert all values to numbers
   const numericValues = values.map(val => Number(val));
+  let min = numericValues[0];
+  let max = numericValues[0];
+
+  for (let i = 1; i < numericValues.length; i += 1) {
+    const currentValue = numericValues[i];
+    if (currentValue < min) min = currentValue;
+    if (currentValue > max) max = currentValue;
+  }
   
   const sorted = [...numericValues].sort((a, b) => a - b);
   const sum = numericValues.reduce((acc, val) => acc + val, 0);
@@ -30,8 +38,8 @@ export const calculateStats = (locations, metric) => {
 
   return {
     avg: Number(avg.toFixed(2)),
-    min: Number(Math.min(...numericValues).toFixed(2)),
-    max: Number(Math.max(...numericValues).toFixed(2)),
+    min: Number(min.toFixed(2)),
+    max: Number(max.toFixed(2)),
     median: Number(median.toFixed(2)),
     count: numericValues.length,
   };

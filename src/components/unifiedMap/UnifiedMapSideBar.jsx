@@ -739,6 +739,10 @@ const UnifiedMapSidebar = ({
   const logGridDirty = Math.round(Number(logGridDraft) || 0) !== Math.round(appliedLogGridSize);
   const normalizedLteGridAggregationMethod =
     lteGridAggregationMethod === "avg" ? "median" : lteGridAggregationMethod || "median";
+  const hasValidProjectId = useMemo(() => {
+    const numericProjectId = Number(projectId);
+    return Number.isFinite(numericProjectId) && numericProjectId > 0;
+  }, [projectId]);
   const handleLteGridAggregationMethodChange = useCallback(
     (nextValue) => {
       if (!setLteGridAggregationMethod) return;
@@ -925,6 +929,11 @@ const UnifiedMapSidebar = ({
 
   const handleSiteToggleChange = useCallback(
     (checked) => {
+      if (!hasValidProjectId) {
+        setEnableSiteToggle?.(false);
+        toast.info("Site options are available only when a project is open.");
+        return;
+      }
       setEnableSiteToggle?.(checked);
       if (!checked) return;
 
@@ -935,8 +944,14 @@ const UnifiedMapSidebar = ({
         toast.info("Fetching site data...");
       }
     },
-    [setEnableSiteToggle, siteRowCount],
+    [hasValidProjectId, setEnableSiteToggle, siteRowCount],
   );
+
+  useEffect(() => {
+    if (!hasValidProjectId && enableSiteToggle) {
+      setEnableSiteToggle?.(false);
+    }
+  }, [enableSiteToggle, hasValidProjectId, setEnableSiteToggle]);
 
   const handleFetchSiteLayerData = useCallback(async () => {
     const isCellMode = String(siteToggle || "").trim().toLowerCase() === "cell";
@@ -2679,6 +2694,9 @@ const UnifiedMapSidebar = ({
               checked={Boolean(showPolygons && polygonSource === "save")}
               onChange={(checked) => {
                 if (checked) {
+                  if (enableGrid) {
+                    setEnableGrid?.(false);
+                  }
                   setShowPolygons?.(true);
                   setPolygonSource?.("save");
                   return;
@@ -2852,6 +2870,7 @@ const UnifiedMapSidebar = ({
                   label="Sites"
                   checked={enableSiteToggle}
                   onChange={handleSiteToggleChange}
+                  disabled={!hasValidProjectId}
                   useSwitch={true}
                 />
 
@@ -2863,6 +2882,7 @@ const UnifiedMapSidebar = ({
                       description="Show site circle markers"
                       checked={Boolean(showSiteMarkers)}
                       onChange={(checked) => setShowSiteMarkers?.(checked)}
+                      disabled={!hasValidProjectId}
                       useSwitch={true}
                     />
                     <ToggleRow
@@ -2870,6 +2890,7 @@ const UnifiedMapSidebar = ({
                       description="Show network planner sector triangles"
                       checked={Boolean(showSiteSectors)}
                       onChange={(checked) => setShowSiteSectors?.(checked)}
+                      disabled={!hasValidProjectId}
                       useSwitch={true}
                     />
                   </div>
@@ -3119,7 +3140,7 @@ const UnifiedMapSidebar = ({
                       }))),
                     ]}
                     placeholder="All Technologies"
-                    disabled={!enableSiteToggle}
+                    disabled={!enableSiteToggle || !hasValidProjectId}
                   />
 
                   <MultiSelectRow
@@ -3134,7 +3155,7 @@ const UnifiedMapSidebar = ({
                       }))),
                     ]}
                     placeholder="All Operators"
-                    disabled={!enableSiteToggle}
+                    disabled={!enableSiteToggle || !hasValidProjectId}
                   />
 
                   <MultiSelectRow
@@ -3149,7 +3170,7 @@ const UnifiedMapSidebar = ({
                       }))),
                     ]}
                     placeholder="All Bands"
-                    disabled={!enableSiteToggle}
+                    disabled={!enableSiteToggle || !hasValidProjectId}
                   />
 
                   <MultiSelectRow
@@ -3164,7 +3185,7 @@ const UnifiedMapSidebar = ({
                       }))),
                     ]}
                     placeholder="All PCIs"
-                    disabled={!enableSiteToggle}
+                    disabled={!enableSiteToggle || !hasValidProjectId}
                   />
                 </div>
                 

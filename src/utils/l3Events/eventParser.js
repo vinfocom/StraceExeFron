@@ -9,6 +9,8 @@ const EVENT_NAME_PATTERNS = ["event name", "eventname", "event type", "eventtype
 const VALUE_PATTERNS = ["value", "detail", "details", "description", "info", "message", "data"];
 const SOURCE_PATTERNS = ["source", "origin", "producer"];
 const SEVERITY_PATTERNS = ["severity", "level", "priority"];
+const LATITUDE_PATTERNS = ["latitude", "lat", "y"];
+const LONGITUDE_PATTERNS = ["longitude", "long", "lon", "lng", "x"];
 
 // Parses a high-level Event CSV (CELL_MEAS, CONFIG, NSA_SA, IMS, CALL, ...)
 // into normalized rows. Header names are located by alias, not fixed index.
@@ -24,6 +26,8 @@ export function parseEventCSV(text, sourceName = "") {
       const value = getField(row, headers, VALUE_PATTERNS);
       const originSource = getField(row, headers, SOURCE_PATTERNS);
       const severity = getField(row, headers, SEVERITY_PATTERNS);
+      const latitude = getField(row, headers, LATITUDE_PATTERNS);
+      const longitude = getField(row, headers, LONGITUDE_PATTERNS);
 
       return {
         sourceType: "event",
@@ -35,6 +39,8 @@ export function parseEventCSV(text, sourceName = "") {
         value,
         originSource,
         severity,
+        latitude,
+        longitude,
         raw: row,
       };
     })

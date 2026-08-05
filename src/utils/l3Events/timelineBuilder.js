@@ -6,6 +6,12 @@ import { decodeL3Item, decodeEventItem } from "./eventDecoder.js";
 // one edge case this won't get right).
 const TIME_ONLY_RE = /^(\d{1,2}):(\d{2}):(\d{2})(?:\.(\d{1,3}))?$/;
 
+function toFiniteCoordinate(value, min, max) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric) || numeric < min || numeric > max) return null;
+  return numeric;
+}
+
 // Best-effort timestamp parsing: numeric epoch (ms or s), a bare time-of-day,
 // or any Date-parseable string. Returns null when the value can't be
 // interpreted, so unsortable rows fall back to a stable position instead of
@@ -51,6 +57,8 @@ const nextId = () => `l3evt-${++idCounter}`;
 function buildItem(row, type, decoded) {
   const date = parseTimestampValue(row.timestamp);
   const rawMessage = type === "l3" ? row.decodedText || row.message || "" : row.value || row.eventName || "";
+  const latitude = toFiniteCoordinate(row.latitude, -90, 90);
+  const longitude = toFiniteCoordinate(row.longitude, -180, 180);
 
   return {
     id: nextId(),
@@ -69,6 +77,8 @@ function buildItem(row, type, decoded) {
     originSource: row.originSource,
     severity: row.severity,
     eventKey: decoded.eventKey || null,
+    latitude,
+    longitude,
   };
 }
 
