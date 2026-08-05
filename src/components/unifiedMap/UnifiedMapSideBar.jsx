@@ -47,6 +47,23 @@ const LTE_RECOMMENDATION_OPTIMIZED_DEFAULTS = Object.freeze({
   azimuthFallbackStepDeg: 5,
 });
 
+const PCI_OPTIMIZATION_DEFAULTS = Object.freeze({
+  region: "india",
+  operator: "Airtel",
+  primaryOnly: true,
+  filterSitesToPolygon: true,
+  filterLogsToPolygon: false,
+  neighborDistanceMeters: 500,
+  collision: true,
+  confusion: true,
+  modRules: "3",
+  grouped: false,
+  coCentric: false,
+  runOptimizer: true,
+  siteIds: "",
+  maxSites: 0,
+});
+
 const normalizeLteCountryCode = (value) => {
   const raw = String(value || "").trim().toUpperCase();
   if (!raw) return "";
@@ -1248,6 +1265,57 @@ const UnifiedMapSidebar = ({
   const lteTiltRecommendationPollingRef = useRef(null);
   const lteTiltRecommendationToastIdRef = useRef(null);
   const lteTiltRecommendationJobIdRef = useRef(null);
+  const [isRunningPciOptimization, setIsRunningPciOptimization] = useState(false);
+  const [pciOptimizationProjectId, setPciOptimizationProjectId] = useState(
+    projectId ? String(projectId) : "",
+  );
+  const [pciOptimizationRegion, setPciOptimizationRegion] = useState(
+    PCI_OPTIMIZATION_DEFAULTS.region,
+  );
+  const [pciOptimizationOperator, setPciOptimizationOperator] = useState(
+    PCI_OPTIMIZATION_DEFAULTS.operator,
+  );
+  const [pciOptimizationPrimaryOnly, setPciOptimizationPrimaryOnly] = useState(
+    PCI_OPTIMIZATION_DEFAULTS.primaryOnly,
+  );
+  const [pciOptimizationFilterSitesToPolygon, setPciOptimizationFilterSitesToPolygon] = useState(
+    PCI_OPTIMIZATION_DEFAULTS.filterSitesToPolygon,
+  );
+  const [pciOptimizationFilterLogsToPolygon, setPciOptimizationFilterLogsToPolygon] = useState(
+    PCI_OPTIMIZATION_DEFAULTS.filterLogsToPolygon,
+  );
+  const [pciOptimizationNeighborDistanceMeters, setPciOptimizationNeighborDistanceMeters] = useState(
+    PCI_OPTIMIZATION_DEFAULTS.neighborDistanceMeters,
+  );
+  const [pciOptimizationCollisionRule, setPciOptimizationCollisionRule] = useState(
+    PCI_OPTIMIZATION_DEFAULTS.collision,
+  );
+  const [pciOptimizationConfusionRule, setPciOptimizationConfusionRule] = useState(
+    PCI_OPTIMIZATION_DEFAULTS.confusion,
+  );
+  const [pciOptimizationModRules, setPciOptimizationModRules] = useState(
+    PCI_OPTIMIZATION_DEFAULTS.modRules,
+  );
+  const [pciOptimizationGroupedRule, setPciOptimizationGroupedRule] = useState(
+    PCI_OPTIMIZATION_DEFAULTS.grouped,
+  );
+  const [pciOptimizationCoCentricRule, setPciOptimizationCoCentricRule] = useState(
+    PCI_OPTIMIZATION_DEFAULTS.coCentric,
+  );
+  const [pciOptimizationRunOptimizer, setPciOptimizationRunOptimizer] = useState(
+    PCI_OPTIMIZATION_DEFAULTS.runOptimizer,
+  );
+  const [pciOptimizationSiteIds, setPciOptimizationSiteIds] = useState(
+    PCI_OPTIMIZATION_DEFAULTS.siteIds,
+  );
+  const [pciOptimizationMaxSites, setPciOptimizationMaxSites] = useState(
+    PCI_OPTIMIZATION_DEFAULTS.maxSites,
+  );
+  const [pciOptimizationResult, setPciOptimizationResult] = useState(null);
+  const [pciOptimizationLastStatus, setPciOptimizationLastStatus] = useState("");
+  const pciOptimizationPollingRef = useRef(null);
+  const pciOptimizationToastIdRef = useRef(null);
+  const pciOptimizationJobIdRef = useRef(null);
   const [isRunningLteOptimisedPrediction, setIsRunningLteOptimisedPrediction] = useState(false);
   const [lteOptimisedSelectedOperators, setLteOptimisedSelectedOperators] = useState([]);
   const lteOptimisedPredictionPollingRef = useRef(null);
@@ -1294,6 +1362,14 @@ const UnifiedMapSidebar = ({
       numericProjectId <= 0
     );
   }, [canRunPrediction, isRunningLteTiltRecommendation, projectId]);
+  const pciOptimizationButtonDisabled = useMemo(() => {
+    const numericProjectId = Number(pciOptimizationProjectId);
+    return (
+      isRunningPciOptimization ||
+      !Number.isFinite(numericProjectId) ||
+      numericProjectId <= 0
+    );
+  }, [isRunningPciOptimization, pciOptimizationProjectId]);
 
   const activePolygonIdsParam = useMemo(() => {
     if (!onlyInsidePolygons || !Array.isArray(filterPolygons)) return undefined;
@@ -1344,6 +1420,11 @@ const UnifiedMapSidebar = ({
       ),
     );
   }, [lteOptimisedOperatorOptions]);
+
+  useEffect(() => {
+    if (!projectId) return;
+    setPciOptimizationProjectId(String(projectId));
+  }, [projectId]);
   const showDeltaGridAdvancedControls = useMemo(
     () =>
       Boolean(deltaGridApiState?.gridVisible) ||
@@ -1500,13 +1581,35 @@ const UnifiedMapSidebar = ({
     }
   }, []);
 
+  const stopPciOptimizationMonitoring = useCallback((dismissToast = false) => {
+    if (pciOptimizationPollingRef.current) {
+      clearInterval(pciOptimizationPollingRef.current);
+      pciOptimizationPollingRef.current = null;
+    }
+
+    if (dismissToast && pciOptimizationToastIdRef.current) {
+      toast.dismiss(pciOptimizationToastIdRef.current);
+    }
+
+    pciOptimizationJobIdRef.current = null;
+    if (dismissToast) {
+      pciOptimizationToastIdRef.current = null;
+    }
+  }, []);
+
   useEffect(() => {
     return () => {
       stopLtePredictionMonitoring(true);
       stopLteTiltRecommendationMonitoring(true);
       stopLteOptimisedPredictionMonitoring(true);
+      stopPciOptimizationMonitoring(true);
     };
-  }, [stopLteOptimisedPredictionMonitoring, stopLtePredictionMonitoring, stopLteTiltRecommendationMonitoring]);
+  }, [
+    stopLteOptimisedPredictionMonitoring,
+    stopLtePredictionMonitoring,
+    stopLteTiltRecommendationMonitoring,
+    stopPciOptimizationMonitoring,
+  ]);
 
   const pollLtePredictionStatus = useCallback(async () => {
     const jobId = ltePredictionJobIdRef.current;
@@ -2424,6 +2527,202 @@ const UnifiedMapSidebar = ({
     lteCountryCode,
     stopLteTiltRecommendationMonitoring,
     pollLteTiltRecommendationStatus,
+  ]);
+
+  const pollPciOptimizationStatus = useCallback(async () => {
+    const jobId = pciOptimizationJobIdRef.current;
+    const toastId = pciOptimizationToastIdRef.current;
+
+    if (!jobId || !toastId) return;
+
+    try {
+      const statusResponse = await predictionApi.getPciOptimizationStatus(jobId);
+      const rawStatus = statusResponse?.status || statusResponse?.Status || "";
+      const status = String(rawStatus).trim().toLowerCase();
+      const progressText = statusResponse?.progress
+        ? String(statusResponse.progress).trim()
+        : "";
+
+      setPciOptimizationLastStatus(status || "queued");
+
+      if (["completed", "done", "success", "succeeded"].includes(status)) {
+        stopPciOptimizationMonitoring(false);
+        const resultResponse = await predictionApi.getPciOptimizationResult(jobId);
+        setPciOptimizationResult(resultResponse);
+        setIsRunningPciOptimization(false);
+        const recommendationCount = Number(
+          resultResponse?.summary?.recommendation_count,
+        );
+        const suffix = Number.isFinite(recommendationCount)
+          ? ` (${recommendationCount} recommendations)`
+          : "";
+        toast.update(toastId, {
+          render: `PCI optimisation completed${suffix}.`,
+          type: "success",
+          isLoading: false,
+          autoClose: 5000,
+          closeOnClick: true,
+          draggable: true,
+        });
+        pciOptimizationToastIdRef.current = null;
+        return;
+      }
+
+      if (["failed", "error"].includes(status)) {
+        stopPciOptimizationMonitoring(false);
+        setIsRunningPciOptimization(false);
+        const errorMessage =
+          statusResponse?.error || statusResponse?.message || "PCI optimisation failed.";
+        toast.update(toastId, {
+          render: `PCI optimisation failed: ${errorMessage}`,
+          type: "error",
+          isLoading: false,
+          autoClose: 7000,
+          closeOnClick: true,
+          draggable: true,
+        });
+        pciOptimizationToastIdRef.current = null;
+        return;
+      }
+
+      const statusLabel = status ? status.toUpperCase() : "QUEUED";
+      const liveMessage = progressText
+        ? `PCI optimisation ${statusLabel}: ${progressText}`
+        : `PCI optimisation ${statusLabel}...`;
+
+      toast.update(toastId, {
+        render: liveMessage,
+        isLoading: true,
+        autoClose: false,
+        closeOnClick: false,
+        draggable: false,
+      });
+    } catch (statusError) {
+      const msg = statusError?.message || "Unable to fetch PCI optimisation status.";
+      console.error("PCI optimisation status polling failed:", msg);
+    }
+  }, [stopPciOptimizationMonitoring]);
+
+  const handleRunPciOptimization = useCallback(async () => {
+    const numericProjectId = Number(pciOptimizationProjectId);
+    if (!Number.isFinite(numericProjectId) || numericProjectId <= 0) {
+      toast.error("Please enter a valid project id before running PCI optimisation.");
+      return;
+    }
+
+    const parsedModRules = String(pciOptimizationModRules || "")
+      .split(/[,\s]+/)
+      .map((value) => Number(value))
+      .filter((value) => Number.isFinite(value) && value >= 0);
+    if (parsedModRules.length === 0) {
+      toast.error("Please enter at least one valid mod rule.");
+      return;
+    }
+
+    const parsedSiteIds = String(pciOptimizationSiteIds || "")
+      .split(/[,\s]+/)
+      .map((value) => Number(value))
+      .filter((value) => Number.isFinite(value) && value > 0);
+
+    setIsRunningPciOptimization(true);
+    setPciOptimizationResult(null);
+    setPciOptimizationLastStatus("queued");
+    stopPciOptimizationMonitoring(true);
+    const loadingToastId = toast.loading("Starting PCI optimisation...", {
+      autoClose: false,
+      closeOnClick: false,
+      draggable: false,
+    });
+    pciOptimizationToastIdRef.current = loadingToastId;
+
+    try {
+      const response = await predictionApi.runPciOptimization({
+        project_id: numericProjectId,
+        region: pciOptimizationRegion,
+        operator: pciOptimizationOperator,
+        primary_only: pciOptimizationPrimaryOnly,
+        filter_sites_to_polygon: pciOptimizationFilterSitesToPolygon,
+        filter_logs_to_polygon: pciOptimizationFilterLogsToPolygon,
+        neighbor_distance_m: Number(pciOptimizationNeighborDistanceMeters) || 0,
+        rules: {
+          collision: pciOptimizationCollisionRule,
+          confusion: pciOptimizationConfusionRule,
+          mod: parsedModRules,
+          grouped: pciOptimizationGroupedRule,
+          co_centric: pciOptimizationCoCentricRule,
+        },
+        run_optimizer: pciOptimizationRunOptimizer,
+        site_ids: parsedSiteIds,
+        max_sites: Number(pciOptimizationMaxSites) || 0,
+      });
+
+      const jobId = response?.job_id || response?.jobId;
+      if (!jobId) {
+        setIsRunningPciOptimization(false);
+        toast.update(loadingToastId, {
+          render: "PCI optimisation started, but no job id was returned.",
+          type: "warning",
+          isLoading: false,
+          autoClose: 6000,
+          closeOnClick: true,
+          draggable: true,
+        });
+        pciOptimizationToastIdRef.current = null;
+        return;
+      }
+
+      pciOptimizationJobIdRef.current = jobId;
+      setPciOptimizationLastStatus(
+        String(response?.status || "queued").trim().toLowerCase() || "queued",
+      );
+      toast.update(loadingToastId, {
+        render: `PCI optimisation queued. Job: ${jobId}. Monitoring progress...`,
+        isLoading: true,
+        autoClose: false,
+        closeOnClick: false,
+        draggable: false,
+      });
+
+      await pollPciOptimizationStatus();
+      pciOptimizationPollingRef.current = setInterval(() => {
+        pollPciOptimizationStatus();
+      }, 3000);
+    } catch (error) {
+      setIsRunningPciOptimization(false);
+      const failureMessage = error?.message || "Failed to start PCI optimisation.";
+      if (pciOptimizationToastIdRef.current) {
+        toast.update(pciOptimizationToastIdRef.current, {
+          render: failureMessage,
+          type: "error",
+          isLoading: false,
+          autoClose: 7000,
+          closeOnClick: true,
+          draggable: true,
+        });
+      } else {
+        toast.error(failureMessage);
+      }
+      stopPciOptimizationMonitoring(false);
+      pciOptimizationToastIdRef.current = null;
+    }
+  }, [
+    pciOptimizationProjectId,
+    pciOptimizationModRules,
+    pciOptimizationSiteIds,
+    pciOptimizationRegion,
+    pciOptimizationOperator,
+    pciOptimizationPrimaryOnly,
+    pciOptimizationFilterSitesToPolygon,
+    pciOptimizationFilterLogsToPolygon,
+    pciOptimizationNeighborDistanceMeters,
+    pciOptimizationCollisionRule,
+    pciOptimizationConfusionRule,
+    pciOptimizationGroupedRule,
+    pciOptimizationCoCentricRule,
+    pciOptimizationRunOptimizer,
+    pciOptimizationMaxSites,
+    stopPciOptimizationMonitoring,
+    pollPciOptimizationStatus,
   ]);
 
   const selectedEnvironment = useMemo(() => {
@@ -4137,6 +4436,228 @@ const UnifiedMapSidebar = ({
                           "Run LTE Tilt Recommendation"
                         )}
                       </Button>
+                      <div className="mt-2 border-t border-slate-700/50 pt-3 space-y-2">
+                        <Label className="text-xs font-semibold text-emerald-400 flex items-center gap-1">
+                          <Radio className="w-3 h-3" /> PCI Optimisation
+                        </Label>
+                        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                          <div className="rounded-lg bg-slate-800/60 p-2">
+                            <Label className="mb-1 block text-[11px] text-slate-400">
+                              Project ID
+                            </Label>
+                            <Input
+                              value={pciOptimizationProjectId}
+                              onChange={(e) => setPciOptimizationProjectId(e.target.value)}
+                              placeholder="193"
+                              className="h-8 bg-slate-800 border-slate-600 text-white text-sm"
+                            />
+                          </div>
+                          <div className="rounded-lg bg-slate-800/60 p-2">
+                            <Label className="mb-1 block text-[11px] text-slate-400">
+                              Region
+                            </Label>
+                            <Input
+                              value={pciOptimizationRegion}
+                              onChange={(e) => setPciOptimizationRegion(e.target.value)}
+                              placeholder="india"
+                              className="h-8 bg-slate-800 border-slate-600 text-white text-sm"
+                            />
+                          </div>
+                        </div>
+                        <div className="rounded-lg bg-slate-800/60 p-2">
+                          <Label className="mb-1 block text-[11px] text-slate-400">
+                            Operator
+                          </Label>
+                          <Input
+                            value={pciOptimizationOperator}
+                            onChange={(e) => setPciOptimizationOperator(e.target.value)}
+                            placeholder="Airtel / all"
+                            className="h-8 bg-slate-800 border-slate-600 text-white text-sm"
+                          />
+                        </div>
+                        <div className="rounded-lg bg-slate-800/60 p-2">
+                          <div className="flex items-center justify-between text-xs mb-2">
+                            <span className="text-slate-400">Neighbor Distance</span>
+                          </div>
+                          <ThresholdInput
+                            value={Number(pciOptimizationNeighborDistanceMeters) || 500}
+                            onChange={(next) =>
+                              setPciOptimizationNeighborDistanceMeters(Math.round(next))
+                            }
+                            min={0}
+                            max={5000}
+                            step={50}
+                            unit="m"
+                            showButtons={false}
+                          />
+                        </div>
+                        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                          <ToggleRow
+                            label="Primary Only"
+                            checked={Boolean(pciOptimizationPrimaryOnly)}
+                            onChange={setPciOptimizationPrimaryOnly}
+                            useSwitch={true}
+                          />
+                          <ToggleRow
+                            label="Run Optimizer"
+                            checked={Boolean(pciOptimizationRunOptimizer)}
+                            onChange={setPciOptimizationRunOptimizer}
+                            useSwitch={true}
+                          />
+                          <ToggleRow
+                            label="Filter Sites To Polygon"
+                            checked={Boolean(pciOptimizationFilterSitesToPolygon)}
+                            onChange={setPciOptimizationFilterSitesToPolygon}
+                            useSwitch={true}
+                          />
+                          <ToggleRow
+                            label="Filter Logs To Polygon"
+                            checked={Boolean(pciOptimizationFilterLogsToPolygon)}
+                            onChange={setPciOptimizationFilterLogsToPolygon}
+                            useSwitch={true}
+                          />
+                        </div>
+                        <div className="rounded-lg bg-slate-800/60 p-2 space-y-2">
+                          <Label className="block text-[11px] text-slate-400">
+                            Rules
+                          </Label>
+                          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                            <ToggleRow
+                              label="Collision"
+                              checked={Boolean(pciOptimizationCollisionRule)}
+                              onChange={setPciOptimizationCollisionRule}
+                              useSwitch={true}
+                            />
+                            <ToggleRow
+                              label="Confusion"
+                              checked={Boolean(pciOptimizationConfusionRule)}
+                              onChange={setPciOptimizationConfusionRule}
+                              useSwitch={true}
+                            />
+                            <ToggleRow
+                              label="Grouped"
+                              checked={Boolean(pciOptimizationGroupedRule)}
+                              onChange={setPciOptimizationGroupedRule}
+                              useSwitch={true}
+                            />
+                            <ToggleRow
+                              label="Co-Centric"
+                              checked={Boolean(pciOptimizationCoCentricRule)}
+                              onChange={setPciOptimizationCoCentricRule}
+                              useSwitch={true}
+                            />
+                          </div>
+                          <div className="rounded-lg bg-slate-900/60 p-2">
+                            <Label className="mb-1 block text-[11px] text-slate-400">
+                              Mod Rules
+                            </Label>
+                            <Input
+                              value={pciOptimizationModRules}
+                              onChange={(e) => setPciOptimizationModRules(e.target.value)}
+                              placeholder="3"
+                              className="h-8 bg-slate-800 border-slate-600 text-white text-sm"
+                            />
+                          </div>
+                        </div>
+                        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                          <div className="rounded-lg bg-slate-800/60 p-2">
+                            <Label className="mb-1 block text-[11px] text-slate-400">
+                              Site IDs
+                            </Label>
+                            <Input
+                              value={pciOptimizationSiteIds}
+                              onChange={(e) => setPciOptimizationSiteIds(e.target.value)}
+                              placeholder="Leave empty for all project sites"
+                              className="h-8 bg-slate-800 border-slate-600 text-white text-sm"
+                            />
+                          </div>
+                          <div className="rounded-lg bg-slate-800/60 p-2">
+                            <Label className="mb-1 block text-[11px] text-slate-400">
+                              Max Sites
+                            </Label>
+                            <Input
+                              value={pciOptimizationMaxSites}
+                              onChange={(e) => setPciOptimizationMaxSites(e.target.value)}
+                              placeholder="0"
+                              className="h-8 bg-slate-800 border-slate-600 text-white text-sm"
+                            />
+                          </div>
+                        </div>
+                        <Button
+                          type="button"
+                          onClick={handleRunPciOptimization}
+                          disabled={pciOptimizationButtonDisabled}
+                          className="w-full h-8 text-xs font-semibold bg-emerald-600 hover:bg-emerald-500"
+                          title="Run PCI optimisation"
+                        >
+                          {isRunningPciOptimization ? (
+                            <span className="inline-flex items-center gap-2">
+                              <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+                              Running...
+                            </span>
+                          ) : (
+                            "Run PCI Optimisation"
+                          )}
+                        </Button>
+                        {(pciOptimizationLastStatus || pciOptimizationResult) && (
+                          <div className="rounded-lg bg-slate-900/50 border border-slate-700/60 p-2 space-y-1">
+                            {pciOptimizationLastStatus && (
+                              <InfoBadge
+                                label="Status"
+                                value={pciOptimizationLastStatus}
+                                color="green"
+                              />
+                            )}
+                            {pciOptimizationResult?.job_id && (
+                              <InfoBadge
+                                label="Job ID"
+                                value={pciOptimizationResult.job_id}
+                                color="cyan"
+                              />
+                            )}
+                            {pciOptimizationResult?.summary && (
+                              <>
+                                <InfoBadge
+                                  label="Sites"
+                                  value={pciOptimizationResult.summary.site_count ?? 0}
+                                />
+                                <InfoBadge
+                                  label="Sectors"
+                                  value={pciOptimizationResult.summary.sector_count ?? 0}
+                                />
+                                <InfoBadge
+                                  label="Transitions"
+                                  value={pciOptimizationResult.summary.transition_event_count ?? 0}
+                                />
+                                <InfoBadge
+                                  label="Neighbors"
+                                  value={pciOptimizationResult.summary.neighbor_edge_count ?? 0}
+                                />
+                                <InfoBadge
+                                  label="Collisions"
+                                  value={pciOptimizationResult.summary.collision_count ?? 0}
+                                  color="orange"
+                                />
+                                <InfoBadge
+                                  label="Confusions"
+                                  value={pciOptimizationResult.summary.confusion_count ?? 0}
+                                  color="orange"
+                                />
+                                <InfoBadge
+                                  label="Mod Conflicts"
+                                  value={pciOptimizationResult.summary.mod_conflict_count ?? 0}
+                                  color="yellow"
+                                />
+                                <InfoBadge
+                                  label="Recommendations"
+                                  value={pciOptimizationResult.summary.recommendation_count ?? 0}
+                                  color="green"
+                                />
+                              </>
+                            )}
+                          </div>
+                        )}
+                      </div>
                     </>
                   )}
                 </div>

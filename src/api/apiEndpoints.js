@@ -71,6 +71,25 @@ const LTE_RECOMMENDATION_OPTIMIZED_DEFAULTS = Object.freeze({
   max_interference_sites: 10,
 });
 
+const PCI_OPTIMIZATION_DEFAULTS = Object.freeze({
+  region: "india",
+  operator: "Airtel",
+  primary_only: true,
+  filter_sites_to_polygon: true,
+  filter_logs_to_polygon: false,
+  neighbor_distance_m: 500,
+  rules: {
+    collision: true,
+    confusion: true,
+    mod: [3],
+    grouped: false,
+    co_centric: false,
+  },
+  run_optimizer: true,
+  site_ids: [],
+  max_sites: 0,
+});
+
 const normalizeLteRegion = (value) => {
   const raw = String(value || "").trim().toLowerCase();
   if (!raw) return "";
@@ -984,6 +1003,88 @@ export const predictionApi = {
     const url = `${PYTHON_BASE_URL_EXPORT}/api/lte-tilt-recommandation/download?file=${encodeURIComponent(filePath)}`;
     const filename = String(filePath).split(/[\\/]/).pop() || "lte_tilt_recommendation.csv";
     return downloadUrlAsBlob(url, filename);
+  },
+
+  runPciOptimization: async (params = {}) => {
+    try {
+      const projectId = Number(params.project_id);
+      if (!Number.isFinite(projectId) || projectId <= 0) {
+        throw new Error("project_id is required");
+      }
+
+      const normalizedSiteIds = Array.isArray(params.site_ids)
+        ? params.site_ids
+            .map((value) => Number(value))
+            .filter((value) => Number.isFinite(value) && value > 0)
+        : [];
+      const normalizedModRules = Array.isArray(params?.rules?.mod)
+        ? params.rules.mod
+            .map((value) => Number(value))
+            .filter((value) => Number.isFinite(value) && value >= 0)
+        : PCI_OPTIMIZATION_DEFAULTS.rules.mod;
+
+      const payload = {
+        project_id: projectId,
+        region: normalizeLteRegion(params.region) || PCI_OPTIMIZATION_DEFAULTS.region,
+        operator: String(params.operator || PCI_OPTIMIZATION_DEFAULTS.operator).trim() || PCI_OPTIMIZATION_DEFAULTS.operator,
+        primary_only:
+          params.primary_only ?? PCI_OPTIMIZATION_DEFAULTS.primary_only,
+        filter_sites_to_polygon:
+          params.filter_sites_to_polygon ?? PCI_OPTIMIZATION_DEFAULTS.filter_sites_to_polygon,
+        filter_logs_to_polygon:
+          params.filter_logs_to_polygon ?? PCI_OPTIMIZATION_DEFAULTS.filter_logs_to_polygon,
+        neighbor_distance_m: Number.isFinite(Number(params.neighbor_distance_m))
+          ? Number(params.neighbor_distance_m)
+          : PCI_OPTIMIZATION_DEFAULTS.neighbor_distance_m,
+        rules: {
+          collision: params?.rules?.collision ?? PCI_OPTIMIZATION_DEFAULTS.rules.collision,
+          confusion: params?.rules?.confusion ?? PCI_OPTIMIZATION_DEFAULTS.rules.confusion,
+          mod: normalizedModRules.length > 0
+            ? normalizedModRules
+            : PCI_OPTIMIZATION_DEFAULTS.rules.mod,
+          grouped: params?.rules?.grouped ?? PCI_OPTIMIZATION_DEFAULTS.rules.grouped,
+          co_centric:
+            params?.rules?.co_centric ?? PCI_OPTIMIZATION_DEFAULTS.rules.co_centric,
+        },
+        run_optimizer:
+          params.run_optimizer ?? PCI_OPTIMIZATION_DEFAULTS.run_optimizer,
+        site_ids: normalizedSiteIds,
+        max_sites: Number.isFinite(Number(params.max_sites))
+          ? Number(params.max_sites)
+          : PCI_OPTIMIZATION_DEFAULTS.max_sites,
+      };
+
+      console.info("[PCI_OPTIMIZATION] POST /api/pci-optimization/run", payload);
+      return await pythonApi.post("/api/pci-optimization/run", payload, {
+        timeout: 600000,
+      });
+    } catch (error) {
+      console.error("PCI optimization run error:", error);
+      if (error.code === "ECONNABORTED") {
+        throw new Error("PCI optimization timed out.");
+      }
+      throw error;
+    }
+  },
+
+  getPciOptimizationStatus: async (jobId) => {
+    try {
+      if (!jobId) throw new Error("jobId is required");
+      return await pythonApi.get(`/api/pci-optimization/status/${jobId}`);
+    } catch (error) {
+      console.error("PCI optimization status error:", error);
+      throw error;
+    }
+  },
+
+  getPciOptimizationResult: async (jobId) => {
+    try {
+      if (!jobId) throw new Error("jobId is required");
+      return await pythonApi.get(`/api/pci-optimization/result/${jobId}`);
+    } catch (error) {
+      console.error("PCI optimization result error:", error);
+      throw error;
+    }
   },
 
   getLtePredictionStatus: async (jobId) => {
