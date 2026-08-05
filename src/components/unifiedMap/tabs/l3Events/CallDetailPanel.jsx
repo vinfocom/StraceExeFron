@@ -96,19 +96,18 @@ function renderTableView(eventsList) {
           <tr className="bg-slate-800/60 text-white text-[11px] font-semibold uppercase tracking-wider border-b border-slate-700">
             <th className="px-3 py-2 w-[95px]">Timestamp</th>
             <th className="px-3 py-2 w-[90px]">Layer/Chan</th>
-            <th className="px-3 py-2 w-[38%] border-r border-slate-800 bg-blue-950/20 text-blue-400 text-center">
+            <th className="px-3 py-2 w-[41%] border-r border-slate-800 bg-blue-950/20 text-blue-400 text-center">
               Uplink Flow (UE → NW)
             </th>
-            <th className="px-3 py-2 w-[38%] bg-emerald-950/20 text-emerald-400 text-center">
+            <th className="px-3 py-2 w-[41%] bg-emerald-950/20 text-emerald-400 text-center">
               Downlink Flow (NW → UE)
             </th>
-            <th className="px-3 py-2 w-[65px] text-right">Source</th>
           </tr>
         </thead>
         <tbody className="divide-y divide-slate-800 text-xs">
           {eventsList.length === 0 ? (
             <tr>
-              <td colSpan="5" className="text-center py-8 text-white font-medium">
+              <td colSpan="4" className="text-center py-8 text-white font-medium">
                 No chronological signaling sequence records found.
               </td>
             </tr>
@@ -191,13 +190,6 @@ function renderTableView(eventsList) {
                       <span className="text-white font-mono text-[10px] select-none">—</span>
                     )}
                   </td>
-
-                  {/* Log Type Source (L3/Event) */}
-                  <td className="px-3 py-2.5 text-right uppercase text-[10px] font-bold text-white align-top whitespace-nowrap">
-                    <span className={item.type === "l3" ? "text-cyan-500/70" : "text-amber-500/70"}>
-                      {item.type}
-                    </span>
-                  </td>
                 </tr>
               );
             })
@@ -255,17 +247,31 @@ function renderMessageSequenceChart(eventsList) {
 function renderLadderDiagram(eventsList) {
   if (eventsList.length === 0) return <div className="text-center py-8 text-white text-xs">No entries.</div>;
 
+  const TIME_GUTTER = 104;
+  const ROW_HEIGHT = 60;
+  const HEADER_OFFSET = 40;
+  const diagramHeight = eventsList.length * 60 + 40;
+
   return (
     <div className="overflow-x-auto min-w-full p-4 font-mono text-xs">
-      <div className="relative min-w-[500px]" style={{ height: `${eventsList.length * 60 + 40}px` }}>
+      <div
+        className="relative min-w-[640px]"
+        style={{ height: `${diagramHeight}px` }}
+      >
         {/* Dynamic Lifelines for protocols/domains */}
-        <div className="absolute top-0 bottom-0 left-[20%] w-0.5 bg-slate-700 flex flex-col items-center"><span className="absolute -top-4 bg-slate-800 px-2 py-0.5 rounded text-[10px] font-bold">UE</span></div>
-        <div className="absolute top-0 bottom-0 left-[50%] w-0.5 bg-slate-700 flex flex-col items-center"><span className="absolute -top-4 bg-violet-600 px-2 py-0.5 rounded text-[10px] font-bold">NAS</span></div>
-        <div className="absolute top-0 bottom-0 left-[80%] w-0.5 bg-slate-700 flex flex-col items-center"><span className="absolute -top-4 bg-cyan-600 px-2 py-0.5 rounded text-[10px] font-bold">RRC</span></div>
+        <div className="absolute inset-y-0 left-[calc(20%+83px)] w-0.5 bg-slate-700 flex flex-col items-center">
+          <span className="absolute -top-4 -translate-x-1/2 bg-slate-800 px-2 py-0.5 rounded text-[10px] font-bold">UE</span>
+        </div>
+        <div className="absolute inset-y-0 left-[calc(50%+52px)] w-0.5 bg-slate-700 flex flex-col items-center">
+          <span className="absolute -top-4 -translate-x-1/2 bg-violet-600 px-2 py-0.5 rounded text-[10px] font-bold">NAS</span>
+        </div>
+        <div className="absolute inset-y-0 left-[calc(80%+21px)] w-0.5 bg-slate-700 flex flex-col items-center">
+          <span className="absolute -top-4 -translate-x-1/2 bg-cyan-600 px-2 py-0.5 rounded text-[10px] font-bold">RRC</span>
+        </div>
 
         {/* Message Rungs / Horizontal steps */}
         {eventsList.map((item, idx) => {
-          const topPos = idx * 60 + 40;
+          const topPos = idx * ROW_HEIGHT + HEADER_OFFSET;
           const isL3 = item.type === "l3";
           const isUplink = String(item.rawMessage || "").includes(">") || String(item.title || "").includes("Request");
           
@@ -274,35 +280,45 @@ function renderLadderDiagram(eventsList) {
           const endX = item.category === "NAS" ? "50%" : "80%";
 
           return (
-            <div key={idx} className="absolute left-0 right-0 group transition-colors" style={{ top: `${topPos}px` }}>
-              <div className="absolute left-2 text-[10px] text-white font-mono">
+            <div
+              key={idx}
+              className="absolute left-0 right-0 grid grid-cols-[104px_minmax(0,1fr)] items-start gap-0 group transition-colors"
+              style={{ top: `${topPos}px` }}
+            >
+              <div
+                className="h-8 pr-4 pt-[2px] text-right text-[10px] text-white font-mono whitespace-nowrap border-r border-slate-800/80"
+              >
                 {item.timestamp ? item.timestamp.toLocaleTimeString([], { hour12: false, timeZone: "UTC" }) : ""}
               </div>
-              
-              <svg className="w-full h-8 overflow-visible absolute top-2">
-                <line 
-                  x1={isUplink ? startX : endX} 
-                  y1="4" 
-                  x2={isUplink ? endX : startX} 
-                  y2="4" 
-                  stroke={isL3 ? "#22d3ee" : "#fbbf24"} 
-                  strokeWidth="2"
-                  strokeDasharray={isL3 ? "0" : "4 2"}
-                />
-                <polygon 
-                  points={isUplink ? "5,0 0,4 5,8" : "-5,0 0,4 -5,8"}
-                  transform={`translate(${isUplink ? `radialPosition` : `radialPosition`})`}
-                  fill={isL3 ? "#22d3ee" : "#fbbf24"}
-                  style={{ transform: `translateX(${isUplink ? endX : startX}) scale(${isUplink ? 1 : -1})` }}
-                />
-              </svg>
-              
-              <div 
-                className="absolute text-[11px] bg-slate-900 border border-slate-800 text-white px-2 py-0.5 rounded shadow group-hover:border-slate-600 whitespace-nowrap z-10"
-                style={{ left: "35%", transform: "translateX(-20%)" }}
-                title={item.summary || item.title}
-              >
-                {item.title}
+
+              <div className="relative h-8">
+                <svg className="absolute inset-0 h-8 w-full overflow-visible">
+                  <line 
+                    x1={isUplink ? startX : endX} 
+                    y1="12" 
+                    x2={isUplink ? endX : startX} 
+                    y2="12" 
+                    stroke={isL3 ? "#22d3ee" : "#fbbf24"} 
+                    strokeWidth="2"
+                    strokeDasharray={isL3 ? "0" : "4 2"}
+                  />
+                  <polygon 
+                    points={isUplink ? "0,8 8,12 0,16" : "8,8 0,12 8,16"}
+                    fill={isL3 ? "#22d3ee" : "#fbbf24"}
+                    style={{
+                      transformBox: "fill-box",
+                      transformOrigin: "center",
+                      transform: `translateX(${isUplink ? endX : startX}) translateX(${isUplink ? "-4px" : "-4px"})`,
+                    }}
+                  />
+                </svg>
+
+                <div 
+                  className="absolute top-0 left-[38%] max-w-[280px] -translate-x-[18%] truncate text-[11px] bg-slate-900 border border-slate-800 text-white px-2 py-0.5 rounded shadow group-hover:border-slate-600 z-10"
+                  title={item.summary || item.title}
+                >
+                  {item.title}
+                </div>
               </div>
             </div>
           );

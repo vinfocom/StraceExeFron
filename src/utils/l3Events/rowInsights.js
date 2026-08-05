@@ -106,7 +106,7 @@ function extractIdentityPair(text) {
 
 function rawColumnDetails(raw = {}) {
   let details = [];
-  ["source", "severity", "category"].forEach((key) => {
+  ["severity", "category"].forEach((key) => {
     const value = raw[key];
     if (value) details = addUniqueDetail(details, key[0].toUpperCase() + key.slice(1), value);
   });

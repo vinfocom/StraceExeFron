@@ -95,8 +95,6 @@ function TimelineCardComponent({ item }) {
                 <span className="font-semibold text-white">Domain:</span> {item.domain}
               </span>
             )}
-            {item.originSource && <span className="ml-3 text-white">Origin: {item.originSource}</span>}
-            {item.sourceFile && <span className="ml-3 text-white">File: {item.sourceFile}</span>}
           </div>
 
           {item.details?.length > 0 && (

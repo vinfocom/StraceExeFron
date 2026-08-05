@@ -852,6 +852,9 @@ export const predictionApi = {
         "bad_grid_coverage_pct",
         "max_group_cells",
         "max_neighbors_per_update_cell",
+        "etilt_candidate_max_delta_deg",
+        "azimuth_fallback_max_delta_deg",
+        "azimuth_fallback_step_deg",
         "threshold_file_path",
       ];
       const copyOptionalFields = (target) => {

@@ -212,6 +212,61 @@ function decodeSimpleValueChange(rawText = "") {
   return [];
 }
 
+function decodeTrackedEventChange(eventName = "", rawValue = "") {
+  const normalizedEvent = String(eventName || "").trim().toLowerCase();
+  if (!normalizedEvent || !rawValue) return null;
+
+  const changeMatch = String(rawValue).match(/^(.+?)\s*->\s*(.+)$/);
+  const newValueMatch = String(rawValue).match(/^\(new\)\s*(.+)$/i);
+
+  const eventConfigs = [
+    {
+      match: /(cellinfo\.count|cell\W*count)/i,
+      previousLabel: "Previous Cell Count",
+      nextLabel: "New Cell Count",
+      singleLabel: "Cell Count",
+    },
+    {
+      match: /(pci\W*handover|handover\W*pci|\bpci\b)/i,
+      previousLabel: "Previous PCI",
+      nextLabel: "New PCI",
+      singleLabel: "PCI",
+    },
+    {
+      match: /(rsrp\W*switch|switch\W*rsrp|\brsrp\b)/i,
+      previousLabel: "Previous RSRP",
+      nextLabel: "New RSRP",
+      singleLabel: "RSRP",
+      unit: " dBm",
+    },
+    {
+      match: /(rsrq\W*switch|switch\W*rsrq|\brsrq\b)/i,
+      previousLabel: "Previous RSRQ",
+      nextLabel: "New RSRQ",
+      singleLabel: "RSRQ",
+      unit: " dB",
+    },
+  ];
+
+  const config = eventConfigs.find((entry) => entry.match.test(normalizedEvent));
+  if (!config) return null;
+
+  const withUnit = (value) => `${value}${config.unit || ""}`;
+
+  if (changeMatch) {
+    return [
+      { label: config.previousLabel, value: withUnit(changeMatch[1].trim()) },
+      { label: config.nextLabel, value: withUnit(changeMatch[2].trim()) },
+    ];
+  }
+
+  if (newValueMatch) {
+    return [{ label: config.singleLabel, value: withUnit(newValueMatch[1].trim()) }];
+  }
+
+  return null;
+}
+
 // CELL_MEAS rows poll one metric per row (event = "rsrp"/"rssnr"/...), so a
 // dedicated metric name + unit reads better than a generic "Value: -97".
 function decodeCellMeasDetail(eventName = "", rawValue = "") {
@@ -405,10 +460,12 @@ export function decodeEventItem(item) {
   const domain = applyDomainStatus(detectDomain(combinedText), domainStatusDetails);
 
   const cellMeasDetail = rawCategory === "CELL_MEAS" ? decodeCellMeasDetail(eventKey, item.value || "") : null;
-  const changeDetails = cellMeasDetail ? [] : decodeSimpleValueChange(item.value || "");
+  const trackedEventDetails = cellMeasDetail ? null : decodeTrackedEventChange(eventKey, item.value || "");
+  const changeDetails = cellMeasDetail || trackedEventDetails ? [] : decodeSimpleValueChange(item.value || "");
 
   const details = mergeDetails(
     cellMeasDetail ? [cellMeasDetail] : [],
+    trackedEventDetails || [],
     changeDetails,
     extractDecodedDetails(item.value || ""),
     extractRowInsights(item),

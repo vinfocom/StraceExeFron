@@ -42,6 +42,9 @@ const LTE_RECOMMENDATION_OPTIMIZED_DEFAULTS = Object.freeze({
   neighborSiteCount: 2,
   maxInterferenceSites: 10,
   maxNeighborsPerUpdateCell: 2,
+  etiltCandidateMaxDeltaDeg: 2,
+  azimuthFallbackMaxDeltaDeg: 25,
+  azimuthFallbackStepDeg: 5,
 });
 
 const normalizeLteCountryCode = (value) => {
@@ -1216,6 +1219,15 @@ const UnifiedMapSidebar = ({
   const [lteTiltRecommendationSinrWeight, setLteTiltRecommendationSinrWeight] = useState(60);
   const [lteTiltRecommendationRadiusMeters, setLteTiltRecommendationRadiusMeters] = useState(LTE_RECOMMENDATION_OPTIMIZED_DEFAULTS.radiusMeters);
   const [lteTiltRecommendationGridResolutionMeters, setLteTiltRecommendationGridResolutionMeters] = useState(LTE_RECOMMENDATION_OPTIMIZED_DEFAULTS.gridResolutionMeters);
+  const [lteTiltRecommendationEtltCandidateMaxDeltaDeg, setLteTiltRecommendationEtltCandidateMaxDeltaDeg] = useState(
+    LTE_RECOMMENDATION_OPTIMIZED_DEFAULTS.etiltCandidateMaxDeltaDeg,
+  );
+  const [lteTiltRecommendationAzimuthFallbackMaxDeltaDeg, setLteTiltRecommendationAzimuthFallbackMaxDeltaDeg] = useState(
+    LTE_RECOMMENDATION_OPTIMIZED_DEFAULTS.azimuthFallbackMaxDeltaDeg,
+  );
+  const [lteTiltRecommendationAzimuthFallbackStepDeg, setLteTiltRecommendationAzimuthFallbackStepDeg] = useState(
+    LTE_RECOMMENDATION_OPTIMIZED_DEFAULTS.azimuthFallbackStepDeg,
+  );
   const [lteTiltRecommendationFile, setLteTiltRecommendationFile] = useState(null);
   const lteTiltFileInputRef = useRef(null);
   const lteTiltRecommendationPollingRef = useRef(null);
@@ -2318,6 +2330,15 @@ const UnifiedMapSidebar = ({
         bad_grid_coverage_pct: 60,
         max_group_cells: 0,
         max_neighbors_per_update_cell: 2,
+        etilt_candidate_max_delta_deg:
+          Number(lteTiltRecommendationEtltCandidateMaxDeltaDeg) ||
+          LTE_RECOMMENDATION_OPTIMIZED_DEFAULTS.etiltCandidateMaxDeltaDeg,
+        azimuth_fallback_max_delta_deg:
+          Number(lteTiltRecommendationAzimuthFallbackMaxDeltaDeg) ||
+          LTE_RECOMMENDATION_OPTIMIZED_DEFAULTS.azimuthFallbackMaxDeltaDeg,
+        azimuth_fallback_step_deg:
+          Number(lteTiltRecommendationAzimuthFallbackStepDeg) ||
+          LTE_RECOMMENDATION_OPTIMIZED_DEFAULTS.azimuthFallbackStepDeg,
         threshold_file: lteTiltRecommendationFile || undefined,
       });
 
@@ -2380,6 +2401,9 @@ const UnifiedMapSidebar = ({
     lteTiltRecommendationSinrWeight,
     lteTiltRecommendationRadiusMeters,
     lteTiltRecommendationGridResolutionMeters,
+    lteTiltRecommendationEtltCandidateMaxDeltaDeg,
+    lteTiltRecommendationAzimuthFallbackMaxDeltaDeg,
+    lteTiltRecommendationAzimuthFallbackStepDeg,
     lteTiltRecommendationFile,
     lteRegion,
     lteCountryCode,
@@ -3966,6 +3990,68 @@ const UnifiedMapSidebar = ({
                             max={100}
                             step={5}
                             unit="%"
+                            showButtons={false}
+                          />
+                        </div>
+                      </div>
+                      <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+                        <div className="rounded-lg bg-slate-800/60 p-2">
+                          <div className="flex items-center justify-between text-xs mb-2">
+                            <span className="text-slate-400">Etilt Candidate Max Delta</span>
+                          </div>
+                          <ThresholdInput
+                            value={
+                              Number.isFinite(Number(lteTiltRecommendationEtltCandidateMaxDeltaDeg))
+                                ? Number(lteTiltRecommendationEtltCandidateMaxDeltaDeg)
+                                : LTE_RECOMMENDATION_OPTIMIZED_DEFAULTS.etiltCandidateMaxDeltaDeg
+                            }
+                            onChange={(next) =>
+                              setLteTiltRecommendationEtltCandidateMaxDeltaDeg(Number(next))
+                            }
+                            min={0}
+                            max={20}
+                            step={1}
+                            unit="deg"
+                            showButtons={false}
+                          />
+                        </div>
+                        <div className="rounded-lg bg-slate-800/60 p-2">
+                          <div className="flex items-center justify-between text-xs mb-2">
+                            <span className="text-slate-400">Azimuth Fallback Max Delta</span>
+                          </div>
+                          <ThresholdInput
+                            value={
+                              Number.isFinite(Number(lteTiltRecommendationAzimuthFallbackMaxDeltaDeg))
+                                ? Number(lteTiltRecommendationAzimuthFallbackMaxDeltaDeg)
+                                : LTE_RECOMMENDATION_OPTIMIZED_DEFAULTS.azimuthFallbackMaxDeltaDeg
+                            }
+                            onChange={(next) =>
+                              setLteTiltRecommendationAzimuthFallbackMaxDeltaDeg(Number(next))
+                            }
+                            min={0}
+                            max={180}
+                            step={1}
+                            unit="deg"
+                            showButtons={false}
+                          />
+                        </div>
+                        <div className="rounded-lg bg-slate-800/60 p-2">
+                          <div className="flex items-center justify-between text-xs mb-2">
+                            <span className="text-slate-400">Azimuth Fallback Step</span>
+                          </div>
+                          <ThresholdInput
+                            value={
+                              Number.isFinite(Number(lteTiltRecommendationAzimuthFallbackStepDeg))
+                                ? Number(lteTiltRecommendationAzimuthFallbackStepDeg)
+                                : LTE_RECOMMENDATION_OPTIMIZED_DEFAULTS.azimuthFallbackStepDeg
+                            }
+                            onChange={(next) =>
+                              setLteTiltRecommendationAzimuthFallbackStepDeg(Number(next))
+                            }
+                            min={1}
+                            max={90}
+                            step={1}
+                            unit="deg"
                             showButtons={false}
                           />
                         </div>
