@@ -50,6 +50,14 @@ export const useProjectPolygons = (projectId, showPolygons, polygonSource) => {
         signal: abortControllerRef.current.signal,
       });
 
+      const sourceRequested =
+        res?.SourceRequested ??
+        res?.data?.SourceRequested ??
+        polygonSource;
+      const countFromSavePolygon = Number(
+        res?.CountFromSavePolygon ?? res?.data?.CountFromSavePolygon,
+      );
+
       const items = res?.Data || res?.data?.Data || (Array.isArray(res) ? res : []);
       const parsed = items.flatMap((item) => {
         const wkt = item.Wkt || item.wkt;
@@ -70,6 +78,13 @@ export const useProjectPolygons = (projectId, showPolygons, polygonSource) => {
 
       setPolygons(parsed);
       writeProjectSessionCache(cacheKey, parsed);
+      if (
+        sourceRequested === 'save' &&
+        Number.isFinite(countFromSavePolygon) &&
+        countFromSavePolygon === 0
+      ) {
+        toast.info('No building found.');
+      }
       if (parsed.length) toast.success(`${parsed.length} polygon(s) loaded`);
     } catch (err) {
       if (err.name === "AbortError") return;
