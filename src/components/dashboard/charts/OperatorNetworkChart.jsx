@@ -1,6 +1,5 @@
 import React, { useState, useMemo } from "react";
 import {
-  ResponsiveContainer,
   BarChart,
   Bar,
   XAxis,
@@ -12,6 +11,7 @@ import {
 } from "recharts";
 import { Settings, Activity, BarChart3 } from "lucide-react";
 import ChartCard from "../ChartCard";
+import StableChartContainer from "../StableChartContainer";
 import {
   useOperatorMetrics,
   useOperatorsAndNetworks,
@@ -494,8 +494,11 @@ const OperatorNetworkChart = ({ chartFilters, onChartFiltersChange }) => {
           filteredData.length > 0 &&
           technologyTypes.length > 0 ? (
           <div className="bg-gray-50 rounded-xl p-4 h-full">
-            <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={220}>
+            <StableChartContainer minHeight={220}>
+              {({ width, height }) => (
               <BarChart
+                width={width}
+                height={height}
                 data={filteredData}
                 margin={{ top: 20, right: 30, left: 50, bottom: 60 }}
                 barGap={2}
@@ -554,7 +557,8 @@ const OperatorNetworkChart = ({ chartFilters, onChartFiltersChange }) => {
                   </Bar>
                 ))}
               </BarChart>
-            </ResponsiveContainer>
+              )}
+            </StableChartContainer>
           </div>
         ) : null}
       </div>

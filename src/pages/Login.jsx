@@ -5,8 +5,11 @@ import { toast } from "react-toastify";
 import Spinner from "../components/common/Spinner";
 import appLogo from "/favicon.svg";
 import comlog from "/logo.svg";
-import axios from "axios";
 import { Eye, EyeOff } from "lucide-react";
+import {
+  clearStoredRedirectTarget,
+  getStoredRedirectTarget,
+} from "../utils/authSession";
 
 const APP_VERSION = "2.1.0";
 const TRANSITION_INTENT_KEY = "authTransitionIntent";
@@ -49,17 +52,14 @@ const LoginPage = () => {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
-  const [ipAddress, setIpAddress] = useState("");
   const [loading, setLoading] = useState(false);
   const { login, isLoggedIn } = useAuth();
   const navigate = useNavigate();
-  const isElectronRuntime =
-    typeof navigator !== "undefined" && /electron/i.test(navigator.userAgent || "");
 
   const navigateAfterLogin = useCallback(() => {
-    const redirectAfterLogin = sessionStorage.getItem("redirectAfterLogin");
+    const redirectAfterLogin = getStoredRedirectTarget();
     if (redirectAfterLogin) {
-      sessionStorage.removeItem("redirectAfterLogin");
+      clearStoredRedirectTarget();
       navigate(redirectAfterLogin, { replace: true });
       return;
     }
@@ -68,21 +68,6 @@ const LoginPage = () => {
 
   useEffect(() => {
     sessionStorage.removeItem(TRANSITION_INTENT_KEY);
-  }, []);
-
-  useEffect(() => {
-    const fetchIp = async () => {
-      try {
-        const response = await axios.get("https://api.ipify.org?format=json");
-        if (response.data && response.data.ip) {
-          setIpAddress(response.data.ip);
-        }
-      } catch {
-        setIpAddress("");
-      }
-    };
-
-    fetchIp();
   }, []);
 
   useEffect(() => {
@@ -107,7 +92,7 @@ const LoginPage = () => {
       const response = await login({
         Email: email,
         Password: password,
-        IP: ipAddress,
+        IP: "",
         ForceLogin: false,
       });
 
@@ -129,7 +114,7 @@ const LoginPage = () => {
             const forceResponse = await login({
               Email: email,
               Password: password,
-              IP: ipAddress,
+              IP: "",
               ForceLogin: true,
             });
 
@@ -177,7 +162,7 @@ const LoginPage = () => {
             const forceResponse = await login({
               Email: email,
               Password: password,
-              IP: ipAddress,
+              IP: "",
               ForceLogin: true,
             });
 

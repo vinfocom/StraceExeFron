@@ -20,6 +20,7 @@ import Spinner from "../components/common/Spinner";
 import { excelApi, mapViewApi, uniReport } from "../api/apiEndpoints";
 import { useFileUpload } from "../hooks/useFileUpload";
 import { useAuth } from "@/context/AuthContext";
+import { resolveCompanyId } from "@/utils/authSession";
 
 const MAX_FILE_SIZE = 500 * 1024 * 1024;
 const MAX_FILE_SIZE_LABEL = "500 MB";
@@ -95,23 +96,6 @@ const normalizeStatus = (status) => String(status ?? "").trim().toLowerCase();
 const isProcessingStatus = (status) => normalizeStatus(status) === "processing";
 
 const extractResponseData = (response) => response?.data || response;
-
-const resolveCompanyId = (user) => {
-  const directCompanyId = Number(user?.company_id ?? user?.CompanyId ?? user?.companyId ?? 0);
-  if (Number.isFinite(directCompanyId) && directCompanyId > 0) return directCompanyId;
-
-  if (typeof window === "undefined") return 0;
-
-  try {
-    const cachedUser = JSON.parse(sessionStorage.getItem("user") || "null");
-    const cachedCompanyId = Number(
-      cachedUser?.company_id ?? cachedUser?.CompanyId ?? cachedUser?.companyId ?? 0,
-    );
-    return Number.isFinite(cachedCompanyId) && cachedCompanyId > 0 ? cachedCompanyId : 0;
-  } catch {
-    return 0;
-  }
-};
 
 const closeLinearRing = (ring) => {
   if (!Array.isArray(ring) || ring.length < 3) return ring || [];

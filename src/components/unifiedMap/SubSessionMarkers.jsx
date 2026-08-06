@@ -1,5 +1,6 @@
 import React, { memo, useEffect, useMemo, useState } from "react";
-import { InfoWindowF, MarkerF } from "@react-google-maps/api";
+import { InfoWindowF, MarkerF, PolylineF } from "@react-google-maps/api";
+import { getColorForMetric } from "@/utils/metrics";
 
 const formatMetric = (value, suffix = "") => {
   if (value == null || Number.isNaN(value)) return "N/A";
@@ -17,6 +18,71 @@ const formatDuration = (value) => {
 const formatText = (value) => {
   const text = String(value ?? "").trim();
   return text || "N/A";
+};
+
+const toMetric = (value) => {
+  if (value == null || value === "") return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+};
+
+const NETWORK_LOG_BUCKET_PRECISION = 4;
+const MAX_THPUT_MATCH_DISTANCE_METERS = 50;
+
+const toBucketKey = (lat, lng) =>
+  `${Number(lat).toFixed(NETWORK_LOG_BUCKET_PRECISION)}|${Number(lng).toFixed(NETWORK_LOG_BUCKET_PRECISION)}`;
+
+const getDistanceMeters = (start, end) => {
+  if (!start || !end) return Number.POSITIVE_INFINITY;
+
+  const earthRadius = 6371000;
+  const lat1 = (Number(start.lat) * Math.PI) / 180;
+  const lat2 = (Number(end.lat) * Math.PI) / 180;
+  const deltaLat = ((Number(end.lat) - Number(start.lat)) * Math.PI) / 180;
+  const deltaLng = ((Number(end.lng) - Number(start.lng)) * Math.PI) / 180;
+
+  const a =
+    Math.sin(deltaLat / 2) * Math.sin(deltaLat / 2) +
+    Math.cos(lat1) * Math.cos(lat2) * Math.sin(deltaLng / 2) * Math.sin(deltaLng / 2);
+
+  return earthRadius * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+};
+
+const findNearestThroughputSample = (position, bucketedLogs) => {
+  if (!position || !bucketedLogs) return null;
+
+  const centerLat = Number(position.lat);
+  const centerLng = Number(position.lng);
+  if (!Number.isFinite(centerLat) || !Number.isFinite(centerLng)) return null;
+
+  const candidates = [];
+  for (let latOffset = -1; latOffset <= 1; latOffset += 1) {
+    for (let lngOffset = -1; lngOffset <= 1; lngOffset += 1) {
+      const bucketLat = centerLat + latOffset / 10 ** NETWORK_LOG_BUCKET_PRECISION;
+      const bucketLng = centerLng + lngOffset / 10 ** NETWORK_LOG_BUCKET_PRECISION;
+      const bucket = bucketedLogs.get(toBucketKey(bucketLat, bucketLng));
+      if (Array.isArray(bucket) && bucket.length > 0) candidates.push(...bucket);
+    }
+  }
+
+  if (candidates.length === 0) return null;
+
+  let bestMatch = null;
+  let bestDistance = Number.POSITIVE_INFINITY;
+  candidates.forEach((sample) => {
+    const samplePosition = {
+      lat: sample.lat ?? sample.latitude,
+      lng: sample.lng ?? sample.longitude ?? sample.lon,
+    };
+    const distance = getDistanceMeters(position, samplePosition);
+    if (distance < bestDistance) {
+      bestDistance = distance;
+      bestMatch = sample;
+    }
+  });
+
+  if (bestDistance > MAX_THPUT_MATCH_DISTANCE_METERS) return null;
+  return bestMatch;
 };
 
 const getNormalizedStatus = (statusRaw) => {
@@ -88,11 +154,14 @@ const getSubSessionMarkerPath = (subSessionType, statusRaw) => {
 const SubSessionMarkers = ({
   markers = [],
   show = false,
+  thresholds = {},
+  networkLogData = [],
   selectedMarkerId = null,
   selectedMarkerIds = [],
   onMarkerSelect,
 }) => {
   const [internalSelectedMarkerId, setInternalSelectedMarkerId] = useState(null);
+  const [hoveredMarkerId, setHoveredMarkerId] = useState(null);
   const activeMarkerId = selectedMarkerId ?? internalSelectedMarkerId;
   const highlightedMarkerIdSet = useMemo(() => {
     const values = Array.isArray(selectedMarkerIds) ? selectedMarkerIds : [];
@@ -102,12 +171,14 @@ const SubSessionMarkers = ({
   useEffect(() => {
     if (!show) {
       setInternalSelectedMarkerId(null);
+      setHoveredMarkerId(null);
     }
   }, [show]);
 
   useEffect(() => {
     if (!Array.isArray(markers) || markers.length === 0) {
       setInternalSelectedMarkerId(null);
+      setHoveredMarkerId(null);
       return;
     }
 
@@ -115,11 +186,69 @@ const SubSessionMarkers = ({
     if (!exists) {
       setInternalSelectedMarkerId(null);
     }
-  }, [markers, activeMarkerId]);
 
-  const selectedMarker = useMemo(
-    () => markers.find((item) => item.id === activeMarkerId) || null,
-    [markers, activeMarkerId],
+    const hoveredExists = markers.some((item) => item.id === hoveredMarkerId);
+    if (!hoveredExists) {
+      setHoveredMarkerId(null);
+    }
+  }, [markers, activeMarkerId, hoveredMarkerId]);
+
+  const bucketedNetworkLogs = useMemo(() => {
+    if (!Array.isArray(networkLogData) || networkLogData.length === 0) return new Map();
+
+    return networkLogData.reduce((accumulator, log) => {
+      const lat = Number(log?.lat ?? log?.latitude);
+      const lng = Number(log?.lng ?? log?.longitude ?? log?.lon);
+      if (!Number.isFinite(lat) || !Number.isFinite(lng)) return accumulator;
+      if (String(log?.log_type ?? log?.connection_type ?? "").toLowerCase() === "wifi") {
+        return accumulator;
+      }
+
+      const dlThroughput = toMetric(
+        log?.dl_tpt ?? log?.dl_thpt ?? log?.dl_rpt ?? log?.dl_throughput ?? log?.throughput_dl,
+      );
+      if (dlThroughput == null) return accumulator;
+
+      const key = toBucketKey(lat, lng);
+      const current = accumulator.get(key) || [];
+      current.push({ ...log, dlThroughput });
+      accumulator.set(key, current);
+      return accumulator;
+    }, new Map());
+  }, [networkLogData]);
+
+  const enrichedMarkers = useMemo(
+    () =>
+      (Array.isArray(markers) ? markers : []).map((marker) => {
+        const matchedSample = findNearestThroughputSample(marker.start ?? marker.position, bucketedNetworkLogs);
+        const dlThroughput = toMetric(
+          marker.dlThroughput ??
+            marker.dl_tpt ??
+            marker.dl_thpt ??
+            matchedSample?.dlThroughput ??
+            matchedSample?.dl_tpt ??
+            matchedSample?.dl_thpt,
+        );
+        const thresholdColor =
+          dlThroughput != null ? getColorForMetric("dl_thpt", dlThroughput, thresholds) : null;
+
+        return {
+          ...marker,
+          dlThroughput,
+          fillColor: thresholdColor || formatStatus(marker.resultStatus).color,
+        };
+      }),
+    [bucketedNetworkLogs, markers, thresholds],
+  );
+
+  const activeSelectedMarker = useMemo(
+    () => enrichedMarkers.find((item) => item.id === activeMarkerId) || null,
+    [enrichedMarkers, activeMarkerId],
+  );
+
+  const activeHoveredMarker = useMemo(
+    () => enrichedMarkers.find((item) => item.id === hoveredMarkerId) || null,
+    [enrichedMarkers, hoveredMarkerId],
   );
 
   if (!show || !Array.isArray(markers) || markers.length === 0) {
@@ -128,7 +257,31 @@ const SubSessionMarkers = ({
 
   return (
     <>
-      {markers.map((marker, index) => (
+      {activeHoveredMarker?.start && activeHoveredMarker?.end && (
+        <PolylineF
+          path={[activeHoveredMarker.start, activeHoveredMarker.end]}
+          options={{
+            strokeColor: "#22d3ee",
+            strokeOpacity: 0.95,
+            strokeWeight: 3,
+            geodesic: true,
+            zIndex: 900,
+            icons: [
+              {
+                icon: {
+                  path: window.google.maps.SymbolPath.FORWARD_OPEN_ARROW,
+                  scale: 3,
+                  strokeColor: "#22d3ee",
+                  strokeOpacity: 1,
+                },
+                offset: "100%",
+              },
+            ],
+          }}
+        />
+      )}
+
+      {enrichedMarkers.map((marker, index) => (
         (() => {
           const markerKey = String(marker.id ?? "");
           const isHighlighted = highlightedMarkerIdSet.has(markerKey);
@@ -142,7 +295,7 @@ const SubSessionMarkers = ({
                   marker.subSessionType,
                   marker.resultStatusRaw ?? marker.resultStatus,
                 ),
-                fillColor: formatStatus(marker.resultStatus).color,
+                fillColor: marker.fillColor,
                 fillOpacity: 1,
                 strokeColor: isHighlighted ? "#22d3ee" : "#f7f8f8",
                 strokeWeight: isHighlighted ? 4 : 2,
@@ -152,21 +305,27 @@ const SubSessionMarkers = ({
               title={`Session ${marker.sessionId}${marker.subSessionId != null ? ` / Sub ${marker.subSessionId}` : ""
                 } / ${formatSubSessionType(marker.subSessionType)}`}
               onClick={() => {
-                if (selectedMarkerId == null) {
-                  setInternalSelectedMarkerId(marker.id);
-                }
+                setInternalSelectedMarkerId(marker.id);
                 if (typeof onMarkerSelect === "function") {
                   onMarkerSelect(marker);
                 }
+              }}
+              onMouseOver={() => {
+                if (marker.start && marker.end) {
+                  setHoveredMarkerId(marker.id);
+                }
+              }}
+              onMouseOut={() => {
+                setHoveredMarkerId((current) => (current === marker.id ? null : current));
               }}
             />
           );
         })()
       ))}
 
-      {selectedMarker && (
+      {activeSelectedMarker && (
         <InfoWindowF
-          position={selectedMarker.position}
+          position={activeSelectedMarker.position}
           onCloseClick={() => {
             if (selectedMarkerId == null) {
               setInternalSelectedMarkerId(null);
@@ -181,60 +340,64 @@ const SubSessionMarkers = ({
             <div className="space-y-1">
               <div className="flex justify-between gap-3">
                 <span className="text-slate-500">Session</span>
-                <span className="font-medium">{selectedMarker.sessionId ?? "N/A"}</span>
+                <span className="font-medium">{activeSelectedMarker.sessionId ?? "N/A"}</span>
               </div>
               <div className="flex justify-between gap-3">
                 <span className="text-slate-500">Sub Session</span>
-                <span className="font-medium">{selectedMarker.subSessionId ?? "N/A"}</span>
+                <span className="font-medium">{activeSelectedMarker.subSessionId ?? "N/A"}</span>
               </div>
               <div className="flex justify-between gap-3">
                 <span className="text-slate-500">Type</span>
-                <span className="font-medium">{formatSubSessionType(selectedMarker.subSessionType)}</span>
+                <span className="font-medium">{formatSubSessionType(activeSelectedMarker.subSessionType)}</span>
               </div>
               <div className="flex justify-between gap-3">
                 <span className="text-slate-500">Status</span>
                 <span className="font-medium">
                   {formatSubSessionStatus(
-                    selectedMarker.resultStatusRaw ?? selectedMarker.resultStatus,
-                    selectedMarker.subSessionType,
+                    activeSelectedMarker.resultStatusRaw ?? activeSelectedMarker.resultStatus,
+                    activeSelectedMarker.subSessionType,
                   )}
                 </span>
               </div>
-              {formatSubSessionType(selectedMarker.subSessionType) === "CS" && (
+              {formatSubSessionType(activeSelectedMarker.subSessionType) === "CS" && (
                 <>
                   <div className="flex justify-between gap-3">
                     <span className="text-slate-500">Number</span>
-                    <span className="font-medium">{formatText(selectedMarker.number)}</span>
+                    <span className="font-medium">{formatText(activeSelectedMarker.number)}</span>
                   </div>
                   <div className="flex justify-between gap-3">
                     <span className="text-slate-500">Direction</span>
-                    <span className="font-medium capitalize">{formatText(selectedMarker.direction)}</span>
+                    <span className="font-medium capitalize">{formatText(activeSelectedMarker.direction)}</span>
                   </div>
                   <div className="flex justify-between gap-3">
                     <span className="text-slate-500">Duration</span>
-                    <span className="font-medium">{formatDuration(selectedMarker.duration)}</span>
+                    <span className="font-medium">{formatDuration(activeSelectedMarker.duration)}</span>
                   </div>
                 </>
               )}
               <div className="flex justify-between gap-3">
+                <span className="text-slate-500">DL Throughput</span>
+                <span className="font-medium">{formatMetric(activeSelectedMarker.dlThroughput, " Mbps")}</span>
+              </div>
+              <div className="flex justify-between gap-3">
                 <span className="text-slate-500">Success</span>
-                <span className="font-medium">{selectedMarker.metrics?.status_counts?.success ?? 0}</span>
+                <span className="font-medium">{activeSelectedMarker.metrics?.status_counts?.success ?? 0}</span>
               </div>
               <div className="flex justify-between gap-3">
                 <span className="text-slate-500">Failed</span>
-                <span className="font-medium">{selectedMarker.metrics?.status_counts?.failed ?? 0}</span>
+                <span className="font-medium">{activeSelectedMarker.metrics?.status_counts?.failed ?? 0}</span>
               </div>
               <div className="flex justify-between gap-3">
                 <span className="text-slate-500">Sub Sessions</span>
-                <span className="font-medium">{selectedMarker.subSessionCount ?? "N/A"}</span>
+                <span className="font-medium">{activeSelectedMarker.subSessionCount ?? "N/A"}</span>
               </div>
               <div className="flex justify-between gap-3">
                 <span className="text-slate-500">Avg Speed</span>
                 <span className="font-medium">
                   {formatMetric(
-                    selectedMarker.metrics?.avg_speed == null
+                    activeSelectedMarker.metrics?.avg_speed == null
                       ? null
-                      : Number(selectedMarker.metrics.avg_speed) / 1000,
+                      : Number(activeSelectedMarker.metrics.avg_speed) / 1000,
                     " Mbps",
                   )}
                 </span>

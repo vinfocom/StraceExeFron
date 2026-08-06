@@ -565,6 +565,9 @@ const MetricThresholdLegend = ({
 }) => {
   const config = getMetricConfig(selectedMetric);
   const list = thresholds?.[config.thresholdKey] || [];
+  const [openColorKey, setOpenColorKey] = useState(null);
+  const [customColorValue, setCustomColorValue] = useState("");
+  const [colorOverrides, setColorOverrides] = useState({});
   const normalizedThresholds = useMemo(
     () =>
       (Array.isArray(list) ? list : [])
@@ -614,7 +617,7 @@ const MetricThresholdLegend = ({
 
       valid++;
       const idx = normalizedThresholds.findIndex((t) =>
-        matchesMetricRange(val, t.minNum, t.maxNum, t.isLast),
+        matchesMetricRange(val, t.minNum, t.maxNum, false),
       );
 
       if (idx !== -1) {
@@ -622,7 +625,7 @@ const MetricThresholdLegend = ({
       } else {
         if (Number.isFinite(lowestMin) && val < lowestMin) {
           belowRange++;
-        } else if (Number.isFinite(highestMax) && val > highestMax) {
+        } else if (Number.isFinite(highestMax) && val >= highestMax) {
           aboveRange++;
         }
         unmatched++;
@@ -650,12 +653,62 @@ const MetricThresholdLegend = ({
         id,
         min: parseFloat(threshold.min),
         max: parseFloat(threshold.max),
-        includeMax: Boolean(threshold.isLast),
+        includeMax: false,
         metric: selectedMetric,
       },
       onFilterChange,
     );
   };
+
+  const handleOpenEndedRowClick = useCallback(
+    (type) => {
+      if (!normalizedThresholds.length) return;
+
+      const filter =
+        type === "below"
+          ? {
+              type: "metric",
+              id: `metric-below-${normalizedThresholds[0]?.minNum}`,
+              min: null,
+              max: normalizedThresholds[0]?.minNum,
+              includeMax: false,
+              metric: selectedMetric,
+            }
+          : {
+              type: "metric",
+              id: `metric-above-${normalizedThresholds[normalizedThresholds.length - 1]?.maxNum}`,
+              min: normalizedThresholds[normalizedThresholds.length - 1]?.maxNum,
+              max: null,
+              includeMax: true,
+              metric: selectedMetric,
+            };
+
+      toggleLegendFilter(activeFilter, filter, onFilterChange);
+    },
+    [activeFilter, normalizedThresholds, onFilterChange, selectedMetric],
+  );
+
+  const handleColorChange = useCallback((key, color) => {
+    if (!/^#[0-9a-f]{6}$/i.test(color)) return;
+    setColorOverrides((prev) => ({ ...prev, [key]: color }));
+    if (typeof window !== "undefined") {
+      window.dispatchEvent(
+        new CustomEvent("stracer:map-threshold-color-change", {
+          detail: {
+            metric: config.thresholdKey,
+            key,
+            color,
+          },
+        }),
+      );
+    }
+  }, [config.thresholdKey]);
+
+  const toggleColorPalette = useCallback((event, key, color) => {
+    event.stopPropagation();
+    setOpenColorKey((current) => (current === key ? null : key));
+    setCustomColorValue(color || "");
+  }, []);
 
   if (!list.length) {
     return (
@@ -676,6 +729,75 @@ const MetricThresholdLegend = ({
   return (
     <div className="flex flex-col">
       <div className="max-h-64 overflow-y-auto space-y-px custom-scrollbar">
+        {belowRangeCount > 0 && normalizedThresholds.length > 0 && (() => {
+          const filter = {
+            type: "metric",
+            id: `metric-below-${normalizedThresholds[0]?.minNum}`,
+            min: null,
+            max: normalizedThresholds[0]?.minNum,
+            includeMax: false,
+            metric: selectedMetric,
+          };
+          const color = colorOverrides[filter.id] || normalizedThresholds[0]?.color || "#64748b";
+          const isActive = hasLegendFilter(activeFilter, filter);
+          const isDimmed = getLegendFilterItems(activeFilter).length > 0 && !isActive;
+          const isPaletteOpen = openColorKey === filter.id;
+
+          return (
+            <div key={filter.id} className="space-y-1">
+              <LegendRow
+                color={color}
+                label={`Below ${normalizedThresholds[0]?.minNum}`}
+                count={belowRangeCount}
+                total={validCount}
+                onClick={() => handleOpenEndedRowClick("below")}
+                isActive={isActive}
+                isDimmed={isDimmed}
+                onColorClick={(event) => toggleColorPalette(event, filter.id, color)}
+              />
+              {isPaletteOpen && (
+                <div
+                  className="rounded-md border border-gray-700 bg-gray-950/95 p-2"
+                  onClick={(event) => event.stopPropagation()}
+                >
+                  <div className="grid grid-cols-6 gap-1.5">
+                    {MAP_COLOR_PRESETS.map((preset) => (
+                      <button
+                        key={preset}
+                        type="button"
+                        aria-label={`Use ${preset}`}
+                        className={`h-5 w-5 rounded border ${
+                          preset.toLowerCase() === color.toLowerCase()
+                            ? "border-white"
+                            : "border-gray-700"
+                        }`}
+                        style={{ backgroundColor: preset }}
+                        onClick={() => handleColorChange(filter.id, preset)}
+                      />
+                    ))}
+                  </div>
+                  <div className="mt-2 flex items-center gap-2">
+                    <input
+                      type="text"
+                      value={customColorValue}
+                      onChange={(event) => setCustomColorValue(event.target.value)}
+                      placeholder="#RRGGBB"
+                      className="h-8 flex-1 rounded border border-gray-700 bg-gray-900 px-2 text-xs text-white outline-none focus:border-cyan-500"
+                    />
+                    <button
+                      type="button"
+                      className="rounded border border-gray-700 px-2 py-1 text-[11px] text-white hover:bg-white/10"
+                      onClick={() => handleColorChange(filter.id, customColorValue)}
+                    >
+                      Apply
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          );
+        })()}
+
         {usedThresholds.map((t) => {
           const id = `metric-${t.min}-${t.max}`;
           const isActive = hasLegendFilter(activeFilter, {
@@ -683,49 +805,141 @@ const MetricThresholdLegend = ({
             id,
             min: parseFloat(t.min),
             max: parseFloat(t.max),
-            includeMax: Boolean(t.isLast),
+            includeMax: false,
             metric: selectedMetric,
           });
           const isDimmed = getLegendFilterItems(activeFilter).length > 0 && !isActive;
+          const color = colorOverrides[id] || t.color;
+          const isPaletteOpen = openColorKey === id;
 
           return (
-            <LegendRow
-              key={t.idx}
-              color={t.color}
-              label={t.range || t.label || `${t.min} → ${t.max}`}
-              count={t.count}
-              total={validCount}
-              onClick={() => handleRowClick(t)}
-              isActive={isActive}
-              isDimmed={isDimmed}
-            />
+            <div key={t.idx} className="space-y-1">
+              <LegendRow
+                color={color}
+                label={t.range || t.label || `${t.min} → ${t.max}`}
+                count={t.count}
+                total={validCount}
+                onClick={() => handleRowClick(t)}
+                isActive={isActive}
+                isDimmed={isDimmed}
+                onColorClick={(event) => toggleColorPalette(event, id, color)}
+              />
+              {isPaletteOpen && (
+                <div
+                  className="rounded-md border border-gray-700 bg-gray-950/95 p-2"
+                  onClick={(event) => event.stopPropagation()}
+                >
+                  <div className="grid grid-cols-6 gap-1.5">
+                    {MAP_COLOR_PRESETS.map((preset) => (
+                      <button
+                        key={preset}
+                        type="button"
+                        aria-label={`Use ${preset}`}
+                        className={`h-5 w-5 rounded border ${
+                          preset.toLowerCase() === color.toLowerCase()
+                            ? "border-white"
+                            : "border-gray-700"
+                        }`}
+                        style={{ backgroundColor: preset }}
+                        onClick={() => handleColorChange(id, preset)}
+                      />
+                    ))}
+                  </div>
+                  <div className="mt-2 flex items-center gap-2">
+                    <input
+                      type="text"
+                      value={customColorValue}
+                      onChange={(event) => setCustomColorValue(event.target.value)}
+                      placeholder="#RRGGBB"
+                      className="h-8 flex-1 rounded border border-gray-700 bg-gray-900 px-2 text-xs text-white outline-none focus:border-cyan-500"
+                    />
+                    <button
+                      type="button"
+                      className="rounded border border-gray-700 px-2 py-1 text-[11px] text-white hover:bg-white/10"
+                      onClick={() => handleColorChange(id, customColorValue)}
+                    >
+                      Apply
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
           );
         })}
         {unmatchedCount > 0 ? (
           <>
-            {belowRangeCount > 0 && (
-              <LegendRow
-                key="metric-below-range"
-                color="#64748b"
-                label={`Less than ${normalizedThresholds[0]?.minNum}`}
-                count={belowRangeCount}
-                total={validCount}
-                onClick={() => {}}
-                isActive={false}
-                isDimmed={false}
-              />
-            )}
             {aboveRangeCount > 0 && (
-              <LegendRow
-                key="metric-above-range"
-                color="#111827"
-                label={`More than ${normalizedThresholds[normalizedThresholds.length - 1]?.maxNum}`}
-                count={aboveRangeCount}
-                total={validCount}
-                onClick={() => {}}
-                isActive={false}
-                isDimmed={false}
-              />
+              (() => {
+                const filter = {
+                  type: "metric",
+                  id: `metric-above-${normalizedThresholds[normalizedThresholds.length - 1]?.maxNum}`,
+                  min: normalizedThresholds[normalizedThresholds.length - 1]?.maxNum,
+                  max: null,
+                  includeMax: true,
+                  metric: selectedMetric,
+                };
+                const color =
+                  colorOverrides[filter.id] ||
+                  normalizedThresholds[normalizedThresholds.length - 1]?.color ||
+                  "#111827";
+                const isActive = hasLegendFilter(activeFilter, filter);
+                const isDimmed = getLegendFilterItems(activeFilter).length > 0 && !isActive;
+                const isPaletteOpen = openColorKey === filter.id;
+
+                return (
+                  <div key={filter.id} className="space-y-1">
+                    <LegendRow
+                      color={color}
+                      label={`Above ${normalizedThresholds[normalizedThresholds.length - 1]?.maxNum}`}
+                      count={aboveRangeCount}
+                      total={validCount}
+                      onClick={() => handleOpenEndedRowClick("above")}
+                      isActive={isActive}
+                      isDimmed={isDimmed}
+                      onColorClick={(event) => toggleColorPalette(event, filter.id, color)}
+                    />
+                    {isPaletteOpen && (
+                      <div
+                        className="rounded-md border border-gray-700 bg-gray-950/95 p-2"
+                        onClick={(event) => event.stopPropagation()}
+                      >
+                        <div className="grid grid-cols-6 gap-1.5">
+                          {MAP_COLOR_PRESETS.map((preset) => (
+                            <button
+                              key={preset}
+                              type="button"
+                              aria-label={`Use ${preset}`}
+                              className={`h-5 w-5 rounded border ${
+                                preset.toLowerCase() === color.toLowerCase()
+                                  ? "border-white"
+                                  : "border-gray-700"
+                              }`}
+                              style={{ backgroundColor: preset }}
+                              onClick={() => handleColorChange(filter.id, preset)}
+                            />
+                          ))}
+                        </div>
+                        <div className="mt-2 flex items-center gap-2">
+                          <input
+                            type="text"
+                            value={customColorValue}
+                            onChange={(event) => setCustomColorValue(event.target.value)}
+                            placeholder="#RRGGBB"
+                            className="h-8 flex-1 rounded border border-gray-700 bg-gray-900 px-2 text-xs text-white outline-none focus:border-cyan-500"
+                          />
+                          <button
+                            type="button"
+                            className="rounded border border-gray-700 px-2 py-1 text-[11px] text-white hover:bg-white/10"
+                            onClick={() => handleColorChange(filter.id, customColorValue)}
+                          >
+                            Apply
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })()
             )}
             {unmatchedCount - belowRangeCount - aboveRangeCount > 0 && (
               <LegendRow

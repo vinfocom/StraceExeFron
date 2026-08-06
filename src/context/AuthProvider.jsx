@@ -7,11 +7,18 @@ import {
   clearProjectSessionCache,
   setProjectSessionCacheUserScope,
 } from '../utils/projectSessionCache';
+import {
+  clearStoredUser,
+  readStoredUser,
+  writeStoredUser,
+} from '../utils/authSession';
 
 const TRANSITION_INTENT_KEY = 'authTransitionIntent';
+const LOGIN_EVENT_KEY = 'login-event';
+const LOGOUT_EVENT_KEY = 'logout-event';
 
 const AuthProvider = ({ children }) => {
-  const [user, setUser] = useState(null);
+  const [user, setUser] = useState(() => readStoredUser());
   const [loading, setLoading] = useState(true);
   const [authError, setAuthError] = useState(null);
   const authRequestVersionRef = useRef(0);
@@ -43,9 +50,37 @@ const AuthProvider = ({ children }) => {
   const clearSession = useCallback(() => {
     setUser(null);
     setAuthError(null);
-    sessionStorage.removeItem('user');
+    clearStoredUser();
     clearProjectSessionCache();
   }, []);
+
+  useEffect(() => {
+    if (user) {
+      setProjectSessionCacheUserScope(user);
+    }
+  }, [user]);
+
+  const refreshUser = useCallback(async () => {
+    try {
+      const response = await homeApi.getAuthStatus();
+      const authUser = extractUserFromResponse(response);
+      if (authUser) {
+        setUser(authUser);
+        writeStoredUser(authUser);
+        setProjectSessionCacheUserScope(authUser);
+        setAuthError(null);
+        return authUser;
+      }
+      clearSession();
+      return null;
+    } catch (error) {
+      if (error.status === 401 || error.status === 403) {
+        clearSession();
+        return null;
+      }
+      throw error;
+    }
+  }, [clearSession]);
 
   const handleAuthError = useCallback(() => {
     clearSession();
@@ -56,20 +91,14 @@ const AuthProvider = ({ children }) => {
     const verifyAuthStatus = async () => {
       const requestVersion = ++authRequestVersionRef.current;
       try {
-        const response = await homeApi.getAuthStatus();
+        const authUser = await refreshUser();
         if (requestVersion !== authRequestVersionRef.current) return;
-
-        const authUser = extractUserFromResponse(response);
         if (authUser) {
-          setUser(authUser);
-          sessionStorage.setItem('user', JSON.stringify(authUser));
-          setProjectSessionCacheUserScope(authUser);
-        } else {
-          clearSession();
+          return;
         }
-      } catch {
+      } catch (error) {
         if (requestVersion !== authRequestVersionRef.current) return;
-        clearSession();
+        setAuthError(error?.message || 'Unable to verify your session right now.');
       } finally {
         if (requestVersion === authRequestVersionRef.current) {
           setLoading(false);
@@ -78,7 +107,7 @@ const AuthProvider = ({ children }) => {
     };
 
     verifyAuthStatus();
-  }, [clearSession]);
+  }, [clearSession, refreshUser]);
 
   useEffect(() => {
     setAuthErrorHandler(handleAuthError);
@@ -87,7 +116,16 @@ const AuthProvider = ({ children }) => {
 
   useEffect(() => {
     const handleStorageChange = (e) => {
-      if (e.key === 'logout-event') {
+      if (e.key === LOGIN_EVENT_KEY && e.newValue) {
+        authRequestVersionRef.current += 1;
+        setLoading(true);
+        refreshUser().finally(() => {
+          setLoading(false);
+        });
+        return;
+      }
+
+      if (e.key === LOGOUT_EVENT_KEY) {
         clearSession();
         navigate('/', { replace: true });
       }
@@ -95,7 +133,7 @@ const AuthProvider = ({ children }) => {
 
     window.addEventListener('storage', handleStorageChange);
     return () => window.removeEventListener('storage', handleStorageChange);
-  }, [clearSession, navigate]);
+  }, [clearSession, navigate, refreshUser]);
 
   const login = async ({ Email, Password, IP = '', ForceLogin = false, country_code }) => {
     try {
@@ -138,8 +176,10 @@ if (isSuccessResponse(response)) {
 
         clearProjectSessionCache();
         setUser(userData);
-        sessionStorage.setItem('user', JSON.stringify(userData));
+        writeStoredUser(userData);
         setProjectSessionCacheUserScope(userData);
+        localStorage.setItem(LOGIN_EVENT_KEY, Date.now().toString());
+        localStorage.removeItem(LOGIN_EVENT_KEY);
 
         return { success: true, user: userData };
       }
@@ -207,8 +247,8 @@ if (isSuccessResponse(response)) {
 
       await homeApi.logout();
 
-      localStorage.setItem('logout-event', Date.now().toString());
-      localStorage.removeItem('logout-event');
+      localStorage.setItem(LOGOUT_EVENT_KEY, Date.now().toString());
+      localStorage.removeItem(LOGOUT_EVENT_KEY);
     } catch (error) {
       console.warn('Logout API failed; clearing local session anyway.', error);
     } finally {
@@ -224,29 +264,11 @@ if (isSuccessResponse(response)) {
     setUser((prevUser) => {
       if (!prevUser) return null;
       const updatedUser = { ...prevUser, ...updates };
-      sessionStorage.setItem('user', JSON.stringify(updatedUser));
+      writeStoredUser(updatedUser);
       setProjectSessionCacheUserScope(updatedUser);
       return updatedUser;
     });
   }, []);
-
-  const refreshUser = useCallback(async () => {
-    try {
-      const response = await homeApi.getAuthStatus();
-      const authUser = extractUserFromResponse(response);
-      if (authUser) {
-        setUser(authUser);
-        sessionStorage.setItem('user', JSON.stringify(authUser));
-        setProjectSessionCacheUserScope(authUser);
-        return authUser;
-      }
-    } catch (error) {
-      if (error.status === 401 || error.status === 403) {
-        clearSession();
-      }
-    }
-    return null;
-  }, [clearSession]);
 
   const contextValue = {
     user,

@@ -6,32 +6,7 @@ import { ProjectForm } from "../components/project/ProjectForm";
 import { useAuth } from "../context/AuthContext";
 import { Button } from "@/components/ui/button";
 import { RefreshCw } from "lucide-react";
-
-const resolveCompanyId = (user) => {
-  const directCompanyId = Number(
-    user?.company_id ?? user?.CompanyId ?? user?.companyId ?? 0
-  );
-  if (Number.isFinite(directCompanyId) && directCompanyId > 0) {
-    return directCompanyId;
-  }
-
-  if (typeof window === "undefined") return 0;
-
-  try {
-    const cachedUser = JSON.parse(sessionStorage.getItem("user") || "null");
-    const cachedCompanyId = Number(
-      cachedUser?.company_id ??
-        cachedUser?.CompanyId ??
-        cachedUser?.companyId ??
-        0
-    );
-    return Number.isFinite(cachedCompanyId) && cachedCompanyId > 0
-      ? cachedCompanyId
-      : 0;
-  } catch {
-    return 0;
-  }
-};
+import { resolveCompanyId } from "@/utils/authSession";
 
 const CreateProjectPage = () => {
   const { user } = useAuth();

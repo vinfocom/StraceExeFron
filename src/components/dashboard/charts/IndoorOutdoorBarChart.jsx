@@ -7,10 +7,10 @@ import {
   YAxis,
   CartesianGrid,
   Tooltip,
-  ResponsiveContainer,
 } from 'recharts';
 import { Activity, AlertTriangle, Building2, TreePine } from 'lucide-react';
 import ChartCard from '../ChartCard';
+import StableChartContainer from '../StableChartContainer';
 import { useIndOut } from '@/hooks/useDashboardData';
 import { getProviderColor, normalizeTechName, normalizeProviderName } from '@/utils/colorUtils';
 
@@ -258,8 +258,11 @@ const IndoorOutdoorProviderChart = ({ chartFilters, onChartFiltersChange }) => {
       ) : chartData.length > 0 ? (
         <div className="h-full flex flex-col">
           <div className="flex-1 min-h-0">
-            <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={220}>
+            <StableChartContainer minHeight={220}>
+              {({ width, height }) => (
               <BarChart
+                width={width}
+                height={height}
                 data={chartData}
                 margin={{ top: 10, right: 25, bottom: 45, left: 15 }}
                 barCategoryGap="20%"
@@ -314,7 +317,8 @@ const IndoorOutdoorProviderChart = ({ chartFilters, onChartFiltersChange }) => {
                   maxBarSize={40}
                 />
               </BarChart>
-            </ResponsiveContainer>
+              )}
+            </StableChartContainer>
           </div>
 
           <CustomLegend />

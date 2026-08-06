@@ -7575,6 +7575,8 @@ const UnifiedMapView = () => {
               <SubSessionMarkers
                 show={showSubSession}
                 markers={subSessionMarkers}
+                thresholds={effectiveThresholds}
+                networkLogData={filteredLocations}
                 selectedMarkerId={selectedSubSessionTarget?.markerId ?? null}
                 selectedMarkerIds={selectedSubSessionTargets.map((item) => item?.markerId).filter(Boolean)}
                 onMarkerSelect={handleSubSessionMarkerSelect}

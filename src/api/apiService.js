@@ -1,10 +1,13 @@
 // src/api/apiService.js
 import axios from 'axios';
 import { clearProjectSessionCache } from '../utils/projectSessionCache';
-
-const isElectronRuntime =
-  typeof navigator !== "undefined" &&
-  /electron/i.test(navigator.userAgent || "");
+import {
+  clearStoredUser,
+  getCurrentAppLocation,
+  isElectronRuntime,
+  isLoginRoute,
+  setStoredRedirectTarget,
+} from '../utils/authSession';
 
 const getRuntimeCsharpApiBaseUrl = () => {
   if (!isElectronRuntime) return "";
@@ -268,7 +271,7 @@ const handleAuthError = (config) => {
   const isAuthEndpoint = config?.url?.includes('/auth/');
   if (isRedirecting || isAuthEndpoint) return;
 
-  sessionStorage.removeItem('user');
+  clearStoredUser();
   clearProjectSessionCache();
 
   isRedirecting = true;
@@ -287,11 +290,17 @@ const handleAuthError = (config) => {
 };
 
 const redirectToLogin = () => {
-  const currentPath = window.location.pathname;
-  if (currentPath !== '/login') {
-    sessionStorage.setItem('redirectAfterLogin', currentPath);
-    window.location.href = '/login';
+  const currentLocation = getCurrentAppLocation();
+  if (isLoginRoute(currentLocation)) return;
+
+  setStoredRedirectTarget(currentLocation);
+
+  if (isElectronRuntime()) {
+    window.location.hash = '#/login';
+    return;
   }
+
+  window.location.href = '/login';
 };
 
 // ============================================

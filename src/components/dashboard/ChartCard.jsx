@@ -1,5 +1,5 @@
 // src/components/ChartCard.jsx
-import React, { useRef, useState, useMemo } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'react-toastify';
 import {
   MoreVertical, Filter, Settings as SettingsIcon, 
@@ -32,6 +32,62 @@ const ChartCard = ({
   const [showTable, setShowTable] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [filterSettingsOpen, setFilterSettingsOpen] = useState(false);
+  const [chartViewportReady, setChartViewportReady] = useState(false);
+  const [chartViewportStyle, setChartViewportStyle] = useState({
+    minHeight: 260,
+  });
+
+  useEffect(() => {
+    if (showTable || isLoading || error || !dataset || dataset.length === 0) {
+      setChartViewportReady(false);
+      return;
+    }
+
+    const node = cardRef.current;
+    if (!node) return;
+
+    let frameId = null;
+
+    const updateViewport = () => {
+      const rect = node.getBoundingClientRect();
+      const width = Math.max(0, Math.floor(rect.width));
+      const height = Math.max(260, Math.floor(rect.height));
+
+      setChartViewportStyle((prev) => {
+        if (prev.minHeight === height) return prev;
+        return { minHeight: height };
+      });
+
+      setChartViewportReady(width > 0 && height > 0);
+    };
+
+    updateViewport();
+
+    if (typeof ResizeObserver === 'undefined') {
+      frameId = window.requestAnimationFrame(updateViewport);
+      return () => {
+        if (frameId !== null) {
+          window.cancelAnimationFrame(frameId);
+        }
+      };
+    }
+
+    const observer = new ResizeObserver(() => {
+      if (frameId !== null) {
+        window.cancelAnimationFrame(frameId);
+      }
+      frameId = window.requestAnimationFrame(updateViewport);
+    });
+
+    observer.observe(node);
+
+    return () => {
+      if (frameId !== null) {
+        window.cancelAnimationFrame(frameId);
+      }
+      observer.disconnect();
+    };
+  }, [dataset, error, isLoading, showTable]);
 
   const handleDownloadPNG = async () => {
     try {
@@ -200,7 +256,7 @@ const ChartCard = ({
         </div>
       </CardHeader>
 
-      <CardContent className="relative h-[320px] sm:h-[360px] lg:h-[390px] xl:h-[420px] p-3 sm:p-4 lg:p-6 min-h-0 min-w-0 overflow-hidden">
+      <CardContent className="relative min-h-[320px] h-[clamp(20rem,42vw,26rem)] p-3 sm:p-4 lg:p-6 min-w-0 overflow-hidden">
         {error ? (
           <div className="flex flex-col items-center justify-center h-full text-red-400">
             <svg className="h-16 w-16 mb-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -244,8 +300,20 @@ const ChartCard = ({
           </div>
         ) : (
           <div ref={cardRef} className="chart-content h-full w-full min-h-0 min-w-0">
-            <div className="h-full w-full min-h-[220px] min-w-0">
-              {children}
+            <div
+              className="h-full w-full min-h-[260px] min-w-0"
+              style={chartViewportStyle}
+            >
+              {chartViewportReady ? (
+                children
+              ) : (
+                <div className="flex h-full w-full items-center justify-center rounded-[1.25rem] border border-dashed border-slate-200 bg-slate-50/70">
+                  <div className="text-center text-sm text-slate-500">
+                    <div className="mx-auto mb-3 h-10 w-10 animate-pulse rounded-full bg-slate-200" />
+                    Preparing responsive chart layout...
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         )}

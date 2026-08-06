@@ -44,6 +44,11 @@ const formatPercent = (value) => {
   return `${Number(value).toFixed(1)}%`;
 };
 
+const formatSignalMetric = (value, unit = "dB") => {
+  if (value == null || Number.isNaN(value)) return "N/A";
+  return `${formatNumber(value, 1)} ${unit}`;
+};
+
 const formatText = (value) => {
   const text = String(value ?? "").trim();
   return text || "N/A";
@@ -113,6 +118,65 @@ const getSubSessionTypeLabel = (typeNormalized) => {
   return "N/A";
 };
 
+const NETWORK_LOG_BUCKET_PRECISION = 4;
+const MAX_SIGNAL_MATCH_DISTANCE_METERS = 50;
+
+const toBucketKey = (lat, lng) =>
+  `${Number(lat).toFixed(NETWORK_LOG_BUCKET_PRECISION)}|${Number(lng).toFixed(NETWORK_LOG_BUCKET_PRECISION)}`;
+
+const getDistanceMeters = (start, end) => {
+  if (!start || !end) return Number.POSITIVE_INFINITY;
+
+  const earthRadius = 6371000;
+  const lat1 = (Number(start.lat) * Math.PI) / 180;
+  const lat2 = (Number(end.lat) * Math.PI) / 180;
+  const deltaLat = ((Number(end.lat) - Number(start.lat)) * Math.PI) / 180;
+  const deltaLng = ((Number(end.lng) - Number(start.lng)) * Math.PI) / 180;
+
+  const a =
+    Math.sin(deltaLat / 2) * Math.sin(deltaLat / 2) +
+    Math.cos(lat1) * Math.cos(lat2) * Math.sin(deltaLng / 2) * Math.sin(deltaLng / 2);
+
+  return earthRadius * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+};
+
+const findNearestSignalSample = (position, bucketedLogs) => {
+  if (!position || !bucketedLogs) return null;
+
+  const centerLat = Number(position.lat);
+  const centerLng = Number(position.lng);
+  if (!Number.isFinite(centerLat) || !Number.isFinite(centerLng)) return null;
+
+  const candidates = [];
+  for (let latOffset = -1; latOffset <= 1; latOffset += 1) {
+    for (let lngOffset = -1; lngOffset <= 1; lngOffset += 1) {
+      const bucketLat = centerLat + latOffset / 10 ** NETWORK_LOG_BUCKET_PRECISION;
+      const bucketLng = centerLng + lngOffset / 10 ** NETWORK_LOG_BUCKET_PRECISION;
+      const bucket = bucketedLogs.get(toBucketKey(bucketLat, bucketLng));
+      if (Array.isArray(bucket) && bucket.length > 0) {
+        candidates.push(...bucket);
+      }
+    }
+  }
+
+  if (candidates.length === 0) return null;
+
+  let bestMatch = null;
+  let bestDistance = Number.POSITIVE_INFINITY;
+
+  candidates.forEach((sample) => {
+    const samplePosition = { lat: sample.lat ?? sample.latitude, lng: sample.lng ?? sample.longitude };
+    const distance = getDistanceMeters(position, samplePosition);
+    if (distance < bestDistance) {
+      bestDistance = distance;
+      bestMatch = sample;
+    }
+  });
+
+  if (bestDistance > MAX_SIGNAL_MATCH_DISTANCE_METERS) return null;
+  return bestMatch;
+};
+
 const PS_SORT_OPTIONS = [
   { key: "NONE", label: "SORT" },
   { key: "AVG_SPD", label: "AVG SPD" },
@@ -130,6 +194,7 @@ const CS_SORT_OPTIONS = [
 export default function SubSessionAnalyticsTab({
   subSessionData = [],
   subSessionSummary: _subSessionSummary = null,
+  networkLogData = [],
   requestedSessionIds = [],
   loading = false,
   onSubSessionSelect,
@@ -220,6 +285,25 @@ export default function SubSessionAnalyticsTab({
     [sortOptions, sortBy],
   );
 
+  const bucketedNetworkLogs = useMemo(() => {
+    if (!Array.isArray(networkLogData) || networkLogData.length === 0) return new Map();
+
+    return networkLogData.reduce((accumulator, log) => {
+      const lat = Number(log?.lat ?? log?.latitude);
+      const lng = Number(log?.lng ?? log?.longitude ?? log?.lon);
+      if (!Number.isFinite(lat) || !Number.isFinite(lng)) return accumulator;
+      if (String(log?.log_type ?? log?.connection_type ?? "").toLowerCase() === "wifi") {
+        return accumulator;
+      }
+
+      const key = toBucketKey(lat, lng);
+      const current = accumulator.get(key) || [];
+      current.push(log);
+      accumulator.set(key, current);
+      return accumulator;
+    }, new Map());
+  }, [networkLogData]);
+
   const rows = useMemo(() => {
     if (!Array.isArray(subSessionData)) return [];
 
@@ -242,6 +326,8 @@ export default function SubSessionAnalyticsTab({
           sub.connection_status ??
           sub.connectionStatus ??
           "Not Connected";
+        const startPosition = sub.start ?? null;
+        const matchedSignalSample = findNearestSignalSample(startPosition, bucketedNetworkLogs);
 
         return {
           rowKey: `sub-row-${session.sessionId ?? sessionIndex}-${sub.subSessionId ?? subIndex}-${subIndex}`,
@@ -255,7 +341,7 @@ export default function SubSessionAnalyticsTab({
           isDroppedCall: isDroppedCallStatus(resultStatusRaw),
           markerId: sub.markerId ?? null,
           position: sub.markerPosition ?? sub.start ?? session.start ?? null,
-          start: sub.start ?? null,
+          start: startPosition,
           end: sub.end ?? null,
           avgSpeed: toMetric(
             sub.avg_speed ??
@@ -280,10 +366,13 @@ export default function SubSessionAnalyticsTab({
               sub.setup_time,
           ),
           duration,
+          rsrp: toMetric(matchedSignalSample?.rsrp),
+          rsrq: toMetric(matchedSignalSample?.rsrq),
+          sinr: toMetric(matchedSignalSample?.sinr),
         };
       }),
     );
-  }, [subSessionData]);
+  }, [bucketedNetworkLogs, subSessionData]);
 
   const sortedRows = useMemo(() => {
     const sorted = [...rows];
@@ -638,7 +727,7 @@ export default function SubSessionAnalyticsTab({
 
         <div
           className={`grid ${
-            activeTypeTab === CALL_TYPE_TAB ? "" : "grid-cols-5"
+            activeTypeTab === CALL_TYPE_TAB ? "" : "grid-cols-8"
           } bg-slate-800 px-2 py-1.5 text-[11px] font-semibold text-slate-300`}
           style={
             activeTypeTab === CALL_TYPE_TAB
@@ -661,6 +750,9 @@ export default function SubSessionAnalyticsTab({
               <span>Duration</span>
               <span>Avg Speed</span>
               <span>File Size</span>
+              <span>RSRP</span>
+              <span>RSRQ</span>
+              <span>SINR</span>
               <span>Map</span>
             </>
           )}
@@ -693,7 +785,7 @@ export default function SubSessionAnalyticsTab({
             <React.Fragment key={row.rowKey}>
               <div
                 className={`grid ${
-                  activeTypeTab === CALL_TYPE_TAB ? "" : "grid-cols-5"
+                  activeTypeTab === CALL_TYPE_TAB ? "" : "grid-cols-8"
                 } px-2 py-1.5 text-xs border-t border-slate-700 ${
                   isSelected || isMultiSelected ? "bg-cyan-900/20 text-cyan-100" : "text-slate-200"
                 }`}
@@ -709,35 +801,59 @@ export default function SubSessionAnalyticsTab({
                     <span className="truncate" title={formatText(row.number)}>{formatText(row.number)}</span>
                     <span className="capitalize">{formatText(row.direction)}</span>
                     <span>{formatDuration(row.duration)}</span>
+                    <span>
+                      <span
+                        className={`inline-flex items-center rounded-md px-2 py-0.5 text-[11px] border ${
+                          row.isDroppedCall
+                            ? "border-amber-700/40 bg-amber-900/20 text-amber-300"
+                            : row.status === "success"
+                            ? "border-emerald-700/40 bg-emerald-900/20 text-emerald-300"
+                            : "border-rose-700/40 bg-rose-900/20 text-rose-300"
+                        }`}
+                      >
+                        {isCallRow && row.isDroppedCall
+                          ? "Drop"
+                          : row.status === "success"
+                          ? isCallRow
+                            ? "Connected"
+                            : "Success"
+                          : isCallRow
+                            ? "Not Connected"
+                            : "Failed"}
+                      </span>
+                    </span>
                   </>
                 ) : (
                   <>
+                    <span>
+                      <span
+                        className={`inline-flex items-center rounded-md px-2 py-0.5 text-[11px] border ${
+                          row.isDroppedCall
+                            ? "border-amber-700/40 bg-amber-900/20 text-amber-300"
+                            : row.status === "success"
+                            ? "border-emerald-700/40 bg-emerald-900/20 text-emerald-300"
+                            : "border-rose-700/40 bg-rose-900/20 text-rose-300"
+                        }`}
+                      >
+                        {isCallRow && row.isDroppedCall
+                          ? "Drop"
+                          : row.status === "success"
+                          ? isCallRow
+                            ? "Connected"
+                            : "Success"
+                          : isCallRow
+                            ? "Not Connected"
+                            : "Failed"}
+                      </span>
+                    </span>
                     <span>{formatDuration(row.duration)}</span>
                     <span>{formatSpeedKbps(row.avgSpeed)}</span>
                     <span>{formatBytes(row.fileSize)}</span>
+                    <span>{formatSignalMetric(row.rsrp, "dBm")}</span>
+                    <span>{formatSignalMetric(row.rsrq, "dB")}</span>
+                    <span>{formatSignalMetric(row.sinr, "dB")}</span>
                   </>
                 )}
-                <span>
-                  <span
-                    className={`inline-flex items-center rounded-md px-2 py-0.5 text-[11px] border ${
-                      row.isDroppedCall
-                        ? "border-amber-700/40 bg-amber-900/20 text-amber-300"
-                        : row.status === "success"
-                        ? "border-emerald-700/40 bg-emerald-900/20 text-emerald-300"
-                        : "border-rose-700/40 bg-rose-900/20 text-rose-300"
-                    }`}
-                  >
-                    {isCallRow && row.isDroppedCall
-                      ? "Drop"
-                      : row.status === "success"
-                      ? isCallRow
-                        ? "Connected"
-                        : "Success"
-                      : isCallRow
-                        ? "Not Connected"
-                        : "Failed"}
-                  </span>
-                </span>
                 <span>
                   <button
                     type="button"

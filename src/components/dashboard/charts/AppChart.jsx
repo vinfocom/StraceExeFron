@@ -7,10 +7,10 @@ import {
   YAxis,
   CartesianGrid,
   Tooltip,
-  ResponsiveContainer,
   ComposedChart,
 } from "recharts";
 import ChartCard from "../ChartCard";
+import StableChartContainer from "../StableChartContainer";
 import { useAppData } from "@/hooks/useDashboardData.js";
 
 const METRIC_CONFIG = [
@@ -378,8 +378,11 @@ function AppChart() {
         </div>
       ) : displayData.length > 0 ? (
         <div style={{ width: "100%", height: "100%" }}>
-          <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={220}>
+          <StableChartContainer minHeight={220}>
+            {({ width, height }) => (
             <ComposedChart
+              width={width}
+              height={height}
               data={displayData}
               margin={{ top: 20, right: 60, left: 20, bottom: 95 }}
             >
@@ -462,7 +465,8 @@ function AppChart() {
                 />
               )}
             </ComposedChart>
-          </ResponsiveContainer>
+            )}
+          </StableChartContainer>
         </div>
       ) : (
         

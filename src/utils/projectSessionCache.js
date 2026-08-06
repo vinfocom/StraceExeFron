@@ -1,4 +1,5 @@
 import { clearIndexedDbByPrefix } from "@/utils/indexedDbCache";
+import { readStoredUser } from "@/utils/authSession";
 
 const CACHE_PREFIX = "stracer:project-cache:v1";
 const USER_SCOPE_STORAGE_KEY = "stracer:user-scope";
@@ -25,9 +26,8 @@ const safeJsonParse = (value, fallback = null) => {
 const getSessionScope = () => {
   if (typeof window === "undefined") return "guest";
   try {
-    const rawUser = window.sessionStorage.getItem("user");
-    if (rawUser && rawUser !== "undefined") {
-      const user = safeJsonParse(rawUser, {});
+    const user = readStoredUser();
+    if (user) {
       const candidate =
         user?.id ??
         user?.Id ??

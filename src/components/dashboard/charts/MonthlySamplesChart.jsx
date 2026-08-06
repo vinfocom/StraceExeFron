@@ -1,6 +1,5 @@
 import React from 'react';
 import {
-  ResponsiveContainer,
   AreaChart,
   Area,
   XAxis,
@@ -10,6 +9,7 @@ import {
   ReferenceDot,
 } from 'recharts';
 import ChartCard from '../ChartCard';
+import StableChartContainer from '../StableChartContainer';
 import { useMonthlySamples } from '@/hooks/useDashboardData.js';
 import { formatNumber } from '@/utils/chartUtils';
 
@@ -62,8 +62,9 @@ const MonthlySamplesChart = ({ chartFilters, onChartFiltersChange, operators, ne
       showChartFilters={true}
     >
       <div className="h-full w-full rounded-[1.5rem] border border-slate-200/80 bg-[radial-gradient(circle_at_top_left,_rgba(14,165,233,0.16),_transparent_38%),linear-gradient(180deg,_rgba(248,250,252,0.95)_0%,_rgba(255,255,255,1)_100%)] p-3 sm:p-4">
-        <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={220}>
-          <AreaChart data={data} margin={{ top: 18, right: 18, left: -12, bottom: 8 }}>
+        <StableChartContainer minHeight={220}>
+          {({ width, height }) => (
+          <AreaChart width={width} height={height} data={data} margin={{ top: 18, right: 18, left: -12, bottom: 8 }}>
             <defs>
               <linearGradient id="monthlyAreaFill" x1="0" y1="0" x2="0" y2="1">
                 <stop offset="0%" stopColor="#0ea5e9" stopOpacity={0.42} />
@@ -135,7 +136,8 @@ const MonthlySamplesChart = ({ chartFilters, onChartFiltersChange, operators, ne
               activeDot={<ActivePoint />}
             />
           </AreaChart>
-        </ResponsiveContainer>
+          )}
+        </StableChartContainer>
       </div>
     </ChartCard>
   );

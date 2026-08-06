@@ -1,5 +1,6 @@
 // src/api/pythonApiService.js
 import axios from 'axios';
+import { resolveUserRegion } from '@/utils/authSession';
 
 const DEFAULT_PYTHON_API_URL = "https://stracerservices.vinfocom.co.in";
 
@@ -109,32 +110,7 @@ const DEFAULT_PYTHON_REGION = 'india';
  * Resolve the active region from the signed-in user's session, so every
  * Python request carries region context even when the caller didn't pass one.
  */
-const getStoredUserRegion = () => {
-  if (typeof window === 'undefined' || typeof window.sessionStorage === 'undefined') {
-    return '';
-  }
-
-  try {
-    const raw = window.sessionStorage.getItem('user');
-    if (!raw) return '';
-
-    const user = JSON.parse(raw);
-    const rawValue =
-      user?.country_code ??
-      user?.countryCode ??
-      user?.country ??
-      user?.source_db ??
-      user?.sourceDb;
-
-    const normalized = String(rawValue || '').trim().toLowerCase();
-    if (!normalized) return '';
-    if (['tw', 'twn', 'taiwan'].includes(normalized)) return 'taiwan';
-    if (['in', 'ind', 'india'].includes(normalized)) return 'india';
-    return normalized;
-  } catch {
-    return '';
-  }
-};
+const getStoredUserRegion = () => resolveUserRegion();
 
 const resolveRequestRegion = () => getStoredUserRegion() || DEFAULT_PYTHON_REGION;
 

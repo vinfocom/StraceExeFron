@@ -1,6 +1,5 @@
 import React, { useState, useMemo, useCallback, memo } from 'react';
 import { 
-  ResponsiveContainer, 
   ComposedChart, 
   Bar, 
   Scatter, 
@@ -12,6 +11,7 @@ import {
 } from 'recharts';
 import { Smartphone, TrendingUp, TrendingDown } from 'lucide-react';
 import ChartCard from '../ChartCard';
+import StableChartContainer from '../StableChartContainer';
 import { TOOLTIP_STYLE } from '@/components/constants/dashboardConstants';
 import { useHandsetPerformance } from '@/hooks/useDashboardData.js';
 import { getRSRPPointColor } from '@/utils/chartUtils';
@@ -403,8 +403,11 @@ const HandsetPerformanceChart = () => {
           </p>
         </div>
       ) : (
-        <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={220}>
+        <StableChartContainer minHeight={220}>
+          {({ width, height }) => (
           <ComposedChart
+            width={width}
+            height={height}
             data={chartData}
             margin={{ top: 20, right: 20, left: 55, bottom: 105 }}
           >
@@ -485,7 +488,8 @@ const HandsetPerformanceChart = () => {
               animationEasing="ease-out"
             />
           </ComposedChart>
-        </ResponsiveContainer>
+          )}
+        </StableChartContainer>
       )}
     </ChartCard>
   );

@@ -36,34 +36,9 @@ import {
 import { useAuth } from "../../context/AuthContext";
 import Spinner from "../common/Spinner";
 import { upsertProjectInProjectsCache } from "@/utils/projectsCache";
+import { resolveCompanyId } from "@/utils/authSession";
 
 const DEFAULT_MIN_SAMPLES = 10;
-
-const resolveCompanyId = (user) => {
-  const directCompanyId = Number(
-    user?.company_id ?? user?.CompanyId ?? user?.companyId ?? 0
-  );
-  if (Number.isFinite(directCompanyId) && directCompanyId > 0) {
-    return directCompanyId;
-  }
-
-  if (typeof window === "undefined") return 0;
-
-  try {
-    const cachedUser = JSON.parse(sessionStorage.getItem("user") || "null");
-    const cachedCompanyId = Number(
-      cachedUser?.company_id ??
-        cachedUser?.CompanyId ??
-        cachedUser?.companyId ??
-        0
-    );
-    return Number.isFinite(cachedCompanyId) && cachedCompanyId > 0
-      ? cachedCompanyId
-      : 0;
-  } catch {
-    return 0;
-  }
-};
 
 const PolygonDropdown = ({
   polygons,

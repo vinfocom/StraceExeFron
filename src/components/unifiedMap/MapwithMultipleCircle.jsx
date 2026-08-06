@@ -615,7 +615,7 @@ const normalizeExternalPolygonData = (polygons = []) => {
 };
 
 // ============== Helper: Color Resolution ==============
-const getColorFromThresholds = (value, metricThresholds) => {
+const getColorFromThresholds = (value, metricThresholds, metricKey = "", colorOverrides = {}) => {
   if (value == null || isNaN(value)) return "#808080";
   if (!metricThresholds?.length) return "#808080";
 
@@ -625,14 +625,20 @@ const getColorFromThresholds = (value, metricThresholds) => {
     const t = sorted[i];
     const min = parseFloat(t.min);
     const max = parseFloat(t.max);
-    const isLast = i === sorted.length - 1;
-    if (value >= min && (isLast ? value <= max : value < max)) {
-      return t.color;
+    if (value >= min && value < max) {
+      return colorOverrides[`${metricKey}|metric-${t.min}-${t.max}`] || t.color;
     }
   }
   
-  if (value < parseFloat(sorted[0].min)) return sorted[0].color;
-  if (value > parseFloat(sorted[sorted.length - 1].max)) return sorted[sorted.length - 1].color;
+  if (value < parseFloat(sorted[0].min)) {
+    return colorOverrides[`${metricKey}|metric-below-${parseFloat(sorted[0].min)}`] || sorted[0].color;
+  }
+  if (value >= parseFloat(sorted[sorted.length - 1].max)) {
+    return (
+      colorOverrides[`${metricKey}|metric-above-${parseFloat(sorted[sorted.length - 1].max)}`] ||
+      sorted[sorted.length - 1].color
+    );
+  }
 
   return "#808080";
 };
@@ -1425,6 +1431,7 @@ const MapWithMultipleCircles = ({
   const [selectedImageLog, setSelectedImageLog] = useState(null);
   const [selectedImageLoadFailed, setSelectedImageLoadFailed] = useState(false);
   const [categoryColorVersion, setCategoryColorVersion] = useState(0);
+  const [metricColorOverrides, setMetricColorOverrides] = useState({});
   
   const onFilteredLocationsChangeRef = useRef(onFilteredLocationsChange);
   const onFilteredNeighborsChangeRef = useRef(onFilteredNeighborsChange);
@@ -1443,9 +1450,21 @@ const MapWithMultipleCircles = ({
     const handleCategoryColorChange = () => {
       setCategoryColorVersion((version) => version + 1);
     };
+    const handleThresholdColorChange = (event) => {
+      const metric = String(event?.detail?.metric || "").trim().toLowerCase();
+      const key = String(event?.detail?.key || "").trim();
+      const color = String(event?.detail?.color || "").trim();
+      if (!metric || !key || !/^#[0-9a-f]{6}$/i.test(color)) return;
+      setMetricColorOverrides((current) => ({
+        ...current,
+        [`${metric}|${key}`]: color,
+      }));
+    };
     window.addEventListener("stracer:map-category-color-change", handleCategoryColorChange);
+    window.addEventListener("stracer:map-threshold-color-change", handleThresholdColorChange);
     return () => {
       window.removeEventListener("stracer:map-category-color-change", handleCategoryColorChange);
+      window.removeEventListener("stracer:map-threshold-color-change", handleThresholdColorChange);
     };
   }, []);
 
@@ -1480,7 +1499,7 @@ const MapWithMultipleCircles = ({
       typeKey === 'ul_tpt' || typeKey === 'ul_rpt' ? 'ul_thpt' : typeKey;
 
     if (thresholds && thresholds[metricKey]?.length > 0) {
-      return getColorFromThresholds(value, thresholds[metricKey]);
+      return getColorFromThresholds(value, thresholds[metricKey], metricKey, metricColorOverrides);
     }
     
     // 4. Fallback to hook if ready
@@ -1489,7 +1508,7 @@ const MapWithMultipleCircles = ({
     }
     
     return "#808080";
-  }, [thresholds, thresholdsReady, getMetricColorFromHook, categoryColorVersion]);
+  }, [thresholds, thresholdsReady, getMetricColorFromHook, categoryColorVersion, metricColorOverrides]);
 
 
   // Fetch polygons

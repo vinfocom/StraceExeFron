@@ -2082,6 +2082,7 @@ function UnifiedDetailLogs({
             <SubSessionAnalyticsTab
               subSessionData={subSessionData}
               subSessionSummary={subSessionSummary}
+              networkLogData={filteredRawLocations.length > 0 ? filteredRawLocations : filteredLocations}
               requestedSessionIds={subSessionRequestedIds}
               loading={subSessionLoading}
               selectedSubSessionTarget={selectedSubSessionTarget}

@@ -28,32 +28,7 @@ import { Trash2, Map as MapIcon, ChevronLeft, ChevronRight, MapPin } from "lucid
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { upsertProjectInProjectsCache } from "@/utils/projectsCache";
-
-const resolveCompanyId = (user) => {
-  const directCompanyId = Number(
-    user?.company_id ?? user?.CompanyId ?? user?.companyId ?? 0,
-  );
-  if (Number.isFinite(directCompanyId) && directCompanyId > 0) {
-    return directCompanyId;
-  }
-
-  if (typeof window === "undefined") return 0;
-
-  try {
-    const cachedUser = JSON.parse(sessionStorage.getItem("user") || "null");
-    const cachedCompanyId = Number(
-      cachedUser?.company_id ??
-        cachedUser?.CompanyId ??
-        cachedUser?.companyId ??
-        0,
-    );
-    return Number.isFinite(cachedCompanyId) && cachedCompanyId > 0
-      ? cachedCompanyId
-      : 0;
-  } catch {
-    return 0;
-  }
-};
+import { resolveCompanyId } from "@/utils/authSession";
 
 const mergeSessionsById = (primaryRows = [], localRows = []) => {
   const seen = new Set();

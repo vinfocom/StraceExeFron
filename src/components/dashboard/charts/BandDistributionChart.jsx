@@ -1,7 +1,6 @@
 // src/components/charts/BandDistributionChart.jsx
 import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { 
-  ResponsiveContainer, 
   BarChart, 
   Bar, 
   Cell, 
@@ -13,6 +12,7 @@ import {
 } from 'recharts';
 import { Check, ChevronDown, X } from 'lucide-react';
 import ChartCard from '../ChartCard';
+import StableChartContainer from '../StableChartContainer';
 import { CHART_COLORS } from '@/components/constants/dashboardConstants';
 import { useBandDistributionRaw } from '@/hooks/useDashboardData.js';
 import { canonicalOperatorName } from '@/utils/dashboardUtils';
@@ -392,8 +392,11 @@ const BandDistributionChart = ({ filters: globalFilters }) => {
       <ActiveFiltersDisplay />
       
       {chartData.length > 0 ? (
-        <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={220}>
+        <StableChartContainer minHeight={220}>
+          {({ width, height }) => (
           <BarChart
+            width={width}
+            height={height}
             data={chartData}
             layout="vertical"
             margin={{ top: 12, right: 50, left: 10, bottom: 8 }}
@@ -439,7 +442,8 @@ const BandDistributionChart = ({ filters: globalFilters }) => {
               ))}
             </Bar>
           </BarChart>
-        </ResponsiveContainer>
+          )}
+        </StableChartContainer>
       ) : (
         <div className="flex items-center justify-center h-full text-gray-500">
           <div className="text-center">
