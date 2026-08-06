@@ -1684,9 +1684,17 @@ function UnifiedDetailLogs({
     const toastId = toast.loading("Processing report request...");
 
     try {
+      const userCountryCode = String(user?.country_code || user?.countryCode || "").trim().toUpperCase();
+      const reportRegion =
+        userCountryCode === "TW" ? "taiwan" :
+        userCountryCode === "IN" ? "india" :
+        "";
+
       const genResponse = await reportApi.generateReport({
         project_id: projectId,
-        user_id: user.id
+        user_id: user.id,
+        ...(userCountryCode ? { country_code: userCountryCode, countryCode: userCountryCode } : {}),
+        ...(reportRegion ? { region: reportRegion } : {}),
       });
 
       const reportId = genResponse?.report_id;

@@ -96,6 +96,48 @@ const looksLikeAxiosConfig = (value) => {
   return keys.some((key) => AXIOS_CONFIG_KEYS.has(key));
 };
 
+const isBlank = (value) => value === undefined || value === null || value === '';
+
+const isPlainRequestBody = (value) =>
+  isPlainObject(value) &&
+  !(typeof Blob !== 'undefined' && value instanceof Blob) &&
+  !(typeof File !== 'undefined' && value instanceof File);
+
+const DEFAULT_PYTHON_REGION = 'india';
+
+/**
+ * Resolve the active region from the signed-in user's session, so every
+ * Python request carries region context even when the caller didn't pass one.
+ */
+const getStoredUserRegion = () => {
+  if (typeof window === 'undefined' || typeof window.sessionStorage === 'undefined') {
+    return '';
+  }
+
+  try {
+    const raw = window.sessionStorage.getItem('user');
+    if (!raw) return '';
+
+    const user = JSON.parse(raw);
+    const rawValue =
+      user?.country_code ??
+      user?.countryCode ??
+      user?.country ??
+      user?.source_db ??
+      user?.sourceDb;
+
+    const normalized = String(rawValue || '').trim().toLowerCase();
+    if (!normalized) return '';
+    if (['tw', 'twn', 'taiwan'].includes(normalized)) return 'taiwan';
+    if (['in', 'ind', 'india'].includes(normalized)) return 'india';
+    return normalized;
+  } catch {
+    return '';
+  }
+};
+
+const resolveRequestRegion = () => getStoredUserRegion() || DEFAULT_PYTHON_REGION;
+
 /**
  * Create axios instance for Python backend
  */
@@ -160,12 +202,32 @@ const discoverPythonBaseUrl = async () => {
 pythonAxios.interceptors.request.use(
   (config) => {
     logApiDebug(`Python API Request: ${config.method?.toUpperCase()} ${config.url}`);
-    
+
+    const method = String(config.method || 'get').toLowerCase();
+    const region = resolveRequestRegion();
+
     // Handle FormData
     if (config.data instanceof FormData) {
+      if (!config.data.has('region')) {
+        config.data.append('region', region);
+      }
       delete config.headers['Content-Type'];
+    } else if (isPlainRequestBody(config.data)) {
+      if (isBlank(config.data.region)) {
+        config.data.region = region;
+      }
+    } else if (['post', 'put', 'patch'].includes(method) && config.data === undefined) {
+      config.data = { region };
     }
-    
+
+    // GET/DELETE requests carry region as a query param instead of a body
+    if (method === 'get' || method === 'delete') {
+      if (!config.params) config.params = {};
+      if (isBlank(config.params.region)) {
+        config.params.region = region;
+      }
+    }
+
     return config;
   },
   (error) => {
