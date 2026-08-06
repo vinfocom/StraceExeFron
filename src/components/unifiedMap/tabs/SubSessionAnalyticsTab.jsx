@@ -1,4 +1,3 @@
-import { ChevronDown } from "lucide-react";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 
 const formatNumber = (value, digits = 2) => {
@@ -61,14 +60,6 @@ const toPositiveMetric = (value) => {
   const parsed = toMetric(value);
   if (parsed == null) return null;
   return parsed > 0 ? parsed : null;
-};
-
-const formatLatLng = (position) => {
-  if (!position || position.lat == null || position.lng == null) return "N/A";
-  const lat = Number(position.lat);
-  const lng = Number(position.lng);
-  if (Number.isNaN(lat) || Number.isNaN(lng)) return "N/A";
-  return `${lat.toFixed(6)}, ${lng.toFixed(6)}`;
 };
 
 const normalizeStatusText = (statusRaw) =>
@@ -145,7 +136,6 @@ export default function SubSessionAnalyticsTab({
   selectedSubSessionTarget = null,
   selectedSubSessionTargets = [],
 }) {
-  const [expandedRows, setExpandedRows] = useState({});
   const [sortBy, setSortBy] = useState("NONE");
   const [isSortOpen, setIsSortOpen] = useState(false);
   const [activeTypeTab, setActiveTypeTab] = useState("CS");
@@ -413,13 +403,6 @@ export default function SubSessionAnalyticsTab({
     };
   }, [filteredRows]);
 
-  const toggleRow = (rowKey) => {
-    setExpandedRows((previous) => ({
-      ...previous,
-      [rowKey]: !previous[rowKey],
-    }));
-  };
-
   const handleHighlight = (row) => {
     if (typeof onSubSessionSelect !== "function") return;
 
@@ -655,15 +638,14 @@ export default function SubSessionAnalyticsTab({
 
         <div
           className={`grid ${
-            activeTypeTab === CALL_TYPE_TAB ? "" : "grid-cols-6"
+            activeTypeTab === CALL_TYPE_TAB ? "" : "grid-cols-5"
           } bg-slate-800 px-2 py-1.5 text-[11px] font-semibold text-slate-300`}
           style={
             activeTypeTab === CALL_TYPE_TAB
-              ? { gridTemplateColumns: "0.8fr 0.95fr 1.15fr 0.8fr 0.8fr 1fr 0.8fr" }
+              ? { gridTemplateColumns: "0.95fr 1.15fr 0.8fr 0.8fr 1fr 0.8fr" }
               : undefined
           }
         >
-          <span>Session ID</span>
           {activeTypeTab === CALL_TYPE_TAB ? (
             <>
               <span>Setup Time</span>
@@ -675,11 +657,11 @@ export default function SubSessionAnalyticsTab({
             </>
           ) : (
             <>
-              <span>Sub Session ID</span>
-              <span>Type</span>
               <span>Status</span>
+              <span>Duration</span>
+              <span>Avg Speed</span>
+              <span>File Size</span>
               <span>Map</span>
-              <span>Details</span>
             </>
           )}
         </div>
@@ -706,23 +688,21 @@ export default function SubSessionAnalyticsTab({
             (selectedSessionKey === String(row.sessionId) &&
               selectedSubSessionKey != null &&
               selectedSubSessionKey === String(row.subSessionId));
-          const isExpanded = Boolean(expandedRows[row.rowKey]);
 
           return (
             <React.Fragment key={row.rowKey}>
               <div
                 className={`grid ${
-                  activeTypeTab === CALL_TYPE_TAB ? "" : "grid-cols-6"
+                  activeTypeTab === CALL_TYPE_TAB ? "" : "grid-cols-5"
                 } px-2 py-1.5 text-xs border-t border-slate-700 ${
                   isSelected || isMultiSelected ? "bg-cyan-900/20 text-cyan-100" : "text-slate-200"
                 }`}
                 style={
                   activeTypeTab === CALL_TYPE_TAB
-                    ? { gridTemplateColumns: "0.8fr 0.95fr 1.15fr 0.8fr 0.8fr 1fr 0.8fr" }
+                    ? { gridTemplateColumns: "0.95fr 1.15fr 0.8fr 0.8fr 1fr 0.8fr" }
                     : undefined
                 }
               >
-                <span>{row.sessionId}</span>
                 {activeTypeTab === CALL_TYPE_TAB ? (
                   <>
                     <span>{formatPreciseSeconds(row.setupTime)}</span>
@@ -732,8 +712,9 @@ export default function SubSessionAnalyticsTab({
                   </>
                 ) : (
                   <>
-                    <span>{row.subSessionId}</span>
-                    <span>{getSubSessionTypeLabel(row.subSessionTypeNormalized)}</span>
+                    <span>{formatDuration(row.duration)}</span>
+                    <span>{formatSpeedKbps(row.avgSpeed)}</span>
+                    <span>{formatBytes(row.fileSize)}</span>
                   </>
                 )}
                 <span>
@@ -762,45 +743,40 @@ export default function SubSessionAnalyticsTab({
                     type="button"
                     onClick={() => handleHighlight(row)}
                     disabled={!row.position}
-                    className={`px-2 py-0.5 rounded border ${
+                    aria-label={
                       row.position
                         ? isMultiSelected
-                          ? "border-cyan-400 bg-cyan-900/30 text-cyan-100 hover:bg-cyan-800/50"
+                          ? "Selected on map"
+                          : "Highlight on map"
+                        : "No map point"
+                    }
+                    title={
+                      row.position
+                        ? isMultiSelected
+                          ? "Selected on map"
+                          : "Highlight on map"
+                        : "No map point"
+                    }
+                    className={`inline-flex h-5 w-5 items-center justify-center rounded-sm border ${
+                      row.position
+                        ? isMultiSelected
+                          ? "border-cyan-400 bg-cyan-500/20 text-cyan-100 hover:bg-cyan-500/30"
                           : "border-cyan-600/60 text-cyan-200 hover:bg-cyan-800/40"
-                        : "border-slate-700 text-slate-500 cursor-not-allowed"
+                        : "border-slate-700 text-slate-500 cursor-not-allowed bg-slate-800/40"
                     }`}
                   >
-                    {row.position ? (isMultiSelected ? "Selected" : "Highlight") : "No Point"}
+                    <span
+                      className={`h-2.5 w-2.5 rounded-[2px] border ${
+                        row.position
+                          ? isMultiSelected
+                            ? "border-cyan-200 bg-cyan-300"
+                            : "border-current bg-transparent"
+                          : "border-slate-600 bg-transparent"
+                      }`}
+                    />
                   </button>
                 </span>
-                {activeTypeTab !== CALL_TYPE_TAB && (
-                  <span>
-                    <button
-                      type="button"
-                      onClick={() => toggleRow(row.rowKey)}
-                      className="px-2 py-0.5 rounded border border-slate-600 text-slate-200 hover:bg-slate-800"
-                    >
-                      {isExpanded ? "Hide" : <ChevronDown />}
-                    </button>
-                  </span>
-                )}
               </div>
-
-              {activeTypeTab !== CALL_TYPE_TAB && isExpanded && (
-                <div
-                  className={`border-t border-slate-700 px-3 py-2 ${
-                    isSelected || isMultiSelected ? "bg-cyan-900/10 text-cyan-100" : "bg-slate-900/30 text-slate-300"
-                  }`}
-                >
-                  <div className="grid grid-cols-2 md:grid-cols-3 gap-2 text-[11px]">
-                    <span className="bg-slate-800/70 rounded px-2 py-1">AVG SPD: {formatSpeedKbps(row.avgSpeed)}</span>
-                    <span className="bg-slate-800/70 rounded px-2 py-1">FS: {formatBytes(row.fileSize)}</span>
-                    <span className="bg-slate-800/70 rounded px-2 py-1">DUR: {formatDuration(row.duration)}</span>
-                    <span className="bg-slate-800/70 rounded px-2 py-1">ST: {formatLatLng(row.start)}</span>
-                    <span className="bg-slate-800/70 rounded px-2 py-1">END: {formatLatLng(row.end)}</span>
-                  </div>
-                </div>
-              )}
             </React.Fragment>
           );
         })}

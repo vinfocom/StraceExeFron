@@ -53,6 +53,7 @@ const formatStatus = (statusRaw) => {
 
 const DIAMOND_PATH = "M 0,-10 10,0 0,10 -10,0 z";
 const HEXAGON_PATH = "M 0,-10 8.66,-5 8.66,5 0,10 -8.66,5 -8.66,-5 z";
+const CROSS_PATH = "M -9,-7 -7,-9 0,-2 7,-9 9,-7 2,0 9,7 7,9 0,2 -7,9 -9,7 -2,0 z";
 
 const formatSubSessionType = (subSessionType) => {
   const value = String(subSessionType ?? "").trim();
@@ -74,7 +75,9 @@ const formatSubSessionStatus = (statusRaw, subSessionType) => {
   return type === "CS" ? "Not Connected" : "Failed";
 };
 
-const getSubSessionMarkerPath = (subSessionType) => {
+const getSubSessionMarkerPath = (subSessionType, statusRaw) => {
+  if (getNormalizedStatus(statusRaw) === "failed") return CROSS_PATH;
+
   const value = String(subSessionType ?? "").trim();
   if (value === "2") return HEXAGON_PATH;
   return DIAMOND_PATH;
@@ -135,7 +138,10 @@ const SubSessionMarkers = ({
               key={`${marker.id ?? "sub"}-${marker.sessionId ?? "na"}-${marker.subSessionId ?? "na"}-${index}`}
               position={marker.position}
               icon={{
-                path: getSubSessionMarkerPath(marker.subSessionType),
+                path: getSubSessionMarkerPath(
+                  marker.subSessionType,
+                  marker.resultStatusRaw ?? marker.resultStatus,
+                ),
                 fillColor: formatStatus(marker.resultStatus).color,
                 fillOpacity: 1,
                 strokeColor: isHighlighted ? "#22d3ee" : "#f7f8f8",
