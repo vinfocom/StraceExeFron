@@ -952,7 +952,7 @@ const UploadDataPage = () => {
               Import Polygon
             </TabsTrigger>
             <TabsTrigger value="Report" className="whitespace-normal px-3 py-2 text-center">
-              Report Generation
+              Indoor Report Generation
             </TabsTrigger>
           </TabsList>
 
