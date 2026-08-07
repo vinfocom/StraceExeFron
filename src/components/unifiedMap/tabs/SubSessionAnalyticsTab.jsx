@@ -100,6 +100,28 @@ const normalizeSubSessionResultStatus = (statusRaw) => {
   return "failed";
 };
 
+const toDisplayCase = (value) =>
+  String(value ?? "")
+    .trim()
+    .replace(/[_\s-]+/g, " ")
+    .split(" ")
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1).toLowerCase())
+    .join(" ");
+
+const getSubSessionResultStatusDisplay = (statusRaw) => {
+  const numeric = Number(statusRaw);
+  if (Number.isFinite(numeric)) {
+    if (numeric === 1) return "Success";
+    if (numeric === 2) return "Failed";
+  }
+
+  const normalizedRaw = String(statusRaw ?? "").trim();
+  if (!normalizedRaw) return "Failed";
+
+  return toDisplayCase(normalizedRaw);
+};
+
 const normalizeSubSessionType = (typeRaw) => {
   const value = String(typeRaw ?? "").trim();
   if (value === "1") return "1"; // PS
@@ -109,6 +131,8 @@ const normalizeSubSessionType = (typeRaw) => {
 
 const CALL_TYPE_TAB = "CS";
 const DETAIL_TYPE_TAB = "PS";
+const CS_TABLE_GRID_TEMPLATE = "0.88fr 1.1fr 0.8fr 0.86fr 1.35fr 0.42fr";
+const PS_TABLE_GRID_TEMPLATE = "1.35fr 0.8fr 0.84fr 0.72fr 0.58fr 0.58fr 0.58fr 0.38fr";
 
 const getSubSessionTypeForTab = (typeTab) => (typeTab === CALL_TYPE_TAB ? "2" : "1");
 
@@ -337,7 +361,9 @@ export default function SubSessionAnalyticsTab({
           subSessionTypeNormalized: normalizeSubSessionType(sub.subSessionType),
           number: sub.number ?? sub.phone_number ?? sub.phoneNumber ?? null,
           direction: sub.direction ?? sub.call_direction ?? sub.callDirection ?? null,
+          statusRaw: resultStatusRaw,
           status: normalizeSubSessionResultStatus(resultStatusRaw),
+          statusDisplay: getSubSessionResultStatusDisplay(resultStatusRaw),
           isDroppedCall: isDroppedCallStatus(resultStatusRaw),
           markerId: sub.markerId ?? null,
           position: sub.markerPosition ?? sub.start ?? session.start ?? null,
@@ -726,14 +752,13 @@ export default function SubSessionAnalyticsTab({
         </div>
 
         <div
-          className={`grid ${
-            activeTypeTab === CALL_TYPE_TAB ? "" : "grid-cols-8"
-          } bg-slate-800 px-2 py-1.5 text-[11px] font-semibold text-slate-300`}
-          style={
-            activeTypeTab === CALL_TYPE_TAB
-              ? { gridTemplateColumns: "0.95fr 1.15fr 0.8fr 0.8fr 1fr 0.8fr" }
-              : undefined
-          }
+          className="grid gap-x-1 bg-slate-800 px-2 py-1.5 text-[11px] font-semibold text-slate-300"
+          style={{
+            gridTemplateColumns:
+              activeTypeTab === CALL_TYPE_TAB
+                ? CS_TABLE_GRID_TEMPLATE
+                : PS_TABLE_GRID_TEMPLATE,
+          }}
         >
           {activeTypeTab === CALL_TYPE_TAB ? (
             <>
@@ -784,24 +809,23 @@ export default function SubSessionAnalyticsTab({
           return (
             <React.Fragment key={row.rowKey}>
               <div
-                className={`grid ${
-                  activeTypeTab === CALL_TYPE_TAB ? "" : "grid-cols-8"
-                } px-2 py-1.5 text-xs border-t border-slate-700 ${
+                className={`grid gap-x-1 px-2 py-1.5 text-xs border-t border-slate-700 ${
                   isSelected || isMultiSelected ? "bg-cyan-900/20 text-cyan-100" : "text-slate-200"
                 }`}
-                style={
-                  activeTypeTab === CALL_TYPE_TAB
-                    ? { gridTemplateColumns: "0.95fr 1.15fr 0.8fr 0.8fr 1fr 0.8fr" }
-                    : undefined
-                }
+                style={{
+                  gridTemplateColumns:
+                    activeTypeTab === CALL_TYPE_TAB
+                      ? CS_TABLE_GRID_TEMPLATE
+                      : PS_TABLE_GRID_TEMPLATE,
+                }}
               >
                 {activeTypeTab === CALL_TYPE_TAB ? (
                   <>
-                    <span>{formatPreciseSeconds(row.setupTime)}</span>
+                    <span className="truncate">{formatPreciseSeconds(row.setupTime)}</span>
                     <span className="truncate" title={formatText(row.number)}>{formatText(row.number)}</span>
-                    <span className="capitalize">{formatText(row.direction)}</span>
-                    <span>{formatDuration(row.duration)}</span>
-                    <span>
+                    <span className="truncate capitalize">{formatText(row.direction)}</span>
+                    <span className="truncate">{formatDuration(row.duration)}</span>
+                    <span className="min-w-0">
                       <span
                         className={`inline-flex items-center rounded-md px-2 py-0.5 text-[11px] border ${
                           row.isDroppedCall
@@ -825,7 +849,7 @@ export default function SubSessionAnalyticsTab({
                   </>
                 ) : (
                   <>
-                    <span>
+                    <span className="min-w-0">
                       <span
                         className={`inline-flex items-center rounded-md px-2 py-0.5 text-[11px] border ${
                           row.isDroppedCall
@@ -838,23 +862,23 @@ export default function SubSessionAnalyticsTab({
                         {isCallRow && row.isDroppedCall
                           ? "Drop"
                           : row.status === "success"
-                          ? isCallRow
-                            ? "Connected"
-                            : "Success"
-                          : isCallRow
-                            ? "Not Connected"
-                            : "Failed"}
+                            ? isCallRow
+                              ? "Connected"
+                              : row.statusDisplay
+                            : isCallRow
+                              ? "Not Connected"
+                              : row.statusDisplay}
                       </span>
                     </span>
-                    <span>{formatDuration(row.duration)}</span>
-                    <span>{formatSpeedKbps(row.avgSpeed)}</span>
-                    <span>{formatBytes(row.fileSize)}</span>
-                    <span>{formatSignalMetric(row.rsrp, "dBm")}</span>
-                    <span>{formatSignalMetric(row.rsrq, "dB")}</span>
-                    <span>{formatSignalMetric(row.sinr, "dB")}</span>
+                    <span className="truncate">{formatDuration(row.duration)}</span>
+                    <span className="truncate">{formatSpeedKbps(row.avgSpeed)}</span>
+                    <span className="truncate">{formatBytes(row.fileSize)}</span>
+                    <span className="truncate">{formatSignalMetric(row.rsrp, "dBm")}</span>
+                    <span className="truncate">{formatSignalMetric(row.rsrq, "dB")}</span>
+                    <span className="truncate">{formatSignalMetric(row.sinr, "dB")}</span>
                   </>
                 )}
-                <span>
+                <span className="flex justify-center">
                   <button
                     type="button"
                     onClick={() => handleHighlight(row)}

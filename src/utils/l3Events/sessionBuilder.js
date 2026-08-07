@@ -80,8 +80,20 @@ function isIncomingRingingEvent(item) {
   return CALL_STATE_EVENT_RE.test(item?.eventKey || "") && RINGING_RE.test(item?.rawMessage || "");
 }
 
+function isDialingStateEvent(item) {
+  return DIALING_EVENT_RE.test(item?.eventKey || "")
+    || (CALL_STATE_EVENT_RE.test(item?.eventKey || "") && DIALING_STATE_RE.test(item?.rawMessage || ""));
+}
+
+function isAlertingStateEvent(item) {
+  return ALERTING_EVENT_RE.test(item?.eventKey || "")
+    || (CALL_STATE_EVENT_RE.test(item?.eventKey || "") && RINGING_RE.test(item?.rawMessage || ""));
+}
+
 function isSessionStartEvent(item) {
-  return isDialInitiatedEvent(item) || isIncomingRingingEvent(item);
+  return isDialInitiatedEvent(item)
+    || isIncomingRingingEvent(item)
+    || isDialingStateEvent(item);
 }
 
 function isDuplicateStartEvent(current, item) {
@@ -160,14 +172,18 @@ function recordEvidence(bucket, date, item, label) {
 }
 
 function createSession(item, index) {
+  const startedDialing = isDialingStateEvent(item);
+  const startedAlerting = isAlertingStateEvent(item);
+  const startedIncoming = isIncomingRingingEvent(item);
   return {
     id: `call-${index}`,
     startTime: item?.timestamp || null,
-    dialTime: isDialInitiatedEvent(item) ? item?.timestamp || null : null,
-    dialingTime: null,
-    alertingTime: isIncomingRingingEvent(item) ? item?.timestamp || null : null,
+    dialTime: isDialInitiatedEvent(item) || startedDialing ? item?.timestamp || null : null,
+    dialingTime: startedDialing ? item?.timestamp || null : null,
+    alertingTime: startedIncoming || startedAlerting ? item?.timestamp || null : null,
     answerTime: null,
     connectedTime: null,
+    setupCompletionTime: null,
     disconnectTime: null,
     idleTime: null,
     endTime: null,
@@ -429,6 +445,15 @@ function finalizeSessionMilestones(session) {
     session.connectedTime = strongConnectedItem.timestamp;
   }
 
+  if (!session.setupCompletionTime) {
+    session.setupCompletionTime =
+      session.connectedTime
+      || session.answerTime
+      || session.alertingTime
+      || session.dialingTime
+      || null;
+  }
+
   if (session.l3Analysis.connectedConfirmed) {
     recordEvidence(session.connectedEvidence, session.answerTime, strongConnectedItem, "SIP 200 OK followed by ACK");
   } else if (explicitConnected[0]) {
@@ -478,6 +503,10 @@ export function buildSessions(timeline = []) {
     }
 
     if (isSessionStartEvent(item)) {
+      if (isDialingStateEvent(item)) {
+        absorbBoundaryEvent(current, item);
+        continue;
+      }
       if (isDuplicateStartEvent(current, item)) {
         absorbBoundaryEvent(current, item);
         continue;

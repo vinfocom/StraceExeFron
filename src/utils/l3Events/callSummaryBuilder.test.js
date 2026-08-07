@@ -249,6 +249,20 @@ test("treats cause=3 as completed for this device profile when the call ran norm
   assert.equal(summary.connected, 1);
   assert.equal(summary.calls[0].status, "Connected");
   assert.equal(summary.calls[0].detailedStatus, "Completed");
+  assert.equal(summary.calls[0].setupTimeMs, 2000);
+});
+
+test("derives setup time when the session starts from dialing without a dial-initiated row", () => {
+  const summary = buildCallSummary([
+    event({ seconds: 0, eventKey: "CALL_DIALING", rawMessage: "dialing" }),
+    event({ seconds: 3, eventKey: "CALL_ACTIVE", rawMessage: "active" }),
+    event({ seconds: 9, eventKey: "CALL_DISCONNECT_NONZERO_CAUSE", rawMessage: "cause=3" }),
+    event({ seconds: 9, eventKey: "CALL_DISCONNECTED", rawMessage: "ended" }),
+  ]);
+
+  assert.equal(summary.totalCalls, 1);
+  assert.equal(summary.calls[0].status, "Connected");
+  assert.equal(summary.calls[0].setupTimeMs, 3000);
 });
 
 test("session builder does not create extra sessions from duplicate states or causes", () => {

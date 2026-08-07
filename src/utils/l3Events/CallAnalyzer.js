@@ -39,6 +39,7 @@ export function analyzeCalls(timeline = []) {
       alertingTime: enrichedSession.alertingTime,
       answerTime: enrichedSession.answerTime,
       connectedTime: enrichedSession.connectedTime,
+      setupCompletionTime: enrichedSession.setupCompletionTime,
       disconnectTime: enrichedSession.disconnectTime,
       idleTime: enrichedSession.idleTime,
       endTime: enrichedSession.endTime,

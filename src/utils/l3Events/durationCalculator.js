@@ -6,8 +6,9 @@ function safeDiffMs(startTime, endTime) {
 export function calculateDurations(session) {
   const dialTime = session.dialTime || session.startTime;
   const connectedTime = session.connectedTime || session.answerTime;
+  const setupCompletionTime = connectedTime || session.setupCompletionTime;
   const disconnectTime = session.disconnectTime || session.endTime;
-  const setupTimeMs = connectedTime ? safeDiffMs(dialTime, connectedTime) : 0;
+  const setupTimeMs = setupCompletionTime ? safeDiffMs(dialTime, setupCompletionTime) : 0;
   const setupAttemptDurationMs = safeDiffMs(dialTime, disconnectTime);
   const talkTimeMs = connectedTime ? safeDiffMs(connectedTime, disconnectTime) : 0;
   const totalDurationMs = safeDiffMs(dialTime, disconnectTime);

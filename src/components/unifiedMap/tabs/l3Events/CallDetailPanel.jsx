@@ -440,6 +440,8 @@ function CallEventsMapView({ eventsList }) {
               streetViewControl: false,
               mapTypeControl: true,
               clickableIcons: false,
+              gestureHandling: "greedy",
+              scrollwheel: true,
             }}
           >
             {points.length > 1 && (

@@ -6784,7 +6784,7 @@ const UnifiedMapView = () => {
       position: marker.position,
       resultStatus: marker.resultStatus,
       source: "marker",
-      toggle: true,
+      toggle: false,
     });
   }, [handleSubSessionSelect]);
 

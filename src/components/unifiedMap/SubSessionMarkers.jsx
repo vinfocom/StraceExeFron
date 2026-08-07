@@ -229,8 +229,11 @@ const SubSessionMarkers = ({
             matchedSample?.dl_tpt ??
             matchedSample?.dl_thpt,
         );
+        const isPsMarker = String(marker.subSessionType ?? "").trim() === "1";
         const thresholdColor =
-          dlThroughput != null ? getColorForMetric("dl_thpt", dlThroughput, thresholds) : null;
+          isPsMarker && dlThroughput != null
+            ? getColorForMetric("dl_thpt", dlThroughput, thresholds)
+            : null;
 
         return {
           ...marker,
@@ -297,9 +300,9 @@ const SubSessionMarkers = ({
                 ),
                 fillColor: marker.fillColor,
                 fillOpacity: 1,
-                strokeColor: isHighlighted ? "#22d3ee" : "#f7f8f8",
-                strokeWeight: isHighlighted ? 4 : 2,
-                scale: isHighlighted ? 1.2 : 1,
+                strokeColor: isHighlighted ? marker.fillColor : "#f7f8f8",
+                strokeWeight: isHighlighted ? 5 : 2,
+                scale: isHighlighted ? 1.28 : 1,
               }}
               zIndex={isHighlighted ? 1000 : undefined}
               title={`Session ${marker.sessionId}${marker.subSessionId != null ? ` / Sub ${marker.subSessionId}` : ""

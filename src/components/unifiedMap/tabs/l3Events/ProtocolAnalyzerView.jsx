@@ -69,7 +69,8 @@ const MESSAGE_TYPE_FILTERS = [
   { id: "event", label: "Events" },
 ];
 
-const MAP_CONTAINER_STYLE = { width: "100%", height: "320px" };
+const ANALYZER_PANEL_HEIGHT_CLASS = "h-[1120px] max-h-[calc(100vh-1px)] min-h-[420px]";
+const MAP_CONTAINER_STYLE = { width: "100%", height: "100%" };
 const DEFAULT_MAP_CENTER = { lat: 20.5937, lng: 78.9629 };
 
 function combineProcedureResults(procedures) {
@@ -154,7 +155,7 @@ function ProcedureTree({ procedures, selectedProcedureId, onSelect, query, setQu
   }, [procedures, query]);
 
   return (
-    <aside className="h-[1120px] max-h-[calc(100vh-1px)] min-h-[420px] rounded-lg border border-slate-700 bg-slate-900/80 overflow-hidden flex flex-col">
+    <aside className={`${ANALYZER_PANEL_HEIGHT_CLASS} rounded-lg border border-slate-700 bg-slate-900/80 overflow-hidden flex flex-col`}>
       <div className="p-3 border-b border-slate-700 bg-slate-800/70">
         <div className="flex items-center gap-2 text-sm font-semibold text-white">
           <GitBranch className="h-4 w-4 text-blue-300" />
@@ -400,7 +401,45 @@ function SequenceArrow({ item, columns, y, selected, onSelectMessage }) {
   );
 }
 
-function LadderDiagram({ procedure, columns, selectedMessageId, onSelectMessage, typeFilter, onTypeFilterChange }) {
+function VisualViewToggle({ activeVisualView, onVisualViewChange }) {
+  return (
+    <div className="inline-flex items-center rounded-md border border-slate-700 bg-slate-900/80 p-1">
+      <button
+        type="button"
+        onClick={() => onVisualViewChange("ladder")}
+        className={`rounded px-3 py-1 text-xs font-medium transition-colors ${
+          activeVisualView === "ladder"
+            ? "bg-blue-600 text-white"
+            : "text-slate-300 hover:bg-slate-800"
+        }`}
+      >
+        Ladder
+      </button>
+      <button
+        type="button"
+        onClick={() => onVisualViewChange("map")}
+        className={`rounded px-3 py-1 text-xs font-medium transition-colors ${
+          activeVisualView === "map"
+            ? "bg-blue-600 text-white"
+            : "text-slate-300 hover:bg-slate-800"
+        }`}
+      >
+        Map
+      </button>
+    </div>
+  );
+}
+
+function LadderDiagram({
+  procedure,
+  columns,
+  selectedMessageId,
+  onSelectMessage,
+  typeFilter,
+  onTypeFilterChange,
+  activeVisualView,
+  onVisualViewChange,
+}) {
   const safeColumns = procedure.flowModel?.nodes?.length ? procedure.flowModel.nodes : columns.length ? columns : ["UE", "eNodeB", "MME", "IMS", "gNB"];
   const visibleItems = typeFilter && typeFilter !== "all"
     ? procedure.items.filter((item) => item.type === typeFilter)
@@ -409,7 +448,7 @@ function LadderDiagram({ procedure, columns, selectedMessageId, onSelectMessage,
   const procedureTitle = procedure.flowModel?.name || procedure.name;
 
   return (
-    <div className="rounded-lg border border-slate-700 bg-slate-900/70 overflow-hidden min-h-[520px] flex flex-col">
+    <div className="h-full rounded-lg border border-slate-700 bg-slate-900/70 overflow-hidden flex flex-col">
       <div className="px-3 py-2 border-b border-slate-700 bg-slate-800/70 flex items-center justify-between gap-3">
         <div>
           <h3 className="text-sm font-semibold text-white">
@@ -421,9 +460,15 @@ function LadderDiagram({ procedure, columns, selectedMessageId, onSelectMessage,
             Absolute and relative timing, with Event CSV annotations merged into the signaling ladder.
           </p>
         </div>
-        <span className={`text-[10px] px-2 py-1 rounded border ${RESULT_CLASS[procedure.result] || RESULT_CLASS.Ongoing}`}>
-          {procedure.result}
-        </span>
+        <div className="flex items-center gap-2">
+          <VisualViewToggle
+            activeVisualView={activeVisualView}
+            onVisualViewChange={onVisualViewChange}
+          />
+          <span className={`text-[10px] px-2 py-1 rounded border ${RESULT_CLASS[procedure.result] || RESULT_CLASS.Ongoing}`}>
+            {procedure.result}
+          </span>
+        </div>
       </div>
 
       <div className="px-3 py-2 border-b border-slate-800 flex items-center gap-2">
@@ -452,7 +497,7 @@ function LadderDiagram({ procedure, columns, selectedMessageId, onSelectMessage,
 
       <ReferenceFlowModel procedure={procedure} />
 
-      <div className="flex-1 overflow-auto bg-slate-950 p-4">
+      <div className="min-h-0 flex-1 overflow-auto bg-slate-950 p-4">
         <div
           className="relative mx-auto min-w-[820px] max-w-[1120px] bg-white px-8 pb-8 pt-5 text-slate-950 shadow-xl ring-1 ring-slate-300"
           style={{ height: `${chartHeight}px` }}
@@ -542,7 +587,14 @@ function LadderDiagram({ procedure, columns, selectedMessageId, onSelectMessage,
   );
 }
 
-function ProcedureLocationMap({ procedure, selectedMessage, onSelectMessage, typeFilter }) {
+function ProcedureLocationMap({
+  procedure,
+  selectedMessage,
+  onSelectMessage,
+  typeFilter,
+  activeVisualView,
+  onVisualViewChange,
+}) {
   const { isLoaded, loadError } = useJsApiLoader(GOOGLE_MAPS_LOADER_OPTIONS);
   const [map, setMap] = useState(null);
   const mapsError = getGoogleMapsConfigError() || (loadError ? getGoogleMapsErrorMessage(loadError) : null);
@@ -568,7 +620,7 @@ function ProcedureLocationMap({ procedure, selectedMessage, onSelectMessage, typ
   }, [map, mapItems]);
 
   return (
-    <div className="rounded-lg border border-slate-700 bg-slate-900/70 overflow-hidden">
+    <div className="h-full rounded-lg border border-slate-700 bg-slate-900/70 overflow-hidden flex flex-col">
       <div className="px-3 py-2 border-b border-slate-700 bg-slate-800/70 flex items-center justify-between gap-3">
         <div>
           <div className="flex items-center gap-2 text-sm font-semibold text-white">
@@ -579,31 +631,37 @@ function ProcedureLocationMap({ procedure, selectedMessage, onSelectMessage, typ
             Visible L3/Event rows are plotted from the uploaded `latitude` and `longitude` columns.
           </p>
         </div>
-        <span className="rounded border border-slate-600 bg-slate-900 px-2 py-1 text-[10px] text-slate-300">
-          {mapItems.length} located rows
-        </span>
+        <div className="flex items-center gap-2">
+          <VisualViewToggle
+            activeVisualView={activeVisualView}
+            onVisualViewChange={onVisualViewChange}
+          />
+          <span className="rounded border border-slate-600 bg-slate-900 px-2 py-1 text-[10px] text-slate-300">
+            {mapItems.length} located rows
+          </span>
+        </div>
       </div>
 
       {!mapsError && !isLoaded && (
-        <div className="flex h-[320px] items-center justify-center bg-slate-950 text-sm text-slate-400">
+        <div className="flex min-h-0 flex-1 items-center justify-center bg-slate-950 text-sm text-slate-400">
           Loading map...
         </div>
       )}
 
       {mapsError && (
-        <div className="flex h-[320px] items-center justify-center px-6 text-center text-sm text-amber-300 bg-amber-500/10">
+        <div className="flex min-h-0 flex-1 items-center justify-center px-6 text-center text-sm text-amber-300 bg-amber-500/10">
           {mapsError}
         </div>
       )}
 
       {!mapsError && isLoaded && mapItems.length === 0 && (
-        <div className="flex h-[320px] items-center justify-center bg-slate-950 text-sm text-slate-400">
+        <div className="flex min-h-0 flex-1 items-center justify-center bg-slate-950 text-sm text-slate-400">
           No visible rows have valid latitude/longitude values.
         </div>
       )}
 
       {!mapsError && isLoaded && mapItems.length > 0 && (
-        <div className="relative">
+        <div className="relative min-h-0 flex-1">
           <GoogleMap
             mapContainerStyle={MAP_CONTAINER_STYLE}
             center={DEFAULT_MAP_CENTER}
@@ -614,6 +672,8 @@ function ProcedureLocationMap({ procedure, selectedMessage, onSelectMessage, typ
               streetViewControl: false,
               mapTypeControl: false,
               fullscreenControl: false,
+              gestureHandling: "greedy",
+              scrollwheel: true,
             }}
           >
             {mapItems.map((item) => {
@@ -661,7 +721,7 @@ function MessageDetails({ procedure, message }) {
   const direction = getDirectionInfo(selected);
 
   return (
-    <aside className="h-[1520px] max-h-[calc(100vh-10px)] min-h-[420px] rounded-lg border border-slate-700 bg-slate-900/80 overflow-hidden flex flex-col">
+    <aside className={`${ANALYZER_PANEL_HEIGHT_CLASS} rounded-lg border border-slate-700 bg-slate-900/80 overflow-hidden flex flex-col`}>
       <div className="p-3 border-b border-slate-700 bg-slate-800/70">
         <div className="flex items-center gap-2 text-sm font-semibold text-white">
           <Info className="h-4 w-4 text-blue-300" />
@@ -826,6 +886,7 @@ export function ProtocolAnalyzerView({ analysis, callScoped = false }) {
   const [selectedMessage, setSelectedMessage] = useState(null);
   const [query, setQuery] = useState("");
   const [messageTypeFilter, setMessageTypeFilter] = useState("all");
+  const [activeVisualView, setActiveVisualView] = useState("ladder");
 
   useEffect(() => {
     if (!analysis.procedures.length) {
@@ -889,22 +950,30 @@ export function ProtocolAnalyzerView({ analysis, callScoped = false }) {
           setQuery={setQuery}
         />
 
-        <div className="space-y-3 min-w-0">
-          <ProcedureLocationMap
-            procedure={selectedProcedure}
-            selectedMessage={selectedMessage}
-            onSelectMessage={setSelectedMessage}
-            typeFilter={messageTypeFilter}
-          />
-
-          <LadderDiagram
-            procedure={selectedProcedure}
-            columns={analysis.columns}
-            selectedMessageId={selectedMessage?.id}
-            onSelectMessage={setSelectedMessage}
-            typeFilter={messageTypeFilter}
-            onTypeFilterChange={setMessageTypeFilter}
-          />
+        <div className={`${ANALYZER_PANEL_HEIGHT_CLASS} min-w-0 rounded-lg border border-slate-700 bg-slate-900/80 overflow-hidden flex flex-col`}>
+          <div className="min-h-0 flex-1 p-3">
+            {activeVisualView === "map" ? (
+              <ProcedureLocationMap
+                procedure={selectedProcedure}
+                selectedMessage={selectedMessage}
+                onSelectMessage={setSelectedMessage}
+                typeFilter={messageTypeFilter}
+                activeVisualView={activeVisualView}
+                onVisualViewChange={setActiveVisualView}
+              />
+            ) : (
+              <LadderDiagram
+                procedure={selectedProcedure}
+                columns={analysis.columns}
+                selectedMessageId={selectedMessage?.id}
+                onSelectMessage={setSelectedMessage}
+                typeFilter={messageTypeFilter}
+                onTypeFilterChange={setMessageTypeFilter}
+                activeVisualView={activeVisualView}
+                onVisualViewChange={setActiveVisualView}
+              />
+            )}
+          </div>
         </div>
 
         <MessageDetails procedure={selectedProcedure} message={selectedMessage} />
