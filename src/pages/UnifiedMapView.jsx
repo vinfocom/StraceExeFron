@@ -67,6 +67,7 @@ import {
 } from "@/utils/colorUtils";
 import { PolygonChecker as FastPolygonChecker } from "@/utils/polygonUtils";
 import { getMetricValueFromLog } from "@/utils/metrics";
+import { shouldRenderLogOnMap } from "@/utils/mapEventRenderFilter";
 import {
   findProjectInProjectsCache,
   upsertProjectInProjectsCache,
@@ -4452,10 +4453,17 @@ const UnifiedMapView = () => {
     return [...(base || []), ...generatedMapLogs];
   }, [drawnPoints, generatedMapLogs, preDrawingDisplayLocations]);
 
+  const mapEventDisplayLocations = useMemo(() => {
+    if (!Array.isArray(finalDisplayLocations) || finalDisplayLocations.length === 0) {
+      return EMPTY_LIST;
+    }
+    return finalDisplayLocations.filter(shouldRenderLogOnMap);
+  }, [finalDisplayLocations]);
+
   // Deferred so filter clicks paint the sidebar/legend immediately; the
   // expensive raster/grid rebuild (generateGridCellsOptimized, grid
   // aggregation) then runs as a lower-priority, interruptible update.
-  const deferredGridDisplayLocations = useDeferredValue(finalDisplayLocations);
+  const deferredGridDisplayLocations = useDeferredValue(mapEventDisplayLocations);
   const deferredGridFilteredLocations = useDeferredValue(filteredLocations);
 
   const renderedLegendFilteredLocations = useMemo(() => {

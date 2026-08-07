@@ -2,7 +2,7 @@
 import React, { useMemo, memo, useState, useCallback, useEffect, useRef } from "react";
 import { MarkerClusterer } from "@googlemaps/markerclusterer";
 import { OverlayView, Polyline, useGoogleMap } from "@react-google-maps/api";
-import { ArrowRightLeft, Zap, Download } from "lucide-react";
+import { ArrowRightLeft, Hand, Download } from "lucide-react";
 import { COLOR_SCHEMES, normalizeTechName, getBandColor } from "@/utils/colorUtils";
 
 const HANDOVER_POLYLINE_REGISTRY_KEY = "__stracer_handover_polylines__";
@@ -65,7 +65,8 @@ const createMarkerIcon = (color, label) => {
   const svg = `
     <svg xmlns="http://www.w3.org/2000/svg" width="34" height="34" viewBox="0 0 34 34">
       <circle cx="17" cy="17" r="13" fill="${color}" stroke="white" stroke-width="3"/>
-      <text x="17" y="21" text-anchor="middle" font-size="12" font-family="Arial, sans-serif" font-weight="700" fill="white">${safeLabel}</text>
+      <text x="17" y="21" text-anchor="middle" font-size="13" font-family="Arial, sans-serif" font-weight="700" fill="white">H</text>
+      <text x="25" y="11" text-anchor="middle" font-size="7" font-family="Arial, sans-serif" font-weight="700" fill="white">${safeLabel}</text>
     </svg>
   `;
   return {
@@ -351,7 +352,7 @@ const CompactHandoverMarker = memo(({ transition, onClick, isSelected, type }) =
         title={`${from} → ${to}`}
       >
         <div className="w-4 h-4 rounded-full border-2 border-white shadow-lg flex items-center justify-center" style={{ backgroundColor: bgColor }}>
-          <Zap className="h-2.5 w-2.5 text-white" />
+          <Hand className="h-2.5 w-2.5 text-white" />
         </div>
       </div>
     </OverlayView>

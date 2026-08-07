@@ -20,6 +20,12 @@ export const CallDetailPanel = ({ call, onClose }) => {
   const eventsList = call.events || [];
   const l3Count = eventsList.filter((e) => e.type === "l3").length;
   const eventCount = eventsList.filter((e) => e.type === "event").length;
+  const setupLabel = call.callSetupTimeMs == null
+    ? "—"
+    : `${call.connectionEstimated ? "~" : ""}${formatDurationMs(call.callSetupTimeMs)}`;
+  const durationLabel = call.connectedDurationMs == null
+    ? "—"
+    : `${call.connectionEstimated ? "~" : ""}${formatDurationMs(call.connectedDurationMs)}`;
 
   return (
     <div className="flex flex-col h-full bg-slate-900 border border-slate-700 rounded-xl overflow-hidden text-white shadow-xl">
@@ -41,7 +47,7 @@ export const CallDetailPanel = ({ call, onClose }) => {
             </span>
           </h3>
           <p className="text-xs text-white mt-0.5">
-            {call.detailedStatus || call.status} | Setup: {formatDurationMs(call.setupTimeMs)} | Duration: {formatDurationMs(call.durationMs)} | Messages: {l3Count} L3, {eventCount} Events
+            {call.detailedStatus || call.status} | Setup: {setupLabel} | Connected duration: {durationLabel} | Messages: {l3Count} L3, {eventCount} Events
           </p>
         </div>
         <button

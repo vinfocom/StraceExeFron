@@ -1,30 +1,3 @@
-const DEVICE_DISCONNECT_CAUSE_MAP = {
-  2: {
-    name: "ABNORMAL_RELEASE_AFTER_ESTABLISHMENT",
-    description: "Abnormal IMS or telephony release after call establishment.",
-    isNormal: false,
-    isDropped: true,
-    status: "Dropped",
-    classification: "DROPPED",
-  },
-  3: {
-    name: "NORMAL_COMPLETED_RELEASE",
-    description: "Normal call release after a completed call.",
-    isNormal: true,
-    isDropped: false,
-    status: "Connected",
-    classification: "COMPLETED",
-  },
-  4: {
-    name: "RELEASED_BEFORE_ESTABLISHMENT",
-    description: "Call released before establishment.",
-    isNormal: false,
-    isDropped: false,
-    status: "Not Connected",
-    classification: "NOT_CONNECTED",
-  },
-};
-
 const DISCONNECT_CAUSE_DEFINITIONS = [
   { code: 0, name: "NOT_DISCONNECTED", description: "No disconnect cause was reported.", isNormal: true, isDropped: false, status: "Unknown", classification: "UNKNOWN" },
   { code: 1, name: "INCOMING_MISSED", description: "Incoming call was not answered.", isNormal: false, isDropped: false, status: "Not Connected", classification: "NOT_CONNECTED" },
@@ -131,8 +104,7 @@ export function getDisconnectCauseInfo(code) {
     };
   }
 
-  const override = DEVICE_DISCONNECT_CAUSE_MAP[code];
-  const definition = override ? { ...baseDefinition, ...override } : { ...baseDefinition };
+  const definition = { ...baseDefinition };
   return {
     ...definition,
     code,

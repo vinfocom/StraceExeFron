@@ -42,8 +42,8 @@ export const CallSummaryPanel = ({ summary, selectedCallId, onSelectCall }) => {
         />
         <StatCard
           icon={Clock}
-          label="Total Duration"
-          value={formatDurationMs(summary.totalDurationMs)}
+          label="Connected Duration"
+          value={formatDurationMs(summary.totalConnectedDurationMs ?? summary.totalDurationMs)}
           color="cyan"
           
         />
@@ -58,10 +58,14 @@ export const CallSummaryPanel = ({ summary, selectedCallId, onSelectCall }) => {
               <tr className="text-slate-500 border-b border-slate-700">
                 <th className="text-left py-1.5 pr-3 font-medium">Call ID</th>
                 <th className="text-left py-1.5 pr-3 font-medium">Start</th>
+                <th className="text-left py-1.5 pr-3 font-medium">Connected At</th>
                 <th className="text-left py-1.5 pr-3 font-medium">End</th>
                 <th className="text-left py-1.5 pr-3 font-medium">Status</th>
+                <th className="text-left py-1.5 pr-3 font-medium">Detailed Status</th>
                 <th className="text-left py-1.5 pr-3 font-medium">Setup Time</th>
-                <th className="text-left py-1.5 font-medium">Duration</th>
+                <th className="text-left py-1.5 pr-3 font-medium">Talk Time</th>
+                <th className="text-left py-1.5 pr-3 font-medium">Disconnect Cause</th>
+                <th className="text-left py-1.5 font-medium">Cause Code</th>
               </tr>
              
             </thead>
@@ -88,9 +92,14 @@ export const CallSummaryPanel = ({ summary, selectedCallId, onSelectCall }) => {
                         ? call.startTime.toLocaleTimeString([], { hour12: false, timeZone: "UTC" })
                         : "--:--:--"}
                     </td>
+                    <td className="py-1.5 pr-3 font-mono text-slate-300 whitespace-nowrap">
+                      {call.connectedTime
+                        ? `${call.connectionEstimated ? "~" : ""}${call.connectedTime.toLocaleTimeString([], { hour12: false, timeZone: "UTC" })}`
+                        : "--:--:--"}
+                    </td>
                     <td className="py-1.5 pr-3 font-mono text-slate-300">
-                      {call.endTime
-                        ? call.endTime.toLocaleTimeString([], { hour12: false, timeZone: "UTC" })
+                      {call.terminationTime || call.endTime
+                        ? (call.terminationTime || call.endTime).toLocaleTimeString([], { hour12: false, timeZone: "UTC" })
                         : "--:--:--"}
                     </td>
                     <td className="py-1.5 pr-3">
@@ -102,8 +111,15 @@ export const CallSummaryPanel = ({ summary, selectedCallId, onSelectCall }) => {
                         {call.status}
                       </span>
                     </td>
-                    <td className="py-1.5 pr-3 text-slate-300">{formatDurationMs(call.setupTimeMs)}</td>
-                    <td className="py-1.5 text-slate-300">{formatDurationMs(call.durationMs)}</td>
+                    <td className="py-1.5 pr-3 text-slate-300 whitespace-nowrap">{call.detailedStatus || "Unknown"}</td>
+                    <td className="py-1.5 pr-3 text-slate-300">
+                      {call.callSetupTimeMs == null ? "—" : `${call.connectionEstimated ? "~" : ""}${formatDurationMs(call.callSetupTimeMs)}`}
+                    </td>
+                    <td className="py-1.5 pr-3 text-slate-300">
+                      {call.connectedDurationMs == null ? "—" : `${call.connectionEstimated ? "~" : ""}${formatDurationMs(call.connectedDurationMs)}`}
+                    </td>
+                    <td className="max-w-64 truncate py-1.5 pr-3 text-slate-300" title={call.disconnectReason}>{call.disconnectReason || "Unknown"}</td>
+                    <td className="py-1.5 text-slate-300">{call.causeCode ?? "—"}</td>
                   </tr>
                   
                 );

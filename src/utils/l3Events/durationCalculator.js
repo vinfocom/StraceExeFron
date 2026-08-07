@@ -7,14 +7,24 @@ export function calculateDurations(session) {
   const dialTime = session.dialTime || session.startTime;
   const connectedTime = session.connectedTime || session.answerTime;
   const setupCompletionTime = connectedTime || session.setupCompletionTime;
-  const disconnectTime = session.disconnectTime || session.endTime;
-  const setupTimeMs = setupCompletionTime ? safeDiffMs(dialTime, setupCompletionTime) : 0;
-  const setupAttemptDurationMs = safeDiffMs(dialTime, disconnectTime);
-  const talkTimeMs = connectedTime ? safeDiffMs(connectedTime, disconnectTime) : 0;
-  const totalDurationMs = safeDiffMs(dialTime, disconnectTime);
-  const ringingDelayMs = safeDiffMs(dialTime, session.alertingTime);
+  // endTime is normalized to the first terminal marker (Idle or explicit
+  // disconnect). Prefer it over later callback cleanup rows.
+  const disconnectTime = session.endTime || session.disconnectTime || session.idleTime;
+  const dialToAlertingMs = session.alertingTime ? safeDiffMs(dialTime, session.alertingTime) : null;
+  const callSetupTimeMs = connectedTime ? safeDiffMs(dialTime, setupCompletionTime) : null;
+  const attemptDurationMs = safeDiffMs(dialTime, disconnectTime);
+  const connectedDurationMs = connectedTime ? safeDiffMs(connectedTime, disconnectTime) : null;
+  const setupTimeMs = callSetupTimeMs ?? 0;
+  const setupAttemptDurationMs = attemptDurationMs;
+  const talkTimeMs = connectedDurationMs ?? 0;
+  const totalDurationMs = attemptDurationMs;
+  const ringingDelayMs = dialToAlertingMs ?? 0;
 
   return {
+    dialToAlertingMs,
+    callSetupTimeMs,
+    connectedDurationMs,
+    attemptDurationMs,
     setupTimeMs,
     setupAttemptDurationMs,
     talkTimeMs,

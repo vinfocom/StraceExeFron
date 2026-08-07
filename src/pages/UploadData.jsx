@@ -1163,16 +1163,7 @@ const UploadDataPage = () => {
                   </p>
                 </div>
 
-                {/* <div>
-                  <label className="block text-sm font-semibold mb-1">Report Title (Optional)</label>
-                  <Input
-                    type="text"
-                    value={reportTitle}
-                    onChange={(e) => setReportTitle(e.target.value)}
-                    placeholder="Enter a report title"
-                    className="bg-white text-black placeholder:text-gray-500"
-                  />
-                </div> */}
+                
 
                 <Button
                   onClick={handleGenerateReport}

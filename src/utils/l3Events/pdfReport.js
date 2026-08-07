@@ -434,7 +434,7 @@ function addCallSummarySection(layout, summary = null) {
     `Rejected: ${summary.rejected ?? 0}`,
     `Setup Failures: ${summary.setupFailures ?? 0}`,
     `Average Setup Time: ${formatDuration(summary.averageSetupTime ?? 0)}`,
-    `Total Duration: ${formatDuration(summary.totalDurationMs ?? 0)}`,
+    `Total Connected Duration: ${formatDuration(summary.totalConnectedDurationMs ?? summary.totalDurationMs ?? 0)}`,
   ].forEach((line) => layout.addWrapped(`- ${line}`, { size: 10, indent: 8, spacing: 3 }));
 
   if (summary.calls?.length) {
@@ -891,4 +891,140 @@ export function downloadL3CallSummaryPdfReport({
   const fileStem = sanitizeFileSegment(sourceFileName.replace(/\.[^.]+$/, ""));
   const scopeStem = selectedCall?.id ? `-${sanitizeFileSegment(selectedCall.id)}` : "";
   blobDownload(blob, `l3-call-summary-messages-${fileStem}${scopeStem}.pdf`);
+}
+
+function formatNullableDuration(value, estimated = false) {
+  if (value === null || value === undefined) return "N/A";
+  return `${estimated ? "~" : ""}${formatDuration(value)}`;
+}
+
+function wrapFixedWidth(value, maxChars) {
+  const remainingLines = String(value ?? "-")
+    .replace(/\s+/g, " ")
+    .trim() || "-";
+  const lines = [];
+  let remaining = remainingLines;
+
+  while (remaining.length > maxChars) {
+    const candidate = remaining.slice(0, maxChars + 1);
+    const breakAt = candidate.lastIndexOf(" ");
+    const splitAt = breakAt >= Math.floor(maxChars * 0.55) ? breakAt : maxChars;
+    lines.push(remaining.slice(0, splitAt).trimEnd());
+    remaining = remaining.slice(splitAt).trimStart();
+  }
+  lines.push(remaining);
+  return lines;
+}
+
+function addExcelSignalingTable(layout, rows = []) {
+  const headers = ["Timestamp", "Interface", "Message", "Detail"];
+  const widths = [14, 14, 22, 46];
+  const formatRow = (values) => values
+    .map((value, index) => truncate(value, widths[index]).padEnd(widths[index], " "))
+    .join("  ");
+  let headerPage = 0;
+
+  const addHeader = () => {
+    layout.addLine(formatRow(headers), { font: FONT_MONO, size: 7, spacing: 2 });
+    layout.addLine(widths.map((width) => "-".repeat(width)).join("  "), { font: FONT_MONO, size: 7, spacing: 2 });
+    headerPage = layout.pageNumber;
+  };
+
+  addHeader();
+  rows.forEach((row) => {
+    const values = [
+      row.timestampLabel || formatClock(row.timestamp),
+      row.interface || "Unknown",
+      row.message || "-",
+      row.rawMessage || "-",
+    ];
+    const wrapped = values.map((value, index) => wrapFixedWidth(value, widths[index]));
+    const lineCount = Math.max(...wrapped.map((lines) => lines.length));
+    layout.ensureSpace((lineCount + 3) * 9);
+    if (layout.pageNumber !== headerPage) addHeader();
+
+    for (let lineIndex = 0; lineIndex < lineCount; lineIndex += 1) {
+      layout.addLine(
+        formatRow(wrapped.map((lines) => lines[lineIndex] || "")),
+        { font: FONT_MONO, size: 7, spacing: 2 },
+      );
+    }
+    layout.addLine(widths.map((width) => "-".repeat(width)).join("  "), { font: FONT_MONO, size: 7, spacing: 2 });
+  });
+}
+
+export function downloadExcelSignalingSummaryPdf({
+  sourceFileName = "",
+  rows = [],
+  calls = [],
+  selectedCall = null,
+}) {
+  if (!rows.length) throw new Error("No sheet messages are available to export.");
+
+  const layout = new PdfLayout();
+  const generatedAt = new Date();
+  const technologies = uniqueNonEmpty(rows.map((row) => categoryValue(row.technology, "")));
+  const technologyCounts = new Map();
+  rows.forEach((row) => {
+    const technology = categoryValue(row.technology, "Unknown");
+    const current = technologyCounts.get(technology) || { count: 0, interfaces: new Set() };
+    current.count += 1;
+    if (row.interface) current.interfaces.add(row.interface);
+    technologyCounts.set(technology, current);
+  });
+
+  layout.addLine("Summary", { font: FONT_BOLD, size: 18, spacing: 6 });
+  layout.addWrapped("Call and technology summary followed by the currently filtered sheet messages.", { size: 10, spacing: 4 });
+  layout.addSpacer(8);
+  [
+    `Source File: ${sourceFileName || "N/A"}`,
+    `Report Scope: ${selectedCall?.id ? `Selected call ${selectedCall.id}` : "Filtered sheet messages"}`,
+    `Generated At: ${formatTimestamp(generatedAt)}`,
+    `Exported Rows: ${rows.length}`,
+    `Technologies: ${technologies.join(", ") || "Unknown"}`,
+  ].forEach((line) => layout.addWrapped(line, { size: 10, spacing: 3 }));
+
+  layout.addSpacer(10);
+  layout.addLine("Call Summary", { font: FONT_BOLD, size: 13, spacing: 5 });
+  if (calls.length) {
+    layout.addTable(
+      ["Call", "Status", "Start Tech", "End Tech", "Start", "End", "Setup", "Duration"],
+      calls.map((call) => [
+        call.id || "N/A",
+        call.detailedStatus || call.status || "N/A",
+        categoryValue(call.technologyStart),
+        categoryValue(call.technologyEnd),
+        formatClock(call.startTime),
+        formatClock(call.terminationTime || call.endTime),
+        formatNullableDuration(call.callSetupTimeMs, call.connectionEstimated),
+        formatNullableDuration(call.connectedDurationMs, call.connectionEstimated),
+      ]),
+      [8, 14, 10, 10, 8, 8, 9, 9],
+    );
+  } else {
+    layout.addWrapped("No call session is associated with the filtered signaling rows.", { size: 10, spacing: 3 });
+  }
+
+  layout.addSpacer(10);
+  layout.addLine("Technology Summary", { font: FONT_BOLD, size: 13, spacing: 5 });
+  layout.addTable(
+    ["Technology", "Rows", "Interfaces"],
+    Array.from(technologyCounts, ([technology, info]) => [
+      technology,
+      String(info.count),
+      Array.from(info.interfaces).join(", ") || "Unknown",
+    ]),
+    [16, 8, 40],
+  );
+
+  layout.addSpacer(12);
+  layout.addLine("Sheet Messages", { font: FONT_BOLD, size: 13, spacing: 5 });
+  layout.addWrapped("Detail contains the complete raw message captured for each exported row.", { size: 9, spacing: 3 });
+  layout.addSpacer(5);
+  addExcelSignalingTable(layout, rows);
+
+  const blob = buildPdfBlob(layout.pages);
+  const fileStem = sanitizeFileSegment(sourceFileName.replace(/\.[^.]+$/, ""));
+  const scopeStem = selectedCall?.id ? `-${sanitizeFileSegment(selectedCall.id)}` : "";
+  blobDownload(blob, `call-summary-${fileStem}${scopeStem}.pdf`);
 }

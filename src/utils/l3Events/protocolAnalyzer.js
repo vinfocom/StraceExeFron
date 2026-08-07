@@ -533,12 +533,14 @@ function inferRowFlow(item, protocol) {
   const text = rowText(item);
   const node = inferNetworkNode(item, protocol);
   if (/\]\s*>|ue\s*[-=]+>\s*\w+|\b(request|complete|report|dial|register)\b/i.test(text)) {
-    return { from: "UE", to: node };
+    return { from: "UE", to: node, known: true };
   }
   if (/\]\s*<|\w+\s*[-=]+>\s*ue|\b(unsol|paging|setup|command|accept|enquiry|incoming|ringing|release)\b/i.test(text)) {
-    return { from: node, to: "UE" };
+    return { from: node, to: "UE", known: true };
   }
-  return item.type === "event" ? { from: "Event", to: "Timeline" } : { from: "UE", to: node };
+  return item.type === "event"
+    ? { from: "Event", to: "Timeline", known: false }
+    : { from: "UE", to: node, known: false };
 }
 
 function createRowAnalysisDefinition(item) {
@@ -552,6 +554,7 @@ function createRowAnalysisDefinition(item) {
     protocol,
     from: flow.from,
     to: flow.to,
+    directionKnown: flow.known,
     spec: /^GSM/.test(protocol) ? SPEC.gsm : /^UMTS/.test(protocol) ? SPEC.umts : protocol === "NR RRC" ? SPEC.nrRrc : protocol === "LTE RRC" ? SPEC.lteRrc : protocol === "IMS" ? SPEC.ims : SPEC.epsNas,
     section: "Decoded row",
     rowFallback: true,
@@ -651,6 +654,7 @@ function enrichItem(item, definition, procedure, startMs, callId) {
     relativeMs: itemMs !== null && startMs !== null ? Math.max(0, itemMs - startMs) : null,
     protocol,
     direction,
+    directionKnown: definition?.directionKnown ?? !definition?.rowFallback,
     from: definition?.from || "Event",
     to: definition?.to || "Timeline",
     spec: definition?.spec || procedure.spec,

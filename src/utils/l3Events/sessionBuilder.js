@@ -10,13 +10,13 @@ const DIALING_STATE_RE = /\b(dial(?:ing)?|calling|trying)\b/i;
 const RINGING_RE = /\b(ring(?:ing)?|alert(?:ing)?)\b/i;
 const IDLE_RE = /\b(idle|disconnected|disconnecting|ended)\b/i;
 const CONNECTED_STATE_RE = /\b(connected|established|answered|in[- ]?call)\b/i;
-const WEAK_ACTIVE_STATE_RE = /\b(active|offhook)\b/i;
 const INCOMING_RE = /\b(incoming|mt call|mobile terminated)\b/i;
 const OUTGOING_RE = /\b(outgoing|dial|mo call|mobile originated)\b/i;
 const FAILURE_RE = /\b(fail(?:ed|ure)?|error|reject(?:ed)?|timeout|lost signal|out of service|busy)\b/i;
 const CAUSE_CODE_RE = /\bcause\s*[:=]\s*(-?\d+)\b/i;
 const CALL_TYPE_3_RE = /\bcalltype\s*=\s*3\b/i;
 const CALL_TYPE_2_RE = /\bcalltype\s*=\s*2\b/i;
+const REMOTE_CAPABILITY_RE = /\b(applyRemoteCallCapabilities|CALL_CAPS_REMOTE)\b/i;
 const CAPABILITY_ONLY_RE = /\b(applyLocalCallCapabilities|applyRemoteCallCapabilities|CALL_CAPS_LOCAL|CALL_CAPS_REMOTE)\b/i;
 const SIP_INVITE_RE = /\bSIP\b.*\bINVITE\b|\bINVITE\b/i;
 const SIP_TRYING_RE = /\b100\b.*\bTrying\b/i;
@@ -31,14 +31,27 @@ const SIP_408_RE = /\b408\b.*\bRequest Timeout\b/i;
 const SIP_480_RE = /\b480\b.*\bTemporarily Unavailable\b/i;
 const SIP_486_RE = /\b486\b.*\bBusy Here\b/i;
 const SIP_FAILURE_RE = /\b([456]\d{2})\b/;
-const MEDIA_ESTABLISHED_RE = /\b(media|voice bearer|bearer|rtp|qos flow)\b.*\b(established|active|connected|setup)\b/i;
-const RADIO_FAILURE_RE = /\b(radio link failure|rlf|rrc re[- ]?establishment failure|rrc reestablishment failure|unexpected rrc release|bearer loss)\b/i;
+const SIP_CONTEXT_RE = /\bSIP(?:\/2\.0)?\b/i;
+const MEDIA_ESTABLISHED_RE = /\b(media|voice bearer|bearer|rtp|qos flow)\b.*\b(established|active|connected|setup (?:complete|success(?:ful)?))\b/i;
+const CODEC_NEGOTIATED_RE = /\bCODEC_(?:AMR_(?:NB|WB)|EVS)\b|updateMediaCapabilities.{0,160}\bcodec\s*=/i;
+const RADIO_FAILURE_RE = /\b(radio link failure|rlf|rrc re[- ]?establishment failure|rrc reestablishment failure|unexpected rrc release|bearer loss|scgfail|scg failure)\b/i;
 const HANDOVER_FAILURE_RE = /\b(hand(?: |-)?over|ho)\b.*\b(fail|failure|reject|drop|timeout)\b/i;
+const HANDOVER_ATTEMPT_RE = /\b(hand(?: |-)?over|ho)\b.*\b(command|start|attempt|request)\b/i;
+const HANDOVER_SUCCESS_RE = /\b(hand(?: |-)?over|ho)\b.*\b(complete|success)\b|\brrc\s+(?:connection\s+)?reconfiguration\s+complete\b/i;
 const IMS_FAILURE_RE = /\b(ims registration lost|ims deregistration|ims deregistered|ims unregistered|sip 408|sip 503)\b/i;
+const RRC_REESTABLISHMENT_REQUEST_RE = /\brrc.*re[- ]?establishment.*request\b/i;
+const RRC_REESTABLISHMENT_SUCCESS_RE = /\brrc.*re[- ]?establishment.*complete\b|\brrc.*re[- ]?established\b/i;
+const RRC_REESTABLISHMENT_FAILURE_RE = /\brrc.*re[- ]?establishment.*(?:reject|failure|failed)\b/i;
+const RECOVERY_SIGNAL_RE = /\b(recover(?:ed|y)?|service restored|rrc.*complete|sip ack|sip 200 ok|call_active|connected)\b/i;
 
 const DEDUPE_WINDOW_MS = 1000;
 const L3_CORRELATION_LEAD_MS = 1000;
 const L3_CORRELATION_TAIL_MS = 1000;
+const SCRIPTED_TALK_DURATION_MS = 90_000;
+const MIN_SCRIPTED_ATTEMPT_MS = 85_000;
+const MAX_SCRIPTED_ATTEMPT_MS = 130_000;
+const MIN_INFERRED_SETUP_MS = 1_000;
+const MAX_INFERRED_SETUP_MS = 30_000;
 
 function getTimeMs(date) {
   return date instanceof Date ? date.getTime() : null;
@@ -69,6 +82,7 @@ function sortTimeline(timeline = []) {
 }
 
 function isCallScopedEvent(item) {
+  if (item?.isStale) return false;
   return item?.category === "Call" || item?.domain?.includes("CS") || item?.domain?.includes("PS");
 }
 
@@ -77,7 +91,10 @@ function isDialInitiatedEvent(item) {
 }
 
 function isIncomingRingingEvent(item) {
-  return CALL_STATE_EVENT_RE.test(item?.eventKey || "") && RINGING_RE.test(item?.rawMessage || "");
+  const text = item?.rawMessage || "";
+  return CALL_STATE_EVENT_RE.test(item?.eventKey || "")
+    && RINGING_RE.test(text)
+    && INCOMING_RE.test(text);
 }
 
 function isDialingStateEvent(item) {
@@ -204,7 +221,16 @@ function createSession(item, index) {
     wasClosedAtEof: false,
     markerTimes: {},
     connectedEvidence: [],
+    connectionSupportingEvidence: [],
+    connectionEstimated: false,
+    connectionInference: null,
     releaseEvidence: [],
+    rrcRecoveryEvents: [],
+    radioIssueDetected: false,
+    radioRecovered: false,
+    handoverAttempts: [],
+    successfulHandovers: [],
+    failedHandovers: [],
     l3Analysis: {
       inviteTime: null,
       tryingTime: null,
@@ -225,6 +251,7 @@ function createSession(item, index) {
 }
 
 function absorbBoundaryEvent(session, item) {
+  if (item?.isStale) return;
   session.lastEventIndex = item?.__order ?? session.lastEventIndex;
   session.missingTimestamps += item?.timestamp ? 0 : 1;
   session.sawFailureHint = session.sawFailureHint || FAILURE_RE.test(String(item?.rawMessage || ""));
@@ -290,8 +317,7 @@ function isExplicitConnectedEvent(item) {
   if (!CALL_STATE_EVENT_RE.test(item?.eventKey || "")) {
     return false;
   }
-  if (CONNECTED_STATE_RE.test(text)) return true;
-  return WEAK_ACTIVE_STATE_RE.test(text) && !CALL_TYPE_2_RE.test(text);
+  return CONNECTED_STATE_RE.test(text);
 }
 
 function isMediaEstablishedEvent(item) {
@@ -349,7 +375,7 @@ function analyseL3ForCall(session) {
     if (!result.progressTime && SIP_PROGRESS_RE.test(text)) {
       result.progressTime = item.timestamp || null;
     }
-    if (!result.sip200Time && SIP_200_OK_RE.test(text)) {
+    if (result.inviteTime && !result.sip200Time && SIP_200_OK_RE.test(text)) {
       result.sip200Time = item.timestamp || null;
       remember("SIP 200 OK");
     }
@@ -371,7 +397,7 @@ function analyseL3ForCall(session) {
       else if (SIP_408_RE.test(text)) result.sipFinalCode = 408;
       else if (SIP_480_RE.test(text)) result.sipFinalCode = 480;
       else if (SIP_486_RE.test(text)) result.sipFinalCode = 486;
-      else {
+      else if (SIP_CONTEXT_RE.test(text)) {
         const match = text.match(SIP_FAILURE_RE);
         const code = match ? Number(match[1]) : null;
         if (code >= 400) result.sipFinalCode = code;
@@ -388,7 +414,16 @@ function analyseL3ForCall(session) {
     }
   }
 
-  result.connectedConfirmed = Boolean(result.sip200Time && result.ackTime);
+  const inviteMs = getTimeMs(result.inviteTime);
+  const okMs = getTimeMs(result.sip200Time);
+  const ackMs = getTimeMs(result.ackTime);
+  result.connectedConfirmed = Boolean(
+    result.inviteTime
+    && result.sip200Time
+    && result.ackTime
+    && (inviteMs === null || okMs === null || inviteMs <= okMs)
+    && (okMs === null || ackMs === null || okMs <= ackMs),
+  );
   result.normalReleaseConfirmed = Boolean(result.byeTime && !result.sipFinalCode);
   result.abnormalReleaseConfirmed = Boolean(result.cancelTime || (result.sipFinalCode !== null && result.sipFinalCode >= 400));
   if (!result.releaseReason && result.sipFinalCode !== null) {
@@ -398,16 +433,51 @@ function analyseL3ForCall(session) {
   return result;
 }
 
+function inferScriptedConnectionTime(session, codecNegotiated = []) {
+  const dialMs = getTimeMs(session.dialTime || session.startTime);
+  const endMs = getTimeMs(session.endTime);
+  const alertingMs = getTimeMs(session.alertingTime);
+  if (dialMs === null || endMs === null || alertingMs === null) return null;
+
+  const attemptMs = endMs - dialMs;
+  if (attemptMs < MIN_SCRIPTED_ATTEMPT_MS || attemptMs > MAX_SCRIPTED_ATTEMPT_MS) return null;
+  if (!session.disconnectCauseHistory.includes(3)) return null;
+
+  const disconnectMs = getTimeMs(session.disconnectTime);
+  const idleMs = getTimeMs(session.idleTime);
+  const modemEndPrecededIdle = disconnectMs !== null && idleMs !== null && disconnectMs <= idleMs;
+  if (!codecNegotiated.length && !modemEndPrecededIdle) return null;
+
+  const inferredMs = endMs - SCRIPTED_TALK_DURATION_MS;
+  const setupMs = inferredMs - dialMs;
+  if (setupMs < MIN_INFERRED_SETUP_MS || setupMs > MAX_INFERRED_SETUP_MS || inferredMs < alertingMs) return null;
+  return new Date(inferredMs);
+}
+
 function finalizeSessionMilestones(session) {
   const analysisEndMs = getTimeMs(session.endTime) ?? Number.POSITIVE_INFINITY;
   const explicitConnected = [];
   const callTypeConnected = [];
   const mediaConnected = [];
+  const codecNegotiated = [];
+  let radioFailureOpen = false;
 
   for (const item of session.events) {
+    if (item?.isStale) continue;
     const itemMs = getTimeMs(item.timestamp);
     if (isCauseEvent(item)) {
       pushUniqueCause(session, extractCauseCode(item), item?.rawMessage || "");
+    }
+    // Both callbacks belong to the same termination even when the second one
+    // arrives just after the first end marker. Capture both so their ordering
+    // can distinguish a completed local hang-up from an unanswered timeout.
+    if (isDisconnectEvent(item) && !session.disconnectTime) {
+      session.disconnectTime = item.timestamp || null;
+      session.hasDisconnectEvent = true;
+    }
+    if (isIdleEndedEvent(item) && !session.idleTime) {
+      session.idleTime = item.timestamp || null;
+      session.hasDisconnectEvent = true;
     }
     if (itemMs !== null && itemMs > analysisEndMs) continue;
 
@@ -420,7 +490,9 @@ function finalizeSessionMilestones(session) {
     if (ALERTING_EVENT_RE.test(item?.eventKey || "") || (CALL_STATE_EVENT_RE.test(item?.eventKey || "") && RINGING_RE.test(text))) {
       setFirstTimestamp(session, "alertingTime", "alerting", item.timestamp || null);
     }
-    if (CALL_TYPE_3_RE.test(text)) {
+    if (CALL_TYPE_3_RE.test(text)
+      && !REMOTE_CAPABILITY_RE.test(text)
+      && (!session.alertingTime || itemMs === null || itemMs >= getTimeMs(session.alertingTime))) {
       callTypeConnected.push(item);
     }
     if (isExplicitConnectedEvent(item)) {
@@ -429,7 +501,54 @@ function finalizeSessionMilestones(session) {
     if (isMediaEstablishedEvent(item)) {
       mediaConnected.push(item);
     }
+    if (CODEC_NEGOTIATED_RE.test(text)) {
+      codecNegotiated.push(item);
+    }
+    if (HANDOVER_ATTEMPT_RE.test(text)) session.handoverAttempts.push(item);
+    if (HANDOVER_FAILURE_RE.test(text)) session.failedHandovers.push(item);
+    if (HANDOVER_SUCCESS_RE.test(text) && (session.handoverAttempts.length > 0 || /\b(hand(?: |-)?over|ho)\b/i.test(text))) {
+      session.successfulHandovers.push(item);
+    }
+    if (RRC_REESTABLISHMENT_REQUEST_RE.test(text)) {
+      session.radioIssueDetected = true;
+      radioFailureOpen = true;
+      session.rrcRecoveryEvents.push({
+        timestamp: item.timestamp || null,
+        type: "RRC_REESTABLISHMENT_REQUEST",
+        cause: text,
+        success: false,
+        recovered: false,
+      });
+    }
+    if (RRC_REESTABLISHMENT_FAILURE_RE.test(text)) {
+      session.radioIssueDetected = true;
+      radioFailureOpen = true;
+      session.rrcRecoveryEvents.push({
+        timestamp: item.timestamp || null,
+        type: "RRC_REESTABLISHMENT_FAILURE",
+        cause: text,
+        success: false,
+        recovered: false,
+      });
+    }
+    if (radioFailureOpen && (RRC_REESTABLISHMENT_SUCCESS_RE.test(text) || RECOVERY_SIGNAL_RE.test(text))) {
+      session.radioRecovered = true;
+      radioFailureOpen = false;
+      session.rrcRecoveryEvents.push({
+        timestamp: item.timestamp || null,
+        type: "RRC_RECOVERY",
+        cause: text,
+        success: true,
+        recovered: true,
+      });
+    }
   }
+
+
+  const terminalTimes = [session.disconnectTime, session.idleTime]
+    .filter((date) => date instanceof Date)
+    .sort((left, right) => left.getTime() - right.getTime());
+  if (terminalTimes.length) session.endTime = terminalTimes[0];
 
   session.l3Analysis = analyseL3ForCall(session);
 
@@ -445,13 +564,18 @@ function finalizeSessionMilestones(session) {
     session.connectedTime = strongConnectedItem.timestamp;
   }
 
+  if (!session.connectedTime) {
+    const inferredConnectionTime = inferScriptedConnectionTime(session, codecNegotiated);
+    if (inferredConnectionTime) {
+      session.answerTime = inferredConnectionTime;
+      session.connectedTime = inferredConnectionTime;
+      session.connectionEstimated = true;
+      session.connectionInference = "Estimated from a locally completed fixed-duration drive-test call";
+    }
+  }
+
   if (!session.setupCompletionTime) {
-    session.setupCompletionTime =
-      session.connectedTime
-      || session.answerTime
-      || session.alertingTime
-      || session.dialingTime
-      || null;
+    session.setupCompletionTime = session.connectedTime || session.answerTime || null;
   }
 
   if (session.l3Analysis.connectedConfirmed) {
@@ -459,14 +583,31 @@ function finalizeSessionMilestones(session) {
   } else if (explicitConnected[0]) {
     recordEvidence(session.connectedEvidence, explicitConnected[0].timestamp, explicitConnected[0], "Explicit connected state");
   } else if (callTypeConnected[0]) {
-    recordEvidence(session.connectedEvidence, callTypeConnected[0].timestamp, callTypeConnected[0], "IMS profile transitioned to callType=3");
+    recordEvidence(session.connectedEvidence, callTypeConnected[0].timestamp, callTypeConnected[0], "IMS profile transitioned to connected callType=3");
   } else if (mediaConnected[0]) {
     recordEvidence(session.connectedEvidence, mediaConnected[0].timestamp, mediaConnected[0], "Media or bearer establishment confirmed");
+  } else if (session.connectionEstimated) {
+    recordEvidence(session.connectedEvidence, session.connectedTime, null, session.connectionInference);
   }
+  if (callTypeConnected[0] && strongConnectedItem !== callTypeConnected[0]) {
+    recordEvidence(session.connectionSupportingEvidence, callTypeConnected[0].timestamp, callTypeConnected[0], "Supporting IMS profile callType=3");
+  }
+  codecNegotiated.forEach((item) => {
+    recordEvidence(session.connectionSupportingEvidence, item.timestamp, item, "IMS voice codec negotiated");
+  });
 
   session.l3Analysis.supportingMessages.forEach((entry) => {
     if (/SIP (?:487|408|480|486|\d{3})|SIP CANCEL|SIP BYE/.test(entry.label)) {
       session.releaseEvidence.push(entry);
+    }
+  });
+  session.events.forEach((item) => {
+    if (item?.isStale) return;
+    const itemMs = getTimeMs(item.timestamp);
+    if (itemMs !== null && itemMs > analysisEndMs) return;
+    const text = rowText(item);
+    if (RADIO_FAILURE_RE.test(text) || HANDOVER_FAILURE_RE.test(text) || IMS_FAILURE_RE.test(text)) {
+      recordEvidence(session.releaseEvidence, item.timestamp, item, "Abnormal protocol termination evidence");
     }
   });
 
@@ -476,12 +617,13 @@ function finalizeSessionMilestones(session) {
   if (session.idleTime && (!session.endTime || getTimeMs(session.idleTime) < getTimeMs(session.endTime))) {
     session.endTime = session.idleTime;
   }
-  session.endTime = session.endTime || session.disconnectTime || session.idleTime || session.connectedTime || session.startTime;
+  const lastObservedTime = session.events.map((item) => item.timestamp).filter((date) => date instanceof Date).at(-1) || null;
+  session.endTime = session.endTime || session.disconnectTime || session.idleTime || lastObservedTime || session.connectedTime || session.startTime;
 }
 
 export function buildSessions(timeline = []) {
   const orderedTimeline = sortTimeline(timeline);
-  const callItems = orderedTimeline.filter(isCallScopedEvent);
+  const callItems = orderedTimeline.filter((item) => isCallScopedEvent(item) && !item.isStale);
   const sessions = [];
   let current = null;
 
@@ -535,6 +677,8 @@ export function buildSessions(timeline = []) {
 export function attachSessionEvents(sessions = [], orderedTimeline = []) {
   let cursor = 0;
 
+  const freshTimeline = orderedTimeline.filter((item) => !item.isStale);
+
   for (let index = 0; index < sessions.length; index += 1) {
     const session = sessions[index];
     const nextSession = sessions[index + 1] || null;
@@ -545,8 +689,8 @@ export function attachSessionEvents(sessions = [], orderedTimeline = []) {
     const nextStartMs = getTimeMs(nextSession?.startTime);
     const upperMs = nextStartMs === null ? tailEndMs : tailEndMs === null ? nextStartMs - 1 : Math.min(tailEndMs, nextStartMs - 1);
 
-    while (cursor < orderedTimeline.length) {
-      const item = orderedTimeline[cursor];
+    while (cursor < freshTimeline.length) {
+      const item = freshTimeline[cursor];
       const itemMs = getTimeMs(item.timestamp);
       if (lowerMs !== null && itemMs !== null && itemMs < lowerMs) {
         cursor += 1;
@@ -556,8 +700,8 @@ export function attachSessionEvents(sessions = [], orderedTimeline = []) {
     }
 
     let scan = cursor;
-    while (scan < orderedTimeline.length) {
-      const item = orderedTimeline[scan];
+    while (scan < freshTimeline.length) {
+      const item = freshTimeline[scan];
       const itemMs = getTimeMs(item.timestamp);
       if (upperMs !== null && itemMs !== null && itemMs > upperMs) {
         break;

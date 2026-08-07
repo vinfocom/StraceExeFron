@@ -218,6 +218,30 @@ const parseLogEntry = (log, sessionId) => {
     log.neighbourBand ??
     "";
   const technology = getNormalizedTechnology(log, band);
+  const eventName =
+    log.event_name ??
+    log.eventName ??
+    log.EventName ??
+    log.message ??
+    log.Message ??
+    log.event ??
+    log.Event ??
+    "";
+  const eventCategory =
+    log.category ??
+    log.Category ??
+    log.event_type ??
+    log.eventType ??
+    log.EventType ??
+    "";
+  const eventDetail =
+    log.detail ??
+    log.Detail ??
+    log.description ??
+    log.Description ??
+    log.value ??
+    log.Value ??
+    "";
 
   return {
     id: log.id ?? log.Id ?? log.log_id ?? log.LogId ?? null,
@@ -245,6 +269,23 @@ const parseLogEntry = (log, sessionId) => {
     tac: parseNum(log.tac),
     packet_loss: parseNum(log.packet_loss),
     provider,
+    event_name: eventName,
+    eventName,
+    event_category: eventCategory,
+    event_type: eventCategory,
+    event_detail: eventDetail,
+    message: log.message ?? log.Message ?? eventName,
+    detail: eventDetail,
+    data_activity: log.data_activity ?? log.dataActivity ?? log.mDataActivity ?? "",
+    call_state: log.call_state ?? log.callState ?? log.CallState ?? log.mPreciseCallState ?? "",
+    raw_event: {
+      event_name: eventName,
+      category: eventCategory,
+      detail: eventDetail,
+      data_activity: log.data_activity ?? log.dataActivity ?? log.mDataActivity ?? "",
+      call_state: log.call_state ?? log.callState ?? log.CallState ?? log.mPreciseCallState ?? "",
+      handover_type: log.handover_type ?? log.handoverType ?? "",
+    },
     log_type: wifiLog ? "wifi" : "network",
     connection_type: wifiLog ? "wifi" : "network",
     is_wifi: wifiLog,
@@ -304,7 +345,7 @@ export const useNetworkSamples = (
     const cacheKey = makeProjectCacheKey({
       resource: 'unified-network-samples',
       sessionIds: sessionIds || [],
-      variant: `typed-network-wifi-v11:${safeMaxRows ? `max-${safeMaxRows}` : 'all'}:project-${projectId || 'none'}`,
+      variant: `typed-network-wifi-v12:${safeMaxRows ? `max-${safeMaxRows}` : 'all'}:project-${projectId || 'none'}`,
     });
 
 

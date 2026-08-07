@@ -6,26 +6,38 @@ import React, {
 } from "react";
 import { Upload, Loader2, AlertTriangle, X, Search, FileText, ListOrdered } from "lucide-react";
 import toast from "react-hot-toast";
+import { GoogleMap, MarkerF, PolylineF, useJsApiLoader } from "@react-google-maps/api";
 import { extractL3AndEventFiles } from "@/utils/l3Events/zipParser";
 import { parseL3CSV } from "@/utils/l3Events/l3Parser";
 import { parseEventCSV } from "@/utils/l3Events/eventParser";
 import { parseNetworkLogCSV } from "@/utils/l3Events/networkLogParser";
 import { mergeTimeline } from "@/utils/l3Events/timelineBuilder";
-import { buildCallSummary } from "@/utils/l3Events/callSummaryBuilder";
+import { buildCallSummary, formatDurationMs } from "@/utils/l3Events/callSummaryBuilder";
 import { buildProtocolAnalysis } from "@/utils/l3Events/protocolAnalyzer";
 import { downloadL3CallSummaryPdfReport, downloadL3EventPdfReport } from "@/utils/l3Events/pdfReport";
 import { NETWORK_FLOW_MODELS } from "@/utils/l3Events/flowModels";
-import { CallSummaryPanel } from "./l3Events/CallSummaryPanel";
 import { FlowModelCatalog } from "./l3Events/FlowModelCatalog";
 import { ProtocolAnalyzerView } from "./l3Events/ProtocolAnalyzerView";
 import { TimelineCard } from "./l3Events/TimelineCard";
+import { ExcelSignalingView } from "./l3Events/ExcelSignalingView";
+import { buildUnifiedSignalingRows } from "@/utils/l3Events/signalingModel";
+import {
+  GOOGLE_MAPS_LOADER_OPTIONS,
+  getGoogleMapsConfigError,
+  getGoogleMapsErrorMessage,
+} from "@/lib/googleMapsLoader";
 
 const VIEW_TABS = [
+  { id: "map", label: "Map View" },
+  { id: "excel", label: "Excel View" },
   { id: "analyzer", label: "Analyzer" },
   { id: "models", label: "Flow Models" },
   { id: "l3", label: "All L3 Messages" },
   { id: "events", label: "All Events" },
 ];
+
+const MAP_CONTAINER_STYLE = { width: "100%", height: "100%" };
+const DEFAULT_MAP_CENTER = { lat: 20.5937, lng: 78.9629 };
 
 export const L3EventsTab = () => {
   const [status, setStatus] = useState("idle"); // idle | loading | ready | error
@@ -35,7 +47,7 @@ export const L3EventsTab = () => {
   const [timeline, setTimeline] = useState([]);
   const [networkLogRows, setNetworkLogRows] = useState([]);
   const [selectedCall, setSelectedCall] = useState(null);
-  const [activeView, setActiveView] = useState("analyzer");
+  const [activeView, setActiveView] = useState(null);
   const [search, setSearch] = useState("");
   const [isExportingReport, setIsExportingReport] = useState(false);
   const [isExportingL3Summary, setIsExportingL3Summary] = useState(false);
@@ -53,7 +65,7 @@ export const L3EventsTab = () => {
     setWarningMessage("");
     setFileName(selectedFiles.length === 1 ? selectedFiles[0].name : `${selectedFiles.length} files selected`);
     setSelectedCall(null);
-    setActiveView("analyzer");
+    setActiveView(null);
     setSearch("");
 
     try {
@@ -112,12 +124,17 @@ export const L3EventsTab = () => {
   }, [timeline, selectedCall]);
 
   const handleSelectCall = useCallback((call) => {
-    if (!call?.startTime) return;
-    setSelectedCall(call);
+    setSelectedCall(call?.startTime ? call : null);
   }, []);
 
   const callSummary = useMemo(() => buildCallSummary(timeline), [timeline]);
+  const fullProtocolAnalysis = useMemo(() => buildProtocolAnalysis(timeline, networkLogRows), [timeline, networkLogRows]);
   const protocolAnalysis = useMemo(() => buildProtocolAnalysis(filteredProtocolTimeline, networkLogRows), [filteredProtocolTimeline, networkLogRows]);
+  const signalingRows = useMemo(
+    () => buildUnifiedSignalingRows(timeline, callSummary.calls, fullProtocolAnalysis),
+    [timeline, callSummary.calls, fullProtocolAnalysis],
+  );
+  const mapPoints = useMemo(() => buildMapPoints(timeline), [timeline]);
   const l3Messages = useMemo(() => timeline.filter((item) => item.type === "l3"), [timeline]);
   const eventMessages = useMemo(() => timeline.filter((item) => item.type === "event"), [timeline]);
   const canExportReport = status === "ready" && protocolAnalysis.procedures.length > 0;
@@ -139,9 +156,11 @@ export const L3EventsTab = () => {
       setupFailures: selectedCall.detailedStatus === "Call Setup Failure" ? 1 : 0,
       ongoing: selectedCall.detailedStatus === "Ongoing" ? 1 : 0,
       unknown: selectedCall.detailedStatus === "Unknown" ? 1 : 0,
-      averageSetupTime: selectedCall.setupTimeMs || 0,
-      averageTalkTime: selectedCall.talkTimeMs || 0,
-      totalDurationMs: selectedCall.durationMs || selectedCall.totalDurationMs || 0,
+      averageSetupTime: selectedCall.callSetupTimeMs || 0,
+      averageTalkTime: selectedCall.connectedDurationMs || 0,
+      totalDurationMs: selectedCall.connectedDurationMs || 0,
+      totalConnectedDurationMs: selectedCall.connectedDurationMs || 0,
+      totalAttemptDurationMs: selectedCall.attemptDurationMs || 0,
       successRate: statusValue === "Connected" ? 1 : 0,
       calls: [selectedCall],
     };
@@ -267,16 +286,10 @@ export const L3EventsTab = () => {
             </div>
           )}
 
-          <CallSummaryPanel
-            summary={callSummary}
-            selectedCallId={selectedCall?.id}
-            onSelectCall={handleSelectCall}
-          />
-
           <div className="rounded-lg border border-slate-700 bg-slate-900/70 p-2">
             <div className="flex flex-wrap gap-2">
               {VIEW_TABS.map((tab) => {
-                const count = tab.id === "l3" ? l3Messages.length : tab.id === "events" ? eventMessages.length : tab.id === "models" ? NETWORK_FLOW_MODELS.length : protocolAnalysis.stats.totalProcedures;
+                const count = tab.id === "map" ? mapPoints.length : tab.id === "excel" ? signalingRows.length : tab.id === "l3" ? l3Messages.length : tab.id === "events" ? eventMessages.length : tab.id === "models" ? NETWORK_FLOW_MODELS.length : protocolAnalysis.stats.totalProcedures;
                 const isActive = activeView === tab.id;
                 return (
                   <button
@@ -296,6 +309,10 @@ export const L3EventsTab = () => {
             </div>
           </div>
 
+          {!activeView && (
+            <HomeCallSummary summary={callSummary} />
+          )}
+
           {activeView === "analyzer" && selectedCall && (
             <div className="flex items-center justify-between gap-2 text-xs bg-blue-500/10 border border-blue-500/30 rounded-lg px-3 py-2">
               <span className="text-blue-300 truncate">
@@ -312,11 +329,21 @@ export const L3EventsTab = () => {
             </div>
           )}
 
-          {activeView === "analyzer" ? (
+          {activeView === "map" ? (
+            <L3EventsMapView points={mapPoints} />
+          ) : activeView === "excel" ? (
+            <ExcelSignalingView
+              rows={signalingRows}
+              calls={callSummary.calls}
+              selectedCall={selectedCall}
+              onSelectCall={handleSelectCall}
+              sourceFileName={fileName}
+            />
+          ) : activeView === "analyzer" ? (
             <ProtocolAnalyzerView analysis={protocolAnalysis} callScoped={Boolean(selectedCall)} />
           ) : activeView === "models" ? (
             <FlowModelCatalog />
-          ) : (
+          ) : activeView === "l3" || activeView === "events" ? (
             <div className="rounded-lg border border-slate-700 bg-slate-900/70 overflow-hidden">
               <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-700 bg-slate-800/70 p-3">
                 <div>
@@ -348,11 +375,188 @@ export const L3EventsTab = () => {
                 )}
               </div>
             </div>
-          )}
+          ) : null}
         </>
       )}
     </div>
   );
 };
+
+function HomeCallSummary({ summary }) {
+  const stats = [
+    { label: "Connected", value: summary.connected || 0, className: "border-emerald-500/35 bg-emerald-500/10 text-emerald-300" },
+    { label: "Dropped", value: summary.dropped || 0, className: "border-red-500/35 bg-red-500/10 text-red-300" },
+    { label: "Not Connected", value: summary.notConnected || 0, className: "border-amber-500/35 bg-amber-500/10 text-amber-300" },
+    { label: "Avg Call Setup", value: formatDurationMs(summary.averageSetupTime || 0), className: "border-blue-500/35 bg-blue-500/10 text-blue-300" },
+    { label: "Avg Connected Duration", value: formatDurationMs(summary.averageTalkTime || 0), className: "border-cyan-500/35 bg-cyan-500/10 text-cyan-300" },
+  ];
+
+  return (
+    <div className="rounded-lg border border-slate-700 bg-slate-900/70 p-4">
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <h3 className="text-sm font-semibold text-white">Call Summary</h3>
+          <p className="text-[11px] text-slate-400">
+            {summary.totalCalls || 0} total call attempt{summary.totalCalls === 1 ? "" : "s"}
+          </p>
+        </div>
+        <span className="text-[11px] text-slate-500">Select a tab above to open a detailed view.</span>
+      </div>
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+        {stats.map((stat) => (
+          <div key={stat.label} className={`rounded-lg border p-3 ${stat.className}`}>
+            <div className="text-[11px] uppercase tracking-wide opacity-80">{stat.label}</div>
+            <div className="mt-1 text-2xl font-semibold text-white">{stat.value}</div>
+          </div>
+        ))}
+      </div>
+      {summary.calls?.length > 0 && (
+        <div className="mt-4 overflow-x-auto rounded-lg border border-slate-700">
+          <table className="w-full min-w-[980px] border-collapse text-xs">
+            <thead className="bg-slate-800/90 text-[10px] uppercase tracking-wide text-slate-400">
+              <tr>
+                <th className="border-b border-r border-slate-700 px-3 py-2 text-left">Call</th>
+                <th className="border-b border-r border-slate-700 px-3 py-2 text-left">Start</th>
+                <th className="border-b border-r border-slate-700 px-3 py-2 text-left">End</th>
+                <th className="border-b border-r border-slate-700 px-3 py-2 text-left">Technology</th>
+                <th className="border-b border-r border-slate-700 px-3 py-2 text-left">Result</th>
+                <th className="border-b border-r border-slate-700 px-3 py-2 text-left">Setup Time</th>
+                <th className="border-b border-r border-slate-700 px-3 py-2 text-left">Call Duration</th>
+                <th className="border-b border-slate-700 px-3 py-2 text-left">Reason</th>
+              </tr>
+            </thead>
+            <tbody>
+              {summary.calls.map((call) => {
+                const technology = call.technologyStart && call.technologyEnd && call.technologyStart !== call.technologyEnd
+                  ? `${call.technologyStart} → ${call.technologyEnd}`
+                  : call.technologyStart || call.technologyEnd || "Unknown";
+                const statusClass = call.status === "Connected"
+                  ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-300"
+                  : call.status === "Dropped"
+                    ? "border-red-500/30 bg-red-500/10 text-red-300"
+                    : "border-amber-500/30 bg-amber-500/10 text-amber-300";
+                return (
+                  <tr key={call.id} className="border-b border-slate-800/90 bg-slate-950/40 text-slate-200 last:border-b-0 hover:bg-slate-800/50">
+                    <td className="border-r border-slate-800 px-3 py-2 font-mono font-semibold text-blue-300">{call.id}</td>
+                    <td className="border-r border-slate-800 px-3 py-2 font-mono whitespace-nowrap">{formatHomeCallTime(call.startTime)}</td>
+                    <td className="border-r border-slate-800 px-3 py-2 font-mono whitespace-nowrap">{formatHomeCallTime(call.terminationTime || call.endTime)}</td>
+                    <td className="border-r border-slate-800 px-3 py-2 whitespace-nowrap">{technology}</td>
+                    <td className="border-r border-slate-800 px-3 py-2">
+                      <span className={`inline-flex rounded-full border px-2 py-0.5 text-[10px] font-medium ${statusClass}`}>{call.status}</span>
+                      <div className="mt-1 text-[10px] text-slate-500">{call.detailedStatus || "Unknown"}</div>
+                    </td>
+                    <td className="border-r border-slate-800 px-3 py-2 whitespace-nowrap">
+                      {formatHomeCallDuration(call.callSetupTimeMs, call.connectionEstimated)}
+                    </td>
+                    <td className="border-r border-slate-800 px-3 py-2 whitespace-nowrap">
+                      {formatHomeCallDuration(call.connectedDurationMs, call.connectionEstimated)}
+                    </td>
+                    <td className="max-w-72 px-3 py-2 text-slate-300" title={call.disconnectReason || ""}>{call.disconnectReason || "—"}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function formatHomeCallTime(value) {
+  if (!(value instanceof Date)) return "—";
+  return value.toLocaleTimeString([], { hour12: false, timeZone: "UTC" });
+}
+
+function formatHomeCallDuration(value, estimated = false) {
+  if (value === null || value === undefined) return "—";
+  return `${estimated ? "~" : ""}${formatDurationMs(value)}`;
+}
+
+function buildMapPoints(timeline) {
+  return (timeline || [])
+    .map((item, index) => {
+      const lat = Number(item?.latitude);
+      const lng = Number(item?.longitude);
+      if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+      return {
+        id: item?.id || `l3-map-point-${index}`,
+        lat,
+        lng,
+        title: item?.title || item?.summary || "Message",
+        timestampLabel: item?.timestampLabel || item?.timestamp?.toLocaleTimeString([], { hour12: false, timeZone: "UTC" }) || "",
+        sourceFile: item?.sourceFile || "",
+      };
+    })
+    .filter(Boolean);
+}
+
+function L3EventsMapView({ points }) {
+  const { isLoaded, loadError } = useJsApiLoader(GOOGLE_MAPS_LOADER_OPTIONS);
+  const mapsError = getGoogleMapsConfigError() || (loadError ? getGoogleMapsErrorMessage(loadError) : null);
+  const center = points.length
+    ? {
+        lat: points.reduce((sum, point) => sum + point.lat, 0) / points.length,
+        lng: points.reduce((sum, point) => sum + point.lng, 0) / points.length,
+      }
+    : DEFAULT_MAP_CENTER;
+
+  if (!points.length) {
+    return (
+      <div className="flex h-[520px] items-center justify-center rounded-lg border border-slate-700 bg-slate-900/70 text-sm text-slate-300">
+        No latitude/longitude points were found in the uploaded L3/Event data.
+      </div>
+    );
+  }
+
+  return (
+    <div className="overflow-hidden rounded-lg border border-slate-700 bg-slate-900/70">
+      <div className="flex items-center justify-between border-b border-slate-700 bg-slate-800/70 px-3 py-2 text-xs text-slate-300">
+        <span>Map View</span>
+        <span>{points.length.toLocaleString()} mapped point{points.length === 1 ? "" : "s"}</span>
+      </div>
+      <div className="h-[560px]">
+        {mapsError ? (
+          <div className="flex h-full items-center justify-center px-6 text-center text-sm text-rose-300">
+            {mapsError}
+          </div>
+        ) : !isLoaded ? (
+          <div className="flex h-full items-center justify-center text-sm text-slate-300">
+            Loading map...
+          </div>
+        ) : (
+          <GoogleMap
+            mapContainerStyle={MAP_CONTAINER_STYLE}
+            center={center}
+            zoom={points.length > 1 ? 13 : 15}
+            options={{
+              fullscreenControl: false,
+              streetViewControl: false,
+              mapTypeControl: true,
+              clickableIcons: false,
+              gestureHandling: "greedy",
+              scrollwheel: true,
+            }}
+          >
+            {points.length > 1 && (
+              <PolylineF
+                path={points.map((point) => ({ lat: point.lat, lng: point.lng }))}
+                options={{ strokeColor: "#38bdf8", strokeOpacity: 0.95, strokeWeight: 3 }}
+              />
+            )}
+            {points.map((point, index) => (
+              <MarkerF
+                key={point.id}
+                position={{ lat: point.lat, lng: point.lng }}
+                title={`${index + 1}. ${point.title}${point.timestampLabel ? ` - ${point.timestampLabel}` : ""}`}
+                label={{ text: String(index + 1), color: "#ffffff", fontSize: "10px", fontWeight: "700" }}
+              />
+            ))}
+          </GoogleMap>
+        )}
+      </div>
+    </div>
+  );
+}
 
 export default L3EventsTab;

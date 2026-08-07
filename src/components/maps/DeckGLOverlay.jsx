@@ -3,6 +3,7 @@ import React, { useEffect, useRef, useMemo, useCallback, useState } from 'react'
 import { GoogleMapsOverlay } from '@deck.gl/google-maps';
 import { ScatterplotLayer, PolygonLayer, TextLayer } from '@deck.gl/layers';
 import { getMetricConfig, getMetricValueFromLog } from '@/utils/metrics';
+import { sampleLogIndices } from '@/utils/logSpatialSampling';
 
 const pickFirstNonEmpty = (obj, keys = []) => {
   for (const key of keys) {
@@ -12,13 +13,6 @@ const pickFirstNonEmpty = (obj, keys = []) => {
     }
   }
   return '';
-};
-
-const getPrimaryRenderLimit = (total) => {
-  if (total > 120000) return 12000;
-  if (total > 80000) return 15000;
-  if (total > 50000) return 18000;
-  return 30000;
 };
 
 const getNeighborRenderLimit = (total) => {
@@ -31,6 +25,9 @@ const getImageRenderLimit = (total) => {
   if (total > 20000) return 2000;
   return 4000;
 };
+
+const VIEWPORT_PADDING_RATIO = 0.18;
+const LOG_SAMPLE_CELL_PIXELS = 16;
 
 const parseColorToRGB = (colorStr) => {
   if (!colorStr || typeof colorStr !== 'string') return [128, 128, 128, 200];
@@ -102,6 +99,27 @@ const downsample = (rows, maxRows) => {
   return rows.filter((_, index) => index % step === 0).slice(0, maxRows);
 };
 
+const normalizeMapBounds = (bounds) => {
+  if (!bounds) return null;
+  const northEast = bounds.getNorthEast?.();
+  const southWest = bounds.getSouthWest?.();
+  const north = Number(northEast?.lat?.());
+  const east = Number(northEast?.lng?.());
+  const south = Number(southWest?.lat?.());
+  const west = Number(southWest?.lng?.());
+  if (![north, east, south, west].every(Number.isFinite)) return null;
+
+  const latPadding = Math.max(0.0005, Math.abs(north - south) * VIEWPORT_PADDING_RATIO);
+  const lngPadding = Math.max(0.0005, Math.abs(east - west) * VIEWPORT_PADDING_RATIO);
+
+  return {
+    north: Math.min(90, north + latPadding),
+    south: Math.max(-90, south - latPadding),
+    east: Math.min(180, east + lngPadding),
+    west: Math.max(-180, west - lngPadding),
+  };
+};
+
 const DeckGLOverlay = ({
   onHover,
   map,
@@ -137,6 +155,10 @@ const DeckGLOverlay = ({
 }) => {
   const overlayRef = useRef(null);
   const [mapZoom, setMapZoom] = useState(null);
+  const [viewportBounds, setViewportBounds] = useState(null);
+  const [sampledPrimaryIndexes, setSampledPrimaryIndexes] = useState(() => new Uint32Array());
+  const samplingWorkerRef = useRef(null);
+  const samplingRequestRef = useRef(0);
   const isCleanedUpRef = useRef(false);
   const attachedMapRef = useRef(null);
   const idleListenerRef = useRef(null);
@@ -223,22 +245,96 @@ const DeckGLOverlay = ({
     };
   }, [map, isValidMapInstance, canAttachOverlay]);
 
+  const updateMapViewport = useCallback(() => {
+    if (!isValidMapInstance(map)) return;
+    setMapZoom(map.getZoom());
+    setViewportBounds(normalizeMapBounds(map.getBounds?.()));
+  }, [map, isValidMapInstance]);
+
   useEffect(() => {
     if (!isValidMapInstance(map) || typeof map.addListener !== 'function') return;
-    setMapZoom(map.getZoom());
-    const listener = map.addListener('zoom_changed', () => {
-      setMapZoom(map.getZoom());
-    });
+    updateMapViewport();
+    const zoomListener = map.addListener('zoom_changed', updateMapViewport);
+    const idleListener = map.addListener('idle', updateMapViewport);
+    const dragListener = map.addListener('dragend', updateMapViewport);
     return () => {
       if (window.google?.maps?.event?.removeListener) {
-        window.google.maps.event.removeListener(listener);
+        window.google.maps.event.removeListener(zoomListener);
+        window.google.maps.event.removeListener(idleListener);
+        window.google.maps.event.removeListener(dragListener);
       }
     };
-  }, [map, isValidMapInstance]);
+  }, [map, isValidMapInstance, updateMapViewport]);
+
+  useEffect(() => {
+    if (typeof Worker === 'undefined') return undefined;
+
+    const worker = new Worker(
+      new URL('../../workers/logSpatialSampling.worker.js', import.meta.url),
+      { type: 'module' },
+    );
+    samplingWorkerRef.current = worker;
+
+    worker.onmessage = ({ data }) => {
+      if (data.requestId !== samplingRequestRef.current) return;
+      if (data.error) {
+        console.warn('[UnifiedMapView] Log sampling worker failed:', data.error);
+        return;
+      }
+      setSampledPrimaryIndexes(new Uint32Array(data.indexesBuffer));
+    };
+
+    worker.onerror = (error) => {
+      console.warn('[UnifiedMapView] Log sampling worker error:', error.message);
+    };
+
+    return () => {
+      worker.terminate();
+      if (samplingWorkerRef.current === worker) samplingWorkerRef.current = null;
+    };
+  }, []);
+
+  useEffect(() => {
+    const requestId = samplingRequestRef.current + 1;
+    samplingRequestRef.current = requestId;
+
+    if (!showPrimaryLogs || !locations?.length) {
+      setSampledPrimaryIndexes(new Uint32Array());
+      return;
+    }
+
+    const coordinates = new Float64Array(locations.length * 2);
+    locations.forEach((loc, index) => {
+      coordinates[index * 2] = Number(loc?.lng ?? loc?.longitude ?? loc?.lon ?? loc?.Lng);
+      coordinates[index * 2 + 1] = Number(loc?.lat ?? loc?.latitude ?? loc?.Lat);
+    });
+
+    const options = {
+      requestId,
+      totalLogs: locations.length,
+      bounds: viewportBounds,
+      zoom: mapZoom,
+      cellPixels: LOG_SAMPLE_CELL_PIXELS,
+      selectedIndex: Number.isInteger(selectedIndex) ? selectedIndex : -1,
+      maxRows: Number.isFinite(primaryRenderLimit) ? primaryRenderLimit : null,
+    };
+    const worker = samplingWorkerRef.current;
+
+    if (worker) {
+      worker.postMessage(
+        { ...options, coordinatesBuffer: coordinates.buffer },
+        [coordinates.buffer],
+      );
+      return;
+    }
+
+    // Older browsers without Worker support retain the same behavior.
+    setSampledPrimaryIndexes(sampleLogIndices({ ...options, coordinates }));
+  }, [locations, showPrimaryLogs, viewportBounds, mapZoom, selectedIndex, primaryRenderLimit]);
 
   const handlePrimaryClick = useCallback((info) => {
     if (!onClick || !info?.object) return;
-    onClick(info.index, info.object.source ?? info.object);
+    onClick(info.object.index, info.object.source ?? info.object);
   }, [onClick]);
 
   const handleNeighborClick = useCallback((info) => {
@@ -271,20 +367,23 @@ const DeckGLOverlay = ({
 
   const primaryData = useMemo(() => {
     if (!showPrimaryLogs || !locations?.length) return [];
-    const renderLimit = Number.isFinite(primaryRenderLimit)
-      ? primaryRenderLimit
-      : getPrimaryRenderLimit(locations.length);
-    const sampled = downsample(locations, renderLimit);
-    return sampled.map((loc, idx) => ({
-      index: idx,
-      source: loc,
-      position: [
-        parseFloat(loc.lng ?? loc.longitude ?? loc.lon ?? loc.Lng ?? 0), 
-        parseFloat(loc.lat ?? loc.latitude ?? loc.Lat ?? 0)
-      ],
-      computedColor: getColor ? parseColorToRGB(getColor(loc)) : [16, 185, 129, 200],
-    }));
-  }, [locations, showPrimaryLogs, getColor, primaryRenderLimit]);
+    return Array.from(sampledPrimaryIndexes, (idx) => {
+      const loc = locations[idx];
+      if (!loc) return null;
+      const position = [
+        Number(loc.lng ?? loc.longitude ?? loc.lon ?? loc.Lng),
+        Number(loc.lat ?? loc.latitude ?? loc.Lat),
+      ];
+      if (!Number.isFinite(position[0]) || !Number.isFinite(position[1])) return null;
+      return {
+        index: idx,
+        source: loc,
+        position,
+        computedColor: getColor ? parseColorToRGB(getColor(loc)) : [16, 185, 129, 200],
+      };
+    })
+      .filter(Boolean);
+  }, [locations, showPrimaryLogs, getColor, sampledPrimaryIndexes]);
 
   const gridData = useMemo(() => {
     if (!showGrid || !gridCells?.length) return [];
@@ -458,8 +557,14 @@ const DeckGLOverlay = ({
         id: 'primary-logs-layer',
         data: primaryData,
         getPosition: d => d.position,
-        getFillColor: d => d.computedColor, 
-        getRadius: d => d.index === selectedIndex ? radius * 1.5 : radius,
+        getFillColor: d => d.computedColor,
+        getLineColor: [255, 255, 255, 70],
+        getLineWidth: 0,
+        lineWidthMinPixels: 0,
+        stroked: true,
+        getRadius: d => {
+          return d.index === selectedIndex ? radius * 1.5 : radius;
+        },
         radiusUnits: 'pixels',
         radiusMinPixels,
         radiusMaxPixels,

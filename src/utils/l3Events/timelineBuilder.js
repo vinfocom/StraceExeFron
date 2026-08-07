@@ -1,4 +1,5 @@
 import { decodeL3Item, decodeEventItem } from "./eventDecoder.js";
+import { extractEmbeddedTimestamp, isStaleEvent } from "./timestampUtils.js";
 
 // Real exports often log a bare time-of-day like "17:34:50.306" with no date
 // at all. Anchor those to a fixed arbitrary date so same-session rows still
@@ -55,15 +56,18 @@ let idCounter = 0;
 const nextId = () => `l3evt-${++idCounter}`;
 
 function buildItem(row, type, decoded) {
-  const date = parseTimestampValue(row.timestamp);
+  const capturedTimestamp = parseTimestampValue(row.timestamp);
   const rawMessage = type === "l3" ? row.decodedText || row.message || "" : row.value || row.eventName || "";
+  const embeddedTimestamp = extractEmbeddedTimestamp(rawMessage, capturedTimestamp);
   const latitude = toFiniteCoordinate(row.latitude, -90, 90);
   const longitude = toFiniteCoordinate(row.longitude, -180, 180);
 
-  return {
+  const item = {
     id: nextId(),
-    timestamp: date,
-    timestampLabel: row.timestamp || formatTimelineTimestamp(date),
+    timestamp: capturedTimestamp,
+    capturedTimestamp,
+    embeddedTimestamp,
+    timestampLabel: row.timestamp || formatTimelineTimestamp(capturedTimestamp),
     type,
     category: decoded.category,
     sourceCategory: type === "l3" ? row.layer : row.category,
@@ -75,10 +79,20 @@ function buildItem(row, type, decoded) {
     rawMessage,
     sourceFile: row.sourceFile,
     originSource: row.originSource,
+    sourceIndex: row.sourceIndex,
     severity: row.severity,
     eventKey: decoded.eventKey || null,
     latitude,
     longitude,
+    metadata: row.raw || {},
+  };
+  const isStale = isStaleEvent(item);
+  return {
+    ...item,
+    // Fresh embedded logcat timestamps are closer to the actual modem event
+    // than the delayed CSV capture time and produce accurate setup/duration.
+    timestamp: embeddedTimestamp instanceof Date && !isStale ? embeddedTimestamp : capturedTimestamp,
+    isStale,
   };
 }
 

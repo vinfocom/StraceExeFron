@@ -40,6 +40,8 @@ export function buildSummary(calls = []) {
     averageSetupTime: 0,
     averageTalkTime: 0,
     totalDurationMs: 0,
+    totalConnectedDurationMs: 0,
+    totalAttemptDurationMs: 0,
     successRate: 0,
     calls,
   };
@@ -49,10 +51,18 @@ export function buildSummary(calls = []) {
 
   for (const call of calls) {
     incrementForStatus(summary, call.status, call.detailedStatus);
-    summary.totalDurationMs += call.totalDurationMs || 0;
-    if (call.setupTimeMs > 0) setupTimes.push(call.setupTimeMs);
-    if (call.talkTimeMs > 0) talkTimes.push(call.talkTimeMs);
+    const connectedDurationMs = call.connectedDurationMs ?? call.talkTimeMs ?? 0;
+    const attemptDurationMs = call.attemptDurationMs ?? call.totalDurationMs ?? 0;
+    summary.totalConnectedDurationMs += connectedDurationMs;
+    summary.totalAttemptDurationMs += attemptDurationMs;
+    if (call.callSetupTimeMs > 0) setupTimes.push(call.callSetupTimeMs);
+    else if (call.setupTimeMs > 0) setupTimes.push(call.setupTimeMs);
+    if (connectedDurationMs > 0) talkTimes.push(connectedDurationMs);
   }
+
+  // Keep the historical field used by reports/UI, but define "call
+  // duration" as connected media time rather than ringing/setup attempts.
+  summary.totalDurationMs = summary.totalConnectedDurationMs;
 
   summary.averageSetupTime = average(setupTimes);
   summary.averageTalkTime = average(talkTimes);

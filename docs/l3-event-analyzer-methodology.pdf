@@ -1,0 +1,1107 @@
+%PDF-1.4
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [7 0 R 9 0 R 11 0 R 13 0 R] /Count 4 >>
+endobj
+3 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>
+endobj
+4 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>
+endobj
+5 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Courier >>
+endobj
+6 0 obj
+<< /Length 5297 >>
+stream
+BT
+/F2 8 Tf
+1 1 1 rg
+48 32 Td
+(L3/Event Analyzer Methodology - Page 1) Tj
+ET
+BT
+/F2 18 Tf
+0.03 0.16 0.32 rg
+48 789.89 Td
+(L3/Event Analyzer Methodology) Tj
+ET
+BT
+/F1 10.5 Tf
+0.13 0.16 0.22 rg
+48 765.89 Td
+(How the current model reads L3 and Events files, fixes timestamps, classifies) Tj
+ET
+BT
+/F1 10.5 Tf
+0.13 0.16 0.22 rg
+48 750.89 Td
+(technology, detects call sessions, separates connected, not connected, and dropped) Tj
+ET
+BT
+/F1 10.5 Tf
+0.13 0.16 0.22 rg
+48 735.89 Td
+(calls, and calculates setup time and duration.) Tj
+ET
+BT
+/F1 9 Tf
+0.38 0.43 0.50 rg
+48 720.89 Td
+(Generated: 2026-08-07) Tj
+ET
+BT
+/F2 13 Tf
+0.04 0.24 0.45 rg
+48 696.89 Td
+(1. Input Data) Tj
+ET
+BT
+/F1 10 Tf
+0.13 0.16 0.22 rg
+48 676.89 Td
+(- The analyzer consumes two families of records: decoded L3 signaling rows and device or) Tj
+ET
+BT
+/F1 10 Tf
+0.13 0.16 0.22 rg
+48 662.89 Td
+(modem Event rows.) Tj
+ET
+BT
+/F1 10 Tf
+0.13 0.16 0.22 rg
+48 648.89 Td
+(- L3 rows provide protocol messages such as RRC, NAS, IMS SIP, attach, registration,) Tj
+ET
+BT
+/F1 10 Tf
+0.13 0.16 0.22 rg
+48 634.89 Td
+(handover, bearer, and release messages.) Tj
+ET
+BT
+/F1 10 Tf
+0.13 0.16 0.22 rg
+48 620.89 Td
+(- Event rows provide call-state callbacks such as CALL_DIAL_INITIATED, CALL_DIALING,) Tj
+ET
+BT
+/F1 10 Tf
+0.13 0.16 0.22 rg
+48 606.89 Td
+(CALL_ALERTING, CALL_ACTIVE, CALL_DISCONNECTED, CallState, mPreciseCallState, and) Tj
+ET
+BT
+/F1 10 Tf
+0.13 0.16 0.22 rg
+48 592.89 Td
+(disconnect cause rows.) Tj
+ET
+BT
+/F1 10 Tf
+0.13 0.16 0.22 rg
+48 578.89 Td
+(- Each row keeps source metadata, raw message text, decoded details, source file, row) Tj
+ET
+BT
+/F1 10 Tf
+0.13 0.16 0.22 rg
+48 564.89 Td
+(index, severity, latitude, longitude, and any parser metadata available from the) Tj
+ET
+BT
+/F1 10 Tf
+0.13 0.16 0.22 rg
+48 550.89 Td
+(uploaded archive.) Tj
+ET
+BT
+/F2 13 Tf
+0.04 0.24 0.45 rg
+48 528.89 Td
+(2. Timeline Normalization) Tj
+ET
+BT
+/F1 10 Tf
+0.13 0.16 0.22 rg
+48 508.89 Td
+(- Every L3 and Event row is merged into one chronological timeline in) Tj
+ET
+BT
+/F1 10 Tf
+0.13 0.16 0.22 rg
+48 494.89 Td
+(timelineBuilder.js.) Tj
+ET
+BT
+/F1 10 Tf
+0.13 0.16 0.22 rg
+48 480.89 Td
+(- Timestamps can be epoch milliseconds, epoch seconds, full date strings, or time-only) Tj
+ET
+BT
+/F1 10 Tf
+0.13 0.16 0.22 rg
+48 466.89 Td
+(values such as 17:34:50.306.) Tj
+ET
+BT
+/F1 10 Tf
+0.13 0.16 0.22 rg
+48 452.89 Td
+(- Time-only values are anchored to 1970-01-01 UTC so ordering stays stable and the) Tj
+ET
+BT
+/F1 10 Tf
+0.13 0.16 0.22 rg
+48 438.89 Td
+(visible time matches the log text.) Tj
+ET
+BT
+/F1 10 Tf
+0.13 0.16 0.22 rg
+48 424.89 Td
+(- If raw logcat text contains a fresher embedded timestamp, the analyzer uses that) Tj
+ET
+BT
+/F1 10 Tf
+0.13 0.16 0.22 rg
+48 410.89 Td
+(embedded timestamp as the true event time.) Tj
+ET
+BT
+/F1 10 Tf
+0.13 0.16 0.22 rg
+48 396.89 Td
+(- If an embedded event is stale compared with the CSV capture time, it is marked stale) Tj
+ET
+BT
+/F1 10 Tf
+0.13 0.16 0.22 rg
+48 382.89 Td
+(and is not allowed to create false call evidence.) Tj
+ET
+BT
+/F2 13 Tf
+0.04 0.24 0.45 rg
+48 360.89 Td
+(3. Technology Classification) Tj
+ET
+BT
+/F1 10 Tf
+0.13 0.16 0.22 rg
+48 340.89 Td
+(- Technology is inferred from procedure analysis, item protocol, interface names, source) Tj
+ET
+BT
+/F1 10 Tf
+0.13 0.16 0.22 rg
+48 326.89 Td
+(category, and raw message text.) Tj
+ET
+BT
+/F1 10 Tf
+0.13 0.16 0.22 rg
+48 312.89 Td
+(- The normalization rule maps gsm or 2g to 2G, umts/utran/3g to 3G, lte/4g/enodeb/eps to) Tj
+ET
+BT
+/F1 10 Tf
+0.13 0.16 0.22 rg
+48 298.89 Td
+(LTE, and nr/5g/gnb to 5G.) Tj
+ET
+BT
+/F1 10 Tf
+0.13 0.16 0.22 rg
+48 284.89 Td
+(- Protocol analysis also tags procedures using 3GPP families: LTE RRC, NR RRC, NAS, IMS,) Tj
+ET
+BT
+/F1 10 Tf
+0.13 0.16 0.22 rg
+48 270.89 Td
+(GSM RR/MM/CC, UMTS RRC, EPS, and NR NAS.) Tj
+ET
+BT
+/F1 10 Tf
+0.13 0.16 0.22 rg
+48 256.89 Td
+(- For each call, the UI records technology at the start and at the end. If technology) Tj
+ET
+BT
+/F1 10 Tf
+0.13 0.16 0.22 rg
+48 242.89 Td
+(changes during mobility, the home table shows it as Start -> End.) Tj
+ET
+BT
+/F1 10 Tf
+0.13 0.16 0.22 rg
+48 228.89 Td
+(- Unknown is kept when no reliable radio/protocol hint exists. The model does not invent) Tj
+ET
+BT
+/F1 10 Tf
+0.13 0.16 0.22 rg
+48 214.89 Td
+(a technology from unrelated text.) Tj
+ET
+BT
+/F2 13 Tf
+0.04 0.24 0.45 rg
+48 192.89 Td
+(4. Procedure and Signaling Model) Tj
+ET
+BT
+/F1 10 Tf
+0.13 0.16 0.22 rg
+48 172.89 Td
+(- protocolAnalyzer.js matches rows against a procedure library of known 3GPP messages) Tj
+ET
+BT
+/F1 10 Tf
+0.13 0.16 0.22 rg
+48 158.89 Td
+(and flows.) Tj
+ET
+BT
+/F1 10 Tf
+0.13 0.16 0.22 rg
+48 144.89 Td
+(- Examples include GSM MO Call, UMTS CS MO Call, Paging, RRC Connection Establishment,) Tj
+ET
+BT
+/F1 10 Tf
+0.13 0.16 0.22 rg
+48 130.89 Td
+(Security Mode Control, Authentication, Attach, Registration, IMS SIP setup, and handover) Tj
+ET
+BT
+/F1 10 Tf
+0.13 0.16 0.22 rg
+48 116.88999999999999 Td
+(procedures.) Tj
+ET
+BT
+/F1 10 Tf
+0.13 0.16 0.22 rg
+48 102.88999999999999 Td
+(- The procedure model records protocol, source node, destination node, specification) Tj
+ET
+BT
+/F1 10 Tf
+0.13 0.16 0.22 rg
+48 88.88999999999999 Td
+(family, success markers, failure markers, duration, and related evidence.) Tj
+ET
+BT
+/F1 10 Tf
+0.13 0.16 0.22 rg
+48 74.88999999999999 Td
+(- signalingModel.js converts the merged timeline into the Excel View rows: Timestamp,) Tj
+ET
+endstream
+endobj
+7 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595.28 841.89] /Resources << /Font << /F1 3 0 R /F2 4 0 R /F3 5 0 R >> >> /Contents 6 0 R >>
+endobj
+8 0 obj
+<< /Length 5526 >>
+stream
+BT
+/F2 8 Tf
+1 1 1 rg
+48 32 Td
+(L3/Event Analyzer Methodology - Page 2) Tj
+ET
+BT
+/F1 10 Tf
+0.13 0.16 0.22 rg
+48 789.89 Td
+(UE, eNB/gNB, MME/AMF/Core, Interface, Message, and raw Detail.) Tj
+ET
+BT
+/F2 13 Tf
+0.04 0.24 0.45 rg
+48 767.89 Td
+(5. Call Session Detection) Tj
+ET
+BT
+/F1 10 Tf
+0.13 0.16 0.22 rg
+48 747.89 Td
+(- sessionBuilder.js creates one call session when it sees a real start event.) Tj
+ET
+BT
+/F1 10 Tf
+0.13 0.16 0.22 rg
+48 733.89 Td
+(- Outgoing starts are detected from CALL_DIAL_INITIATED, CALL_DIALING, or) Tj
+ET
+BT
+/F1 10 Tf
+0.13 0.16 0.22 rg
+48 719.89 Td
+(dial/calling/trying state.) Tj
+ET
+BT
+/F1 10 Tf
+0.13 0.16 0.22 rg
+48 705.89 Td
+(- Incoming starts are detected only from CallState or mPreciseCallState rows that) Tj
+ET
+BT
+/F1 10 Tf
+0.13 0.16 0.22 rg
+48 691.89 Td
+(contain ringing or alerting plus incoming/MT-call wording.) Tj
+ET
+BT
+/F1 10 Tf
+0.13 0.16 0.22 rg
+48 677.89 Td
+(- Generic ringing by itself is intentionally not a start because it created false calls) Tj
+ET
+BT
+/F1 10 Tf
+0.13 0.16 0.22 rg
+48 663.89 Td
+(in real traces.) Tj
+ET
+BT
+/F1 10 Tf
+0.13 0.16 0.22 rg
+48 649.89 Td
+(- Duplicate start rows inside a one second window are deduplicated into the same) Tj
+ET
+BT
+/F1 10 Tf
+0.13 0.16 0.22 rg
+48 635.89 Td
+(session.) Tj
+ET
+BT
+/F1 10 Tf
+0.13 0.16 0.22 rg
+48 621.89 Td
+(- A session ends on CALL_DISCONNECTED or an idle/disconnected/ended call-state row. Both) Tj
+ET
+BT
+/F1 10 Tf
+0.13 0.16 0.22 rg
+48 607.89 Td
+(terminal callbacks are captured because ordering matters.) Tj
+ET
+BT
+/F2 13 Tf
+0.04 0.24 0.45 rg
+48 585.89 Td
+(6. Connection Evidence) Tj
+ET
+BT
+/F1 10 Tf
+0.13 0.16 0.22 rg
+48 565.89 Td
+(- A call is connected only when strong connection evidence is found before the) Tj
+ET
+BT
+/F1 10 Tf
+0.13 0.16 0.22 rg
+48 551.89 Td
+(normalized end marker.) Tj
+ET
+BT
+/F1 10 Tf
+0.13 0.16 0.22 rg
+48 537.89 Td
+(- Strong evidence includes SIP INVITE followed by SIP 200 OK followed by SIP ACK,) Tj
+ET
+BT
+/F1 10 Tf
+0.13 0.16 0.22 rg
+48 523.89 Td
+(explicit connected call state, non-remote callType=3 after alerting, or media/bearer) Tj
+ET
+BT
+/F1 10 Tf
+0.13 0.16 0.22 rg
+48 509.89 Td
+(establishment.) Tj
+ET
+BT
+/F1 10 Tf
+0.13 0.16 0.22 rg
+48 495.89 Td
+(- Remote capability callType=3 is not treated as connection by itself. Local callType=3) Tj
+ET
+BT
+/F1 10 Tf
+0.13 0.16 0.22 rg
+48 481.89 Td
+(can confirm the call after alerting.) Tj
+ET
+BT
+/F1 10 Tf
+0.13 0.16 0.22 rg
+48 467.89 Td
+(- Codec evidence such as CODEC_AMR_NB, CODEC_AMR_WB, CODEC_EVS, or) Tj
+ET
+BT
+/F1 10 Tf
+0.13 0.16 0.22 rg
+48 453.89 Td
+(updateMediaCapabilities codec fields is kept as supporting evidence.) Tj
+ET
+BT
+/F1 10 Tf
+0.13 0.16 0.22 rg
+48 439.89 Td
+(- Evidence after the actual end is ignored so delayed callbacks do not turn a failed) Tj
+ET
+BT
+/F1 10 Tf
+0.13 0.16 0.22 rg
+48 425.89 Td
+(attempt into a connected call.) Tj
+ET
+BT
+/F2 13 Tf
+0.04 0.24 0.45 rg
+48 403.89 Td
+(7. Fixed-Duration Drive-Test Inference) Tj
+ET
+BT
+/F1 10 Tf
+0.13 0.16 0.22 rg
+48 383.89 Td
+(- Some drive-test calls complete locally with weak explicit connection callbacks. For) Tj
+ET
+BT
+/F1 10 Tf
+0.13 0.16 0.22 rg
+48 369.89 Td
+(those, the analyzer has a conservative estimator.) Tj
+ET
+BT
+/F1 10 Tf
+0.13 0.16 0.22 rg
+48 355.89 Td
+(- The estimator requires local cause 3, an attempt between 85 and 130 seconds, alerting) Tj
+ET
+BT
+/F1 10 Tf
+0.13 0.16 0.22 rg
+48 341.89 Td
+(evidence, and either codec evidence or modem disconnect before Idle.) Tj
+ET
+BT
+/F1 10 Tf
+0.13 0.16 0.22 rg
+48 327.89 Td
+(- When those conditions match, connected time is inferred as end time minus 90 seconds.) Tj
+ET
+BT
+/F1 10 Tf
+0.13 0.16 0.22 rg
+48 313.89 Td
+(- The inferred setup must be between 1 and 30 seconds and after alerting. Inferred) Tj
+ET
+BT
+/F1 10 Tf
+0.13 0.16 0.22 rg
+48 299.89 Td
+(values are marked with connectionEstimated.) Tj
+ET
+BT
+/F1 10 Tf
+0.13 0.16 0.22 rg
+48 285.89 Td
+(- This rule is narrow by design because it should repair known scripted-call traces) Tj
+ET
+BT
+/F1 10 Tf
+0.13 0.16 0.22 rg
+48 271.89 Td
+(without hiding real setup failures.) Tj
+ET
+BT
+/F2 13 Tf
+0.04 0.24 0.45 rg
+48 249.89 Td
+(8. Connected, Not Connected, Dropped) Tj
+ET
+BT
+/F1 10 Tf
+0.13 0.16 0.22 rg
+48 229.89 Td
+(- callClassifier.js classifies a session after milestones and evidence are finalized.) Tj
+ET
+BT
+/F1 10 Tf
+0.13 0.16 0.22 rg
+48 215.89 Td
+(- Connected means the call has connection evidence and no unrecovered abnormal) Tj
+ET
+BT
+/F1 10 Tf
+0.13 0.16 0.22 rg
+48 201.89 Td
+(termination evidence before the end.) Tj
+ET
+BT
+/F1 10 Tf
+0.13 0.16 0.22 rg
+48 187.89 Td
+(- Not Connected means the session ended before connection evidence. Details can be Busy,) Tj
+ET
+BT
+/F1 10 Tf
+0.13 0.16 0.22 rg
+48 173.89 Td
+(Rejected, User Cancelled, Call Setup Failure, IMS Failure, Radio Failure, or Handover) Tj
+ET
+BT
+/F1 10 Tf
+0.13 0.16 0.22 rg
+48 159.89 Td
+(Failure.) Tj
+ET
+BT
+/F1 10 Tf
+0.13 0.16 0.22 rg
+48 145.89 Td
+(- Dropped means the call connected first and then ended with abnormal release evidence) Tj
+ET
+BT
+/F1 10 Tf
+0.13 0.16 0.22 rg
+48 131.89 Td
+(such as radio failure, handover failure, IMS failure, bearer/media loss, SCG failure, or) Tj
+ET
+BT
+/F1 10 Tf
+0.13 0.16 0.22 rg
+48 117.88999999999999 Td
+(unrecovered RRC failure.) Tj
+ET
+BT
+/F1 10 Tf
+0.13 0.16 0.22 rg
+48 103.88999999999999 Td
+(- Recovered RF problems are tracked. If RRC re-establishment or a recovery signal) Tj
+ET
+BT
+/F1 10 Tf
+0.13 0.16 0.22 rg
+48 89.88999999999999 Td
+(appears before release, that issue is exposed as evidence but does not force a dropped) Tj
+ET
+BT
+/F1 10 Tf
+0.13 0.16 0.22 rg
+48 75.88999999999999 Td
+(final result.) Tj
+ET
+endstream
+endobj
+9 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595.28 841.89] /Resources << /Font << /F1 3 0 R /F2 4 0 R /F3 5 0 R >> >> /Contents 8 0 R >>
+endobj
+10 0 obj
+<< /Length 5536 >>
+stream
+BT
+/F2 8 Tf
+1 1 1 rg
+48 32 Td
+(L3/Event Analyzer Methodology - Page 3) Tj
+ET
+BT
+/F2 13 Tf
+0.04 0.24 0.45 rg
+48 789.89 Td
+(9. RF and Protocol Failure Signals) Tj
+ET
+BT
+/F1 10 Tf
+0.13 0.16 0.22 rg
+48 769.89 Td
+(- RF/radio failure hints include radio link failure, RLF, RRC re-establishment failure,) Tj
+ET
+BT
+/F1 10 Tf
+0.13 0.16 0.22 rg
+48 755.89 Td
+(unexpected RRC release, bearer loss, lost signal, out of service, SCG fail, and SCG) Tj
+ET
+BT
+/F1 10 Tf
+0.13 0.16 0.22 rg
+48 741.89 Td
+(failure.) Tj
+ET
+BT
+/F1 10 Tf
+0.13 0.16 0.22 rg
+48 727.89 Td
+(- Handover failures include handover or HO text combined with fail, failure, reject,) Tj
+ET
+BT
+/F1 10 Tf
+0.13 0.16 0.22 rg
+48 713.89 Td
+(drop, or timeout.) Tj
+ET
+BT
+/F1 10 Tf
+0.13 0.16 0.22 rg
+48 699.89 Td
+(- IMS/SIP failures include IMS registration lost/deregistered/unregistered and SIP) Tj
+ET
+BT
+/F1 10 Tf
+0.13 0.16 0.22 rg
+48 685.89 Td
+(failure codes such as 408, 480, 486, 500, and 503 in SIP context.) Tj
+ET
+BT
+/F1 10 Tf
+0.13 0.16 0.22 rg
+48 671.89 Td
+(- Bearer failures include voice bearer, media, RTP, or QoS flow loss/failure/release) Tj
+ET
+BT
+/F1 10 Tf
+0.13 0.16 0.22 rg
+48 657.89 Td
+(unexpected wording.) Tj
+ET
+BT
+/F1 10 Tf
+0.13 0.16 0.22 rg
+48 643.89 Td
+(- Disconnect cause codes are mapped through disconnectCauseMapper.js and combined with) Tj
+ET
+BT
+/F1 10 Tf
+0.13 0.16 0.22 rg
+48 629.89 Td
+(L3 evidence to choose the most specific reason.) Tj
+ET
+BT
+/F2 13 Tf
+0.04 0.24 0.45 rg
+48 607.89 Td
+(10. Duration Calculation) Tj
+ET
+BT
+/F1 10 Tf
+0.13 0.16 0.22 rg
+48 587.89 Td
+(- durationCalculator.js uses the normalized first terminal marker as the end time, not) Tj
+ET
+BT
+/F1 10 Tf
+0.13 0.16 0.22 rg
+48 573.89 Td
+(later cleanup rows.) Tj
+ET
+BT
+/F1 10 Tf
+0.13 0.16 0.22 rg
+48 559.89 Td
+(- Call setup time is dial/start to connected/setup completion. It stays null when the) Tj
+ET
+BT
+/F1 10 Tf
+0.13 0.16 0.22 rg
+48 545.89 Td
+(call never connected.) Tj
+ET
+BT
+/F1 10 Tf
+0.13 0.16 0.22 rg
+48 531.89 Td
+(- Connected duration is connected time to normalized end time. It stays null for) Tj
+ET
+BT
+/F1 10 Tf
+0.13 0.16 0.22 rg
+48 517.89 Td
+(not-connected attempts.) Tj
+ET
+BT
+/F1 10 Tf
+0.13 0.16 0.22 rg
+48 503.89 Td
+(- Attempt duration is dial/start to end time and is tracked separately from connected) Tj
+ET
+BT
+/F1 10 Tf
+0.13 0.16 0.22 rg
+48 489.89 Td
+(talk time.) Tj
+ET
+BT
+/F1 10 Tf
+0.13 0.16 0.22 rg
+48 475.89 Td
+(- The summary uses connected media time as call duration, while still keeping total) Tj
+ET
+BT
+/F1 10 Tf
+0.13 0.16 0.22 rg
+48 461.89 Td
+(attempt duration for diagnostics.) Tj
+ET
+BT
+/F2 13 Tf
+0.04 0.24 0.45 rg
+48 439.89 Td
+(11. Summary Output) Tj
+ET
+BT
+/F1 10 Tf
+0.13 0.16 0.22 rg
+48 419.89 Td
+(- summaryBuilder.js counts total calls, connected, dropped, not connected, busy,) Tj
+ET
+BT
+/F1 10 Tf
+0.13 0.16 0.22 rg
+48 405.89 Td
+(rejected, setup failures, ongoing, and unknown.) Tj
+ET
+BT
+/F1 10 Tf
+0.13 0.16 0.22 rg
+48 391.89 Td
+(- Average setup time is calculated from connected calls with positive setup time.) Tj
+ET
+BT
+/F1 10 Tf
+0.13 0.16 0.22 rg
+48 377.89 Td
+(- Average talk time is calculated from connected duration values greater than zero.) Tj
+ET
+BT
+/F1 10 Tf
+0.13 0.16 0.22 rg
+48 363.89 Td
+(- Success rate is connected calls divided by total calls.) Tj
+ET
+BT
+/F1 10 Tf
+0.13 0.16 0.22 rg
+48 349.89 Td
+(- The home screen now shows the main cards plus a per-call table with call id, start,) Tj
+ET
+BT
+/F1 10 Tf
+0.13 0.16 0.22 rg
+48 335.89 Td
+(end, technology, result, setup time, duration, and reason.) Tj
+ET
+BT
+/F2 13 Tf
+0.04 0.24 0.45 rg
+48 313.89 Td
+(12. Excel View and PDF Export) Tj
+ET
+BT
+/F1 10 Tf
+0.13 0.16 0.22 rg
+48 293.89 Td
+(- Excel View is a signaling sheet, not a spreadsheet clone. It shows all filtered data) Tj
+ET
+BT
+/F1 10 Tf
+0.13 0.16 0.22 rg
+48 279.89 Td
+(in one scrollable table.) Tj
+ET
+BT
+/F1 10 Tf
+0.13 0.16 0.22 rg
+48 265.89 Td
+(- The visible columns are Timestamp, UE, eNB/gNB, MME/AMF/Core, Interface, and Message.) Tj
+ET
+BT
+/F1 10 Tf
+0.13 0.16 0.22 rg
+48 251.89 Td
+(- Interface and Message filters live in their column headers. UE, radio, and core) Tj
+ET
+BT
+/F1 10 Tf
+0.13 0.16 0.22 rg
+48 237.89 Td
+(columns support uplink/downlink filtering.) Tj
+ET
+BT
+/F1 10 Tf
+0.13 0.16 0.22 rg
+48 223.89 Td
+(- The selected row detail panel shows the raw message first, then supporting decoded) Tj
+ET
+BT
+/F1 10 Tf
+0.13 0.16 0.22 rg
+48 209.89 Td
+(fields.) Tj
+ET
+BT
+/F1 10 Tf
+0.13 0.16 0.22 rg
+48 195.89 Td
+(- Download Summary creates a PDF with Summary, Call Summary, Technology Summary, and) Tj
+ET
+BT
+/F1 10 Tf
+0.13 0.16 0.22 rg
+48 181.89 Td
+(Sheet Messages. Sheet Messages contain Timestamp, Interface, Message, and Detail/raw) Tj
+ET
+BT
+/F1 10 Tf
+0.13 0.16 0.22 rg
+48 167.89 Td
+(message.) Tj
+ET
+BT
+/F2 13 Tf
+0.04 0.24 0.45 rg
+48 145.89 Td
+(13. Main Source Files) Tj
+ET
+BT
+/F3 8.5 Tf
+0.04 0.24 0.45 rg
+48 125.88999999999999 Td
+(File Responsibility) Tj
+ET
+BT
+/F3 8.5 Tf
+0.45 0.50 0.57 rg
+48 113.88999999999999 Td
+(--------------------------------------------------------------------------------------------) Tj
+ET
+BT
+/F3 8.2 Tf
+0.15 0.18 0.24 rg
+48 103.88999999999999 Td
+(timestampUtils.js embedded timestamp extraction and stale-event checks) Tj
+ET
+BT
+/F3 8.2 Tf
+0.15 0.18 0.24 rg
+48 92.88999999999999 Td
+(timelineBuilder.js merge L3/Event rows into chronological timeline) Tj
+ET
+BT
+/F3 8.2 Tf
+0.15 0.18 0.24 rg
+48 81.88999999999999 Td
+(protocolAnalyzer.js 3GPP procedure detection and technology/protocol context) Tj
+ET
+BT
+/F3 8.2 Tf
+0.15 0.18 0.24 rg
+48 70.88999999999999 Td
+(sessionBuilder.js call session creation, milestones, SIP/media/RF evidence) Tj
+ET
+endstream
+endobj
+11 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595.28 841.89] /Resources << /Font << /F1 3 0 R /F2 4 0 R /F3 5 0 R >> >> /Contents 10 0 R >>
+endobj
+12 0 obj
+<< /Length 2811 >>
+stream
+BT
+/F2 8 Tf
+1 1 1 rg
+48 32 Td
+(L3/Event Analyzer Methodology - Page 4) Tj
+ET
+BT
+/F3 8.2 Tf
+0.15 0.18 0.24 rg
+48 789.89 Td
+(callClassifier.js connected/not connected/dropped decision and reason) Tj
+ET
+BT
+/F3 8.2 Tf
+0.15 0.18 0.24 rg
+48 778.89 Td
+(durationCalculator.js setup, connected duration, and attempt duration) Tj
+ET
+BT
+/F3 8.2 Tf
+0.15 0.18 0.24 rg
+48 767.89 Td
+(summaryBuilder.js aggregate call counters and averages) Tj
+ET
+BT
+/F3 8.2 Tf
+0.15 0.18 0.24 rg
+48 756.89 Td
+(signalingModel.js Excel View signaling rows and lane/message model) Tj
+ET
+BT
+/F3 8.2 Tf
+0.15 0.18 0.24 rg
+48 745.89 Td
+(pdfReport.js in-app PDF reports and sheet-message summary export) Tj
+ET
+BT
+/F3 8.2 Tf
+0.15 0.18 0.24 rg
+48 734.89 Td
+(L3EventsTab.jsx home cards, per-call table, tabs, and export actions) Tj
+ET
+BT
+/F2 13 Tf
+0.04 0.24 0.45 rg
+48 715.89 Td
+(14. Validation Dataset Results) Tj
+ET
+BT
+/F1 10 Tf
+0.13 0.16 0.22 rg
+48 695.89 Td
+(- The corrected analyzer was checked against the uploaded archives used during) Tj
+ET
+BT
+/F1 10 Tf
+0.13 0.16 0.22 rg
+48 681.89 Td
+(development.) Tj
+ET
+BT
+/F3 8.5 Tf
+0.04 0.24 0.45 rg
+48 667.89 Td
+(Archive Total Connected Not Connected Dropped) Tj
+ET
+BT
+/F3 8.5 Tf
+0.45 0.50 0.57 rg
+48 655.89 Td
+(------------------------------------------------------------------------------) Tj
+ET
+BT
+/F3 8.2 Tf
+0.15 0.18 0.24 rg
+48 645.89 Td
+(Log_20260807_094502.zip 4 2 1 1) Tj
+ET
+BT
+/F3 8.2 Tf
+0.15 0.18 0.24 rg
+48 634.89 Td
+(BestL3.zip 5 5 0 0) Tj
+ET
+BT
+/F3 8.2 Tf
+0.15 0.18 0.24 rg
+48 623.89 Td
+(CSTEST.zip 6 2 2 2) Tj
+ET
+BT
+/F2 13 Tf
+0.04 0.24 0.45 rg
+48 604.89 Td
+(15. Practical Reading Guide) Tj
+ET
+BT
+/F1 10 Tf
+0.13 0.16 0.22 rg
+48 584.89 Td
+(- When a count looks wrong, first inspect stale timestamp flags and whether an Event row) Tj
+ET
+BT
+/F1 10 Tf
+0.13 0.16 0.22 rg
+48 570.89 Td
+(was delayed by log buffering.) Tj
+ET
+BT
+/F1 10 Tf
+0.13 0.16 0.22 rg
+48 556.89 Td
+(- If a not-connected call appears connected, check whether the evidence came from remote) Tj
+ET
+BT
+/F1 10 Tf
+0.13 0.16 0.22 rg
+48 542.89 Td
+(capability callType=3 or from a row after end time.) Tj
+ET
+BT
+/F1 10 Tf
+0.13 0.16 0.22 rg
+48 528.89 Td
+(- If a connected call appears dropped, check whether RF failure evidence was recovered) Tj
+ET
+BT
+/F1 10 Tf
+0.13 0.16 0.22 rg
+48 514.89 Td
+(by RRC re-establishment or later normal SIP/BYE release.) Tj
+ET
+BT
+/F1 10 Tf
+0.13 0.16 0.22 rg
+48 500.89 Td
+(- If setup time is zero or missing, confirm that dial/start and connected evidence both) Tj
+ET
+BT
+/F1 10 Tf
+0.13 0.16 0.22 rg
+48 486.89 Td
+(have usable timestamps.) Tj
+ET
+BT
+/F1 10 Tf
+0.13 0.16 0.22 rg
+48 472.89 Td
+(- If technology is Unknown, inspect protocol, interface, source category, and raw text.) Tj
+ET
+BT
+/F1 10 Tf
+0.13 0.16 0.22 rg
+48 458.89 Td
+(The model only labels a technology when one of those inputs has a clear hint.) Tj
+ET
+endstream
+endobj
+13 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595.28 841.89] /Resources << /Font << /F1 3 0 R /F2 4 0 R /F3 5 0 R >> >> /Contents 12 0 R >>
+endobj
+xref
+0 14
+0000000000 65535 f 
+0000000009 00000 n 
+0000000058 00000 n 
+0000000135 00000 n 
+0000000205 00000 n 
+0000000280 00000 n 
+0000000348 00000 n 
+0000005697 00000 n 
+0000005849 00000 n 
+0000011427 00000 n 
+0000011579 00000 n 
+0000017168 00000 n 
+0000017322 00000 n 
+0000020186 00000 n 
+trailer
+<< /Size 14 /Root 1 0 R >>
+startxref
+20340
+%%EOF
