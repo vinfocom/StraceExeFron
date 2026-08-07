@@ -642,6 +642,9 @@ const UnifiedMapSidebar = ({
   setLteGridSizeMeters,
   lteGridAggregationMethod,
   setLteGridAggregationMethod,
+  loadedSectorGridOptions = [],
+  sectorGridSettings = {},
+  onSectorGridSettingChange = null,
   storedGridVersion = "original",
   setStoredGridVersion,
   storedGridScenarioId = null,
@@ -760,14 +763,6 @@ const UnifiedMapSidebar = ({
     const numericProjectId = Number(projectId);
     return Number.isFinite(numericProjectId) && numericProjectId > 0;
   }, [projectId]);
-  const handleLteGridAggregationMethodChange = useCallback(
-    (nextValue) => {
-      if (!setLteGridAggregationMethod) return;
-      setLteGridAggregationMethod(nextValue === "avg" ? "median" : nextValue);
-    },
-    [setLteGridAggregationMethod],
-  );
-
   useEffect(() => {
     if (!isEditingSessions) {
       setSessionInputValue(Array.isArray(sessionIds) ? sessionIds.join(", ") : "");
@@ -1501,6 +1496,19 @@ const UnifiedMapSidebar = ({
       );
     },
     [setStoredGridMetricMode, storedGridLayerMode],
+  );
+  // One control drives both the live sector-triangle grid (median/mean/min/max)
+  // and the stored/KPI baseline grid's precomputed aggregate (avg/min/max only —
+  // there's no stored "median" field, so median/mean both map to avg there).
+  const handleLteGridAggregationMethodChange = useCallback(
+    (nextValue) => {
+      const normalizedValue = nextValue === "avg" ? "median" : nextValue;
+      setLteGridAggregationMethod?.(normalizedValue);
+      const storedAggregateValue =
+        normalizedValue === "min" || normalizedValue === "max" ? normalizedValue : "avg";
+      handleStoredGridAggregateModeChange(storedAggregateValue);
+    },
+    [setLteGridAggregationMethod, handleStoredGridAggregateModeChange],
   );
   const handleStoredGridVersionChange = useCallback(
     (nextVersion) => {
@@ -3660,43 +3668,110 @@ const UnifiedMapSidebar = ({
                   {lteGridAvailable ? (
                     <>
                       {!isCellMode && (
-                        <>
-                          <div className="pt-1 bg-slate-800/50 rounded-lg p-2">
-                            <div className="flex items-center justify-between text-xs mb-2">
-                              <span className="text-slate-400">Grid Size</span>
-                            </div>
-                            <ThresholdInput
-                              value={Number(lteGridSizeMeters) || 50}
-                              onChange={(next) =>
-                                setLteGridSizeMeters?.(Math.round(next))
-                              }
-                              min={5}
-                              max={500}
-                              step={5}
-                              unit="m"
-                            />
+                        <div className="pt-1 bg-slate-800/50 rounded-lg p-2">
+                          <div className="flex items-center justify-between text-xs mb-2">
+                            <span className="text-slate-400">Grid Size</span>
                           </div>
-
-                          <SelectRow
-                            label="Aggregation"
-                            value={normalizedLteGridAggregationMethod}
-                            onChange={handleLteGridAggregationMethodChange}
-                            options={[
-                              { value: "median", label: "Median" },
-                              { value: "mean", label: "Mean" },
-                              { value: "min", label: "Min" },
-                              { value: "max", label: "Max" },
-                            ]}
-                            placeholder="Select aggregation"
+                          <ThresholdInput
+                            value={Number(lteGridSizeMeters) || 50}
+                            onChange={(next) =>
+                              setLteGridSizeMeters?.(Math.round(next))
+                            }
+                            min={5}
+                            max={500}
+                            step={5}
+                            unit="m"
                           />
-                        </>
+                        </div>
                       )}
 
+                      <SelectRow
+                        label="Aggregation"
+                        value={normalizedLteGridAggregationMethod}
+                        onChange={handleLteGridAggregationMethodChange}
+                        options={[
+                          { value: "median", label: "Median" },
+                          { value: "mean", label: "Mean" },
+                          { value: "min", label: "Min" },
+                          { value: "max", label: "Max" },
+                        ]}
+                        placeholder="Select aggregation"
+                      />
+                      <p className="text-[10px] text-slate-500">
+                        Also sets the aggregate used by "Show Stored Baseline Grid" (KPI) below.
+                      </p>
                     </>
                   ) : (
                     <p className="text-[10px] text-slate-400">
                       Select any site or sector prediction first.
                     </p>
+                  )}
+
+                  {enableSiteToggle && (
+                    <div className="pt-1 bg-slate-800/50 rounded-lg p-2 space-y-2">
+                      <span className="text-xs text-slate-400">Sector Grid</span>
+                      {loadedSectorGridOptions.length === 0 ? (
+                        <p className="text-[10px] text-slate-400">
+                          Click a sector triangle on the map to manage its grid settings.
+                        </p>
+                      ) : (
+                        <div className="max-h-64 overflow-y-auto space-y-2 pr-1">
+                          {loadedSectorGridOptions.map((option) => {
+                            const setting = sectorGridSettings?.[option.renderKey] || {};
+                            const includeInGrid = setting.includeInGrid !== false;
+                            const aggregationOverride = setting.aggregationMethod || "";
+                            return (
+                              <div
+                                key={option.renderKey}
+                                className="rounded border border-slate-600 bg-slate-900/60 px-2 py-1.5"
+                              >
+                                <div className="flex items-center justify-between gap-2">
+                                  <span
+                                    className="truncate text-[11px] text-white"
+                                    title={`${option.siteId} / ${option.sector}`}
+                                  >
+                                    {option.siteId || "Site"} / {option.sector || "Sector"}
+                                  </span>
+                                  <span className="shrink-0 text-[10px] text-slate-400">
+                                    {option.pointCount} pts
+                                  </span>
+                                </div>
+                                <div className="mt-1 flex items-center justify-between gap-2">
+                                  <label className="flex items-center gap-1 text-[11px] text-slate-200">
+                                    <input
+                                      type="checkbox"
+                                      checked={includeInGrid}
+                                      onChange={(e) =>
+                                        onSectorGridSettingChange?.(option.renderKey, {
+                                          includeInGrid: e.target.checked,
+                                        })
+                                      }
+                                    />
+                                    In grid
+                                  </label>
+                                  <select
+                                    value={aggregationOverride}
+                                    disabled={!includeInGrid}
+                                    onChange={(e) =>
+                                      onSectorGridSettingChange?.(option.renderKey, {
+                                        aggregationMethod: e.target.value || null,
+                                      })
+                                    }
+                                    className="h-6 rounded border border-slate-600 bg-slate-800 px-1 text-[10px] text-white disabled:opacity-50"
+                                  >
+                                    <option value="">Default</option>
+                                    <option value="median">Median</option>
+                                    <option value="mean">Mean</option>
+                                    <option value="min">Min</option>
+                                    <option value="max">Max</option>
+                                  </select>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
                   )}
 
                   {isCellMode && (

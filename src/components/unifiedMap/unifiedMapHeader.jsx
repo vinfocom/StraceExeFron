@@ -852,6 +852,7 @@ function UnifiedHeader({
     }
   }, [triangleSizeAvailable, activeQuickControl]);
 
+
   useEffect(() => {
     const handleUtilityAction = (event) => {
       const action = event?.detail?.action;

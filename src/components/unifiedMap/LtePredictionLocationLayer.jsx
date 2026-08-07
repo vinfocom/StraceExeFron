@@ -318,6 +318,8 @@ const LtePredictionLocationLayer = ({
   enableGrid = false,
   gridSizeMeters = 50,
   gridAggregationMethod = "median",
+  excludedSectorKeys = null,
+  sectorAggregationOverrides = null,
   deltaComparisonMode = false,
   externalGridCells = [],
   aggregateOverlaps = false,
@@ -615,8 +617,13 @@ const LtePredictionLocationLayer = ({
     const aggregateFn =
       AGGREGATION_METHODS[gridAggregationMethod] || AGGREGATION_METHODS.median;
 
+    const gridEligiblePoints =
+      excludedSectorKeys && excludedSectorKeys.size > 0
+        ? filteredPoints.filter((point) => !excludedSectorKeys.has(point.sectorKey))
+        : filteredPoints;
+
     const cellBuckets = new Map();
-    for (const point of filteredPoints) {
+    for (const point of gridEligiblePoints) {
       const row = Math.floor((point.lat - globalBounds.south) / cellHeight);
       const col = Math.floor((point.lng - globalBounds.west) / cellWidth);
       if (!Number.isFinite(row) || !Number.isFinite(col)) continue;
@@ -628,6 +635,7 @@ const LtePredictionLocationLayer = ({
           row,
           col,
           values: [],
+          valueEntries: [],
           pointCount: 0,
           sampleCount: 0,
           baselineValues: [],
@@ -652,6 +660,7 @@ const LtePredictionLocationLayer = ({
       }
       if (Number.isFinite(point.value)) {
         bucket.values.push(point.value);
+        bucket.valueEntries.push({ value: point.value, sectorKey: point.sectorKey || null });
         if (variant === "baseline") bucket.baselineValues.push(point.value);
         if (variant === "optimized") bucket.optimizedValues.push(point.value);
       }
@@ -672,7 +681,31 @@ const LtePredictionLocationLayer = ({
         return;
       }
 
-      let aggregatedValue = aggregateFn(bucket.values);
+      let effectiveValues = bucket.values;
+      if (sectorAggregationOverrides && bucket.valueEntries.length > 0) {
+        const bySectorOverride = new Map();
+        const rawValues = [];
+        for (const entry of bucket.valueEntries) {
+          const method = entry.sectorKey ? sectorAggregationOverrides[entry.sectorKey] : null;
+          if (method) {
+            if (!bySectorOverride.has(entry.sectorKey)) bySectorOverride.set(entry.sectorKey, []);
+            bySectorOverride.get(entry.sectorKey).push(entry.value);
+          } else {
+            rawValues.push(entry.value);
+          }
+        }
+        if (bySectorOverride.size > 0) {
+          effectiveValues = [...rawValues];
+          bySectorOverride.forEach((values, sectorKey) => {
+            const overrideFn =
+              AGGREGATION_METHODS[sectorAggregationOverrides[sectorKey]] || aggregateFn;
+            const overrideValue = overrideFn(values);
+            if (Number.isFinite(overrideValue)) effectiveValues.push(overrideValue);
+          });
+        }
+      }
+
+      let aggregatedValue = aggregateFn(effectiveValues);
       let colorHex = Number.isFinite(aggregatedValue)
         ? resolveMetricColor(aggregatedValue)
         : "#6b7280";
@@ -739,6 +772,8 @@ const LtePredictionLocationLayer = ({
     filterInsidePolygons,
     gridSizeMeters,
     gridAggregationMethod,
+    excludedSectorKeys,
+    sectorAggregationOverrides,
     polygonPaths,
     selectedMetric,
     thresholds,

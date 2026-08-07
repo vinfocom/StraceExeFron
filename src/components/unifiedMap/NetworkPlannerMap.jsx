@@ -1559,6 +1559,8 @@ const NetworkPlannerMap = ({
   siteLegendFilter = null,
   siteFilters = null,
   siteColorOverrides = {},
+  sectorGridSettings = null,
+  onSectorGridSettingChange = null,
 }) => {
   const siteLteDebugEnabled = useMemo(() => isSiteLteDebugEnabled(), []);
   const { siteData, loading, error, fetchSiteData } = useSiteData({
@@ -2715,6 +2717,7 @@ const NetworkPlannerMap = ({
           deltaVariant:
             String(row?.deltaVariant ?? row?.delta_variant ?? "").trim().toLowerCase() || null,
           source: "sector",
+          sectorKey: row?.__renderKey || null,
         };
       })
       .filter(Boolean);
@@ -4795,6 +4798,46 @@ const NetworkPlannerMap = ({
                   <div>Technology: {infoSector.technology || "N/A"}</div>
                   <div>Band: {infoSector.band || "N/A"}</div>
                   <div>Prediction Points: {selectedSectorPredictionRows.length}</div>
+                  {selectedSectorPredictionRows.length > 0 && (() => {
+                    const gridSetting = sectorGridSettings?.[sectorRenderKey] || {};
+                    const includeInGrid = gridSetting.includeInGrid !== false;
+                    const aggregationOverride = gridSetting.aggregationMethod || "";
+                    return (
+                      <div className="mt-2 border-t border-slate-200 pt-2">
+                        <label className="flex items-center gap-1.5 text-[11px] text-slate-700">
+                          <input
+                            type="checkbox"
+                            checked={includeInGrid}
+                            onChange={(e) =>
+                              onSectorGridSettingChange?.(sectorRenderKey, {
+                                includeInGrid: e.target.checked,
+                              })
+                            }
+                          />
+                          Show this sector in grid
+                        </label>
+                        <label className="mt-1 flex items-center gap-1.5 text-[11px] text-slate-700">
+                          Aggregation:
+                          <select
+                            value={aggregationOverride}
+                            disabled={!includeInGrid}
+                            onChange={(e) =>
+                              onSectorGridSettingChange?.(sectorRenderKey, {
+                                aggregationMethod: e.target.value || null,
+                              })
+                            }
+                            className="rounded border border-slate-300 bg-white px-1 py-0.5 text-[11px] disabled:opacity-50"
+                          >
+                            <option value="">Default (global)</option>
+                            <option value="median">Median</option>
+                            <option value="mean">Mean</option>
+                            <option value="min">Min</option>
+                            <option value="max">Max</option>
+                          </select>
+                        </label>
+                      </div>
+                    );
+                  })()}
                   {loadingSectorDetailsKey === sectorRenderKey && (
                     <div className="mt-1 text-[11px] text-blue-700">Loading sector details...</div>
                   )}
