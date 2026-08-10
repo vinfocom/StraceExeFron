@@ -9,7 +9,6 @@ import React, {
 import { ChevronDown, Layers, Settings2, X } from "lucide-react";
 import { Rnd } from "react-rnd";
 import {
-  PCI_COLOR_PALETTE,
   getPciColor as getMetricPciColor,
   getEarfcnColor,
   getMetricConfig,
@@ -22,6 +21,7 @@ import {
   COLOR_SCHEMES,
   generateColorFromHash,
   getLogColor,
+  getRegisteredColor,
   registerColor,
 } from "@/utils/colorUtils";
 import { useSettingsDialog } from "@/context/SettingsDialogContext";
@@ -485,6 +485,9 @@ const TacLegend = ({ logs, activeFilter, onFilterChange }) => {
 
 // ✅ PCI Legend
 const PciLegend = ({ logs, activeFilter, onFilterChange }) => {
+  const [openColorKey, setOpenColorKey] = useState(null);
+  const [customColorValue, setCustomColorValue] = useState("");
+  const [colorOverrides, setColorOverrides] = useState({});
   const pciStats = useMemo(() => {
     const pciMap = new Map();
     let validCount = 0,
@@ -509,7 +512,30 @@ const PciLegend = ({ logs, activeFilter, onFilterChange }) => {
   }, [logs]);
 
   const getPciColor = (pci) =>
-    PCI_COLOR_PALETTE[Math.abs(Math.floor(pci)) % PCI_COLOR_PALETTE.length];
+    colorOverrides[String(pci)] ||
+    getRegisteredColor("pci", pci) ||
+    getMetricPciColor(pci);
+
+  const handleColorChange = (pci, color) => {
+    if (!/^#[0-9a-f]{6}$/i.test(color)) return;
+    const key = String(pci);
+    registerColor("pci", key, color);
+    setColorOverrides((prev) => ({ ...prev, [key]: color }));
+    if (typeof window !== "undefined") {
+      window.dispatchEvent(
+        new CustomEvent("stracer:map-category-color-change", {
+          detail: { colorBy: "pci", value: key, color },
+        }),
+      );
+    }
+  };
+
+  const toggleColorPalette = (event, pci, color) => {
+    event.stopPropagation();
+    const key = String(pci);
+    setOpenColorKey((current) => (current === key ? null : key));
+    setCustomColorValue(color || "");
+  };
 
   const handleRowClick = (pci) => {
     toggleLegendFilter(activeFilter, { type: "pci", value: pci }, onFilterChange);
@@ -527,23 +553,67 @@ const PciLegend = ({ logs, activeFilter, onFilterChange }) => {
     <div className="flex flex-col">
       <div className="max-h-64 overflow-y-auto space-y-px custom-scrollbar">
         {pciStats.allPcis.map(([pci, count]) => {
+          const key = String(pci);
+          const color = getPciColor(pci);
           const isActive = hasLegendFilter(activeFilter, {
             type: "pci",
             value: pci,
           });
           const isDimmed = getLegendFilterItems(activeFilter).length > 0 && !isActive;
+          const isPaletteOpen = openColorKey === key;
 
           return (
-            <LegendRow
-              key={pci}
-              color={getPciColor(pci)}
-              label={pci}
-              count={count}
-              total={pciStats.validCount}
-              onClick={() => handleRowClick(pci)}
-              isActive={isActive}
-              isDimmed={isDimmed}
-            />
+            <div key={pci} className="space-y-1">
+              <LegendRow
+                color={color}
+                label={pci}
+                count={count}
+                total={pciStats.validCount}
+                onClick={() => handleRowClick(pci)}
+                isActive={isActive}
+                isDimmed={isDimmed}
+                onColorClick={(event) => toggleColorPalette(event, pci, color)}
+              />
+              {isPaletteOpen && (
+                <div
+                  className="rounded-md border border-gray-700 bg-gray-950/95 p-2"
+                  onClick={(event) => event.stopPropagation()}
+                >
+                  <div className="grid grid-cols-6 gap-1.5">
+                    {MAP_COLOR_PRESETS.map((preset) => (
+                      <button
+                        key={preset}
+                        type="button"
+                        aria-label={`Use ${preset}`}
+                        className={`h-5 w-5 rounded border ${
+                          preset.toLowerCase() === color.toLowerCase()
+                            ? "border-white"
+                            : "border-gray-700"
+                        }`}
+                        style={{ backgroundColor: preset }}
+                        onClick={() => handleColorChange(pci, preset)}
+                      />
+                    ))}
+                  </div>
+                  <div className="mt-2 flex items-center gap-2">
+                    <input
+                      type="text"
+                      value={customColorValue}
+                      onChange={(event) => setCustomColorValue(event.target.value)}
+                      placeholder="#RRGGBB"
+                      className="h-8 flex-1 rounded border border-gray-700 bg-gray-900 px-2 text-xs text-white outline-none focus:border-cyan-500"
+                    />
+                    <button
+                      type="button"
+                      className="rounded border border-gray-700 px-2 py-1 text-[11px] text-white hover:bg-white/10"
+                      onClick={() => handleColorChange(pci, customColorValue)}
+                    >
+                      Apply
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
           );
         })}
       </div>

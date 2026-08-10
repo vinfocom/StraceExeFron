@@ -7,7 +7,7 @@ import { Zap, Layers, Radio, Square, Circle } from "lucide-react";
 // import TechHandoverMarkers from "../unifiedMap/TechHandoverMarkers";
 import useColorForLog from "@/hooks/useColorForLog";
 import { getMetricValueFromLog, getPciColor, getEarfcnColor } from "@/utils/metrics";
-import { normalizeProviderName, normalizeTechName, normalizeBandName, getLogColor, generateColorFromHash } from "@/utils/colorUtils";
+import { normalizeProviderName, normalizeTechName, normalizeBandName, getLogColor, getRegisteredColor, generateColorFromHash } from "@/utils/colorUtils";
 
 const DEFAULT_CENTER = { lat: 28.64453086, lng: 77.37324242 };
 const isElectronRuntime =
@@ -66,6 +66,9 @@ const resolveProviderDisplayName = (log) => {
     "Unknown"
   );
 };
+
+const getOverridablePciColor = (value) =>
+  getRegisteredColor("pci", value) || getPciColor(value);
 
 const getLegendCategoryKeyFromLog = (log, colorBy) => {
   const key = String(colorBy || "").trim().toLowerCase();
@@ -857,7 +860,9 @@ const generateGridCellsOptimized = (
     }
     if (normalizedColorBy === "pci") {
       const pci = Number.parseInt(categoryName, 10);
-      return Number.isFinite(pci) ? getPciColor(pci) : getLogColor("pci", categoryName);
+      return Number.isFinite(pci)
+        ? getOverridablePciColor(pci)
+        : getLogColor("pci", categoryName);
     }
     return "#E5E7EB";
   };
@@ -999,7 +1004,7 @@ const generateGridCellsOptimized = (
               name: rankedPcis[0][0],
               count: rankedPcis[0][1],
             };
-            fillColor = getPciColor(rankedPcis[0][0]);
+            fillColor = getOverridablePciColor(rankedPcis[0][0]);
           } else if (isCellIdMetric && cellIdCountBuckets.size > 0) {
             const rankedCellIds = Array.from(cellIdCountBuckets.entries()).sort(
               (a, b) => b[1] - a[1],
@@ -1479,7 +1484,7 @@ const MapWithMultipleCircles = ({
     const typeKey = metricOrType.toLowerCase();
 
     if (typeKey === "pci" || typeKey === "best_pci") {
-      return getPciColor(value);
+      return getOverridablePciColor(value);
     }
     
     if (typeKey === 'tac') {

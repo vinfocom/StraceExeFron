@@ -480,6 +480,19 @@ export const registerColor = (colorBy, value, color) => {
   }
 };
 
+export const getRegisteredColor = (colorBy, value) => {
+  const cache = dynamicColorCache[colorBy];
+  if (!cache) return null;
+
+  let normalizedValue = String(value ?? "").trim();
+  if (colorBy === "pci") {
+    const pci = Number.parseInt(normalizedValue, 10);
+    normalizedValue = Number.isFinite(pci) ? String(pci) : "Unknown";
+  }
+
+  return cache[normalizedValue] || null;
+};
+
 export const getAllRegisteredColors = (colorBy) => {
   const predefined = COLOR_SCHEMES[colorBy] || {};
   const dynamic = dynamicColorCache[colorBy] || {};
