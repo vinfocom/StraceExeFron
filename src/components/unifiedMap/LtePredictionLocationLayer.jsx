@@ -317,7 +317,7 @@ const LtePredictionLocationLayer = ({
   maxPoints = 20000,
   enableGrid = false,
   gridSizeMeters = 50,
-  gridAggregationMethod = "median",
+  gridAggregationMethod = "mean",
   excludedSectorKeys = null,
   sectorAggregationOverrides = null,
   deltaComparisonMode = false,
@@ -615,7 +615,7 @@ const LtePredictionLocationLayer = ({
     }
 
     const aggregateFn =
-      AGGREGATION_METHODS[gridAggregationMethod] || AGGREGATION_METHODS.median;
+      AGGREGATION_METHODS[gridAggregationMethod] || AGGREGATION_METHODS.mean;
 
     const gridEligiblePoints =
       excludedSectorKeys && excludedSectorKeys.size > 0

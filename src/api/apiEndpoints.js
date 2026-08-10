@@ -2017,6 +2017,37 @@ export const mapViewApi = {
     }
   },
 
+  getHandoverTargetObservations: async ({
+    sessionIds,
+    project_id,
+    transitions,
+    lookbackSeconds = 30,
+    lookaheadSeconds = 30,
+    signal,
+  }) => {
+    const normalizedSessionIds = (Array.isArray(sessionIds) ? sessionIds : [sessionIds])
+      .flatMap((value) => String(value ?? "").split(","))
+      .map((value) => Number(String(value).trim()))
+      .filter((value) => Number.isFinite(value) && value > 0);
+
+    if (!normalizedSessionIds.length || !Array.isArray(transitions) || !transitions.length) {
+      return { Status: 1, Cached: false, RecordCount: 0, Data: [] };
+    }
+
+    const response = await api.post(
+      "/api/MapView/GetHandoverTargetObservations",
+      {
+        session_ids: [...new Set(normalizedSessionIds)],
+        project_id: project_id ?? undefined,
+        lookback_seconds: lookbackSeconds,
+        lookahead_seconds: lookaheadSeconds,
+        transitions,
+      },
+      { signal, dedupe: false },
+    );
+    return response?.data ?? response;
+  },
+
   getSubSessionAnalytics: async ({ sessionIds, signal } = {}) => {
     try {
       const idsParam = Array.isArray(sessionIds)

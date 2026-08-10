@@ -13,6 +13,7 @@ import {
 
 const APP_VERSION = "2.2.0";
 const TRANSITION_INTENT_KEY = "authTransitionIntent";
+const GENERIC_LOGIN_ERROR = "Something went wrong. Please try again.";
 
 const formatActiveLoginDetails = (activeLogin) => {
   if (!activeLogin || typeof activeLogin !== "object") {
@@ -124,32 +125,32 @@ const LoginPage = () => {
               return;
             }
 
-            toast.error(forceResponse?.message || "Force login failed. Please try again.");
+            toast.error(GENERIC_LOGIN_ERROR);
             sessionStorage.removeItem(TRANSITION_INTENT_KEY);
             return;
           }
         }
 
         sessionStorage.removeItem(TRANSITION_INTENT_KEY);
-        toast.error(response.message || "Login failed. Please check your credentials.");
+        toast.error(GENERIC_LOGIN_ERROR);
       }
     } catch (error) {
-      let displayMessage = "An unexpected error occurred.";
+      let backendMessage = "";
 
       if (error.response) {
         const data = error.response.data;
-        displayMessage =
-          data?.message || data?.Message || data?.error || error.message;
+        backendMessage =
+          data?.message || data?.Message || data?.error || error.message || "";
       } else if (error.request) {
-        displayMessage = "Server did not respond. Please check your network.";
+        backendMessage = "";
       } else {
-        displayMessage =
-          error.message || (typeof error === "string" ? error : displayMessage);
+        backendMessage =
+          error.message || (typeof error === "string" ? error : "");
       }
 
       const alreadyLoggedIn =
-        typeof displayMessage === "string" &&
-        displayMessage.toLowerCase().includes("already logged in");
+        typeof backendMessage === "string" &&
+        backendMessage.toLowerCase().includes("already logged in");
 
       if (alreadyLoggedIn) {
         const confirmMessage = `${formatActiveLoginDetails(error?.active_login)}\n\nDo you want to continue and force login here?`;
@@ -172,24 +173,19 @@ const LoginPage = () => {
               return;
             }
 
-            toast.error(forceResponse?.message || "Force login failed. Please try again.");
+            toast.error(GENERIC_LOGIN_ERROR);
             sessionStorage.removeItem(TRANSITION_INTENT_KEY);
             return;
           } catch (forceError) {
-            const forceMessage =
-              forceError?.response?.data?.message ||
-              forceError?.response?.data?.Message ||
-              forceError?.message ||
-              "Force login failed. Please try again.";
             sessionStorage.removeItem(TRANSITION_INTENT_KEY);
-            toast.error(forceMessage);
+            toast.error(GENERIC_LOGIN_ERROR);
             return;
           }
         }
       }
 
       sessionStorage.removeItem(TRANSITION_INTENT_KEY);
-      toast.error(displayMessage);
+      toast.error(GENERIC_LOGIN_ERROR);
     } finally {
       setLoading(false);
     }

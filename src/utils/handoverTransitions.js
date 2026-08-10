@@ -1,4 +1,4 @@
-import { normalizeTechName } from "./colorUtils.js";
+import { normalizeBandName, normalizeTechName } from "./colorUtils.js";
 
 export const DEFAULT_HANDOVER_MAX_GAP_MS = 2 * 60 * 1000;
 export const DEFAULT_NEIGHBOR_LOOKBACK_MS = 30 * 1000;
@@ -166,15 +166,14 @@ const getServingCell = (row) => {
 
   // Never substitute Cell ID for PCI: they are different RF identifiers.
   const pci = readText(row, ["pci", "PCI", "Pci", "physical_cell_id", "physicalCellId"]);
-  if (!pci) return null;
-
-  const band = readText(row, ["band", "Band", "primaryBand", "primary_band"]);
+  const rawBand = readText(row, ["band", "Band", "primaryBand", "primary_band"]);
+  const normalizedBand = normalizeBandName(rawBand);
+  const band = normalizedBand && normalizedBand !== "Unknown" ? normalizedBand : null;
   const technology = normalizeTechName(
     readValue(row, ["technology", "Technology", "networkType", "network", "rat", "RAT"]),
-    band,
+    rawBand,
   );
-
-  return {
+  const state = {
     pci,
     technology: technology && technology !== "Unknown" ? technology : null,
     band,
@@ -192,13 +191,16 @@ const getServingCell = (row) => {
     ]),
     cellId: readText(row, ["cell_id", "cellId", "CellId", "eci", "ECI", "nci", "NCI"]),
   };
+
+  // Technology and band mobility remain detectable when a device omits PCI.
+  return Object.values(state).some(Boolean) ? state : null;
 };
 
 const sameOptionalValue = (a, b) => !a || !b || String(a) === String(b);
 
 const isSameServingCell = (a, b) =>
   Boolean(a && b) &&
-  String(a.pci) === String(b.pci) &&
+  sameOptionalValue(a.pci, b.pci) &&
   sameOptionalValue(a.technology, b.technology) &&
   (a.frequency && b.frequency
     ? String(a.frequency) === String(b.frequency)
@@ -228,7 +230,7 @@ const buildRuns = (entries, maxGapMs) => {
 
   for (const entry of entries) {
     const cell = getServingCell(entry.loc);
-    if (!cell) continue;
+    if (!cell?.pci) continue;
 
     const continuesRun =
       currentRun &&
@@ -239,7 +241,7 @@ const buildRuns = (entries, maxGapMs) => {
       currentRun.entries.push(entry);
       // Prefer later non-missing identity fields without changing the run identity.
       currentRun.cell = {
-        pci: currentRun.cell.pci,
+        pci: currentRun.cell.pci || cell.pci,
         technology: currentRun.cell.technology || cell.technology,
         band: currentRun.cell.band || cell.band,
         frequency: currentRun.cell.frequency || cell.frequency,
@@ -255,8 +257,34 @@ const buildRuns = (entries, maxGapMs) => {
   return runs;
 };
 
+const buildFieldRuns = (entries, field, maxGapMs) => {
+  const runs = [];
+  let currentRun = null;
+
+  for (const entry of entries) {
+    const cell = getServingCell(entry.loc);
+    const value = cell?.[field];
+    if (!value) continue;
+
+    const continuesRun =
+      currentRun &&
+      isContinuous(currentRun.entries[currentRun.entries.length - 1], entry, maxGapMs) &&
+      String(currentRun.value) === String(value);
+
+    if (continuesRun) {
+      currentRun.entries.push(entry);
+      continue;
+    }
+
+    currentRun = { value, cell, entries: [entry] };
+    runs.push(currentRun);
+  }
+
+  return runs;
+};
+
 const findNeighborEvidence = ({ neighborLogs, sourceCell, targetCell, targetEntry, lookbackMs }) => {
-  if (!neighborLogs?.length) return null;
+  if (!neighborLogs?.length || !targetCell?.pci) return null;
   const targetTime = targetEntry.timestampMs;
   const sessionKey = targetEntry.sessionKey;
 
@@ -273,7 +301,7 @@ const findNeighborEvidence = ({ neighborLogs, sourceCell, targetCell, targetEntr
       if (!neighborPci || String(neighborPci) !== String(targetCell.pci)) return false;
 
       const primaryPci = readText(row, ["primaryPci", "primary_pci", "servingPci", "serving_pci"]);
-      if (primaryPci && String(primaryPci) !== String(sourceCell.pci)) return false;
+      if (primaryPci && sourceCell.pci && String(primaryPci) !== String(sourceCell.pci)) return false;
 
       if (targetTime != null && timestampMs != null) {
         return timestampMs <= targetTime && targetTime - timestampMs <= lookbackMs;
@@ -334,6 +362,30 @@ const createTransitionMeta = ({
     nextPci: targetCell.pci,
     fromCellId: sourceCell.cellId,
     toCellId: targetCell.cellId,
+    fromNodebId: readText(source, [
+      "nodeb_id",
+      "nodebId",
+      "NodebId",
+      "NodeBId",
+      "enodeb_id",
+      "enodebId",
+      "eNodeBId",
+      "gnodeb_id",
+      "gnodebId",
+      "gNodeBId",
+    ]),
+    toNodebId: readText(target, [
+      "nodeb_id",
+      "nodebId",
+      "NodebId",
+      "NodeBId",
+      "enodeb_id",
+      "enodebId",
+      "eNodeBId",
+      "gnodeb_id",
+      "gnodebId",
+      "gNodeBId",
+    ]),
     fromFrequency: sourceCell.frequency,
     toFrequency: targetCell.frequency,
     fromTechnology: sourceCell.technology,
@@ -341,12 +393,78 @@ const createTransitionMeta = ({
     fromBand: sourceCell.band,
     toBand: targetCell.band,
     mobilityCategory: getMobilityCategory(sourceCell, targetCell),
-    samePciCellChange: String(sourceCell.pci) === String(targetCell.pci),
+    samePciCellChange:
+      sourceCell.pci && targetCell.pci
+        ? String(sourceCell.pci) === String(targetCell.pci)
+        : null,
     classification: eventStatus.classification,
     confidence: eventStatus.confidence,
     targetSeenAsNeighbor: neighborDataAvailable ? false : null,
     ...neighborEvidence,
   };
+};
+
+const buildFieldTransitions = ({
+  entries,
+  field,
+  type,
+  neighborLogs,
+  maxGapMs,
+  neighborLookbackMs,
+  minTargetSamples,
+}) => {
+  const transitions = [];
+  const runs = buildFieldRuns(entries, field, maxGapMs);
+  let stableRun = runs[0] || null;
+
+  for (let index = 1; index < runs.length && stableRun; index += 1) {
+    const candidateRun = runs[index];
+    const sourceEntry = stableRun.entries[stableRun.entries.length - 1];
+    const targetEntry = candidateRun.entries[0];
+
+    if (!isContinuous(sourceEntry, targetEntry, maxGapMs)) {
+      stableRun = candidateRun;
+      continue;
+    }
+
+    const eventStatus = classifyEvent(candidateRun.entries);
+    const hasExplicitOutcome = eventStatus.classification !== "inferred_handover";
+    if (candidateRun.entries.length < Math.max(1, minTargetSamples) && !hasExplicitOutcome) {
+      continue;
+    }
+    if (String(stableRun.value) === String(candidateRun.value)) continue;
+
+    const sourceCell = getServingCell(sourceEntry.loc) || stableRun.cell;
+    const targetCell = getServingCell(targetEntry.loc) || candidateRun.cell;
+    const neighborEvidence = findNeighborEvidence({
+      neighborLogs,
+      sourceCell,
+      targetCell,
+      targetEntry,
+      lookbackMs: neighborLookbackMs,
+    });
+    const meta = createTransitionMeta({
+      sourceEntry,
+      targetEntry,
+      sourceCell,
+      targetCell,
+      eventStatus,
+      neighborEvidence,
+      neighborDataAvailable: neighborLogs.length > 0,
+    });
+
+    if (Number.isFinite(meta.lat) && Number.isFinite(meta.lng)) {
+      transitions.push({
+        from: String(stableRun.value),
+        to: String(candidateRun.value),
+        ...meta,
+        type,
+      });
+    }
+    stableRun = candidateRun;
+  }
+
+  return transitions;
 };
 
 export const buildHandoverTransitions = (
@@ -371,6 +489,29 @@ export const buildHandoverTransitions = (
   });
 
   sessions.forEach((entries) => {
+    technologyTransitions.push(
+      ...buildFieldTransitions({
+        entries,
+        field: "technology",
+        type: "technology",
+        neighborLogs,
+        maxGapMs,
+        neighborLookbackMs,
+        minTargetSamples,
+      }),
+    );
+    bandTransitions.push(
+      ...buildFieldTransitions({
+        entries,
+        field: "band",
+        type: "band",
+        neighborLogs,
+        maxGapMs,
+        neighborLookbackMs,
+        minTargetSamples,
+      }),
+    );
+
     const runs = buildRuns(entries, maxGapMs);
     let stableRun = runs[0] || null;
 
@@ -413,32 +554,6 @@ export const buildHandoverTransitions = (
       if (!Number.isFinite(meta.lat) || !Number.isFinite(meta.lng)) {
         stableRun = candidateRun;
         continue;
-      }
-
-      if (
-        stableRun.cell.technology &&
-        candidateRun.cell.technology &&
-        stableRun.cell.technology !== candidateRun.cell.technology
-      ) {
-        technologyTransitions.push({
-          from: stableRun.cell.technology,
-          to: candidateRun.cell.technology,
-          ...meta,
-          type: "technology",
-        });
-      }
-
-      if (
-        stableRun.cell.band &&
-        candidateRun.cell.band &&
-        stableRun.cell.band !== candidateRun.cell.band
-      ) {
-        bandTransitions.push({
-          from: stableRun.cell.band,
-          to: candidateRun.cell.band,
-          ...meta,
-          type: "band",
-        });
       }
 
       pciTransitions.push({

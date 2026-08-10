@@ -87,8 +87,8 @@ const min = (values = []) =>
 const max = (values = []) =>
   Array.isArray(values) && values.length > 0 ? Math.max(...values) : null;
 
-const getAggregateValue = (values = [], method = "median") => {
-  const normalizedMethod = String(method || "median").trim().toLowerCase();
+const getAggregateValue = (values = [], method = "mean") => {
+  const normalizedMethod = String(method || "mean").trim().toLowerCase();
   if (!Array.isArray(values) || values.length === 0) return null;
   if (normalizedMethod === "avg" || normalizedMethod === "mean") {
     return mean(values);
@@ -188,7 +188,7 @@ export const useUnifiedGridViewData = ({
   selectedMetric = "rsrp",
   colorBy = null,
   gridSizeMeters = 20,
-  aggregationMethod = "median",
+  aggregationMethod = "mean",
 }) => {
   return useMemo(() => {
     if (!enabled || !Array.isArray(locations) || locations.length === 0) {
@@ -239,7 +239,7 @@ export const useUnifiedGridViewData = ({
     const cellHeight = safeGridSizeMeters * latDegPerMeter;
     const cellWidth = safeGridSizeMeters * lngDegPerMeter;
     const selectedMetricKey = String(selectedMetric || "rsrp").trim().toLowerCase();
-    const normalizedAggregationMethod = String(aggregationMethod || "median")
+    const normalizedAggregationMethod = String(aggregationMethod || "mean")
       .trim()
       .toLowerCase();
     const normalizedColorBy = String(colorBy || "metric").trim().toLowerCase();

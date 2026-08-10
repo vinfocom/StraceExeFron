@@ -22,10 +22,10 @@ const row = (id, pci, offsetSeconds, extra = {}) => ({
 
 test("creates one inferred handover after the target PCI persists", () => {
   const result = buildHandoverTransitions([
-    row(1, 101, 0),
-    row(2, 101, 1),
-    row(3, 205, 2),
-    row(4, 205, 3),
+    row(1, 101, 0, { nodeb_id: "1001" }),
+    row(2, 101, 1, { nodeb_id: "1001" }),
+    row(3, 205, 2, { nodeb_id: "2002" }),
+    row(4, 205, 3, { nodeb_id: "2002" }),
   ]);
 
   assert.equal(result.pciTransitions.length, 1);
@@ -33,6 +33,8 @@ test("creates one inferred handover after the target PCI persists", () => {
   assert.equal(result.pciTransitions[0].to, "205");
   assert.equal(result.pciTransitions[0].classification, "inferred_handover");
   assert.equal(result.pciTransitions[0].mobilityCategory, "intra-frequency");
+  assert.equal(result.pciTransitions[0].fromNodebId, "1001");
+  assert.equal(result.pciTransitions[0].toNodebId, "2002");
 });
 
 test("rejects a one-sample PCI fluctuation", () => {
@@ -54,6 +56,75 @@ test("does not substitute Cell ID when PCI is missing", () => {
   ]);
 
   assert.equal(result.pciTransitions.length, 0);
+});
+
+test("detects a persistent technology handover when PCI is unavailable", () => {
+  const result = buildHandoverTransitions([
+    row(1, "", 0, { technology: "LTE", band: "3", cell_id: "" }),
+    row(2, "", 1, { technology: "LTE", band: "3", cell_id: "" }),
+    row(3, "", 2, { technology: "NR", band: "n78", cell_id: "" }),
+    row(4, "", 3, { technology: "NR", band: "n78", cell_id: "" }),
+  ]);
+
+  assert.equal(result.technologyTransitions.length, 1);
+  assert.equal(result.technologyTransitions[0].from, "4G");
+  assert.equal(result.technologyTransitions[0].to, "5G");
+  assert.equal(result.technologyTransitions[0].mobilityCategory, "inter-rat");
+  assert.equal(result.pciTransitions.length, 0);
+});
+
+test("detects and normalizes a persistent band handover when PCI is unavailable", () => {
+  const result = buildHandoverTransitions([
+    row(1, "", 0, { band: "3", earfcn: "", cell_id: "" }),
+    row(2, "", 1, { band: "B3", earfcn: "", cell_id: "" }),
+    row(3, "", 2, { band: "7", earfcn: "", cell_id: "" }),
+    row(4, "", 3, { band: "Band 7", earfcn: "", cell_id: "" }),
+  ]);
+
+  assert.equal(result.bandTransitions.length, 1);
+  assert.equal(result.bandTransitions[0].from, "B3");
+  assert.equal(result.bandTransitions[0].to, "B7");
+  assert.equal(result.pciTransitions.length, 0);
+});
+
+test("rejects one-sample technology and band fluctuations", () => {
+  const result = buildHandoverTransitions([
+    row(1, 101, 0, { technology: "LTE", band: "3" }),
+    row(2, 101, 1, { technology: "LTE", band: "3" }),
+    row(3, 205, 2, { technology: "NR", band: "n78" }),
+    row(4, 101, 3, { technology: "LTE", band: "3" }),
+    row(5, 101, 4, { technology: "LTE", band: "3" }),
+  ]);
+
+  assert.equal(result.technologyTransitions.length, 0);
+  assert.equal(result.bandTransitions.length, 0);
+  assert.equal(result.pciTransitions.length, 0);
+});
+
+test("validates technology persistence independently from PCI changes", () => {
+  const result = buildHandoverTransitions([
+    row(1, 101, 0, { technology: "LTE", band: "3" }),
+    row(2, 102, 1, { technology: "LTE", band: "3" }),
+    row(3, 201, 2, { technology: "NR", band: "n78" }),
+    row(4, 202, 3, { technology: "NR", band: "n78" }),
+  ]);
+
+  assert.equal(result.technologyTransitions.length, 1);
+  assert.equal(result.technologyTransitions[0].from, "4G");
+  assert.equal(result.technologyTransitions[0].to, "5G");
+});
+
+test("validates band persistence independently from PCI changes", () => {
+  const result = buildHandoverTransitions([
+    row(1, 101, 0, { band: "3", earfcn: "1300" }),
+    row(2, 102, 1, { band: "B3", earfcn: "1300" }),
+    row(3, 201, 2, { band: "7", earfcn: "2850" }),
+    row(4, 202, 3, { band: "Band 7", earfcn: "2850" }),
+  ]);
+
+  assert.equal(result.bandTransitions.length, 1);
+  assert.equal(result.bandTransitions[0].from, "B3");
+  assert.equal(result.bandTransitions[0].to, "B7");
 });
 
 test("does not connect serving cells across a long logging gap", () => {
@@ -124,4 +195,3 @@ test("keeps sessions isolated", () => {
 
   assert.equal(result.pciTransitions.length, 0);
 });
-
