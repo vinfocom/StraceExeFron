@@ -1538,6 +1538,20 @@ const filterHandoverTransitionsByPairs = (transitions = [], selectedPairs = []) 
   );
 };
 
+const getHandoverObservationKey = (transition = {}) => {
+  const session = String(
+    transition?.sessionGroup ?? transition?.session_id ?? transition?.sessionId ?? "",
+  ).trim();
+  const timestamp = Number(transition?.sequenceTimestamp);
+  const timestampKey = Number.isFinite(timestamp)
+    ? String(Math.trunc(timestamp))
+    : String(transition?.timestamp ?? "").trim();
+  const sourcePci = String(transition?.pci ?? transition?.from ?? "").trim();
+  const targetPci = String(transition?.nextPci ?? transition?.to ?? "").trim();
+  const targetFrequency = String(transition?.toFrequency ?? "").trim();
+  return `${session}|${timestampKey}|${sourcePci}|${targetPci}|${targetFrequency}`;
+};
+
 const HandoverLegend = React.memo(({
   techEnabled,
   bandEnabled,
@@ -1868,7 +1882,7 @@ const UnifiedMapView = () => {
   const [lteGridEnabled, setLteGridEnabled] = useState(false);
   const [lteGridSizeMeters, setLteGridSizeMeters] = useState(50);
   const [lteGridAggregationMethod, setLteGridAggregationMethod] =
-    useState("median");
+    useState("mean");
   const [storedGridMetricMode, setStoredGridMetricMode] = useState("max");
   const [storedGridVersion, setStoredGridVersion] = useState("original");
   const [storedGridScenarioId, setStoredGridScenarioId] = useState(null);
@@ -4576,11 +4590,7 @@ const UnifiedMapView = () => {
     return effectiveGridColorBy;
   }, [isStoredGridOverlayVisible, storedGridMetricMode, effectiveGridColorBy, selectedMetric]);
 
-  const {
-    technologyTransitions,
-    bandTransitions,
-    pciTransitions,
-  } = useMemo(() => {
+  const baseHandoverTransitions = useMemo(() => {
     const sourceLogs = isSampleMode ? sampleLocations : finalDisplayLocations;
     if (!sourceLogs?.length) {
       return {
@@ -4622,6 +4632,129 @@ const UnifiedMapView = () => {
     sampleLocations,
     polygonFilteredNeighborData,
   ]);
+
+  const [handoverTargetObservations, setHandoverTargetObservations] = useState(
+    () => new Map(),
+  );
+
+  useEffect(() => {
+    const allTransitions = [
+      ...(techHandOver ? baseHandoverTransitions.technologyTransitions || [] : []),
+      ...(bandHandover ? baseHandoverTransitions.bandTransitions || [] : []),
+      ...(pciHandover ? baseHandoverTransitions.pciTransitions || [] : []),
+    ];
+    const descriptorsByKey = new Map();
+
+    allTransitions.forEach((transition) => {
+      const sessionId = Number(transition?.sessionGroup ?? transition?.session_id);
+      const sourcePci = String(transition?.pci ?? "").trim();
+      const targetPci = String(transition?.nextPci ?? "").trim();
+      const timestampMs = Number(transition?.sequenceTimestamp);
+      const fallbackTimestampMs = Date.parse(String(transition?.timestamp ?? ""));
+      const effectiveTimestampMs = Number.isFinite(timestampMs)
+        ? timestampMs
+        : fallbackTimestampMs;
+      const rawTimestamp = String(transition?.timestamp ?? "").trim();
+      if (
+        !Number.isFinite(sessionId) ||
+        sessionId <= 0 ||
+        !sourcePci ||
+        !targetPci ||
+        !Number.isFinite(effectiveTimestampMs)
+      ) {
+        return;
+      }
+
+      const observationKey = getHandoverObservationKey(transition);
+      if (!descriptorsByKey.has(observationKey)) {
+        descriptorsByKey.set(observationKey, {
+          observation_key: observationKey,
+          session_id: sessionId,
+          source_pci: sourcePci,
+          target_pci: targetPci,
+          source_earfcn: String(transition?.fromFrequency ?? "").trim(),
+          target_earfcn: String(transition?.toFrequency ?? "").trim(),
+          // Keep the database wall-clock value when available. Converting an
+          // offset-less DB timestamp to UTC shifts the neighbour lookup window.
+          timestamp: rawTimestamp || new Date(effectiveTimestampMs).toISOString(),
+        });
+      }
+    });
+
+    const descriptors = Array.from(descriptorsByKey.values()).slice(0, 5000);
+    if (!descriptors.length) {
+      setHandoverTargetObservations(new Map());
+      return undefined;
+    }
+
+    const controller = new AbortController();
+    setHandoverTargetObservations(new Map());
+    mapViewApi.getHandoverTargetObservations({
+      sessionIds,
+      project_id: projectId,
+      transitions: descriptors,
+      lookbackSeconds: 30,
+      lookaheadSeconds: 30,
+      signal: controller.signal,
+    }).then((response) => {
+      if (controller.signal.aborted) return;
+      const rows = response?.Data ?? response?.data ?? [];
+      setHandoverTargetObservations(
+        new Map(
+          (Array.isArray(rows) ? rows : [])
+            .filter((row) => row?.observation_key)
+            .map((row) => [String(row.observation_key), row]),
+        ),
+      );
+    }).catch((error) => {
+      if (controller.signal.aborted) return;
+      console.warn("Handover target observation lookup failed:", error?.message || error);
+    });
+
+    return () => controller.abort();
+  }, [
+    baseHandoverTransitions,
+    bandHandover,
+    pciHandover,
+    projectId,
+    sessionIds,
+    techHandOver,
+  ]);
+
+  const {
+    technologyTransitions,
+    bandTransitions,
+    pciTransitions,
+  } = useMemo(() => {
+    const enrichTransitions = (transitions = []) => transitions.map((transition) => {
+      const observation = handoverTargetObservations.get(
+        getHandoverObservationKey(transition),
+      );
+      if (!observation) return transition;
+      return {
+        ...transition,
+        targetSeenAsNeighbor: observation.observed === true,
+        forwardNeighborObserved: observation.forward_observed === true,
+        reverseNeighborObserved: observation.reverse_observed === true,
+        neighborRelation: observation.neighbour_relation ?? "not_observed",
+        neighborObservedDirection: observation.observed_direction ?? "none",
+        targetNeighborTimestamp: observation.observed_at ?? null,
+        reverseNeighborTimestamp: observation.reverse_observed_at ?? null,
+        targetNeighborRsrp: observation.rsrp ?? null,
+        targetNeighborRsrq: observation.rsrq ?? null,
+        targetNeighborSinr: observation.sinr ?? null,
+        targetNeighborEarfcn: observation.earfcn ?? null,
+        targetNeighborNodebId: observation.nodeb_id ?? null,
+        targetNeighborCellId: observation.cell_id ?? null,
+      };
+    });
+
+    return {
+      technologyTransitions: enrichTransitions(baseHandoverTransitions.technologyTransitions),
+      bandTransitions: enrichTransitions(baseHandoverTransitions.bandTransitions),
+      pciTransitions: enrichTransitions(baseHandoverTransitions.pciTransitions),
+    };
+  }, [baseHandoverTransitions, handoverTargetObservations]);
 
   // From-to pairs selected in the handover legend; empty list = show all of that type.
   const [handoverLegendSelectedPairs, setHandoverLegendSelectedPairs] = useState(
@@ -7154,7 +7287,13 @@ const UnifiedMapView = () => {
         )}
 
         <div ref={mapSnapshotContainerRef} className="relative h-full w-full">
-          {error || siteError ? (
+          {isLoading &&
+            (locations?.length || 0) === 0 &&
+            (siteData?.length || 0) === 0 ? (
+            <div className="flex items-center justify-center h-full bg-gray-100 dark:bg-gray-700">
+              <Spinner />
+            </div>
+          ) : error || siteError ? (
             <div className="flex items-center justify-center h-full bg-gray-100 dark:bg-gray-700">
               <div className="text-center space-y-2">
                 {error && <p className="text-red-500">Data Error: {displayDataError}</p>}
@@ -7203,7 +7342,7 @@ const UnifiedMapView = () => {
               onProjectPolygonBoundaryChange={handleProjectPolygonPathChange}
               enableGrid={mapGridEnabled}
               gridSizeMeters={gridSizeMeters}
-              gridAggregationMethod={lteGridAggregationMethod || "median"}
+              gridAggregationMethod={lteGridAggregationMethod || "mean"}
               areaEnabled={areaEnabled}
               filterInsidePolygons={onlyInsidePolygons}
               opacity={opacity}
@@ -7256,7 +7395,7 @@ const UnifiedMapView = () => {
                     !(showPolygons || areaEnabled || buildingBorderEnabled)
                   }
                   gridSizeMeters={lteGridSizeMeters || 50}
-                  gridAggregationMethod={lteGridAggregationMethod || "median"}
+                  gridAggregationMethod={lteGridAggregationMethod || "mean"}
                   excludedSectorKeys={excludedGridSectorKeys}
                   sectorAggregationOverrides={sectorGridAggregationOverrides}
                   deltaComparisonMode={isDeltaSiteGridMode}
@@ -7416,18 +7555,6 @@ const UnifiedMapView = () => {
 
             </MapWithMultipleCircles>
           )}
-
-          {isLoading &&
-            (locations?.length || 0) === 0 &&
-            (siteData?.length || 0) === 0 &&
-            !error &&
-            !siteError && (
-              <div className="pointer-events-none absolute inset-0 z-[550] flex items-center justify-center bg-slate-900/10">
-                <div className="rounded-lg bg-white/90 p-3 shadow-lg dark:bg-gray-700/90">
-                  <Spinner />
-                </div>
-              </div>
-            )}
         </div>
       </div>
       </div>

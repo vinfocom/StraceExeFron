@@ -758,7 +758,7 @@ const UnifiedMapSidebar = ({
   }, [logSizeMeters]);
   const logGridDirty = Math.round(Number(logGridDraft) || 0) !== Math.round(appliedLogGridSize);
   const normalizedLteGridAggregationMethod =
-    lteGridAggregationMethod === "avg" ? "median" : lteGridAggregationMethod || "median";
+    lteGridAggregationMethod === "avg" ? "mean" : lteGridAggregationMethod || "mean";
   const hasValidProjectId = useMemo(() => {
     const numericProjectId = Number(projectId);
     return Number.isFinite(numericProjectId) && numericProjectId > 0;
@@ -1502,7 +1502,7 @@ const UnifiedMapSidebar = ({
   // there's no stored "median" field, so median/mean both map to avg there).
   const handleLteGridAggregationMethodChange = useCallback(
     (nextValue) => {
-      const normalizedValue = nextValue === "avg" ? "median" : nextValue;
+      const normalizedValue = nextValue === "avg" ? "mean" : nextValue;
       setLteGridAggregationMethod?.(normalizedValue);
       const storedAggregateValue =
         normalizedValue === "min" || normalizedValue === "max" ? normalizedValue : "avg";

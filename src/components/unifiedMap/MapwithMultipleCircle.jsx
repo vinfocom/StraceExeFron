@@ -735,7 +735,7 @@ const generateGridCellsOptimized = (
   locations, 
   metric, 
   getMetricColor,
-  aggregationMethod = 'median',
+  aggregationMethod = 'mean',
   spatialIndex,
   colorBy = null
 ) => {
@@ -769,7 +769,7 @@ const generateGridCellsOptimized = (
   const cellWidth = gridSizeMeters * lngDegPerMeter;
 
   const checker = new PolygonChecker(polygonData);
-  const aggregateFn = AGGREGATION_METHODS[aggregationMethod] || AGGREGATION_METHODS.median;
+  const aggregateFn = AGGREGATION_METHODS[aggregationMethod] || AGGREGATION_METHODS.mean;
   const lowerIsBetterMetrics = new Set([
     "latency",
     "jitter",
@@ -1381,7 +1381,7 @@ const MapWithMultipleCircles = ({
   showPolygonBoundary = true,
   enableGrid = false,
   gridSizeMeters = 50,
-  gridAggregationMethod = 'median',
+  gridAggregationMethod = 'mean',
   areaEnabled = false,
   showControls = true,
   showStats = true,

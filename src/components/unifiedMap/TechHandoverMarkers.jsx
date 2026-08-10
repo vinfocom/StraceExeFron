@@ -76,8 +76,6 @@ const createMarkerIcon = (color, label) => {
   };
 };
 
-// ... (Keep downloadCSVFunc and DownloadButton unchanged) ...
-// CSV Download Utility Function
 const downloadCSVFunc = (transitions, filename = "handover_data.csv") => {
     if (!transitions || transitions.length === 0) {
       alert("No data to download");
@@ -419,56 +417,67 @@ HandoverClusterLayer.displayName = "HandoverClusterLayer";
 
 const HandoverPopup = memo(({ transition, onClose, type }) => {
   if (!transition) return null;
-  const { from, to, lat, lng, timestamp, session_id, atIndex } = transition;
+  const { from, to, lat, lng } = transition;
   // Anchor above the marker's rendered (possibly spread) position, lifted so the
   // popup and its arrow leave the marker itself visible.
   const anchorLat = Number(transition?._renderLat ?? lat);
   const anchorLng = Number(transition?._renderLng ?? lng);
   const handoverType = getHandoverType(from, to, type);
-  const classificationLabel = String(transition?.classification || "")
-    .replaceAll("_", " ")
-    .replace(/\b\w/g, (letter) => letter.toUpperCase());
-  const mobilityLabel = String(transition?.mobilityCategory || "")
-    .replaceAll("-", " ")
-    .replace(/\b\w/g, (letter) => letter.toUpperCase());
-  const handleDownloadSingle = () => downloadCSVFunc([transition], `handover_${type}_${from}_to_${to}.csv`);
+  const formatSignalPair = (sourceValue, targetValue, unit) => {
+    const formatValue = (value) => {
+      const numeric = Number(value);
+      return Number.isFinite(numeric) ? `${numeric.toFixed(1)} ${unit}` : "-";
+    };
+    return `${formatValue(sourceValue)} → ${formatValue(targetValue)}`;
+  };
+  const neighborRelationLabel = (() => {
+    if (transition?.neighborRelation === "two_way") return "Two-way";
+    if (transition?.neighborRelation === "one_way") {
+      return transition?.neighborObservedDirection === "target_to_source"
+        ? "One-way (target → source)"
+        : "One-way (source → target)";
+    }
+    if (transition?.neighborRelation === "not_observed") return "Not observed";
+    if (transition?.targetSeenAsNeighbor === true) return "One-way (source → target)";
+    if (transition?.targetSeenAsNeighbor === false) return "Not observed";
+    return "Unavailable";
+  })();
 
   return (
     <OverlayView position={{ lat: anchorLat, lng: anchorLng }} mapPaneName={OverlayView.FLOAT_PANE}>
       <div className="relative" style={{ transform: "translate(-50%, calc(-100% - 34px))" }}>
-        <div className="bg-slate-900 text-white rounded-lg shadow-xl p-3 min-w-[200px] border border-slate-700">
+        <div className="bg-slate-900 text-white rounded-lg shadow-xl p-3 min-w-[280px] border border-slate-700">
           <div className="flex items-center justify-between mb-2 pb-2 border-b border-slate-700">
             <span className="text-sm font-semibold capitalize">{type} Handover</span>
             <button onClick={onClose} className="text-slate-400 hover:text-white">×</button>
           </div>
           <div className="space-y-2">
-            <div className="flex items-center justify-center gap-2">
-              <span className="px-2 py-1 rounded text-sm font-bold text-white min-w-[30px] text-center" style={{ backgroundColor: getColor(from, type) }}>{from}</span>
-              <span className="text-lg">→</span>
-              <span className="px-2 py-1 rounded text-sm font-bold text-white min-w-[30px] text-center" style={{ backgroundColor: getColor(to, type) }}>{to}</span>
-            </div>
-            <div className={`text-center text-xs font-medium px-2 py-1 rounded bg-blue-500/20 text-blue-400`}>
-              {type === 'technology' 
-               ? (handoverType === "upgrade" ? "⬆️ Upgrade" : handoverType === "downgrade" ? "⬇️ Downgrade" : "↔️ Lateral")
-               : type === "pci" && classificationLabel
-                 ? classificationLabel
-                 : "↔️ Change"
-              }
-            </div>
+            {type !== "pci" && (
+              <div className="flex items-center justify-center gap-2">
+                <span className="px-2 py-1 rounded text-sm font-bold text-white min-w-[30px] text-center" style={{ backgroundColor: getColor(from, type) }}>{from}</span>
+                <span className="text-lg">→</span>
+                <span className="px-2 py-1 rounded text-sm font-bold text-white min-w-[30px] text-center" style={{ backgroundColor: getColor(to, type) }}>{to}</span>
+              </div>
+            )}
+            {type !== "pci" && (
+              <div className="text-center text-xs font-medium px-2 py-1 rounded bg-blue-500/20 text-blue-400">
+                {type === 'technology'
+                  ? (handoverType === "upgrade" ? "⬆️ Upgrade" : handoverType === "downgrade" ? "⬇️ Downgrade" : "↔️ Lateral")
+                  : "↔️ Change"
+                }
+              </div>
+            )}
             <div className="text-xs space-y-1 pt-2 border-t border-slate-700">
-              {type === "pci" && transition?.confidence && <div className="flex justify-between"><span className="text-slate-400">Confidence:</span><span className="capitalize">{transition.confidence}</span></div>}
-              {type === "pci" && mobilityLabel && <div className="flex justify-between"><span className="text-slate-400">Mobility:</span><span>{mobilityLabel}</span></div>}
-              {type === "pci" && (transition?.fromFrequency || transition?.toFrequency) && <div className="flex justify-between gap-3"><span className="text-slate-400">Frequency:</span><span>{transition?.fromFrequency || "-"} → {transition?.toFrequency || "-"}</span></div>}
-              {type === "pci" && (transition?.fromCellId || transition?.toCellId) && <div className="flex justify-between gap-3"><span className="text-slate-400">Cell ID:</span><span>{transition?.fromCellId || "-"} → {transition?.toCellId || "-"}</span></div>}
-              {type === "pci" && <div className="flex justify-between"><span className="text-slate-400">Target neighbor:</span><span>{transition?.targetSeenAsNeighbor === true ? "Observed" : transition?.targetSeenAsNeighbor === false ? "Not observed" : "Unavailable"}</span></div>}
-              {timestamp && <div className="flex justify-between"><span className="text-slate-400">Time:</span><span>{new Date(timestamp).toLocaleString()}</span></div>}
-              {session_id && <div className="flex justify-between"><span className="text-slate-400">Session:</span><span className="truncate max-w-[100px]">{session_id}</span></div>}
-              <div className="flex justify-between"><span className="text-slate-400">Location:</span><span>{lat.toFixed(5)}, {lng.toFixed(5)}</span></div>
-              {atIndex !== undefined && <div className="flex justify-between"><span className="text-slate-400">Log Index:</span><span>{atIndex}</span></div>}
+              {(transition?.fromTechnology || transition?.toTechnology) && <div className="flex justify-between gap-3"><span className="text-slate-400">Technology:</span><span>{transition?.fromTechnology || "-"} → {transition?.toTechnology || "-"}</span></div>}
+              {(transition?.fromFrequency || transition?.toFrequency) && <div className="flex justify-between gap-3"><span className="text-slate-400">EARFCN:</span><span>{transition?.fromFrequency || "-"} → {transition?.toFrequency || "-"}</span></div>}
+              {(transition?.fromCellId || transition?.toCellId) && <div className="flex justify-between gap-3"><span className="text-slate-400">Cell ID:</span><span>{transition?.fromCellId || "-"} → {transition?.toCellId || "-"}</span></div>}
+              {(transition?.fromNodebId || transition?.toNodebId) && <div className="flex justify-between gap-3"><span className="text-slate-400">eNodeB ID:</span><span>{transition?.fromNodebId || "-"} → {transition?.toNodebId || "-"}</span></div>}
+              {(transition?.pci || transition?.nextPci) && <div className="flex justify-between gap-3"><span className="text-slate-400">PCI:</span><span>{transition?.pci || "-"} → {transition?.nextPci || "-"}</span></div>}
+              {(transition?.pci || transition?.nextPci) && <div className="flex justify-between gap-3"><span className="text-slate-400">Neighbor relation:</span><span>{neighborRelationLabel}</span></div>}
+              {(transition?.rsrp != null || transition?.nextRsrp != null) && <div className="flex justify-between gap-3"><span className="text-slate-400">RSRP:</span><span>{formatSignalPair(transition?.rsrp, transition?.nextRsrp, "dBm")}</span></div>}
+              {(transition?.rsrq != null || transition?.nextRsrq != null) && <div className="flex justify-between gap-3"><span className="text-slate-400">RSRQ:</span><span>{formatSignalPair(transition?.rsrq, transition?.nextRsrq, "dB")}</span></div>}
+              {(transition?.sinr != null || transition?.nextSinr != null) && <div className="flex justify-between gap-3"><span className="text-slate-400">SINR:</span><span>{formatSignalPair(transition?.sinr, transition?.nextSinr, "dB")}</span></div>}
             </div>
-            <button onClick={handleDownloadSingle} className="w-full mt-2 flex items-center justify-center gap-1.5 px-2 py-1.5 text-xs font-medium rounded bg-slate-700 hover:bg-slate-600 text-slate-200">
-              <Download className="h-3 w-3" /> Download Record
-            </button>
           </div>
         </div>
         <div className="absolute left-1/2 -translate-x-1/2 -bottom-2 w-0 h-0 border-l-8 border-r-8 border-t-8 border-transparent border-t-slate-900" />
