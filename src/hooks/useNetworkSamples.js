@@ -13,6 +13,7 @@ import {
   readIndexedDbCache,
   writeIndexedDbCache,
 } from '@/utils/indexedDbCache';
+import { buildHandoverTransitions } from '@/utils/handoverTransitions';
 
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -248,7 +249,14 @@ const parseLogEntry = (log, sessionId) => {
     session_id: sessionId ?? log.session_id,
     lat, lng, latitude: lat, longitude: lng,
     radius: 18,
-    timestamp: log.timestamp,
+    timestamp:
+      log.timestamp ??
+      log.Timestamp ??
+      log.time_stamp ??
+      log.timeStamp ??
+      log.log_time ??
+      log.logTime ??
+      null,
     rsrp: wifiLog ? null : signalValue,
     rssi: parsedRssi,
     signal_value: signalValue,
@@ -298,8 +306,14 @@ const parseLogEntry = (log, sessionId) => {
     band,
     pci: log.pci ?? log.Pci ?? log.PCI ?? '',
     earfcn: log.earfcn ?? log.EARFCN ?? log.Earfcn ?? '',
+    nrarfcn: log.nrarfcn ?? log.nr_arfcn ?? log.NRARFCN ?? '',
+    arfcn: log.arfcn ?? log.ARFCN ?? '',
     nodeb_id: log.nodeb_id || '',
     cell_id: log.cell_id ?? log.cellId ?? '',
+    primary_cell_info_1:
+      log.primary_cell_info_1 ?? log.primaryCellInfo1 ?? log.primary_cell_info ?? '',
+    is_registered:
+      log.is_registered ?? log.isRegistered ?? log.registered ?? log.mRegistered ?? null,
     num_cells: parseInt(log.num_cells) || null,
     speed: parseNum(log.Speed),
     battery: parseInt(log.battery) || null,
@@ -565,77 +579,10 @@ export const useNetworkSamples = (
   }, [sessionIds, enabled, filterEnabled, polygons, maxRows, projectId]);
 
   useEffect(() => {
-    if (!locations || locations.length < 2) {
-      setTechnologyTransitions([]);
-      setBandTransitions([]);
-      setPciTransitions([]);
-      return;
-    }
-
-    const techTrans = [];
-    const bandTrans = [];
-    const pciTrans = [];
-
-    let prevTech = normalizeTechName(locations[0].technology);
-    let prevBand = locations[0].band;
-    let prevPci = locations[0].pci;
-
-    for (let i = 1; i < locations.length; i++) {
-      const loc = locations[i];
-      const prevLoc = locations[i - 1] || {};
-      const transitionMeta = {
-        atIndex: i,
-        lat: loc.lat,
-        lng: loc.lng,
-        timestamp: loc.timestamp,
-        session_id: loc.session_id,
-        rsrp: prevLoc.rsrp,
-        nextRsrp: loc.rsrp,
-        rsrq: prevLoc.rsrq,
-        nextRsrq: loc.rsrq,
-        sinr: prevLoc.sinr,
-        nextSinr: loc.sinr,
-        pci: prevLoc.pci,
-        nextPci: loc.pci,
-      };
-
-      const currTech = normalizeTechName(loc.technology);
-      if (currTech && prevTech && currTech !== prevTech) {
-        techTrans.push({
-          from: prevTech,
-          to: currTech,
-          ...transitionMeta,
-          type: 'technology'
-        });
-      }
-      prevTech = currTech;
-
-      const currBand = loc.band;
-      if (currBand && prevBand && String(currBand) !== String(prevBand)) {
-        bandTrans.push({
-          from: String(prevBand),
-          to: String(currBand),
-          ...transitionMeta,
-          type: 'band'
-        });
-      }
-      prevBand = currBand;
-
-      const currPci = loc.pci;
-      if (currPci !== '' && currPci !== null && prevPci !== '' && prevPci !== null && String(currPci) !== String(prevPci)) {
-        pciTrans.push({
-          from: String(prevPci),
-          to: String(currPci),
-          ...transitionMeta,
-          type: 'pci'
-        });
-      }
-      prevPci = currPci;
-    }
-
-    setTechnologyTransitions(techTrans);
-    setBandTransitions(bandTrans);
-    setPciTransitions(pciTrans);
+    const transitions = buildHandoverTransitions(locations || []);
+    setTechnologyTransitions(transitions.technologyTransitions);
+    setBandTransitions(transitions.bandTransitions);
+    setPciTransitions(transitions.pciTransitions);
   }, [locations]);
   
   useEffect(() => {

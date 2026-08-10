@@ -83,9 +83,16 @@ const downloadCSVFunc = (transitions, filename = "handover_data.csv") => {
       alert("No data to download");
       return;
     }
-    const headers = ["Index", "From", "To", "Type", "Latitude", "Longitude", "Timestamp", "Session ID", "Log Index"];
+    const headers = [
+      "Index", "From", "To", "Type", "Classification", "Confidence", "Mobility Category",
+      "From Cell ID", "To Cell ID", "From Frequency", "To Frequency", "Target Seen As Neighbor",
+      "Latitude", "Longitude", "Timestamp", "Session ID", "Log Index"
+    ];
     const rows = transitions.map((t, index) => [
-        index + 1, t.from || "", t.to || "", t.type || "unknown", 
+        index + 1, t.from || "", t.to || "", t.type || "unknown",
+        t.classification || "", t.confidence || "", t.mobilityCategory || "",
+        t.fromCellId || "", t.toCellId || "", t.fromFrequency || "", t.toFrequency || "",
+        t.targetSeenAsNeighbor === true ? "Yes" : t.targetSeenAsNeighbor === false ? "No" : "Unavailable",
         t.lat?.toFixed(6) || "", t.lng?.toFixed(6) || "", 
         t.timestamp ? new Date(t.timestamp).toISOString() : "", 
         t.session_id || "", t.atIndex ?? ""
@@ -418,6 +425,12 @@ const HandoverPopup = memo(({ transition, onClose, type }) => {
   const anchorLat = Number(transition?._renderLat ?? lat);
   const anchorLng = Number(transition?._renderLng ?? lng);
   const handoverType = getHandoverType(from, to, type);
+  const classificationLabel = String(transition?.classification || "")
+    .replaceAll("_", " ")
+    .replace(/\b\w/g, (letter) => letter.toUpperCase());
+  const mobilityLabel = String(transition?.mobilityCategory || "")
+    .replaceAll("-", " ")
+    .replace(/\b\w/g, (letter) => letter.toUpperCase());
   const handleDownloadSingle = () => downloadCSVFunc([transition], `handover_${type}_${from}_to_${to}.csv`);
 
   return (
@@ -437,10 +450,17 @@ const HandoverPopup = memo(({ transition, onClose, type }) => {
             <div className={`text-center text-xs font-medium px-2 py-1 rounded bg-blue-500/20 text-blue-400`}>
               {type === 'technology' 
                ? (handoverType === "upgrade" ? "⬆️ Upgrade" : handoverType === "downgrade" ? "⬇️ Downgrade" : "↔️ Lateral")
-               : "↔️ Change"
+               : type === "pci" && classificationLabel
+                 ? classificationLabel
+                 : "↔️ Change"
               }
             </div>
             <div className="text-xs space-y-1 pt-2 border-t border-slate-700">
+              {type === "pci" && transition?.confidence && <div className="flex justify-between"><span className="text-slate-400">Confidence:</span><span className="capitalize">{transition.confidence}</span></div>}
+              {type === "pci" && mobilityLabel && <div className="flex justify-between"><span className="text-slate-400">Mobility:</span><span>{mobilityLabel}</span></div>}
+              {type === "pci" && (transition?.fromFrequency || transition?.toFrequency) && <div className="flex justify-between gap-3"><span className="text-slate-400">Frequency:</span><span>{transition?.fromFrequency || "-"} → {transition?.toFrequency || "-"}</span></div>}
+              {type === "pci" && (transition?.fromCellId || transition?.toCellId) && <div className="flex justify-between gap-3"><span className="text-slate-400">Cell ID:</span><span>{transition?.fromCellId || "-"} → {transition?.toCellId || "-"}</span></div>}
+              {type === "pci" && <div className="flex justify-between"><span className="text-slate-400">Target neighbor:</span><span>{transition?.targetSeenAsNeighbor === true ? "Observed" : transition?.targetSeenAsNeighbor === false ? "Not observed" : "Unavailable"}</span></div>}
               {timestamp && <div className="flex justify-between"><span className="text-slate-400">Time:</span><span>{new Date(timestamp).toLocaleString()}</span></div>}
               {session_id && <div className="flex justify-between"><span className="text-slate-400">Session:</span><span className="truncate max-w-[100px]">{session_id}</span></div>}
               <div className="flex justify-between"><span className="text-slate-400">Location:</span><span>{lat.toFixed(5)}, {lng.toFixed(5)}</span></div>

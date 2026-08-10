@@ -10,6 +10,12 @@ import {
   writeProjectSessionCache,
 } from '@/utils/projectSessionCache';
 
+const parsePci = (value) => {
+  if (value === null || value === undefined || value === '') return null;
+  const parsed = Number.parseInt(value, 10);
+  return Number.isFinite(parsed) ? parsed : null;
+};
+
 // ✅ FIX 1: Robust cancellation check including Axios 'CanceledError'
 export const useSessionNeighbors = (
   sessionIds,
@@ -109,11 +115,11 @@ export const useSessionNeighbors = (
                 primaryRsrp: parseFloat(item.primary_rsrp) || null,
                 primaryRsrq: parseFloat(item.primary_rsrq) || null,
                 primarySinr: parseFloat(item.primary_sinr) || null,
-                primaryPci: parseInt(item.primary_pci) || null,
+                primaryPci: parsePci(item.primary_pci),
                 neighbourRsrp: parseFloat(item.neighbour_rsrp) || null,
                 neighbourRsrq: parseFloat(item.neighbour_rsrq) || null,
                 neighbourSinr: parseFloat(item.neighbour_sinr) || null,
-                neighbourPci: parseInt(item.neighbour_pci) || null,
+                neighbourPci: parsePci(item.neighbour_pci),
             };
         }).filter(Boolean);
 

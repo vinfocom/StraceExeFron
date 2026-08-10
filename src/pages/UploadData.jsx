@@ -323,13 +323,14 @@ const UploadDataPage = () => {
   const [historyLoading, setHistoryLoading] = useState(true);
 
   // --- REPORT GENERATION STATE ---
-  const [reportFile, setReportFile] = useState(null);
+  const [reportFiles, setReportFiles] = useState([]);
   const [discoveredBands, setDiscoveredBands] = useState([]);
   const [selectedBands, setSelectedBands] = useState([]);
   const [reportTitle, setReportTitle] = useState("");
   const [reportType, setReportType] = useState("pdf");
   const [reportMode, setReportMode] = useState("separate");
   const [filterByImageName, setFilterByImageName] = useState(false);
+  const [showSampleCount, setShowSampleCount] = useState(false);
   const [reportLoading, setReportLoading] = useState(false);
   const [reportError, setReportError] = useState(null);
 
@@ -532,33 +533,43 @@ const UploadDataPage = () => {
       }
       setSessionFiles((prev) => prev.filter((_, itemIndex) => itemIndex !== index));
     } else if (type === "report") {
-      setReportFile(null);
+      setReportFiles((prev) =>
+        index === null ? [] : prev.filter((_, itemIndex) => itemIndex !== index),
+      );
       setDiscoveredBands([]);
       setSelectedBands([]);
       setReportTitle("");
-      setReportType("pdf");
-      setReportMode("separate");
-      setFilterByImageName(false);
       setReportError(null);
     }
   };
 
   // ------------------ REPORT GENERATION UPLOAD LOGIC ------------------
   const onDropReport = useCallback((files) => {
-    if (files && files.length > 0) {
-      const file = files[0];
-      if (file.size > MAX_FILE_SIZE) {
-        toast.error(`Size limit exceeded. Maximum allowed file size is ${MAX_FILE_SIZE_LABEL}.`);
-        return;
-      }
-      setReportFile(file);
-      setDiscoveredBands([]); // Reset on new file
-      setSelectedBands([]);
-      setReportTitle("");
-      setReportMode("separate");
-      setFilterByImageName(false);
-      setReportError(null);
-    }
+    const validFiles = toSafeArray(files).filter((file) => {
+      if (file.size <= MAX_FILE_SIZE) return true;
+      toast.error(
+        `Size limit exceeded for ${file.name}. Maximum allowed file size is ${MAX_FILE_SIZE_LABEL}.`,
+      );
+      return false;
+    });
+    if (!validFiles.length) return;
+
+    setReportFiles((prev) => {
+      const next = [...prev];
+      validFiles.forEach((file) => {
+        const exists = next.some(
+          (item) =>
+            item.name === file.name &&
+            item.size === file.size &&
+            item.lastModified === file.lastModified,
+        );
+        if (!exists) next.push(file);
+      });
+      return next;
+    });
+    setDiscoveredBands([]);
+    setSelectedBands([]);
+    setReportError(null);
   }, []);
 
   const {
@@ -571,12 +582,12 @@ const UploadDataPage = () => {
       'application/zip': ['.zip'],
       'application/x-zip-compressed': ['.zip']
     },
-    multiple: false,
+    multiple: true,
     maxSize: MAX_FILE_SIZE,
   });
 
   const handleDiscoverBands = async () => {
-    if (!reportFile) return;
+    if (!reportFiles.length) return;
     setReportLoading(true);
     setReportError(null);
     setDiscoveredBands([]);
@@ -584,7 +595,8 @@ const UploadDataPage = () => {
 
     try {
       const formData = new FormData();
-      formData.append("LogZip", reportFile);
+      const fileField = reportType === "excel" ? "LogZips" : "LogZip";
+      reportFiles.forEach((file) => formData.append(fileField, file));
       formData.append("FilterByImageName", String(filterByImageName));
 
       const reportHandler = REPORT_TYPE_OPTIONS[reportType] || REPORT_TYPE_OPTIONS.pdf;
@@ -592,7 +604,7 @@ const UploadDataPage = () => {
       const bandsList = normalizeDiscoveredBands(response?.AvailableBands ?? response);
 
       if (!bandsList.length) {
-        const message = "No bands found in this ZIP file.";
+        const message = "No bands found in the selected ZIP files.";
         setReportError(message);
         toast.info(message);
         return;
@@ -611,8 +623,8 @@ const UploadDataPage = () => {
   };
 
   const handleGenerateReport = async () => {
-    if (!reportFile) {
-      toast.warn("Please upload a ZIP file first.");
+    if (!reportFiles.length) {
+      toast.warn("Please upload at least one ZIP file first.");
       return;
     }
     setReportLoading(true);
@@ -620,11 +632,16 @@ const UploadDataPage = () => {
 
     try {
       const formData = new FormData();
-      formData.append("LogZip", reportFile);
+      const fileField = reportType === "excel" ? "LogZips" : "LogZip";
+      reportFiles.forEach((file) => formData.append(fileField, file));
       formData.append("Title", reportTitle || "");
       formData.append("ProjectName", reportTitle || "");
-      formData.append("ReportMode", reportMode);
       formData.append("FilterByImageName", String(filterByImageName));
+      formData.append("ShowSampleCount", String(showSampleCount));
+
+      if (reportType === "excel") {
+        formData.append("ReportMode", reportMode);
+      }
 
       if (selectedBands.length) {
         formData.append("BandFilter", selectedBands.join(","));
@@ -638,12 +655,19 @@ const UploadDataPage = () => {
       const downloadUrl = window.URL.createObjectURL(blob);
       const link = document.createElement("a");
       const safeBands = selectedBands.join("-") || "ALL";
-      const safeBaseName = reportFile.name.replace(/\.zip$/i, "");
+      const safeBaseName =
+        reportFiles.length === 1
+          ? reportFiles[0].name.replace(/\.zip$/i, "")
+          : `${reportFiles.length}_logs`;
+      const downloadExtension =
+        reportType === "pdf" && blob?.type?.toLowerCase().includes("zip")
+          ? "zip"
+          : reportHandler.extension;
 
       link.href = downloadUrl;
       link.setAttribute(
         "download",
-        `${safeBaseName}_${safeBands}_report.${reportHandler.extension}`,
+        `${safeBaseName}_${safeBands}_report.${downloadExtension}`,
       );
       document.body.appendChild(link);
       link.click();
@@ -1039,9 +1063,9 @@ const UploadDataPage = () => {
               getRootPropsReport,
               getInputPropsReport,
               isDragActiveReport,
-              reportFile ? [reportFile] : [],
+              reportFiles,
               "report",
-              "Upload Log ZIP File (.zip, max 500 MB)"
+              "Upload one or more Log ZIP Files (.zip, max 500 MB each)"
             )}
 
             <div className="space-y-2">
@@ -1053,7 +1077,6 @@ const UploadDataPage = () => {
                   setDiscoveredBands([]);
                   setSelectedBands([]);
                   setReportMode("separate");
-                  setFilterByImageName(false);
                   setReportError(null);
                 }}
                 disabled={reportLoading}
@@ -1072,8 +1095,8 @@ const UploadDataPage = () => {
               </p>
             </div>
 
-            {reportType === "excel" && (
-              <div className="space-y-4 rounded-md border border-white/20 bg-white/5 p-4">
+            <div className="space-y-4 rounded-md border border-white/20 bg-white/5 p-4">
+              {reportType === "excel" && (
                 <div className="space-y-2">
                   <label className="block text-sm font-semibold">Report Mode</label>
                   <Select
@@ -1093,24 +1116,44 @@ const UploadDataPage = () => {
                     Sends <code>ReportMode</code> as <code>separate</code> or <code>combined</code>.
                   </p>
                 </div>
+              )}
 
-                <label className="flex cursor-pointer items-start gap-3 rounded border border-white/20 bg-white/5 px-3 py-3">
-                  <input
-                    type="checkbox"
-                    checked={filterByImageName}
-                    onChange={(event) => setFilterByImageName(event.target.checked)}
-                    disabled={reportLoading}
-                    className="mt-1 h-4 w-4"
-                  />
-                  <span className="text-sm">
-                    Filter by image name
-                    <span className="mt-1 block text-xs text-gray-200">
-                      Sends <code>FilterByImageName</code> as true or false to band discovery and report generation.
-                    </span>
+              <label className="flex cursor-pointer items-start gap-3 rounded border border-white/20 bg-white/5 px-3 py-3">
+                <input
+                  type="checkbox"
+                  checked={filterByImageName}
+                  onChange={(event) => {
+                    setFilterByImageName(event.target.checked);
+                    setDiscoveredBands([]);
+                    setSelectedBands([]);
+                  }}
+                  disabled={reportLoading}
+                  className="mt-1 h-4 w-4"
+                />
+                <span className="text-sm">
+                  Filter by image name
+                  <span className="mt-1 block text-xs text-gray-200">
+                    Applies <code>FilterByImageName</code> during band discovery and report generation.
                   </span>
-                </label>
-              </div>
-            )}
+                </span>
+              </label>
+
+              <label className="flex cursor-pointer items-start gap-3 rounded border border-white/20 bg-white/5 px-3 py-3">
+                <input
+                  type="checkbox"
+                  checked={showSampleCount}
+                  onChange={(event) => setShowSampleCount(event.target.checked)}
+                  disabled={reportLoading}
+                  className="mt-1 h-4 w-4"
+                />
+                <span className="text-sm">
+                  Show sample count
+                  <span className="mt-1 block text-xs text-gray-200">
+                    Sends <code>ShowSampleCount</code> as true or false when generating the report.
+                  </span>
+                </span>
+              </label>
+            </div>
 
             {reportError && (
               <div className="p-3 bg-red-100 text-red-700 border border-red-300 rounded text-sm">
@@ -1119,7 +1162,7 @@ const UploadDataPage = () => {
             )}
 
             {/* Discover Bands Action Button */}
-            {reportFile && discoveredBands.length === 0 && (
+            {reportFiles.length > 0 && discoveredBands.length === 0 && (
               <Button
                 onClick={handleDiscoverBands}
                 disabled={reportLoading}

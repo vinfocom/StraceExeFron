@@ -68,6 +68,7 @@ import {
 import { PolygonChecker as FastPolygonChecker } from "@/utils/polygonUtils";
 import { getMetricValueFromLog } from "@/utils/metrics";
 import { shouldRenderLogOnMap } from "@/utils/mapEventRenderFilter";
+import { buildHandoverTransitions } from "@/utils/handoverTransitions";
 import {
   findProjectInProjectsCache,
   upsertProjectInProjectsCache,
@@ -1182,260 +1183,6 @@ const locationMatchesSelectedApps = (location, selectedApps = []) => {
       location?.Application,
   ).map((app) => app.toLowerCase());
   return rowApps.some((app) => selected.has(app));
-};
-
-const getLocationSessionKey = (loc) =>
-  normalizeKey(
-    loc?.session_id ??
-    loc?.sessionId ??
-    loc?.SessionId ??
-    loc?.session ??
-    loc?.Session,
-  );
-
-const toEpochMilliseconds = (value) => {
-  const numeric = Number(value);
-  if (!Number.isFinite(numeric)) return null;
-  if (numeric > 1e11) return Math.trunc(numeric); // already in ms
-  if (numeric > 1e8) return Math.trunc(numeric * 1000); // epoch seconds
-  return null;
-};
-
-const getLocationTimestampMs = (loc) => {
-  const candidates = [
-    loc?.timestamp,
-    loc?.time_stamp,
-    loc?.timeStamp,
-    loc?.log_time,
-    loc?.logTime,
-    loc?.created_at,
-    loc?.createdAt,
-  ];
-
-  for (const candidate of candidates) {
-    if (candidate == null || candidate === "") continue;
-
-    const numericEpoch = toEpochMilliseconds(candidate);
-    if (numericEpoch !== null) return numericEpoch;
-
-    const parsed = Date.parse(String(candidate));
-    if (Number.isFinite(parsed)) return parsed;
-  }
-
-  return null;
-};
-
-const compareNullableNumbers = (a, b) => {
-  const aMissing = a == null;
-  const bMissing = b == null;
-  if (aMissing && bMissing) return 0;
-  if (aMissing) return 1;
-  if (bMissing) return -1;
-  return a - b;
-};
-
-const buildOrderedDriveLogs = (logs = []) =>
-  (logs || [])
-    .map((loc, originalIndex) => {
-      const logIdRaw = getLocationIdKey(loc);
-      const logIdNumber = Number(logIdRaw);
-
-      return {
-        loc,
-        originalIndex,
-        sessionKey: getLocationSessionKey(loc) ?? "__session_missing__",
-        logIdRaw,
-        logIdNumber: Number.isFinite(logIdNumber) ? logIdNumber : null,
-        timestampMs: getLocationTimestampMs(loc),
-      };
-    })
-    .sort((a, b) => {
-      const sessionCompare = String(a.sessionKey).localeCompare(
-        String(b.sessionKey),
-        undefined,
-        { numeric: true, sensitivity: "base" },
-      );
-      if (sessionCompare !== 0) return sessionCompare;
-
-      const idCompare = compareNullableNumbers(a.logIdNumber, b.logIdNumber);
-      if (idCompare !== 0) return idCompare;
-
-      const timeCompare = compareNullableNumbers(a.timestampMs, b.timestampMs);
-      if (timeCompare !== 0) return timeCompare;
-
-      if (a.logIdRaw && b.logIdRaw && a.logIdRaw !== b.logIdRaw) {
-        const rawIdCompare = a.logIdRaw.localeCompare(
-          b.logIdRaw,
-          undefined,
-          { numeric: true, sensitivity: "base" },
-        );
-        if (rawIdCompare !== 0) return rawIdCompare;
-      }
-
-      return a.originalIndex - b.originalIndex;
-    });
-
-const readHandoverMetric = (loc, keys = []) => {
-  for (const key of keys) {
-    const value = loc?.[key];
-    if (value !== null && value !== undefined && value !== "") {
-      const parsed = Number.parseFloat(value);
-      if (Number.isFinite(parsed)) return parsed;
-    }
-  }
-  return null;
-};
-
-const readHandoverValue = (loc, keys = []) => {
-  for (const key of keys) {
-    const value = loc?.[key];
-    if (value !== null && value !== undefined && value !== "") return value;
-  }
-  return null;
-};
-
-const buildHandoverTransitions = (logs = []) => {
-  const orderedLogs = buildOrderedDriveLogs(logs);
-  if (orderedLogs.length < 2) {
-    return {
-      technologyTransitions: [],
-      bandTransitions: [],
-      pciTransitions: [],
-    };
-  }
-
-  const technologyTransitions = [];
-  const bandTransitions = [];
-  const pciTransitions = [];
-
-  let prevTech = normalizeTechName(
-    readHandoverValue(orderedLogs[0].loc, ["technology", "Technology", "networkType", "network"]),
-    readHandoverValue(orderedLogs[0].loc, ["band", "Band", "primaryBand"]),
-  );
-  let prevBand = readHandoverValue(orderedLogs[0].loc, ["band", "Band", "primaryBand"]);
-  let prevPci = readHandoverValue(orderedLogs[0].loc, ["pci", "PCI", "Pci", "physical_cell_id", "cell_id"]);
-  let prevSessionKey = orderedLogs[0].sessionKey;
-  let prevEntry = orderedLogs[0];
-
-  for (let i = 1; i < orderedLogs.length; i++) {
-    const currentEntry = orderedLogs[i];
-    const loc = currentEntry.loc;
-    if (!loc) continue;
-
-    if (currentEntry.sessionKey !== prevSessionKey) {
-      prevTech = normalizeTechName(
-        readHandoverValue(loc, ["technology", "Technology", "networkType", "network"]),
-        readHandoverValue(loc, ["band", "Band", "primaryBand"]),
-      );
-      prevBand = readHandoverValue(loc, ["band", "Band", "primaryBand"]);
-      prevPci = readHandoverValue(loc, ["pci", "PCI", "Pci", "physical_cell_id", "cell_id"]);
-      prevSessionKey = currentEntry.sessionKey;
-      prevEntry = currentEntry;
-      continue;
-    }
-
-    const lat = Number(loc.lat ?? loc.latitude);
-    const lng = Number(loc.lng ?? loc.longitude);
-    const hasCoordinates = Number.isFinite(lat) && Number.isFinite(lng);
-    const displaySessionId =
-      loc?.session_id ?? loc?.sessionId ?? loc?.SessionId ?? null;
-    const previousLog = prevEntry?.loc || {};
-    const signalMeta = {
-      rsrp: readHandoverMetric(previousLog, ["rsrp", "RSRP", "Rsrp", "lte_rsrp", "nr_rsrp"]),
-      nextRsrp: readHandoverMetric(loc, ["rsrp", "RSRP", "Rsrp", "lte_rsrp", "nr_rsrp"]),
-      rsrq: readHandoverMetric(previousLog, ["rsrq", "RSRQ", "Rsrq", "lte_rsrq", "nr_rsrq"]),
-      nextRsrq: readHandoverMetric(loc, ["rsrq", "RSRQ", "Rsrq", "lte_rsrq", "nr_rsrq"]),
-      sinr: readHandoverMetric(previousLog, ["sinr", "SINR", "Sinr", "snr", "SNR", "lte_sinr", "nr_sinr"]),
-      nextSinr: readHandoverMetric(loc, ["sinr", "SINR", "Sinr", "snr", "SNR", "lte_sinr", "nr_sinr"]),
-      pci: readHandoverValue(previousLog, ["pci", "PCI", "Pci", "physical_cell_id", "cell_id"]),
-      nextPci: readHandoverValue(loc, ["pci", "PCI", "Pci", "physical_cell_id", "cell_id"]),
-    };
-    const transitionMeta = {
-      atIndex: currentEntry.originalIndex,
-      orderIndex: i,
-      sequenceLogId: currentEntry.logIdRaw ?? null,
-      sequenceTimestamp: currentEntry.timestampMs,
-      sessionGroup: currentEntry.sessionKey,
-      timestamp:
-        loc?.timestamp ??
-        loc?.time_stamp ??
-        loc?.timeStamp ??
-        loc?.log_time ??
-        loc?.logTime ??
-        null,
-      session_id: displaySessionId,
-      previousSequenceLogId: prevEntry?.logIdRaw ?? null,
-      previousSequenceTimestamp: prevEntry?.timestampMs ?? null,
-      ...signalMeta,
-    };
-    const prevLat = Number(prevEntry?.loc?.lat ?? prevEntry?.loc?.latitude);
-    const prevLng = Number(prevEntry?.loc?.lng ?? prevEntry?.loc?.longitude);
-    if (Number.isFinite(prevLat) && Number.isFinite(prevLng) && hasCoordinates) {
-      transitionMeta.fromLat = prevLat;
-      transitionMeta.fromLng = prevLng;
-      transitionMeta.toLat = lat;
-      transitionMeta.toLng = lng;
-    }
-
-    const currTech = normalizeTechName(
-      readHandoverValue(loc, ["technology", "Technology", "networkType", "network"]),
-      readHandoverValue(loc, ["band", "Band", "primaryBand"]),
-    );
-    if (hasCoordinates && currTech && prevTech && currTech !== prevTech) {
-      technologyTransitions.push({
-        from: prevTech,
-        to: currTech,
-        lat,
-        lng,
-        ...transitionMeta,
-        type: "technology",
-      });
-    }
-    prevTech = currTech;
-
-    const currBand = readHandoverValue(loc, ["band", "Band", "primaryBand"]);
-    if (
-      hasCoordinates &&
-      currBand &&
-      prevBand &&
-      String(currBand) !== String(prevBand)
-    ) {
-      bandTransitions.push({
-        from: String(prevBand),
-        to: String(currBand),
-        lat,
-        lng,
-        ...transitionMeta,
-        type: "band",
-      });
-    }
-    prevBand = currBand;
-
-    const currPci = readHandoverValue(loc, ["pci", "PCI", "Pci", "physical_cell_id", "cell_id"]);
-    if (
-      hasCoordinates &&
-      currPci !== "" &&
-      currPci !== null &&
-      currPci !== undefined &&
-      prevPci !== "" &&
-      prevPci !== null &&
-      prevPci !== undefined &&
-      String(currPci) !== String(prevPci)
-    ) {
-      pciTransitions.push({
-        from: String(prevPci),
-        to: String(currPci),
-        lat,
-        lng,
-        ...transitionMeta,
-        type: "pci",
-      });
-    }
-    prevPci = currPci;
-    prevEntry = currentEntry;
-  }
-
-  return { technologyTransitions, bandTransitions, pciTransitions };
 };
 
 const calculateMedian = (values) => {
@@ -4834,15 +4581,47 @@ const UnifiedMapView = () => {
     bandTransitions,
     pciTransitions,
   } = useMemo(() => {
-    if (!finalDisplayLocations?.length) {
+    const sourceLogs = isSampleMode ? sampleLocations : finalDisplayLocations;
+    if (!sourceLogs?.length) {
       return {
         technologyTransitions: [],
         bandTransitions: [],
         pciTransitions: [],
       };
     }
-    return buildHandoverTransitions(finalDisplayLocations);
-  }, [finalDisplayLocations]);
+
+    // Detect mobility on the complete primary-log sequence. Display filters are
+    // applied to the resulting target markers so removed samples cannot invent
+    // a direct handover between two otherwise non-adjacent cells.
+    const built = buildHandoverTransitions(sourceLogs, {
+      neighborLogs: polygonFilteredNeighborData,
+    });
+    if (!isSampleMode || sourceLogs === finalDisplayLocations) return built;
+
+    const visibleTargets = new Set(
+      (finalDisplayLocations || [])
+        .map((row) => getLocationIdentityKey(row))
+        .filter(Boolean),
+    );
+    const keepVisibleTarget = (transition) => {
+      const targetKey =
+        transition?.sequenceLogId != null
+          ? String(transition.sequenceLogId).trim()
+          : getLocationCoordinateKey(transition);
+      return targetKey ? visibleTargets.has(targetKey) : true;
+    };
+
+    return {
+      technologyTransitions: built.technologyTransitions.filter(keepVisibleTarget),
+      bandTransitions: built.bandTransitions.filter(keepVisibleTarget),
+      pciTransitions: built.pciTransitions.filter(keepVisibleTarget),
+    };
+  }, [
+    finalDisplayLocations,
+    isSampleMode,
+    sampleLocations,
+    polygonFilteredNeighborData,
+  ]);
 
   // From-to pairs selected in the handover legend; empty list = show all of that type.
   const [handoverLegendSelectedPairs, setHandoverLegendSelectedPairs] = useState(
@@ -5817,11 +5596,13 @@ const UnifiedMapView = () => {
         debouncedSetViewport(newViewport);
 
         const center = map.getCenter?.();
-        if ((locations?.length || 0) === 0 && center) {
+        if (center) {
           const nextCenter = { lat: center.lat(), lng: center.lng() };
-          setMapCenterFallback((prev) =>
-            areCentersEqual(prev, nextCenter) ? prev : nextCenter,
-          );
+          if (Number.isFinite(nextCenter.lat) && Number.isFinite(nextCenter.lng)) {
+            setMapCenterFallback((prev) =>
+              areCentersEqual(prev, nextCenter) ? prev : nextCenter,
+            );
+          }
         }
 
         const currentZoom = map.getZoom?.();
@@ -6015,7 +5796,6 @@ const UnifiedMapView = () => {
     [
       applyZoomLockControlStyle,
       debouncedSetViewport,
-      locations?.length,
       storeCurrentZoomMemory,
       teardownZoomLockControl,
     ],
@@ -7054,6 +6834,7 @@ const UnifiedMapView = () => {
             allFilteredLocations={deferredAnalyticsPanelFilteredLocations}
             rawLocations={deferredRawAnalyticsLocations}
             rawFilteredLocations={deferredRawAnalyticsFilteredLocations}
+            mapPlotLocations={isDataPredictionMode ? EMPTY_LIST : deferredGridDisplayLocations}
             onHighlightLogs={setHighlightedLogs}
             totalLocations={locations?.length || 0}
             filteredCount={finalDisplayLocations?.length || 0}
@@ -7373,13 +7154,7 @@ const UnifiedMapView = () => {
         )}
 
         <div ref={mapSnapshotContainerRef} className="relative h-full w-full">
-          {isLoading &&
-            (locations?.length || 0) === 0 &&
-            (siteData?.length || 0) === 0 ? (
-            <div className="flex items-center justify-center h-full bg-gray-100 dark:bg-gray-700">
-              <Spinner />
-            </div>
-          ) : error || siteError ? (
+          {error || siteError ? (
             <div className="flex items-center justify-center h-full bg-gray-100 dark:bg-gray-700">
               <div className="text-center space-y-2">
                 {error && <p className="text-red-500">Data Error: {displayDataError}</p>}
@@ -7641,6 +7416,18 @@ const UnifiedMapView = () => {
 
             </MapWithMultipleCircles>
           )}
+
+          {isLoading &&
+            (locations?.length || 0) === 0 &&
+            (siteData?.length || 0) === 0 &&
+            !error &&
+            !siteError && (
+              <div className="pointer-events-none absolute inset-0 z-[550] flex items-center justify-center bg-slate-900/10">
+                <div className="rounded-lg bg-white/90 p-3 shadow-lg dark:bg-gray-700/90">
+                  <Spinner />
+                </div>
+              </div>
+            )}
         </div>
       </div>
       </div>

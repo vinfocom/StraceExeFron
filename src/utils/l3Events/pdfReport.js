@@ -1,3 +1,5 @@
+import { getNrRrcPayloadInsights } from "./nrRrcPayloadInsights.js";
+
 const PAGE = {
   width: 612,
   height: 792,
@@ -916,6 +918,27 @@ function wrapFixedWidth(value, maxChars) {
   return lines;
 }
 
+function getInsightValue(insights = [], label) {
+  return insights.find((item) => item.label === label)?.value || "";
+}
+
+function formatExcelDetailForPdf(row = {}) {
+  const rawMessage = row.rawMessage || "-";
+  if (!/payload\[\d+\]=/i.test(rawMessage)) return rawMessage;
+
+  const insights = getNrRrcPayloadInsights(row);
+  const pci = getInsightValue(insights, "NR PCI");
+  const earfcn = getInsightValue(insights, "NR ARFCN");
+  const band = getInsightValue(insights, "NR Band");
+  const compact = [
+    pci && `PCI: ${pci}`,
+    earfcn && `EARFCN: ${earfcn}`,
+    band && `Band: ${band}`,
+  ].filter(Boolean).join(" | ");
+
+  return compact || "NR-RRC payload row";
+}
+
 function addExcelSignalingTable(layout, rows = []) {
   const headers = ["Timestamp", "Interface", "Message", "Detail"];
   const widths = [14, 14, 22, 46];
@@ -936,7 +959,7 @@ function addExcelSignalingTable(layout, rows = []) {
       row.timestampLabel || formatClock(row.timestamp),
       row.interface || "Unknown",
       row.message || "-",
-      row.rawMessage || "-",
+      formatExcelDetailForPdf(row),
     ];
     const wrapped = values.map((value, index) => wrapFixedWidth(value, widths[index]));
     const lineCount = Math.max(...wrapped.map((lines) => lines.length));
@@ -1019,7 +1042,7 @@ export function downloadExcelSignalingSummaryPdf({
 
   layout.addSpacer(12);
   layout.addLine("Sheet Messages", { font: FONT_BOLD, size: 13, spacing: 5 });
-  layout.addWrapped("Detail contains the complete raw message captured for each exported row.", { size: 9, spacing: 3 });
+  layout.addWrapped("Payload rows show decoded PCI, EARFCN and band in Detail; other rows keep their captured detail.", { size: 9, spacing: 3 });
   layout.addSpacer(5);
   addExcelSignalingTable(layout, rows);
 

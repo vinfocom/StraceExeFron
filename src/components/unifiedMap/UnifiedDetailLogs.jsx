@@ -1234,6 +1234,7 @@ function UnifiedDetailLogs({
   storedGridMetricMode = "avg",
   conditionLogsLocations = [],
   conditionSectorLocations = [],
+  mapPlotLocations = [],
   viewport = null,
   gridViewEnabled = false,
   gridViewSummary = null,
@@ -1970,6 +1971,7 @@ function UnifiedDetailLogs({
               durationData={durationTime}
               duration={duration}
               locations={filteredRawLocations.length > 0 ? filteredRawLocations : filteredLocations}
+              mapPlotLocations={mapPlotLocations}
               expanded={expanded}
               tptVolume={tptVolume}
               drawnShapeAnalytics={drawnShapeAnalytics}
