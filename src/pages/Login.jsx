@@ -11,7 +11,7 @@ import {
   getStoredRedirectTarget,
 } from "../utils/authSession";
 
-const APP_VERSION = "2.2.0";
+const APP_VERSION = "2.2.2";
 const TRANSITION_INTENT_KEY = "authTransitionIntent";
 const GENERIC_LOGIN_ERROR = "Something went wrong. Please try again.";
 
