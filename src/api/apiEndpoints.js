@@ -651,9 +651,23 @@ export const predictionApi = {
         user_id: params.user_id,
         project_id: params.project_id,
         session_ids: params.session_ids,
-        grid_value: params.grid_value ?? 25.0,
+        grid_resolution:
+          params.grid_resolution ??
+          params.grid_resolution_m ??
+          params.grid_value ??
+          25.0,
+        grid_resolution_m:
+          params.grid_resolution_m ??
+          params.grid_resolution ??
+          params.grid_value ??
+          25.0,
+        grid_value:
+          params.grid_value ??
+          params.grid_resolution ??
+          params.grid_resolution_m ??
+          25.0,
         radius_m: params.radius_m ?? 5000.0,
-        building: params.building ?? true
+        building: params.building ?? params.use_buildings ?? true
       };
       addLteCountryContext(payload, params);
 
