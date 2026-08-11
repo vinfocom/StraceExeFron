@@ -50,6 +50,7 @@ const dynamicColorCache = {
   cell_id: {},
   earfcn: {},
   pci: {},
+  tac: {},
 };
 
 const hashString = (str) => {
@@ -335,6 +336,9 @@ export const COLOR_SCHEMES = {
   pci: {
     Unknown: "#a8a6a2",
   },
+  tac: {
+    Unknown: "#a8a6a2",
+  },
 };
 
 const DEFAULT_TECHNOLOGY_SCHEME = {
@@ -472,6 +476,7 @@ export const clearDynamicColorCache = () => {
   dynamicColorCache.cell_id = {};
   dynamicColorCache.earfcn = {};
   dynamicColorCache.pci = {};
+  dynamicColorCache.tac = {};
 };
 
 export const registerColor = (colorBy, value, color) => {

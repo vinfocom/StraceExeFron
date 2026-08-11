@@ -70,6 +70,12 @@ const resolveProviderDisplayName = (log) => {
 const getOverridablePciColor = (value) =>
   getRegisteredColor("pci", value) || getPciColor(value);
 
+const getOverridableEarfcnColor = (value) =>
+  getRegisteredColor("earfcn", value) || getEarfcnColor(value);
+
+const getOverridableTacColor = (value) =>
+  getRegisteredColor("tac", value) || generateColorFromHash(String(value));
+
 const getLegendCategoryKeyFromLog = (log, colorBy) => {
   const key = String(colorBy || "").trim().toLowerCase();
 
@@ -856,7 +862,7 @@ const generateGridCellsOptimized = (
       return getLogColor("cell_id", categoryName);
     }
     if (normalizedColorBy === "earfcn") {
-      return getEarfcnColor(categoryName);
+      return getOverridableEarfcnColor(categoryName);
     }
     if (normalizedColorBy === "pci") {
       const pci = Number.parseInt(categoryName, 10);
@@ -1488,11 +1494,11 @@ const MapWithMultipleCircles = ({
     }
     
     if (typeKey === 'tac') {
-      return generateColorFromHash(String(value));
+      return getOverridableTacColor(value);
     }
 
     if (typeKey === 'earfcn') {
-      return getEarfcnColor(value);
+      return getOverridableEarfcnColor(value);
     }
 
     if (['provider', 'technology', 'band', 'operator', 'cell_id'].includes(typeKey)) {

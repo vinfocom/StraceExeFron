@@ -261,8 +261,8 @@ const getShapeOptions = (type, polygonOpacity, polygonFillOpacity) => {
       clickable: true,
       editable: true,
       draggable: true,
-      strokeWeight: 3,
-      strokeColor: "#ea580c",
+      strokeWeight: 2,
+      strokeColor: "#0057d9",
     };
   }
 
@@ -717,7 +717,7 @@ function DrawingToolsLayerComponent({
       const previewOptions =
         type === "polygon"
           ? { strokeWeight: 2, strokeColor: "#1d4ed8", strokeOpacity: resolvedPolygonOpacity }
-          : { strokeWeight: 3, strokeColor: "#ea580c" };
+          : { strokeWeight: 2, strokeColor: "#0057d9" };
       const overlay = new gm.Polyline({
         map,
         path: [],
