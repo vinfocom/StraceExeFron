@@ -38,6 +38,12 @@ const VIEW_TABS = [
 ];
 
 const NR_RRC_MESSAGE_FIELDS = ["NR PCI", "NR ARFCN", "NR Frequency", "NR Band"];
+const NR_RRC_MAP_RAW_FIELD_LABELS = {
+  "NR PCI": "PCI",
+  "NR ARFCN": "EARFCN / NR ARFCN",
+  "NR Frequency": "Frequency",
+  "NR Band": "Band",
+};
 const MAP_CONTAINER_STYLE = { width: "100%", height: "100%" };
 const DEFAULT_MAP_CENTER = { lat: 20.5937, lng: 78.9629 };
 const MAP_INTERFACE_COLOR_STORAGE_KEY = "l3-events-map-interface-colors";
@@ -99,7 +105,7 @@ function hexToRgbArray(hex, alpha = 255) {
   ];
 }
 
-function buildRsrpByRowId(analysis) {
+export function buildRsrpByRowId(analysis) {
   const byId = new Map();
   analysis?.procedures?.forEach((procedure) => {
     if (!Number.isFinite(Number(procedure.rsrpValue))) return;
@@ -378,7 +384,7 @@ export const L3EventsTab = () => {
   );
 };
 
-function HomeCallSummary({ summary }) {
+export function HomeCallSummary({ summary }) {
   const stats = [
     { label: "Connected", value: summary.connected || 0, className: "border-emerald-500/35 bg-emerald-500/10 text-emerald-300" },
     { label: "Dropped", value: summary.dropped || 0, className: "border-red-500/35 bg-red-500/10 text-red-300" },
@@ -489,7 +495,7 @@ function procedureTechnologyForCall(call, procedures = []) {
   return matchingProcedures.find((procedure) => !isUnknownTechnology(procedure.technology))?.technology || "";
 }
 
-function enrichCallSummaryTechnology(summary, procedures = []) {
+export function enrichCallSummaryTechnology(summary, procedures = []) {
   if (!summary?.calls?.length) return summary;
 
   return {
@@ -506,7 +512,7 @@ function enrichCallSummaryTechnology(summary, procedures = []) {
   };
 }
 
-function buildMapPoints(timeline, rsrpByRowId = new Map()) {
+export function buildMapPoints(timeline, rsrpByRowId = new Map()) {
   const toMapCoordinate = (value, min, max) => {
     if (value === null || value === undefined || String(value).trim() === "") return null;
     const numeric = Number(value);
@@ -525,6 +531,9 @@ function buildMapPoints(timeline, rsrpByRowId = new Map()) {
         lng,
         type: item?.type || "event",
         category: item?.category || item?.sourceCategory || "",
+        interface: item?.interface || "",
+        protocol: item?.protocol || "",
+        procedure: item?.procedure || "",
         title: item?.message || item?.title || item?.summary || "Message",
         summary: item?.summary || "",
         rawMessage: item?.rawMessage || "",
@@ -543,18 +552,20 @@ function buildMapPoints(timeline, rsrpByRowId = new Map()) {
 
 function formatMapRawMessage(point) {
   if (!point) return "No raw message available.";
-  const isNrRrcConfigInfo = /NR\s*RRC\s*Config\s*Info/i.test(String(point.title || point.rawMessage || ""));
-  if (isNrRrcConfigInfo) {
-    const decodedInsights = getNrRrcPayloadInsights({
-      rawMessage: point.rawMessage,
-      message: point.title,
-      protocol: point.category,
-      sourceCategory: point.category,
-    }).filter((detail) => NR_RRC_MESSAGE_FIELDS.includes(detail.label));
+  const decodedInsights = getNrRrcPayloadInsights({
+    rawMessage: point.rawMessage,
+    message: point.title,
+    interface: point.interface,
+    protocol: point.protocol || point.category,
+    procedure: point.procedure,
+    sourceCategory: point.category,
+  }).filter((detail) => NR_RRC_MESSAGE_FIELDS.includes(detail.label));
 
-    if (decodedInsights.length > 0) {
-      return decodedInsights.map((detail) => `${detail.label}: ${detail.value || "—"}`).join(" | ");
-    }
+  if (decodedInsights.length > 0) {
+    const decodedText = decodedInsights
+      .map((detail) => `${NR_RRC_MAP_RAW_FIELD_LABELS[detail.label] || detail.label}: ${detail.value || "—"}`)
+      .join("\n");
+    return decodedText;
   }
   return point.rawMessage || "No raw message available.";
 }
@@ -564,7 +575,7 @@ function isFailurePoint(point) {
   return /\b(fail(?:ed|ure)?|reject(?:ed)?|timeout|error|rlf|radio link failure|dropped|forbidden|unavailable)\b|\b[45]\d{2}\b/i.test(text);
 }
 
-function L3EventsMapView({ points }) {
+export function L3EventsMapView({ points }) {
   const { isLoaded, loadError } = useJsApiLoader(GOOGLE_MAPS_LOADER_OPTIONS);
   const { getThresholdInfo, getThresholdsForMetric } = useColorForLog();
   const [isPlaying, setIsPlaying] = useState(false);

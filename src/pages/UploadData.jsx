@@ -378,6 +378,32 @@ const normalizePositiveGroup = (value, fallback = 1) => {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 };
 
+const buildReportFileGroups = (files, groupsByFile) =>
+  files.map((file, index) =>
+    normalizePositiveGroup(groupsByFile[getReportFileKey(file)], index + 1),
+  );
+
+const buildReportSheetNames = (files, sheetNamesByFile, reportMode, fileGroups = []) => {
+  if (reportMode !== "combined") {
+    return files
+      .map((file) => String(sheetNamesByFile[getReportFileKey(file)] || "").trim())
+      .filter(Boolean);
+  }
+
+  const firstNameByGroup = new Map();
+  files.forEach((file, index) => {
+    const group = fileGroups[index] ?? index + 1;
+    if (!firstNameByGroup.has(group)) {
+      firstNameByGroup.set(group, String(sheetNamesByFile[getReportFileKey(file)] || "").trim());
+    }
+  });
+
+  return Array.from(firstNameByGroup.entries())
+    .sort(([groupA], [groupB]) => groupA - groupB)
+    .map(([, sheetName]) => sheetName)
+    .filter(Boolean);
+};
+
 const UploadDataPage = () => {
   const { user } = useAuth();
   const [sessionFiles, setSessionFiles] = useState([]);
@@ -763,18 +789,20 @@ const UploadDataPage = () => {
 
       if (reportType === "excel") {
         formData.append("ReportMode", reportMode);
-        const sheetNames = reportFiles
-          .map((file) => String(reportSheetNames[getReportFileKey(file)] || "").trim())
-          .filter(Boolean);
+        const fileGroups =
+          reportMode === "combined" ? buildReportFileGroups(reportFiles, reportFileGroups) : [];
+        const sheetNames = buildReportSheetNames(
+          reportFiles,
+          reportSheetNames,
+          reportMode,
+          fileGroups,
+        );
 
         if (sheetNames.length) {
           formData.append("SheetNames", sheetNames.join(","));
         }
 
         if (reportMode === "combined") {
-          const fileGroups = reportFiles.map((file, index) =>
-            normalizePositiveGroup(reportFileGroups[getReportFileKey(file)], index + 1),
-          );
           formData.append("LogFileGroups", fileGroups.join(","));
         }
       }
@@ -1271,7 +1299,9 @@ const UploadDataPage = () => {
 	                  <div>
 	                    <label className="block text-sm font-semibold">Excel Sheet Setup</label>
 	                    <p className="mt-1 text-xs text-gray-200">
-	                      Sends <code>SheetNames</code> as comma-separated values. <code>LogFileGroups</code> is sent only in combined mode.
+	                      {reportMode === "combined"
+	                        ? "In combined mode, the first file in each group provides that group's sheet name."
+	                        : "Sends SheetNames as comma-separated values."}
                     </p>
                   </div>
 

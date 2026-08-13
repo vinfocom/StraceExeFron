@@ -1,7 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
-import { ArrowLeft, Download, FileUp, History, Loader2, Plus, Search, Upload } from "lucide-react";
-import { GoogleMap, MarkerF, PolylineF, useJsApiLoader } from "@react-google-maps/api";
+import { ArrowLeft, Download, FileUp, History, Loader2, Plus, Search, Upload, X } from "lucide-react";
 import { toast } from "react-toastify";
 import { l3EventApi } from "@/api/apiEndpoints";
 import { parseTimestampValue } from "@/utils/l3Events/timelineBuilder";
@@ -10,18 +9,21 @@ import { buildUnifiedSignalingRows } from "@/utils/l3Events/signalingModel";
 import { ExcelSignalingView } from "@/components/unifiedMap/tabs/l3Events/ExcelSignalingView";
 import { ProtocolAnalyzerView } from "@/components/unifiedMap/tabs/l3Events/ProtocolAnalyzerView";
 import { TimelineCard } from "@/components/unifiedMap/tabs/l3Events/TimelineCard";
-import { FlowModelCatalog } from "@/components/unifiedMap/tabs/l3Events/FlowModelCatalog";
-import { CallSummaryPanel } from "@/components/unifiedMap/tabs/l3Events/CallSummaryPanel";
-import { GOOGLE_MAPS_LOADER_OPTIONS, getGoogleMapsConfigError, getGoogleMapsErrorMessage } from "@/lib/googleMapsLoader";
+import {
+  HomeCallSummary,
+  L3EventsMapView,
+  buildMapPoints,
+  buildRsrpByRowId,
+  enrichCallSummaryTechnology,
+} from "@/components/unifiedMap/tabs/L3EventsTab";
 
 const TAKE = 50000;
 const VIEW_TABS = [
-  { id: "map", label: "Map View", countKey: "map_view_count" },
-  { id: "excel", label: "Excel View", countKey: "excel_view_count" },
-  { id: "analyzer", label: "Analyzer", countKey: "analyzer_count" },
-  { id: "flows", label: "Flow Models", countKey: "flow_model_count" },
-  { id: "l3", label: "All L3 Messages", countKey: "l3_count" },
-  { id: "events", label: "All Events", countKey: "event_count" },
+  { id: "map", label: "Map View" },
+  { id: "excel", label: "Excel View" },
+  { id: "analyzer", label: "Analyzer" },
+  { id: "l3", label: "All L3 Messages" },
+  { id: "events", label: "All Events" },
 ];
 
 const valueOf = (row, ...keys) => {
@@ -100,28 +102,6 @@ function normalizeSummary(summary, fallbackCalls = []) {
     totalConnectedDurationMs: summary?.totalConnectedDurationMs || 0,
     calls,
   };
-}
-
-function buildBackendMapPoints(rows = []) {
-  return rows.map((row) => {
-    const lat = Number(row.latitude);
-    const lng = Number(row.longitude);
-    if (!Number.isFinite(lat) || !Number.isFinite(lng) || Math.abs(lat) > 90 || Math.abs(lng) > 180) return null;
-    return { id: row.id, lat, lng, title: row.message || row.title, timestampLabel: row.timestampLabel };
-  }).filter(Boolean);
-}
-
-function BackendMapView({ points = [] }) {
-  const { isLoaded, loadError } = useJsApiLoader(GOOGLE_MAPS_LOADER_OPTIONS);
-  const mapsError = getGoogleMapsConfigError() || (loadError ? getGoogleMapsErrorMessage(loadError) : null);
-  if (mapsError) return <div className="flex h-full items-center justify-center p-6 text-center text-amber-300">{mapsError}</div>;
-  if (!isLoaded) return <div className="flex h-full items-center justify-center text-blue-300"><Loader2 className="mr-2 h-5 w-5 animate-spin" />Loading map…</div>;
-  if (!points.length) return <div className="flex h-full items-center justify-center text-slate-400">No rows contain valid map coordinates.</div>;
-  const center = points[0];
-  return <GoogleMap mapContainerStyle={{ width: "100%", height: "100%" }} center={center} zoom={15} options={{ streetViewControl: false, mapTypeControl: false }}>
-    <PolylineF path={points} options={{ strokeColor: "#3b82f6", strokeOpacity: 0.75, strokeWeight: 3 }} />
-    {points.map((point) => <MarkerF key={point.id} position={point} title={`${point.timestampLabel || ""} ${point.title || ""}`} />)}
-  </GoogleMap>;
 }
 
 const parseSessionIds = (value) => [...new Set(String(value || "")
@@ -270,7 +250,6 @@ function BackendAnalyzer({ sessionIds, projectName, onBack }) {
   const [backendAnalyzer, setBackendAnalyzer] = useState(null);
   const [l3Messages, setL3Messages] = useState([]);
   const [eventMessages, setEventMessages] = useState([]);
-  const [flowModels, setFlowModels] = useState([]);
   const scope = useMemo(() => ({ sessionIds, take: TAKE }), [sessionIds]);
 
   useEffect(() => {
@@ -284,8 +263,7 @@ function BackendAnalyzer({ sessionIds, projectName, onBack }) {
       l3EventApi.getAnalyzerSummary(scope),
       l3EventApi.getL3Messages(scope),
       l3EventApi.getEvents(scope),
-      l3EventApi.getFlowModels(),
-    ]).then(([countResponse, rowResponse, callResponse, analyzerResponse, l3Response, eventResponse, flowResponse]) => {
+    ]).then(([countResponse, rowResponse, callResponse, analyzerResponse, l3Response, eventResponse]) => {
       if (cancelled) return;
       const normalizedTimeline = (rowResponse?.rows || []).map((row) => normalizeTimelineRow(row));
       setCounts(countResponse || {});
@@ -294,7 +272,6 @@ function BackendAnalyzer({ sessionIds, projectName, onBack }) {
       setBackendAnalyzer(analyzerResponse?.analyzer || null);
       setL3Messages((l3Response?.l3 || []).map((row) => normalizeTimelineRow(row, "l3")));
       setEventMessages((eventResponse?.events || []).map((row) => normalizeTimelineRow(row, "event")));
-      setFlowModels(flowResponse?.flowModels || flowResponse?.flow_models || []);
     }).catch((requestError) => {
       if (!cancelled) setError(requestError?.message || "Failed to load diagnostic session data.");
     }).finally(() => {
@@ -313,10 +290,23 @@ function BackendAnalyzer({ sessionIds, projectName, onBack }) {
     });
   }, [selectedCall, timeline]);
   const fullAnalysis = useMemo(() => buildProtocolAnalysis(timeline, []), [timeline]);
+  const enrichedSummary = useMemo(
+    () => enrichCallSummaryTechnology(summary, fullAnalysis.procedures),
+    [fullAnalysis.procedures, summary],
+  );
   const protocolAnalysis = useMemo(() => buildProtocolAnalysis(protocolTimeline, []), [protocolTimeline]);
-  const signalingRows = useMemo(() => buildUnifiedSignalingRows(timeline, summary.calls, fullAnalysis), [fullAnalysis, summary.calls, timeline]);
-  const mapPoints = useMemo(() => buildBackendMapPoints(signalingRows), [signalingRows]);
+  const signalingRows = useMemo(() => buildUnifiedSignalingRows(timeline, enrichedSummary.calls, fullAnalysis), [enrichedSummary.calls, fullAnalysis, timeline]);
+  const rsrpByRowId = useMemo(() => buildRsrpByRowId(fullAnalysis), [fullAnalysis]);
+  const mapPoints = useMemo(() => buildMapPoints(signalingRows, rsrpByRowId), [rsrpByRowId, signalingRows]);
   const rawRows = activeView === "events" ? eventMessages : l3Messages;
+  const countForTab = useCallback((tabId) => {
+    if (tabId === "map") return mapPoints.length;
+    if (tabId === "excel") return signalingRows.length || counts.excel_view_count || 0;
+    if (tabId === "analyzer") return protocolAnalysis?.stats?.totalProcedures ?? counts.analyzer_count ?? 0;
+    if (tabId === "l3") return l3Messages.length || counts.l3_count || 0;
+    if (tabId === "events") return eventMessages.length || counts.event_count || 0;
+    return 0;
+  }, [counts.analyzer_count, counts.event_count, counts.excel_view_count, counts.l3_count, eventMessages.length, l3Messages.length, mapPoints.length, protocolAnalysis?.stats?.totalProcedures, signalingRows.length]);
   const visibleRawRows = useMemo(() => {
     const needle = search.trim().toLowerCase();
     if (!needle) return rawRows;
@@ -342,17 +332,26 @@ function BackendAnalyzer({ sessionIds, projectName, onBack }) {
       <header className="flex shrink-0 flex-wrap items-center gap-2 border-b border-slate-700 bg-slate-800/70 px-2 py-2">
         <button type="button" onClick={onBack} className="inline-flex items-center gap-1 rounded border border-slate-600 px-2 py-1.5 text-xs hover:bg-slate-700"><ArrowLeft className="h-3.5 w-3.5" />Upload & History</button>
         <div className="mr-auto min-w-0"><div className="truncate text-sm font-semibold">{projectName}</div><div className="text-[10px] text-slate-400">Sessions: {sessionIds.join(", ")}</div></div>
-        {VIEW_TABS.map((tab) => <button key={tab.id} type="button" onClick={() => setActiveView(tab.id)} className={`border px-2.5 py-1.5 text-xs ${activeView === tab.id ? "border-blue-500 bg-blue-600" : "border-slate-700 bg-slate-900 text-slate-300"}`}>{tab.label} ({counts[tab.countKey] ?? (tab.id === "flows" ? flowModels.length : 0)})</button>)}
+        {VIEW_TABS.map((tab) => <button key={tab.id} type="button" onClick={() => setActiveView(tab.id)} className={`border px-2.5 py-1.5 text-xs ${activeView === tab.id ? "border-blue-500 bg-blue-600" : "border-slate-700 bg-slate-900 text-slate-300 hover:bg-slate-700"}`}>{tab.label} ({countForTab(tab.id).toLocaleString()})</button>)}
         <button type="button" onClick={() => downloadPdf("analyzer")} className="inline-flex items-center gap-1 rounded border border-blue-500/50 px-2 py-1.5 text-xs"><Download className="h-3.5 w-3.5" />Analyzer PDF</button>
         <button type="button" onClick={() => downloadPdf("summary")} className="inline-flex items-center gap-1 rounded border border-blue-500/50 px-2 py-1.5 text-xs"><Download className="h-3.5 w-3.5" />L3 PDF</button>
       </header>
-      <main className="min-h-0 flex-1 overflow-hidden">
-        {!activeView && <div className="h-full overflow-auto p-3"><CallSummaryPanel summary={summary} selectedCallId={selectedCall?.id} onSelectCall={setSelectedCall} /></div>}
-        {activeView === "map" && <BackendMapView points={mapPoints} />}
-        {activeView === "excel" && <ExcelSignalingView rows={signalingRows} calls={summary.calls} selectedCall={selectedCall} onSelectCall={setSelectedCall} sourceFileName={`sessions-${sessionIds.join("-")}`} />}
+      <main className="flex min-h-0 flex-1 flex-col overflow-hidden">
+        {!activeView && <div className="h-full overflow-auto p-3"><HomeCallSummary summary={enrichedSummary} /></div>}
+        {activeView === "analyzer" && selectedCall && (
+          <div className="shrink-0 flex items-center justify-between gap-2 border-b border-blue-500/30 bg-blue-500/10 px-2 py-1 text-xs">
+            <span className="truncate text-blue-300">
+              Analyzer scoped to {selectedCall.id} starting at {selectedCall.startTime?.toLocaleTimeString([], { hour12: false, timeZone: "UTC" })}
+            </span>
+            <button type="button" onClick={() => setSelectedCall(null)} className="flex shrink-0 items-center gap-1 font-medium text-blue-300 hover:text-blue-200">
+              <X className="h-3.5 w-3.5" /> Clear
+            </button>
+          </div>
+        )}
+        {activeView === "map" && <L3EventsMapView points={mapPoints} />}
+        {activeView === "excel" && <ExcelSignalingView rows={signalingRows} calls={enrichedSummary.calls} selectedCall={selectedCall} onSelectCall={setSelectedCall} sourceFileName={`sessions-${sessionIds.join("-")}`} />}
         {activeView === "analyzer" && <div className="flex h-full min-h-0 flex-col"><div className="flex shrink-0 gap-3 border-b border-slate-800 px-3 py-1.5 text-[11px] text-slate-300"><span>RRC: {backendAnalyzer?.states?.rrc || "—"}</span><span>NAS: {backendAnalyzer?.states?.nas || "—"}</span><span>IMS: {backendAnalyzer?.states?.ims || "—"}</span><span>Failures: {backendAnalyzer?.stats?.failures ?? 0}</span></div><div className="min-h-0 flex-1"><ProtocolAnalyzerView analysis={protocolAnalysis} callScoped={Boolean(selectedCall)} /></div></div>}
-        {activeView === "flows" && <div className="h-full overflow-auto"><FlowModelCatalog models={flowModels} /></div>}
-        {(activeView === "l3" || activeView === "events") && <div className="flex h-full min-h-0 flex-col"><div className="relative shrink-0 border-b border-slate-700 p-2"><Search className="absolute left-4 top-4 h-3.5 w-3.5 text-slate-500" /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search messages…" className="h-8 w-full rounded border border-slate-700 bg-slate-900 pl-8 text-xs" /></div><div className="min-h-0 flex-1 space-y-2 overflow-auto p-2">{visibleRawRows.map((row) => <TimelineCard key={row.id} item={row} />)}</div></div>}
+        {(activeView === "l3" || activeView === "events") && <div className="flex h-full min-h-0 flex-col bg-slate-900/70"><div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-slate-700 bg-slate-800/70 px-2 py-1"><div><h3 className="text-sm font-semibold text-white">{activeView === "l3" ? "All L3 Messages" : "All Event Rows"}</h3><p className="text-[11px] text-slate-400">Showing {visibleRawRows.length.toLocaleString()} of {rawRows.length.toLocaleString()} backend rows.</p></div><div className="relative w-full sm:w-80"><Search className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-slate-500" /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search timestamp, file, title, or raw text..." className="w-full rounded-md border border-slate-700 bg-slate-950 py-2 pl-8 pr-2 text-xs text-white placeholder:text-slate-500 focus:border-blue-500 focus:outline-none" /></div></div><div className="min-h-0 flex-1 space-y-2 overflow-auto">{visibleRawRows.length ? visibleRawRows.map((row) => <TimelineCard key={row.id} item={row} />) : <div className="py-10 text-center text-sm text-slate-400">No matching {activeView === "l3" ? "L3 messages" : "event rows"}.</div>}</div></div>}
       </main>
     </div>
   );
