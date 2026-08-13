@@ -2,7 +2,7 @@
 import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "react-toastify";
-import { Map, Folder, Calendar, RefreshCw, Search, Eye, Trash } from "lucide-react";
+import { Map, Folder, Calendar, RefreshCw, Search, Eye, Radio, Trash } from "lucide-react";
 import { GoogleMap, PolygonF, useJsApiLoader } from "@react-google-maps/api";
 import {
   Card,
@@ -29,11 +29,22 @@ import {
 const mergeProjectsById = (primaryRows = [], localRows = []) => {
   const seen = new Set();
   return [...localRows, ...primaryRows].filter((project) => {
-    const key = String(project?.id ?? project?.project_id ?? "");
+    const key = String(project?.id ?? project?.projectId ?? project?.project_id ?? "");
     if (!key || seen.has(key)) return false;
     seen.add(key);
     return true;
   });
+};
+
+const normalizeProject = (project = {}) => ({
+  ...project,
+  id: project.id ?? project.projectId ?? project.project_id,
+  project_name: project.project_name ?? project.projectName ?? "",
+});
+
+const projectHasL3 = (project) => {
+  const value = project?.l3 ?? project?.L3;
+  return value === true || value === 1 || String(value).toLowerCase() === "true";
 };
 
 const normalizeLatLng = (input) => {
@@ -318,8 +329,9 @@ const ViewProjectsPage = () => {
 
       try {
         const res = await mapViewApi.getProjects();
-        if (res?.Data && Array.isArray(res.Data)) {
-          cloudRows = res.Data;
+        const projectRows = Array.isArray(res?.Data) ? res.Data : Array.isArray(res?.data) ? res.data : null;
+        if (projectRows) {
+          cloudRows = projectRows.map(normalizeProject);
         } else if (res?.Status === 0 && res?.Message) {
           toast.error(res.Message);
         }
@@ -389,6 +401,17 @@ const ViewProjectsPage = () => {
           ? String(project.ref_session_id).split(",").map((id) => id.trim()).filter(Boolean)
           : [],
       },
+    });
+  };
+
+  const handleOpenL3Events = (project) => {
+    const projectId = project?.id ?? project?.projectId ?? project?.project_id;
+    if (!projectId) {
+      toast.warn("Project has no ID for L3/Event analysis.");
+      return;
+    }
+    navigate(`/project-l3-events?projectId=${encodeURIComponent(projectId)}`, {
+      state: { project },
     });
   };
 
@@ -475,6 +498,16 @@ const ViewProjectsPage = () => {
                               </p>
                               <div className="flex items-center gap-2 mt-1 flex-wrap">
                                 <p className="text-xs text-slate-500">Project ID: {project.id}</p>
+                                {projectHasL3(project) && (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleOpenL3Events(project)}
+                                    className="inline-flex items-center gap-1 rounded border border-indigo-200 bg-indigo-50 px-1.5 py-0.5 text-[11px] font-semibold text-indigo-700 hover:bg-indigo-100"
+                                    title="Open backend L3/Event analyzer"
+                                  >
+                                    <Radio className="h-3 w-3" />L3
+                                  </button>
+                                )}
                                 {(project.is_local || Number(project.id) < 0) && (
                                   <span className="rounded border border-amber-200 bg-amber-50 px-1.5 py-0.5 text-[11px] font-medium text-amber-700">
                                     Local

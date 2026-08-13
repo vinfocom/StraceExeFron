@@ -2171,6 +2171,48 @@ export const mapViewApi = {
     api.post("/api/MapView/UploadImageLegacy", formData, { headers: getPublicApiHeaders() }),
 };
 
+const diagnosticScopeParams = ({ sessionId, sessionIds, uploadId, take } = {}) => ({
+  ...(sessionId ? { sessionId } : {}),
+  ...(Array.isArray(sessionIds) && sessionIds.length
+    ? { sessionIds: sessionIds.join(",") }
+    : sessionIds ? { sessionIds } : {}),
+  ...(uploadId ? { uploadId } : {}),
+  ...(take ? { take } : {}),
+});
+
+export const l3EventApi = {
+  addSessionUpload: ({ projectId, zipFile, dataType, l3File, eventFile }, onUploadProgress) => {
+    const formData = new FormData();
+    if (Number(projectId) > 0) formData.append("projectId", projectId);
+    if (zipFile) formData.append("zipFile", zipFile);
+    if (dataType) formData.append("dataType", dataType);
+    if (l3File) formData.append("l3File", l3File);
+    if (eventFile) formData.append("eventFile", eventFile);
+    return api.post("/api/L3Event/AddSessionUpload", formData, {
+      timeout: 7200000,
+      onUploadProgress,
+    });
+  },
+  getHistory: (params = {}) => api.get("/api/L3Event/GetL3EventHistory", { params }),
+  getTabCounts: (scope) => api.get("/api/L3Event/GetDiagnosticTabCounts", { params: diagnosticScopeParams(scope) }),
+  getMapRows: (scope) => api.get("/api/L3Event/GetDiagnosticMapRows", { params: diagnosticScopeParams(scope) }),
+  getExcelRows: (scope) => api.get("/api/L3Event/GetDiagnosticExcelRows", { params: diagnosticScopeParams(scope) }),
+  getAnalyzerSummary: (scope) => api.get("/api/L3Event/GetDiagnosticAnalyzerSummary", { params: diagnosticScopeParams(scope) }),
+  getCallSummary: (scope) => api.get("/api/L3Event/GetDiagnosticCallSummaryOnly", { params: diagnosticScopeParams(scope) }),
+  getFullCallSummary: (scope) => api.get("/api/L3Event/GetDiagnosticCallSummary", { params: diagnosticScopeParams(scope) }),
+  getL3Messages: (scope) => api.get("/api/L3Event/GetDiagnosticL3Messages", { params: diagnosticScopeParams(scope) }),
+  getEvents: (scope) => api.get("/api/L3Event/GetDiagnosticEvents", { params: diagnosticScopeParams(scope) }),
+  getFlowModels: () => api.get("/api/L3Event/GetDiagnosticFlowModels"),
+  downloadEventAnalyzerPdf: (scope) => api.get("/api/L3Event/GenerateDiagnosticEventAnalyzerPdf", {
+    params: diagnosticScopeParams(scope),
+    responseType: "blob",
+  }),
+  downloadL3SummaryPdf: (scope) => api.get("/api/L3Event/GenerateDiagnosticL3SummaryPdf", {
+    params: diagnosticScopeParams(scope),
+    responseType: "blob",
+  }),
+};
+
 export const gridAnalyticsApi = {
       computeAndStoreGridAnalytics: (params, config = {}) =>
     api.post("/api/GridAnalytics/ComputeAndStoreGridAnalytics", null, {

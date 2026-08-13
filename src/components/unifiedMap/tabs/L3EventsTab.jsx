@@ -591,6 +591,7 @@ function L3EventsMapView({ points }) {
     }
   });
   const activeCardRef = useRef(null);
+  const messageListRef = useRef(null);
   const mapStageRef = useRef(null);
   const [mapStageWidth, setMapStageWidth] = useState(0);
   const mapsError = getGoogleMapsConfigError() || (loadError ? getGoogleMapsErrorMessage(loadError) : null);
@@ -721,9 +722,32 @@ function L3EventsMapView({ points }) {
   }, [isPlaying, playbackSpeedMs, points.length]);
 
   useEffect(() => {
-    if (isPlaying && playbackSpeedMs <= 350) return;
-    activeCardRef.current?.scrollIntoView({ behavior: "smooth", block: "center", inline: "nearest" });
-  }, [currentIndex, isPlaying, playbackSpeedMs]);
+    const activeEl = activeCardRef.current;
+    const listEl = messageListRef.current;
+    if (!activeEl || !listEl) return;
+
+    const activeTop = activeEl.offsetTop;
+    const activeBottom = activeTop + activeEl.offsetHeight;
+    const viewTop = listEl.scrollTop;
+    const viewBottom = viewTop + listEl.clientHeight;
+    const topPadding = 24;
+    const bottomPadding = 48;
+
+    if (activeTop < viewTop + topPadding) {
+      listEl.scrollTo({
+        top: Math.max(0, activeTop - topPadding),
+        behavior: isPlaying ? "auto" : "smooth",
+      });
+      return;
+    }
+
+    if (activeBottom > viewBottom - bottomPadding) {
+      listEl.scrollTo({
+        top: activeBottom - listEl.clientHeight + bottomPadding,
+        behavior: isPlaying ? "auto" : "smooth",
+      });
+    }
+  }, [currentIndex, isPlaying, filteredMessagePoints.length]);
 
   useEffect(() => {
     if (!mapStageRef.current) return undefined;
@@ -948,7 +972,7 @@ function L3EventsMapView({ points }) {
                 />
               </div>
             </div>
-            <div className="min-h-0 flex-1 w-full max-w-full min-w-0 overflow-y-auto overflow-x-hidden">
+            <div ref={messageListRef} className="min-h-0 flex-1 w-full max-w-full min-w-0 overflow-y-auto overflow-x-hidden">
               {filteredMessagePoints.length > 0 ? filteredMessagePoints.map(({ point, index }) => (
                 <MapMessageCard
                   key={point.id}

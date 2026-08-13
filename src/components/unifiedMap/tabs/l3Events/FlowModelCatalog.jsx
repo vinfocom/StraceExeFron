@@ -1,7 +1,7 @@
 import React from "react";
 import { NETWORK_FLOW_MODELS } from "@/utils/l3Events/flowModels";
 
-export function FlowModelCatalog() {
+export function FlowModelCatalog({ models = NETWORK_FLOW_MODELS }) {
   return (
     <div className="rounded-lg border border-slate-700 bg-slate-900/70 overflow-hidden">
       <div className="border-b border-slate-700 bg-slate-800/70 p-3">
@@ -12,7 +12,7 @@ export function FlowModelCatalog() {
       </div>
 
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-3 p-3">
-        {NETWORK_FLOW_MODELS.map((model) => (
+        {models.map((model) => (
           <section key={model.id} className="rounded-lg border border-slate-800 bg-slate-950/55 p-3">
             <div className="flex flex-wrap items-start justify-between gap-2">
               <div>

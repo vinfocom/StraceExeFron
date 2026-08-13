@@ -54,6 +54,7 @@ const CompanyForm = lazy(() => import("./pages/CompanyForm"));
 const CompanyLicensesPage = lazy(() => import("./pages/CompanyLicenses"));
 const DataDeletionPage = lazy(() => import("./pages/DataDeletion"));
 const L3EventAnalyzerPage = lazy(() => import("./pages/L3EventAnalyzer"));
+const BackendL3EventAnalyzerPage = lazy(() => import("./pages/BackendL3EventAnalyzer"));
 
 // Loading Component for Suspense
 const PageLoader = ({ mode = "dashboard" }) => {
@@ -197,6 +198,7 @@ function AppShell({ isElectronRuntime }) {
             <Route path="/realtime-network-map" element={<PrivateRoute><RealtimeNetworkMap /></PrivateRoute>} />
             <Route path="/viewProject" element={<PrivateRoute><ViewProjectsPage /></PrivateRoute>} />
             <Route path="/l3-events" element={<PrivateRoute><L3EventAnalyzerPage /></PrivateRoute>} />
+            <Route path="/project-l3-events" element={<PrivateRoute><BackendL3EventAnalyzerPage /></PrivateRoute>} />
 
             <Route path="/companies" element={<SuperAdminRoute><SuperAdminCompanies /></SuperAdminRoute>} />
             <Route path="/company-licenses" element={<SuperAdminRoute><CompanyLicensesPage /></SuperAdminRoute>} />
