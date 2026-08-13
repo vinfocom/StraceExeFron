@@ -216,6 +216,7 @@ const SignalingRow = memo(function SignalingRow({ row, selected, onSelect, inclu
     <tr
       onClick={() => onSelect(row)}
       className={`h-8 cursor-pointer border-b border-slate-800/90 transition-colors hover:bg-blue-500/10 ${selected ? "outline outline-1 -outline-offset-1 outline-blue-400 bg-blue-500/15" : ""}`}
+      style={{ height: "32px" }}
     >
       <td className={`border-r border-slate-800 px-2 font-mono text-[11px] whitespace-nowrap ${severityClass}`}>{row.timestampLabel}</td>
       <td className={`border-r border-slate-800 px-2 text-center font-mono text-[10px] text-cyan-200 whitespace-nowrap ${severityClass}`}>{laneValue(row, "ue")}</td>
@@ -228,8 +229,8 @@ const SignalingRow = memo(function SignalingRow({ row, selected, onSelect, inclu
         </>
       )}
       <td className={`max-w-40 truncate border-r border-slate-800 px-2 text-[10px] text-slate-300 ${severityClass}`} title={row.interface}>{row.interface}</td>
-      <td className="max-w-72 truncate border-r border-slate-800 px-2 text-[12px] font-medium text-white" title={row.message}>
-        {row.message}
+      <td className="h-8 max-h-8 max-w-72 overflow-hidden border-r border-slate-800 px-2 py-0 text-[12px] font-medium text-white" title={row.message}>
+        <span className="block max-h-8 truncate leading-8">{row.message}</span>
       </td>
     </tr>
   );

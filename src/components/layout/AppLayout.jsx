@@ -40,7 +40,14 @@ const AppLayout = ({ children }) => {
     }
   }, [isCompactViewport]);
 
-  const pathsWithoutHeader = ["/mapview", "/prediction-map", "/unified-map", "/multi-map", "/l3-events"];
+  const pathsWithoutHeader = [
+    "/mapview",
+    "/prediction-map",
+    "/unified-map",
+    "/multi-map",
+    "/l3-events",
+    "/project-l3-events",
+  ];
   const pathsWithoutSidebar = ["/unified-map"];
 
   const shouldShowHeader = !pathsWithoutHeader.some((path) =>

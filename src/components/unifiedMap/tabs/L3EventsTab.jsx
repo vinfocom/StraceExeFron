@@ -389,7 +389,7 @@ export function HomeCallSummary({ summary }) {
     { label: "Connected", value: summary.connected || 0, className: "border-emerald-500/35 bg-emerald-500/10 text-emerald-300" },
     { label: "Dropped", value: summary.dropped || 0, className: "border-red-500/35 bg-red-500/10 text-red-300" },
     { label: "Not Connected", value: summary.notConnected || 0, className: "border-amber-500/35 bg-amber-500/10 text-amber-300" },
-    { label: "Avg Call Setup", value: formatDurationMs(summary.averageSetupTime || 0), className: "border-blue-500/35 bg-blue-500/10 text-blue-300" },
+    { label: "Avg Call Setup", value: formatAverageSetupMs(summary.averageSetupTime), className: "border-blue-500/35 bg-blue-500/10 text-blue-300" },
     { label: "Avg Connected Duration", value: formatDurationMs(summary.averageTalkTime || 0), className: "border-cyan-500/35 bg-cyan-500/10 text-cyan-300" },
   ];
 
@@ -468,6 +468,15 @@ export function HomeCallSummary({ summary }) {
 function formatHomeCallTime(value) {
   if (!(value instanceof Date)) return "—";
   return value.toLocaleTimeString([], { hour12: false, timeZone: "UTC" });
+}
+
+function formatAverageSetupMs(value) {
+  const milliseconds = Number(value);
+  if (!Number.isFinite(milliseconds) || milliseconds <= 0) return "0.00s";
+  const totalSeconds = milliseconds / 1000;
+  if (totalSeconds < 60) return `${totalSeconds.toFixed(2)}s`;
+  const minutes = Math.floor(totalSeconds / 60);
+  return `${minutes}m ${(totalSeconds - (minutes * 60)).toFixed(2)}s`;
 }
 
 function formatHomeCallDuration(value, estimated = false) {

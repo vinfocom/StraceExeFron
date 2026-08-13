@@ -2181,9 +2181,10 @@ const diagnosticScopeParams = ({ sessionId, sessionIds, uploadId, take } = {}) =
 });
 
 export const l3EventApi = {
-  addSessionUpload: ({ projectId, zipFile, dataType, l3File, eventFile }, onUploadProgress) => {
+  addSessionUpload: ({ projectId, sessionId, zipFile, dataType, l3File, eventFile }, onUploadProgress) => {
     const formData = new FormData();
     if (Number(projectId) > 0) formData.append("projectId", projectId);
+    if (Number(sessionId) > 0) formData.append("sessionId", sessionId);
     if (zipFile) formData.append("zipFile", zipFile);
     if (dataType) formData.append("dataType", dataType);
     if (l3File) formData.append("l3File", l3File);
@@ -2194,6 +2195,7 @@ export const l3EventApi = {
     });
   },
   getHistory: (params = {}) => api.get("/api/L3Event/GetL3EventHistory", { params }),
+  deleteHistory: (historyId) => api.delete(`/api/L3Event/DeleteL3EventHistory/${encodeURIComponent(historyId)}`),
   getTabCounts: (scope) => api.get("/api/L3Event/GetDiagnosticTabCounts", { params: diagnosticScopeParams(scope) }),
   getMapRows: (scope) => api.get("/api/L3Event/GetDiagnosticMapRows", { params: diagnosticScopeParams(scope) }),
   getExcelRows: (scope) => api.get("/api/L3Event/GetDiagnosticExcelRows", { params: diagnosticScopeParams(scope) }),

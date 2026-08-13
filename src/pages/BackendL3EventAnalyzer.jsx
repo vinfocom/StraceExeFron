@@ -1,9 +1,10 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
-import { ArrowLeft, Download, FileUp, History, Loader2, Plus, Search, Upload, X } from "lucide-react";
+import { ArrowLeft, Download, FileUp, History, Loader2, Search, Trash2, Upload, X } from "lucide-react";
 import { toast } from "react-toastify";
 import { l3EventApi } from "@/api/apiEndpoints";
 import { parseTimestampValue } from "@/utils/l3Events/timelineBuilder";
+import { decodeEventItem, decodeL3Item } from "@/utils/l3Events/eventDecoder";
 import { buildProtocolAnalysis } from "@/utils/l3Events/protocolAnalyzer";
 import { buildUnifiedSignalingRows } from "@/utils/l3Events/signalingModel";
 import { ExcelSignalingView } from "@/components/unifiedMap/tabs/l3Events/ExcelSignalingView";
@@ -47,6 +48,27 @@ function normalizeTimelineRow(row = {}, forcedType = null) {
   const message = valueOf(row, "message", "eventName", "title", "officialName", "category", "Message", "EventName", "Title", "OfficialName", "Category") || "Log row";
   const detail = valueOf(row, "rawMessage", "rawText", "detail", "summary", "RawMessage", "RawText", "Detail", "Summary") || message;
   const category = valueOf(row, "category", "sourceCategory", "Category", "SourceCategory") || (sourceType === "l3" ? "L3" : "Event");
+  const sourceCategory = valueOf(row, "sourceCategory", "SourceCategory") || category;
+  const raw = valueOf(row, "raw", "metadata", "rawJson", "Raw", "Metadata", "RawJson") || row;
+  const decoded = sourceType === "l3"
+    ? decodeL3Item({
+      layer: sourceCategory,
+      message,
+      decodedText: detail,
+      latitude: valueOf(row, "latitude", "Latitude"),
+      longitude: valueOf(row, "longitude", "Longitude"),
+      raw,
+    })
+    : decodeEventItem({
+      category: sourceCategory,
+      eventName: valueOf(row, "eventKey", "eventName", "message", "EventKey", "EventName", "Message") || message,
+      value: detail,
+      originSource: valueOf(row, "originSource", "source", "OriginSource", "Source"),
+      severity: valueOf(row, "severity", "Severity"),
+      latitude: valueOf(row, "latitude", "Latitude"),
+      longitude: valueOf(row, "longitude", "Longitude"),
+      raw,
+    });
   return {
     ...row,
     id: String(rawId).startsWith(`${sourceType}-`) ? String(rawId) : `${sourceType}-${rawId}`,
@@ -54,18 +76,18 @@ function normalizeTimelineRow(row = {}, forcedType = null) {
     sourceType,
     timestamp: asDate(valueOf(row, "timestamp", "timestampText", "timestampLabel", "Timestamp", "TimestampText", "TimestampLabel")),
     timestampLabel,
-    category,
-    sourceCategory: valueOf(row, "sourceCategory", "SourceCategory") || category,
-    domain: valueOf(row, "domain", "Domain") || "Radio",
-    title: valueOf(row, "title", "message", "eventName", "Title", "Message", "EventName") || message,
-    officialName: valueOf(row, "officialName", "message", "eventName", "OfficialName", "Message", "EventName") || message,
+    category: decoded.category || category,
+    sourceCategory,
+    domain: decoded.domain || valueOf(row, "domain", "Domain") || "Radio",
+    title: decoded.title || valueOf(row, "title", "message", "eventName", "Title", "Message", "EventName") || message,
+    officialName: valueOf(row, "officialName", "message", "eventName", "OfficialName", "Message", "EventName") || decoded.title || message,
     message,
-    summary: valueOf(row, "summary", "detail", "Summary", "Detail") || detail,
+    summary: decoded.summary || valueOf(row, "summary", "detail", "Summary", "Detail") || detail,
     rawMessage: detail,
     sourceFile: valueOf(row, "sourceFile", "sourceFileName", "SourceFile", "SourceFileName") || "",
     sourceIndex: valueOf(row, "sourceIndex", "rowNo", "SourceIndex", "RowNo"),
     severity: valueOf(row, "severity", "Severity") || "info",
-    eventKey: valueOf(row, "eventKey", "message", "eventName", "EventKey", "Message", "EventName"),
+    eventKey: decoded.eventKey || valueOf(row, "eventKey", "message", "eventName", "EventKey", "Message", "EventName"),
     technology: valueOf(row, "technology", "Technology") || "Unknown",
     protocol: valueOf(row, "protocol", "Protocol") || category,
     interface: valueOf(row, "interface", "Interface") || category,
@@ -73,33 +95,46 @@ function normalizeTimelineRow(row = {}, forcedType = null) {
     latitude: valueOf(row, "latitude", "Latitude"),
     longitude: valueOf(row, "longitude", "Longitude"),
     callId: valueOf(row, "callId", "CallId"),
-    details: Array.isArray(row.details) ? row.details : [],
-    metadata: row.metadata || row,
-    icon: sourceType === "l3" ? "📡" : "📋",
+    details: Array.isArray(row.details) && row.details.length ? row.details : decoded.details || [],
+    metadata: raw,
+    icon: decoded.icon || (sourceType === "l3" ? "📡" : "📋"),
   };
 }
 
 function normalizeCall(call = {}) {
-  const dateKeys = ["startTime", "dialTime", "connectedTime", "endTime", "terminationTime"];
+  const canonicalKeys = [
+    "id", "call", "startTime", "dialTime", "alertingTime", "connectedTime", "endTime", "terminationTime",
+    "callSetupTimeMs", "setupTimeMs", "connectedDurationMs", "talkTimeMs", "durationMs", "attemptDurationMs",
+    "totalDurationMs", "status", "detailedStatus", "callResult", "classification", "confidence",
+    "connectionEstimated", "direction", "technologyStart", "technologyEnd", "disconnectReason", "causeCode",
+    "causeName", "connectedEvidence", "connectionSupportingEvidence", "releaseEvidence", "handoverAttempts",
+    "successfulHandovers", "failedHandovers", "handovers", "rrcRecoveryEvents", "radioIssueDetected",
+    "radioRecovered", "sipEvents", "imsEvents", "l3Events", "eventEvents", "events", "warnings", "recommendations",
+  ];
   const normalized = { ...call };
-  dateKeys.forEach((key) => {
-    normalized[key] = asDate(call[key]);
+  canonicalKeys.forEach((key) => {
+    const value = valueOf(call, key);
+    if (value !== null) normalized[key] = value;
   });
-  normalized.id = call.id || call.call || "Call";
+  ["startTime", "dialTime", "alertingTime", "connectedTime", "endTime", "terminationTime"].forEach((key) => {
+    normalized[key] = asDate(normalized[key]);
+  });
+  normalized.id = normalized.id || normalized.call || "Call";
   return normalized;
 }
 
 function normalizeSummary(summary, fallbackCalls = []) {
-  const calls = (summary?.calls || fallbackCalls || []).map(normalizeCall);
+  const backendCalls = valueOf(summary, "calls");
+  const calls = (Array.isArray(backendCalls) ? backendCalls : fallbackCalls || []).map(normalizeCall);
   return {
-    totalCalls: summary?.totalCalls ?? calls.length,
-    connected: summary?.connected ?? calls.filter((call) => call.status === "Connected").length,
-    dropped: summary?.dropped ?? calls.filter((call) => call.status === "Dropped").length,
-    notConnected: summary?.notConnected ?? calls.filter((call) => call.status === "Not Connected").length,
-    averageSetupTime: summary?.averageSetupTime || 0,
-    averageTalkTime: summary?.averageTalkTime || 0,
-    totalDurationMs: summary?.totalDurationMs || 0,
-    totalConnectedDurationMs: summary?.totalConnectedDurationMs || 0,
+    totalCalls: valueOf(summary, "totalCalls") ?? calls.length,
+    connected: valueOf(summary, "connected") ?? calls.filter((call) => call.status === "Connected").length,
+    dropped: valueOf(summary, "dropped") ?? calls.filter((call) => call.status === "Dropped").length,
+    notConnected: valueOf(summary, "notConnected") ?? calls.filter((call) => call.status === "Not Connected").length,
+    averageSetupTime: valueOf(summary, "averageSetupTime") || 0,
+    averageTalkTime: valueOf(summary, "averageTalkTime") || 0,
+    totalDurationMs: valueOf(summary, "totalDurationMs") || 0,
+    totalConnectedDurationMs: valueOf(summary, "totalConnectedDurationMs") || 0,
     calls,
   };
 }
@@ -125,7 +160,9 @@ function UploadHistoryLanding({ projectId, projectName, onOpenSessions, onBack }
   const [progress, setProgress] = useState(0);
   const [historyLoading, setHistoryLoading] = useState(true);
   const [historyRows, setHistoryRows] = useState([]);
-  const [manualSessionIds, setManualSessionIds] = useState("");
+  const [deletingHistoryId, setDeletingHistoryId] = useState(null);
+  const [manualProjectId, setManualProjectId] = useState(projectId ? String(projectId) : "");
+  const [manualSessionId, setManualSessionId] = useState("");
   const fileInputRef = useRef(null);
 
   const loadHistory = useCallback(async () => {
@@ -151,11 +188,21 @@ function UploadHistoryLanding({ projectId, projectName, onOpenSessions, onBack }
       toast.warn("Select a ZIP file containing L3 and Event files.");
       return;
     }
+    const selectedProjectId = manualProjectId.trim() ? Number(manualProjectId) : null;
+    const selectedSessionId = manualSessionId.trim() ? Number(manualSessionId) : null;
+    if (selectedProjectId !== null && (!Number.isInteger(selectedProjectId) || selectedProjectId <= 0)) {
+      toast.warn("Project ID must be a positive number.");
+      return;
+    }
+    if (selectedSessionId !== null && (!Number.isInteger(selectedSessionId) || selectedSessionId <= 0)) {
+      toast.warn("Session ID must be a positive number when provided.");
+      return;
+    }
     setUploading(true);
     setProgress(0);
     try {
       const response = await l3EventApi.addSessionUpload(
-        { projectId, zipFile: selectedFile, dataType: "L3Event" },
+        { projectId: selectedProjectId, sessionId: selectedSessionId, zipFile: selectedFile, dataType: "L3Event" },
         (progressEvent) => {
           if (progressEvent.total) setProgress(Math.round((progressEvent.loaded * 100) / progressEvent.total));
         },
@@ -180,13 +227,26 @@ function UploadHistoryLanding({ projectId, projectName, onOpenSessions, onBack }
     if (selectedFile) uploadZip(selectedFile);
   };
 
-  const addManualSessions = () => {
-    const parsed = parseSessionIds(manualSessionIds);
-    if (!parsed.length) {
-      toast.warn("Enter at least one valid session ID.");
+  const deleteHistory = async (row) => {
+    const historyId = Number(row?.id);
+    if (!Number.isInteger(historyId) || historyId <= 0) {
+      toast.error("This upload history row does not have a valid ID.");
       return;
     }
-    onOpenSessions(parsed);
+    const fileName = row.originalFileName || "this L3/Event upload";
+    if (!window.confirm(`Delete ${fileName}? This permanently removes its call summary, L3 rows, Event rows, and upload-history entry.`)) return;
+
+    setDeletingHistoryId(historyId);
+    try {
+      const response = await l3EventApi.deleteHistory(historyId);
+      if (response?.status !== 1) throw new Error(response?.message || "Delete failed.");
+      setHistoryRows((current) => current.filter((item) => Number(item.id) !== historyId));
+      toast.success(response.message || "L3/Event upload data deleted successfully.");
+    } catch (error) {
+      toast.error(error?.message || "Failed to delete the L3/Event upload data.");
+    } finally {
+      setDeletingHistoryId(null);
+    }
   };
 
   return (
@@ -198,6 +258,16 @@ function UploadHistoryLanding({ projectId, projectName, onOpenSessions, onBack }
         </div>
 
         <section className="rounded-lg border border-slate-700 bg-slate-900 p-4">
+          <div className="mb-4 grid gap-3 sm:grid-cols-2">
+            <label className="text-xs text-slate-300">
+              <span className="mb-1 block">Project ID (optional)</span>
+              <input type="number" min="1" value={manualProjectId} onChange={(event) => setManualProjectId(event.target.value)} placeholder="Enter project ID" className="h-9 w-full rounded border border-slate-700 bg-slate-950 px-3 text-sm text-white outline-none focus:border-blue-500" />
+            </label>
+            <label className="text-xs text-slate-300">
+              <span className="mb-1 block">Session ID (optional)</span>
+              <input type="number" min="1" value={manualSessionId} onChange={(event) => setManualSessionId(event.target.value)} placeholder="Leave empty to create a new session" className="h-9 w-full rounded border border-slate-700 bg-slate-950 px-3 text-sm text-white outline-none focus:border-blue-500" />
+            </label>
+          </div>
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div><div className="flex items-center gap-2 text-sm font-semibold"><FileUp className="h-4 w-4 text-blue-300" />Upload L3 / Event ZIP</div><p className="mt-1 text-xs text-slate-400">Select a ZIP containing L3 and Event CSV/TXT files; matching files are parsed automatically.</p></div>
             <button type="button" onClick={selectZip} disabled={uploading} className="inline-flex h-9 items-center gap-2 rounded bg-blue-600 px-4 text-sm font-medium hover:bg-blue-500 disabled:opacity-50">
@@ -210,25 +280,23 @@ function UploadHistoryLanding({ projectId, projectName, onOpenSessions, onBack }
 
         <section className="rounded-lg border border-slate-700 bg-slate-900 p-4">
           <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
-            <div className="flex items-center gap-2 text-sm font-semibold"><History className="h-4 w-4 text-blue-300" />Combined L3 / Event Upload History</div>
-            <div className="flex min-w-0 items-center gap-2">
-              <input value={manualSessionIds} onChange={(event) => setManualSessionIds(event.target.value)} placeholder="Add session IDs: 7099,7100" className="h-9 w-64 rounded border border-slate-700 bg-slate-950 px-3 text-xs text-white" />
-              <button type="button" onClick={addManualSessions} className="inline-flex h-9 items-center gap-1 rounded border border-blue-500/60 bg-blue-600 px-3 text-xs"><Plus className="h-3.5 w-3.5" />Open</button>
-            </div>
+            <div className="flex items-center gap-2 text-sm font-semibold"><History className="h-4 w-4 text-blue-300" />Upload History</div>
+            <span className="text-xs text-slate-500">Select Analysis to reopen saved results without uploading again.</span>
           </div>
           <div className="overflow-x-auto rounded border border-slate-800">
-            <table className="w-full min-w-[1050px] text-xs">
-              <thead className="bg-slate-800 text-left text-slate-400"><tr><th className="px-3 py-2">Project</th><th>Type</th><th>Uploaded File Name</th><th>Session ID</th><th>L3 Rows</th><th>Event Rows</th><th>Uploaded By</th><th>Uploaded On</th><th className="px-3">Action</th></tr></thead>
+            <table className="w-full min-w-[800px] text-xs">
+              <thead className="bg-slate-800 text-left text-slate-400"><tr><th className="px-3 py-2">Project</th><th className="px-3 py-2">File Name</th><th className="px-3 py-2">Session ID</th><th className="px-3 py-2">Uploaded By</th><th className="px-3 py-2">Uploaded On</th><th className="px-3 py-2">Action</th></tr></thead>
               <tbody>
-                {historyLoading ? <tr><td colSpan={9} className="p-8 text-center"><Loader2 className="mx-auto h-5 w-5 animate-spin" /></td></tr> : historyRows.length ? historyRows.map((row) => (
+                {historyLoading ? <tr><td colSpan={6} className="p-8 text-center"><Loader2 className="mx-auto h-5 w-5 animate-spin" /></td></tr> : historyRows.length ? historyRows.map((row) => (
                   <tr key={row.id || row.uploadHistoryId} className="border-t border-slate-800 text-slate-200">
                     <td className="px-3 py-2"><div>{row.projectName || (row.projectId ? `Project ${row.projectId}` : "Unassigned upload")}</div><div className="font-mono text-[10px] text-slate-500">{row.projectId || "-"}</div></td>
-                    <td><span className="rounded border border-blue-500/30 bg-blue-500/10 px-2 py-0.5 text-blue-300">{row.l3 && row.event ? "L3 + Event" : row.l3 ? "L3" : "Event"}</span></td>
-                    <td className="max-w-72 py-2"><div className="break-all font-medium text-white">{row.originalFileName || [row.l3FileName, row.eventFileName].filter(Boolean).join(", ") || "—"}</div>{row.l3 && row.event && <div className="mt-0.5 text-[10px] text-slate-500">L3: {row.l3FileName || "—"} · Event: {row.eventFileName || "—"}</div>}</td>
-                    <td className="font-mono">{row.sessionId}</td><td>{row.l3RowsImported ?? "—"}</td><td>{row.eventRowsImported ?? "—"}</td><td>{row.uploadedByName || row.uploadedBy || "—"}</td><td>{row.uploadedOn ? new Date(row.uploadedOn).toLocaleString() : "—"}</td>
-                    <td className="px-3"><button type="button" onClick={() => onOpenSessions([row.sessionId], row.projectId)} className="inline-flex items-center gap-1 rounded bg-blue-600 px-3 py-1.5 font-medium hover:bg-blue-500"><Search className="h-3.5 w-3.5" />Analysis</button></td>
+                    <td className="max-w-80 px-3 py-2"><div className="break-all font-medium text-white">{row.originalFileName || [row.l3FileName, row.eventFileName].filter(Boolean).join(", ") || "—"}</div></td>
+                    <td className="px-3 py-2 font-mono">{row.sessionId}</td>
+                    <td className="px-3 py-2">{row.uploadedByName || row.uploadedBy || "—"}</td>
+                    <td className="px-3 py-2">{row.uploadedOn ? new Date(row.uploadedOn).toLocaleString() : "—"}</td>
+                    <td className="px-3"><div className="flex items-center gap-2"><button type="button" onClick={() => onOpenSessions([row.sessionId], row.projectId)} disabled={deletingHistoryId === Number(row.id)} className="inline-flex items-center gap-1 rounded bg-blue-600 px-3 py-1.5 font-medium hover:bg-blue-500 disabled:opacity-50"><Search className="h-3.5 w-3.5" />Analysis</button><button type="button" onClick={() => deleteHistory(row)} disabled={deletingHistoryId !== null} className="inline-flex items-center gap-1 rounded border border-red-500/60 bg-red-500/10 px-3 py-1.5 font-medium text-red-300 hover:bg-red-500/20 disabled:opacity-50">{deletingHistoryId === Number(row.id) ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}Delete</button></div></td>
                   </tr>
-                )) : <tr><td colSpan={9} className="p-8 text-center text-slate-500">No L3/Event upload history was found.</td></tr>}
+                )) : <tr><td colSpan={6} className="p-8 text-center text-slate-500">No L3/Event upload history was found.</td></tr>}
               </tbody>
             </table>
           </div>
@@ -246,6 +314,7 @@ function BackendAnalyzer({ sessionIds, projectName, onBack }) {
   const [selectedCall, setSelectedCall] = useState(null);
   const [counts, setCounts] = useState({});
   const [timeline, setTimeline] = useState([]);
+  const [mapTimeline, setMapTimeline] = useState([]);
   const [summary, setSummary] = useState(normalizeSummary(null));
   const [backendAnalyzer, setBackendAnalyzer] = useState(null);
   const [l3Messages, setL3Messages] = useState([]);
@@ -258,15 +327,18 @@ function BackendAnalyzer({ sessionIds, projectName, onBack }) {
     setError("");
     Promise.all([
       l3EventApi.getTabCounts(scope),
+      l3EventApi.getMapRows(scope),
       l3EventApi.getExcelRows(scope),
       l3EventApi.getCallSummary(scope),
       l3EventApi.getAnalyzerSummary(scope),
       l3EventApi.getL3Messages(scope),
       l3EventApi.getEvents(scope),
-    ]).then(([countResponse, rowResponse, callResponse, analyzerResponse, l3Response, eventResponse]) => {
+    ]).then(([countResponse, mapResponse, rowResponse, callResponse, analyzerResponse, l3Response, eventResponse]) => {
       if (cancelled) return;
+      const normalizedMapTimeline = (mapResponse?.rows || rowResponse?.rows || []).map((row) => normalizeTimelineRow(row));
       const normalizedTimeline = (rowResponse?.rows || []).map((row) => normalizeTimelineRow(row));
       setCounts(countResponse || {});
+      setMapTimeline(normalizedMapTimeline);
       setTimeline(normalizedTimeline);
       setSummary(normalizeSummary(callResponse?.summary, rowResponse?.calls));
       setBackendAnalyzer(analyzerResponse?.analyzer || null);
@@ -296,8 +368,13 @@ function BackendAnalyzer({ sessionIds, projectName, onBack }) {
   );
   const protocolAnalysis = useMemo(() => buildProtocolAnalysis(protocolTimeline, []), [protocolTimeline]);
   const signalingRows = useMemo(() => buildUnifiedSignalingRows(timeline, enrichedSummary.calls, fullAnalysis), [enrichedSummary.calls, fullAnalysis, timeline]);
-  const rsrpByRowId = useMemo(() => buildRsrpByRowId(fullAnalysis), [fullAnalysis]);
-  const mapPoints = useMemo(() => buildMapPoints(signalingRows, rsrpByRowId), [rsrpByRowId, signalingRows]);
+  const mapFullAnalysis = useMemo(() => buildProtocolAnalysis(mapTimeline.length ? mapTimeline : timeline, []), [mapTimeline, timeline]);
+  const mapSignalingRows = useMemo(
+    () => buildUnifiedSignalingRows(mapTimeline.length ? mapTimeline : timeline, enrichedSummary.calls, mapFullAnalysis),
+    [enrichedSummary.calls, mapFullAnalysis, mapTimeline, timeline],
+  );
+  const rsrpByRowId = useMemo(() => buildRsrpByRowId(mapFullAnalysis), [mapFullAnalysis]);
+  const mapPoints = useMemo(() => buildMapPoints(mapSignalingRows, rsrpByRowId), [mapSignalingRows, rsrpByRowId]);
   const rawRows = activeView === "events" ? eventMessages : l3Messages;
   const countForTab = useCallback((tabId) => {
     if (tabId === "map") return mapPoints.length;

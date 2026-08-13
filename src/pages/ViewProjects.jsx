@@ -498,14 +498,14 @@ const ViewProjectsPage = () => {
                               </p>
                               <div className="flex items-center gap-2 mt-1 flex-wrap">
                                 <p className="text-xs text-slate-500">Project ID: {project.id}</p>
-                                {projectHasL3(project) && (
+                                {!project.is_local && Number(project.id) > 0 && (
                                   <button
                                     type="button"
                                     onClick={() => handleOpenL3Events(project)}
                                     className="inline-flex items-center gap-1 rounded border border-indigo-200 bg-indigo-50 px-1.5 py-0.5 text-[11px] font-semibold text-indigo-700 hover:bg-indigo-100"
-                                    title="Open backend L3/Event analyzer"
+                                    title={projectHasL3(project) ? "Open L3/Event upload history" : "Upload L3/Event data"}
                                   >
-                                    <Radio className="h-3 w-3" />L3
+                                    <Radio className="h-3 w-3" />{projectHasL3(project) ? "L3" : "Add L3"}
                                   </button>
                                 )}
                                 {(project.is_local || Number(project.id) < 0) && (
