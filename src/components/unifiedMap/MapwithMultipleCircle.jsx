@@ -1252,6 +1252,16 @@ const sortStackedLogsForTop = (logs = [], selectedMetric, overlapDrawOrder) => {
 const getLogDisplayId = (log, fallbackIndex) =>
   log?.id ?? log?.log_id ?? log?.network_log_id ?? log?.timestamp ?? `#${fallbackIndex + 1}`;
 
+const formatDbmValue = (value) => {
+  const number = Number.parseFloat(value);
+  return Number.isFinite(number) ? `${number.toFixed(1)} dBm` : "N/A";
+};
+
+const formatDeltaValue = (value) => {
+  const number = Number.parseFloat(value);
+  return Number.isFinite(number) ? `${number.toFixed(1)} dB` : "N/A";
+};
+
 const PrimaryLogInfoWindow = React.memo(({ log, onClose, resolveColor, selectedMetric }) => {
   if (!log) return null;
   const selectedMetricKey = String(selectedMetric || "").trim().toLowerCase();
@@ -1277,6 +1287,10 @@ const PrimaryLogInfoWindow = React.memo(({ log, onClose, resolveColor, selectedM
   const overlapLogs = Array.isArray(log.__overlapLogs) ? log.__overlapLogs : [];
   const hiddenOverlapCount = Math.max(0, overlapLogs.length - 1);
   const overlapPreview = overlapLogs.slice(0, 6);
+  const coverageViolationNeighbors = Array.isArray(log.coverageViolationNeighbors)
+    ? log.coverageViolationNeighbors
+    : [];
+  const coverageViolationPreview = coverageViolationNeighbors.slice(0, 6);
 
   return (
     <InfoWindow
@@ -1312,6 +1326,40 @@ const PrimaryLogInfoWindow = React.memo(({ log, onClose, resolveColor, selectedM
           {dlValue !== null && <div className="flex justify-between text-xs"><span className="text-gray-500">DL Throughput</span><span className="font-medium">{dlValue.toFixed(2)} Mbps</span></div>}
           {ulValue !== null && <div className="flex justify-between text-xs"><span className="text-gray-500">UL Throughput</span><span className="font-medium">{ulValue.toFixed(2)} Mbps</span></div>}
         </div>
+        {selectedMetricKey === "coverage_violation" && coverageViolationPreview.length > 0 && (
+          <div className="mt-2 rounded-md border border-amber-200 bg-amber-50 px-2 py-1.5">
+            <div className="mb-1 flex items-center justify-between text-[11px] font-semibold text-amber-800">
+              <span>Coverage violation source</span>
+              <span>{coverageViolationNeighbors.length.toLocaleString()} neighbor{coverageViolationNeighbors.length === 1 ? "" : "s"}</span>
+            </div>
+            <div className="max-h-32 overflow-y-auto space-y-1">
+              {coverageViolationPreview.map((neighbor, index) => {
+                const neighbourPci =
+                  neighbor?.neighbourPci ??
+                  neighbor?.neighborPci ??
+                  neighbor?.neighbour_pci ??
+                  neighbor?.neighbor_pci ??
+                  "N/A";
+                return (
+                  <div key={`${neighbourPci}-${index}`} className="rounded bg-white/75 px-1.5 py-1 text-[10px] text-slate-700">
+                    <div className="flex justify-between gap-2">
+                      <span className="font-semibold">Neighbor PCI {neighbourPci}</span>
+                      <span className="font-semibold text-amber-700">{formatDeltaValue(neighbor?.dominance)}</span>
+                    </div>
+                    <div className="mt-0.5">
+                      <span>Neighbor {formatDbmValue(neighbor?.neighbourRsrp ?? neighbor?.neighborRsrp)}</span>
+                    </div>
+                  </div>
+                );
+              })}
+              {coverageViolationNeighbors.length > coverageViolationPreview.length && (
+                <div className="text-[10px] text-amber-700">
+                  {coverageViolationNeighbors.length - coverageViolationPreview.length} more neighbors in range
+                </div>
+              )}
+            </div>
+          </div>
+        )}
         {hiddenOverlapCount > 0 && (
           <div className="mt-2 rounded-md border border-amber-200 bg-amber-50 px-2 py-1.5">
             <div className="mb-1 flex items-center justify-between text-[11px] font-semibold text-amber-800">
@@ -1329,17 +1377,17 @@ const PrimaryLogInfoWindow = React.memo(({ log, onClose, resolveColor, selectedM
                   selectedMetricKey === "cell_id"
                     ? resolveColor(itemCellId || "Unknown", "cell_id")
                     : resolveColor(value, selectedMetric);
-                const band = item.band || item.Band || "-";
+                const pciValue = getMetricValueFromLog(item, "pci");
+                const pciLabel = Number.isFinite(pciValue)
+                  ? Math.round(pciValue)
+                  : (item.pci ?? item.PCI ?? item.Pci ?? item.best_pci ?? "-");
+                const itemRsrp = Number(item?.rsrp ?? item?.RSRP);
                 return (
                   <div key={`${getLogDisplayId(item, index)}-${index}`} className="grid grid-cols-[10px_1fr_auto] items-center gap-1 text-[10px] text-slate-700">
                     <span className="h-2 w-2 rounded-full" style={{ backgroundColor: itemColor }} />
-                    <span className="truncate">Band {band}</span>
+                    <span className="truncate">PCI/BCCH {pciLabel}</span>
                     <span className="font-semibold">
-                      {selectedMetricKey === "cell_id"
-                        ? value || "N/A"
-                        : Number.isFinite(value)
-                          ? value.toFixed(1)
-                          : "N/A"}
+                      {Number.isFinite(itemRsrp) ? `${itemRsrp.toFixed(1)} dBm` : "RSRP N/A"}
                     </span>
                   </div>
                 );

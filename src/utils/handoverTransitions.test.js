@@ -138,6 +138,30 @@ test("does not connect serving cells across a long logging gap", () => {
   assert.equal(result.pciTransitions.length, 0);
 });
 
+test("does not create handovers across a sudden timestamp jump", () => {
+  const result = buildHandoverTransitions([
+    row(1, 101, 0, { technology: "LTE", band: "3" }),
+    row(2, 101, 1, { technology: "LTE", band: "3" }),
+    row(3, 205, 8, { technology: "NR", band: "n78" }),
+    row(4, 205, 9, { technology: "NR", band: "n78" }),
+  ]);
+
+  assert.equal(result.pciTransitions.length, 0);
+  assert.equal(result.bandTransitions.length, 0);
+  assert.equal(result.technologyTransitions.length, 0);
+});
+
+test("allows a handover when the source-to-target gap matches session cadence", () => {
+  const result = buildHandoverTransitions([
+    row(1, 101, 0),
+    row(2, 101, 3),
+    row(3, 205, 6),
+    row(4, 205, 9),
+  ]);
+
+  assert.equal(result.pciTransitions.length, 1);
+});
+
 test("detects an inter-frequency cell change even when PCI is reused", () => {
   const result = buildHandoverTransitions([
     row(1, 101, 0, { cell_id: "a", earfcn: "1300" }),

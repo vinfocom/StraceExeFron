@@ -922,6 +922,12 @@ function getInsightValue(insights = [], label) {
   return insights.find((item) => item.label === label)?.value || "";
 }
 
+function formatPdfCoordinate(value) {
+  if (value === null || value === undefined || String(value).trim() === "") return "N/A";
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric.toFixed(6) : "N/A";
+}
+
 function formatExcelDetailForPdf(row = {}) {
   const rawMessage = row.rawMessage || "-";
   if (!/payload\[\d+\]=/i.test(rawMessage)) return rawMessage;
@@ -939,9 +945,13 @@ function formatExcelDetailForPdf(row = {}) {
   return compact || "NR-RRC payload row";
 }
 
-function addExcelSignalingTable(layout, rows = []) {
-  const headers = ["Timestamp", "Interface", "Message", "Detail"];
-  const widths = [14, 14, 22, 46];
+function addExcelSignalingTable(layout, rows = [], { includeLocation = false } = {}) {
+  const headers = includeLocation
+    ? ["Timestamp", "Lat", "Lon", "Interface", "Message", "Detail"]
+    : ["Timestamp", "Interface", "Message", "Detail"];
+  const widths = includeLocation
+    ? [13, 9, 9, 12, 18, 31]
+    : [14, 14, 22, 46];
   const formatRow = (values) => values
     .map((value, index) => truncate(value, widths[index]).padEnd(widths[index], " "))
     .join("  ");
@@ -955,12 +965,21 @@ function addExcelSignalingTable(layout, rows = []) {
 
   addHeader();
   rows.forEach((row) => {
-    const values = [
-      row.timestampLabel || formatClock(row.timestamp),
-      row.interface || "Unknown",
-      row.message || "-",
-      formatExcelDetailForPdf(row),
-    ];
+    const values = includeLocation
+      ? [
+          row.timestampLabel || formatClock(row.timestamp),
+          formatPdfCoordinate(row.latitude),
+          formatPdfCoordinate(row.longitude),
+          row.interface || "Unknown",
+          row.message || "-",
+          formatExcelDetailForPdf(row),
+        ]
+      : [
+          row.timestampLabel || formatClock(row.timestamp),
+          row.interface || "Unknown",
+          row.message || "-",
+          formatExcelDetailForPdf(row),
+        ];
     const wrapped = values.map((value, index) => wrapFixedWidth(value, widths[index]));
     const lineCount = Math.max(...wrapped.map((lines) => lines.length));
     layout.ensureSpace((lineCount + 3) * 9);
@@ -981,6 +1000,7 @@ export function downloadExcelSignalingSummaryPdf({
   rows = [],
   calls = [],
   selectedCall = null,
+  includeLocation = false,
 }) {
   if (!rows.length) throw new Error("No sheet messages are available to export.");
 
@@ -1044,7 +1064,7 @@ export function downloadExcelSignalingSummaryPdf({
   layout.addLine("Sheet Messages", { font: FONT_BOLD, size: 13, spacing: 5 });
   layout.addWrapped("Payload rows show decoded PCI, EARFCN and band in Detail; other rows keep their captured detail.", { size: 9, spacing: 3 });
   layout.addSpacer(5);
-  addExcelSignalingTable(layout, rows);
+  addExcelSignalingTable(layout, rows, { includeLocation });
 
   const blob = buildPdfBlob(layout.pages);
   const fileStem = sanitizeFileSegment(sourceFileName.replace(/\.[^.]+$/, ""));

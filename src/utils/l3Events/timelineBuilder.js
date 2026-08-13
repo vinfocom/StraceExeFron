@@ -8,6 +8,7 @@ import { extractEmbeddedTimestamp, isStaleEvent } from "./timestampUtils.js";
 const TIME_ONLY_RE = /^(\d{1,2}):(\d{2}):(\d{2})(?:\.(\d{1,3}))?$/;
 
 function toFiniteCoordinate(value, min, max) {
+  if (value === null || value === undefined || String(value).trim() === "") return null;
   const numeric = Number(value);
   if (!Number.isFinite(numeric) || numeric < min || numeric > max) return null;
   return numeric;

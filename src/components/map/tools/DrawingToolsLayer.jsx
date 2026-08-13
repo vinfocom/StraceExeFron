@@ -9,6 +9,780 @@ function toLatLng(item) {
   return new window.google.maps.LatLng(lat, lng);
 }
 
+const MAX_ROUTE_BUFFER_POINTS = 220;
+const MAX_ROUTE_BUFFER_CELLS = 90000;
+const MAX_ROUTE_EXTERIOR_CELLS = 300000;
+
+function simplifyClosedGridPath(points, maxPoints, initialTolerance = 0.5) {
+  if (!Array.isArray(points) || points.length <= 3) return points || [];
+
+  const distanceToSegment = (point, start, end) => {
+    const dx = end.x - start.x;
+    const dy = end.y - start.y;
+    const lengthSquared = dx * dx + dy * dy;
+    if (lengthSquared === 0) return Math.hypot(point.x - start.x, point.y - start.y);
+    const ratio = Math.max(
+      0,
+      Math.min(1, ((point.x - start.x) * dx + (point.y - start.y) * dy) / lengthSquared),
+    );
+    return Math.hypot(
+      point.x - (start.x + ratio * dx),
+      point.y - (start.y + ratio * dy),
+    );
+  };
+
+  const simplifyOpen = (line, tolerance) => {
+    if (line.length <= 2) return line;
+    const keep = new Set([0, line.length - 1]);
+    const stack = [[0, line.length - 1]];
+    while (stack.length) {
+      const [startIndex, endIndex] = stack.pop();
+      let farthestIndex = -1;
+      let farthestDistance = tolerance;
+      for (let index = startIndex + 1; index < endIndex; index += 1) {
+        const distance = distanceToSegment(
+          line[index],
+          line[startIndex],
+          line[endIndex],
+        );
+        if (distance > farthestDistance) {
+          farthestDistance = distance;
+          farthestIndex = index;
+        }
+      }
+      if (farthestIndex !== -1) {
+        keep.add(farthestIndex);
+        stack.push([startIndex, farthestIndex], [farthestIndex, endIndex]);
+      }
+    }
+    return [...keep].sort((a, b) => a - b).map((index) => line[index]);
+  };
+
+  let splitIndex = 1;
+  let farthestDistance = -1;
+  for (let index = 1; index < points.length; index += 1) {
+    const distance =
+      (points[index].x - points[0].x) ** 2 +
+      (points[index].y - points[0].y) ** 2;
+    if (distance > farthestDistance) {
+      farthestDistance = distance;
+      splitIndex = index;
+    }
+  }
+
+  const simplifyAtTolerance = (tolerance) => {
+    const firstHalf = simplifyOpen(points.slice(0, splitIndex + 1), tolerance);
+    const secondHalf = simplifyOpen(
+      [...points.slice(splitIndex), points[0]],
+      tolerance,
+    );
+    return [...firstHalf.slice(0, -1), ...secondHalf.slice(0, -1)];
+  };
+
+  let tolerance = initialTolerance;
+  let simplified = simplifyAtTolerance(tolerance);
+  while (simplified.length > maxPoints) {
+    tolerance *= 1.5;
+    simplified = simplifyAtTolerance(tolerance);
+  }
+  return simplified.length >= 3 ? simplified : points.slice(0, 3);
+}
+
+function getLogRouteOrder(log, fallbackIndex) {
+  const raw =
+    log?.timestamp ??
+    log?.Timestamp ??
+    log?.time_stamp ??
+    log?.timeStamp ??
+    log?.log_time ??
+    log?.logTime ??
+    log?.created_at ??
+    log?.createdAt ??
+    log?.id ??
+    log?.Id ??
+    log?.log_id ??
+    log?.LogId ??
+    fallbackIndex;
+
+  if (raw instanceof Date) {
+    const time = raw.getTime();
+    return Number.isFinite(time) ? time : fallbackIndex;
+  }
+
+  if (typeof raw === "number") {
+    return Number.isFinite(raw) ? raw : fallbackIndex;
+  }
+
+  const numeric = Number(raw);
+  if (Number.isFinite(numeric)) return numeric;
+
+  const parsed = Date.parse(raw);
+  return Number.isFinite(parsed) ? parsed : fallbackIndex;
+}
+
+function sortLogsByRouteOrder(logs) {
+  return (logs || [])
+    .map((log, index) => ({ log, index, order: getLogRouteOrder(log, index) }))
+    .sort((a, b) => (a.order === b.order ? a.index - b.index : a.order - b.order))
+    .map((item) => item.log);
+}
+
+function getRouteLogPoints(logs, offsetMeters = 50, maxPoints = MAX_ROUTE_BUFFER_POINTS) {
+  const gm = window.google.maps;
+  if (!gm?.geometry?.spherical || !Array.isArray(logs)) return [];
+
+  const minPointSpacingMeters = Math.max(1, Math.min(20, Number(offsetMeters) / 4 || 10));
+  const points = [];
+  sortLogsByRouteOrder(logs).forEach((log) => {
+    const point = toLatLng(log);
+    if (!point) return;
+    const previous = points[points.length - 1];
+    if (
+      previous &&
+      gm.geometry.spherical.computeDistanceBetween(previous, point) < minPointSpacingMeters
+    ) {
+      return;
+    }
+    points.push(point);
+  });
+
+  return simplifyRoutePoints(points, maxPoints);
+}
+
+function simplifyRoutePoints(points, maxPoints, toleranceMeters = 12) {
+  if (!Array.isArray(points) || points.length <= maxPoints) return points;
+
+  const gm = window.google.maps;
+  if (!gm?.geometry?.spherical) {
+    const keep = new Set([0, points.length - 1]);
+    const step = (points.length - 1) / (maxPoints - 1);
+    for (let i = 1; i < maxPoints - 1; i++) {
+      keep.add(Math.round(i * step));
+    }
+    return [...keep]
+      .sort((a, b) => a - b)
+      .map((index) => points[index])
+      .filter(Boolean);
+  }
+
+  const preservedIndexes = new Set([0, points.length - 1]);
+  const stack = [[0, points.length - 1]];
+  const distanceToSegment = (point, start, end) => {
+    const segmentLength = gm.geometry.spherical.computeDistanceBetween(start, end);
+    if (!Number.isFinite(segmentLength) || segmentLength < 1) {
+      return gm.geometry.spherical.computeDistanceBetween(point, start);
+    }
+
+    const startToPoint = gm.geometry.spherical.computeDistanceBetween(start, point);
+    const headingSegment = gm.geometry.spherical.computeHeading(start, end);
+    const headingPoint = gm.geometry.spherical.computeHeading(start, point);
+    const angle = ((headingPoint - headingSegment) * Math.PI) / 180;
+    const projected = Math.max(0, Math.min(segmentLength, startToPoint * Math.cos(angle)));
+    const crossTrack = Math.abs(startToPoint * Math.sin(angle));
+
+    if (projected <= 0) return gm.geometry.spherical.computeDistanceBetween(point, start);
+    if (projected >= segmentLength) return gm.geometry.spherical.computeDistanceBetween(point, end);
+    return crossTrack;
+  };
+
+  while (stack.length && preservedIndexes.size < maxPoints) {
+    const [startIndex, endIndex] = stack.pop();
+    let maxDistance = 0;
+    let maxIndex = -1;
+
+    for (let i = startIndex + 1; i < endIndex; i++) {
+      const distance = distanceToSegment(points[i], points[startIndex], points[endIndex]);
+      if (distance > maxDistance) {
+        maxDistance = distance;
+        maxIndex = i;
+      }
+    }
+
+    if (maxIndex > -1 && maxDistance >= toleranceMeters) {
+      preservedIndexes.add(maxIndex);
+      stack.push([startIndex, maxIndex], [maxIndex, endIndex]);
+    }
+  }
+
+  if (preservedIndexes.size < maxPoints) {
+    const step = (points.length - 1) / (maxPoints - 1);
+    for (let i = 1; i < maxPoints - 1 && preservedIndexes.size < maxPoints; i++) {
+      preservedIndexes.add(Math.round(i * step));
+    }
+  }
+
+  return [...preservedIndexes]
+    .sort((a, b) => a - b)
+    .map((index) => points[index])
+    .filter(Boolean);
+}
+
+function createRouteOffsetPolygonPath(routePoints, offsetMeters) {
+  const gm = window.google.maps;
+  const offset = Math.max(1, Number(offsetMeters) || 1);
+  if (!gm?.geometry?.spherical || !Array.isArray(routePoints) || routePoints.length < 2) {
+    return [];
+  }
+
+  const { computeHeading, computeOffset, computeDistanceBetween } = gm.geometry.spherical;
+  const leftPath = [];
+  const rightPath = [];
+
+  routePoints.forEach((point, index) => {
+    let from = routePoints[Math.max(0, index - 1)];
+    let to = routePoints[Math.min(routePoints.length - 1, index + 1)];
+
+    if (index === 0) {
+      from = point;
+      to = routePoints[1];
+    } else if (index === routePoints.length - 1) {
+      from = routePoints[index - 1];
+      to = point;
+    }
+
+    if (!from || !to || computeDistanceBetween(from, to) < 0.25) return;
+
+    const heading = computeHeading(from, to);
+    leftPath.push(computeOffset(point, offset, heading - 90));
+    rightPath.push(computeOffset(point, offset, heading + 90));
+  });
+
+  if (leftPath.length < 2 || rightPath.length < 2) return [];
+  return [...leftPath, ...rightPath.reverse()];
+}
+
+function getHeadingDelta(a, b) {
+  const diff = Math.abs(a - b) % 360;
+  return diff > 180 ? 360 - diff : diff;
+}
+
+function splitRouteIntoLegs(routePoints, offsetMeters) {
+  const gm = window.google.maps;
+  if (!gm?.geometry?.spherical || !Array.isArray(routePoints) || routePoints.length < 4) {
+    return [routePoints];
+  }
+
+  const { computeDistanceBetween, computeHeading } = gm.geometry.spherical;
+  const retraceDistanceMeters = Math.max(30, Math.min(120, Number(offsetMeters) * 2 || 60));
+  const minRouteDistanceBeforeSplit = Math.max(120, Number(offsetMeters) * 6 || 300);
+  const minPointsPerLeg = 3;
+  const legs = [];
+  let legStart = 0;
+  let distanceSinceLegStart = 0;
+  let previousHeading = null;
+
+  for (let i = 1; i < routePoints.length; i++) {
+    const prev = routePoints[i - 1];
+    const current = routePoints[i];
+    const stepDistance = computeDistanceBetween(prev, current);
+    if (!Number.isFinite(stepDistance) || stepDistance < 0.25) continue;
+
+    distanceSinceLegStart += stepDistance;
+    const currentHeading = computeHeading(prev, current);
+    let shouldSplit = false;
+
+    if (
+      previousHeading !== null &&
+      i - legStart >= minPointsPerLeg &&
+      routePoints.length - i >= minPointsPerLeg &&
+      distanceSinceLegStart >= minRouteDistanceBeforeSplit &&
+      getHeadingDelta(previousHeading, currentHeading) >= 150
+    ) {
+      shouldSplit = true;
+    }
+
+    if (!shouldSplit && i - legStart >= minPointsPerLeg && routePoints.length - i >= minPointsPerLeg) {
+      for (let j = legStart; j < i - minPointsPerLeg; j++) {
+        const routeDistanceGap = i - j;
+        if (routeDistanceGap < minPointsPerLeg * 2) continue;
+        const retraceDistance = computeDistanceBetween(current, routePoints[j]);
+        if (
+          Number.isFinite(retraceDistance) &&
+          retraceDistance <= retraceDistanceMeters &&
+          distanceSinceLegStart >= minRouteDistanceBeforeSplit
+        ) {
+          shouldSplit = true;
+          break;
+        }
+      }
+    }
+
+    if (shouldSplit) {
+      const leg = routePoints.slice(legStart, i);
+      if (leg.length >= minPointsPerLeg) legs.push(leg);
+      legStart = i - 1;
+      distanceSinceLegStart = 0;
+      previousHeading = null;
+      continue;
+    }
+
+    previousHeading = currentHeading;
+  }
+
+  const lastLeg = routePoints.slice(legStart);
+  if (lastLeg.length >= 2) legs.push(lastLeg);
+  return legs.length ? legs : [routePoints];
+}
+
+function getRouteLegHeading(points) {
+  const gm = window.google.maps;
+  if (!gm?.geometry?.spherical || !Array.isArray(points) || points.length < 2) return null;
+  for (let i = 1; i < points.length; i++) {
+    if (gm.geometry.spherical.computeDistanceBetween(points[0], points[i]) > 1) {
+      return gm.geometry.spherical.computeHeading(points[0], points[i]);
+    }
+  }
+  return null;
+}
+
+function getRouteLength(points) {
+  const gm = window.google.maps;
+  if (!gm?.geometry?.spherical || !Array.isArray(points) || points.length < 2) return 0;
+  let length = 0;
+  for (let i = 1; i < points.length; i++) {
+    length += gm.geometry.spherical.computeDistanceBetween(points[i - 1], points[i]);
+  }
+  return length;
+}
+
+function getLocalRouteHeading(points, index) {
+  const gm = window.google.maps;
+  if (!gm?.geometry?.spherical || !Array.isArray(points) || points.length < 2) return null;
+
+  const point = points[index];
+  let from = points[Math.max(0, index - 1)];
+  let to = points[Math.min(points.length - 1, index + 1)];
+  if (index === 0) {
+    from = point;
+    to = points[1];
+  } else if (index === points.length - 1) {
+    from = points[index - 1];
+    to = point;
+  }
+  if (!from || !to || gm.geometry.spherical.computeDistanceBetween(from, to) < 0.25) {
+    return null;
+  }
+  return gm.geometry.spherical.computeHeading(from, to);
+}
+
+function projectLateralFromReference(point, referencePoint, referenceHeading) {
+  const gm = window.google.maps;
+  const distance = gm.geometry.spherical.computeDistanceBetween(referencePoint, point);
+  const heading = gm.geometry.spherical.computeHeading(referencePoint, point);
+  const delta = ((heading - referenceHeading) * Math.PI) / 180;
+  return distance * Math.sin(delta);
+}
+
+function createRouteEnvelopePolygonPath(routeLegs, offsetMeters) {
+  const gm = window.google.maps;
+  const offset = Math.max(1, Number(offsetMeters) || 1);
+  const legs = (routeLegs || []).filter((leg) => Array.isArray(leg) && leg.length >= 2);
+  if (!gm?.geometry?.spherical || !legs.length) return [];
+
+  const { computeHeading, computeOffset, computeDistanceBetween } = gm.geometry.spherical;
+  const reference = legs.reduce(
+    (best, leg) => (getRouteLength(leg) > getRouteLength(best) ? leg : best),
+    legs[0],
+  );
+  const referenceHeading = getRouteLegHeading(reference);
+  if (referenceHeading === null) return [];
+
+  const alignedLegs = legs.map((leg) => {
+    const legHeading = getRouteLegHeading(leg);
+    if (legHeading !== null && getHeadingDelta(referenceHeading, legHeading) > 90) {
+      return [...leg].reverse();
+    }
+    return leg;
+  });
+
+  const leftSide = [];
+  const rightSide = [];
+  const searchRadiusMeters = Math.max(40, Math.min(250, offset * 5));
+
+  reference.forEach((referencePoint, referenceIndex) => {
+    const localHeading = getLocalRouteHeading(reference, referenceIndex);
+    if (localHeading === null) return;
+
+    let minCandidate = null;
+    let maxCandidate = null;
+
+    alignedLegs.forEach((leg) => {
+      let nearestIndex = -1;
+      let nearestDistance = Infinity;
+      leg.forEach((point, index) => {
+        const distance = computeDistanceBetween(referencePoint, point);
+        if (distance < nearestDistance) {
+          nearestDistance = distance;
+          nearestIndex = index;
+        }
+      });
+
+      if (nearestIndex < 0 || nearestDistance > searchRadiusMeters) return;
+      const routePoint = leg[nearestIndex];
+      const legHeading = getLocalRouteHeading(leg, nearestIndex) ?? localHeading;
+      const normalizedHeading =
+        getHeadingDelta(legHeading, localHeading) > 90 ? legHeading + 180 : legHeading;
+
+      [normalizedHeading - 90, normalizedHeading + 90].forEach((sideHeading) => {
+        const offsetPoint = computeOffset(routePoint, offset, sideHeading);
+        const lateral = projectLateralFromReference(offsetPoint, referencePoint, localHeading);
+        const candidate = { point: offsetPoint, lateral };
+        if (!minCandidate || lateral < minCandidate.lateral) minCandidate = candidate;
+        if (!maxCandidate || lateral > maxCandidate.lateral) maxCandidate = candidate;
+      });
+    });
+
+    if (maxCandidate?.point && minCandidate?.point) {
+      leftSide.push(maxCandidate.point);
+      rightSide.push(minCandidate.point);
+    }
+  });
+
+  if (leftSide.length < 2 || rightSide.length < 2) return [];
+
+  return [...leftSide, ...rightSide.reverse()];
+}
+
+// Builds a sparse, bounded corridor around all selected route samples. Repeated
+// drives add to the same cells. Point connections are based only on geographic
+// proximity; timestamps and session ordering are deliberately ignored.
+function createRasterRouteBufferPath(logs, offsetMeters) {
+  const gm = window.google.maps;
+  const offset = Math.max(1, Number(offsetMeters) || 1);
+  if (!gm?.geometry?.spherical || !Array.isArray(logs) || logs.length < 2) return [];
+
+  const allPoints = logs.map(toLatLng).filter(Boolean);
+  if (allPoints.length < 2) return [];
+
+  const originLat = allPoints[0].lat();
+  const originLng = allPoints[0].lng();
+  const metersPerLat = 111320;
+  const metersPerLng = Math.max(
+    1000,
+    metersPerLat * Math.cos((originLat * Math.PI) / 180),
+  );
+  const cellSize = Math.max(3, Math.min(18, offset / 4));
+  const radiusCells = Math.ceil(offset / cellSize);
+  const maxLinkMeters = Math.max(80, Math.min(300, offset * 4));
+  const maxLinkCells = maxLinkMeters / cellSize;
+  const occupied = new Set();
+  const centerlineCells = new Set();
+  const spatialPoints = new Map();
+  let bufferTooLarge = false;
+  const keyOf = (x, y) => `${x},${y}`;
+  const toGridPoint = (point) => ({
+    x: ((point.lng() - originLng) * metersPerLng) / cellSize,
+    y: ((point.lat() - originLat) * metersPerLat) / cellSize,
+  });
+
+  const markDisc = ({ x: pointX, y: pointY }) => {
+    if (bufferTooLarge) return;
+    const baseX = Math.floor(pointX);
+    const baseY = Math.floor(pointY);
+    for (let y = baseY - radiusCells; y <= baseY + radiusCells; y += 1) {
+      for (let x = baseX - radiusCells; x <= baseX + radiusCells; x += 1) {
+        const dx = x + 0.5 - pointX;
+        const dy = y + 0.5 - pointY;
+        if (dx * dx + dy * dy <= radiusCells * radiusCells) {
+          occupied.add(keyOf(x, y));
+          if (occupied.size > MAX_ROUTE_BUFFER_CELLS) {
+            bufferTooLarge = true;
+            return;
+          }
+        }
+      }
+    }
+  };
+  const addSpatialPoint = ({ x, y }) => {
+    const cellX = Math.floor(x);
+    const cellY = Math.floor(y);
+    spatialPoints.set(keyOf(cellX, cellY), {
+      x: cellX + 0.5,
+      y: cellY + 0.5,
+      cellX,
+      cellY,
+    });
+  };
+  const markCenterline = ({ x, y }) => {
+    centerlineCells.add(keyOf(Math.floor(x), Math.floor(y)));
+  };
+
+  allPoints.forEach((point) => addSpatialPoint(toGridPoint(point)));
+  if (spatialPoints.size > MAX_ROUTE_BUFFER_CELLS) return [];
+
+  const points = [...spatialPoints.values()];
+  points.forEach((point, index) => {
+    point.index = index;
+  });
+  const parents = points.map((_, index) => index);
+  const findRoot = (index) => {
+    let root = index;
+    while (parents[root] !== root) root = parents[root];
+    while (parents[index] !== index) {
+      const next = parents[index];
+      parents[index] = root;
+      index = next;
+    }
+    return root;
+  };
+  const unionPoints = (a, b) => {
+    const rootA = findRoot(a.index);
+    const rootB = findRoot(b.index);
+    if (rootA !== rootB) parents[rootB] = rootA;
+  };
+  const bucketSize = Math.max(1, Math.ceil(maxLinkCells));
+  const buckets = new Map();
+  points.forEach((point) => {
+    const bucketKey = keyOf(
+      Math.floor(point.x / bucketSize),
+      Math.floor(point.y / bucketSize),
+    );
+    const bucket = buckets.get(bucketKey) || [];
+    bucket.push(point);
+    buckets.set(bucketKey, bucket);
+  });
+
+  const markConnection = (start, end) => {
+    unionPoints(start, end);
+    const dx = end.x - start.x;
+    const dy = end.y - start.y;
+    const steps = Math.max(1, Math.ceil(Math.hypot(dx, dy)));
+    for (let step = 0; step <= steps; step += 1) {
+      const ratio = step / steps;
+      markCenterline({ x: start.x + dx * ratio, y: start.y + dy * ratio });
+    }
+  };
+
+  points.forEach((point) => {
+    markCenterline(point);
+    const bucketX = Math.floor(point.x / bucketSize);
+    const bucketY = Math.floor(point.y / bucketSize);
+    let nearest = null;
+    let secondNearest = null;
+
+    for (let y = bucketY - 1; y <= bucketY + 1; y += 1) {
+      for (let x = bucketX - 1; x <= bucketX + 1; x += 1) {
+        (buckets.get(keyOf(x, y)) || []).forEach((candidate) => {
+          if (candidate === point) return;
+          const distance = Math.hypot(candidate.x - point.x, candidate.y - point.y);
+          if (distance > maxLinkCells) return;
+          const match = { candidate, distance };
+          if (!nearest || distance < nearest.distance) {
+            secondNearest = nearest;
+            nearest = match;
+          } else if (!secondNearest || distance < secondNearest.distance) {
+            secondNearest = match;
+          }
+        });
+      }
+    }
+
+    if (nearest) markConnection(point, nearest.candidate);
+    if (secondNearest) markConnection(point, secondNearest.candidate);
+  });
+
+  const buildComponents = () => {
+    const components = new Map();
+    points.forEach((point) => {
+      const root = findRoot(point.index);
+      let component = components.get(root);
+      if (!component) {
+        component = {
+          points: [],
+          minX: point.x,
+          maxX: point.x,
+          minY: point.y,
+          maxY: point.y,
+        };
+        components.set(root, component);
+      }
+      component.points.push(point);
+      component.minX = Math.min(component.minX, point.x);
+      component.maxX = Math.max(component.maxX, point.x);
+      component.minY = Math.min(component.minY, point.y);
+      component.maxY = Math.max(component.maxY, point.y);
+    });
+    return [...components.values()];
+  };
+
+  const boundsDistanceSquared = (a, b) => {
+    const dx = Math.max(0, a.minX - b.maxX, b.minX - a.maxX);
+    const dy = Math.max(0, a.minY - b.maxY, b.minY - a.maxY);
+    return dx * dx + dy * dy;
+  };
+
+  // A logging gap creates separate spatial clusters. Join the two closest
+  // clusters repeatedly so every log selected by the rectangle contributes to
+  // one continuous route without consulting time or session order.
+  let components = buildComponents();
+  let componentGuard = 0;
+  while (components.length > 1 && componentGuard < points.length) {
+    componentGuard += 1;
+    let closestComponents = null;
+    let closestBoundsDistance = Infinity;
+    for (let a = 0; a < components.length - 1; a += 1) {
+      for (let b = a + 1; b < components.length; b += 1) {
+        const distance = boundsDistanceSquared(components[a], components[b]);
+        if (distance < closestBoundsDistance) {
+          closestBoundsDistance = distance;
+          closestComponents = [components[a], components[b]];
+        }
+      }
+    }
+
+    if (!closestComponents) break;
+    let closestPoints = null;
+    let closestPointDistance = Infinity;
+    closestComponents[0].points.forEach((a) => {
+      closestComponents[1].points.forEach((b) => {
+        const distance = (a.x - b.x) ** 2 + (a.y - b.y) ** 2;
+        if (distance < closestPointDistance) {
+          closestPointDistance = distance;
+          closestPoints = [a, b];
+        }
+      });
+    });
+
+    if (!closestPoints) break;
+    markConnection(closestPoints[0], closestPoints[1]);
+    components = buildComponents();
+  }
+
+  if (centerlineCells.size > MAX_ROUTE_BUFFER_CELLS) return [];
+  centerlineCells.forEach((key) => {
+    const [x, y] = key.split(",").map(Number);
+    markDisc({ x: x + 0.5, y: y + 0.5 });
+  });
+  if (bufferTooLarge) return [];
+
+  let minOccupiedX = Infinity;
+  let maxOccupiedX = -Infinity;
+  let minOccupiedY = Infinity;
+  let maxOccupiedY = -Infinity;
+  occupied.forEach((key) => {
+    const [x, y] = key.split(",").map(Number);
+    minOccupiedX = Math.min(minOccupiedX, x);
+    maxOccupiedX = Math.max(maxOccupiedX, x);
+    minOccupiedY = Math.min(minOccupiedY, y);
+    maxOccupiedY = Math.max(maxOccupiedY, y);
+  });
+
+  const floodMinX = minOccupiedX - 1;
+  const floodMaxX = maxOccupiedX + 1;
+  const floodMinY = minOccupiedY - 1;
+  const floodMaxY = maxOccupiedY + 1;
+  const floodCellCount =
+    (floodMaxX - floodMinX + 1) * (floodMaxY - floodMinY + 1);
+  let exterior = null;
+  if (floodCellCount <= MAX_ROUTE_EXTERIOR_CELLS) {
+    exterior = new Set();
+    const queue = [[floodMinX, floodMinY]];
+    exterior.add(keyOf(floodMinX, floodMinY));
+    for (let queueIndex = 0; queueIndex < queue.length; queueIndex += 1) {
+      const [x, y] = queue[queueIndex];
+      [[x + 1, y], [x - 1, y], [x, y + 1], [x, y - 1]].forEach(
+        ([nextX, nextY]) => {
+          if (
+            nextX < floodMinX ||
+            nextX > floodMaxX ||
+            nextY < floodMinY ||
+            nextY > floodMaxY
+          ) {
+            return;
+          }
+          const nextKey = keyOf(nextX, nextY);
+          if (occupied.has(nextKey) || exterior.has(nextKey)) return;
+          exterior.add(nextKey);
+          queue.push([nextX, nextY]);
+        },
+      );
+    }
+  }
+
+  const outgoing = new Map();
+  const addEdge = (startX, startY, endX, endY, direction) => {
+    const startKey = keyOf(startX, startY);
+    const edges = outgoing.get(startKey) || [];
+    edges.push({ x: endX, y: endY, direction });
+    outgoing.set(startKey, edges);
+  };
+  const isOutside = (x, y) => {
+    const key = keyOf(x, y);
+    return !occupied.has(key) && (!exterior || exterior.has(key));
+  };
+
+  occupied.forEach((key) => {
+    const [x, y] = key.split(",").map(Number);
+    if (isOutside(x, y - 1)) addEdge(x, y, x + 1, y, 0);
+    if (isOutside(x + 1, y)) addEdge(x + 1, y, x + 1, y + 1, 1);
+    if (isOutside(x, y + 1)) addEdge(x + 1, y + 1, x, y + 1, 2);
+    if (isOutside(x - 1, y)) addEdge(x, y + 1, x, y, 3);
+  });
+
+  const loops = [];
+  while (outgoing.size) {
+    const [startKey] = outgoing.keys();
+    const [startX, startY] = startKey.split(",").map(Number);
+    const loop = [{ x: startX, y: startY }];
+    let currentKey = startKey;
+    let previousDirection = null;
+    let guard = 0;
+    let closed = false;
+
+    while (guard < MAX_ROUTE_BUFFER_CELLS * 4) {
+      guard += 1;
+      const edges = outgoing.get(currentKey);
+      if (!edges?.length) break;
+      let edgeIndex = edges.length - 1;
+      if (previousDirection !== null && edges.length > 1) {
+        const turnPriority = [0, 1, 3, 2];
+        edgeIndex = edges.reduce((bestIndex, edge, index) => {
+          const bestTurn =
+            (edges[bestIndex].direction - previousDirection + 4) % 4;
+          const nextTurn = (edge.direction - previousDirection + 4) % 4;
+          return turnPriority.indexOf(nextTurn) < turnPriority.indexOf(bestTurn)
+            ? index
+            : bestIndex;
+        }, 0);
+      }
+      const [next] = edges.splice(edgeIndex, 1);
+      if (!edges.length) outgoing.delete(currentKey);
+      previousDirection = next.direction;
+      if (next.x === startX && next.y === startY) {
+        closed = true;
+        break;
+      }
+      loop.push(next);
+      currentKey = keyOf(next.x, next.y);
+    }
+    if (closed && loop.length >= 4) loops.push(loop);
+  }
+
+  const signedArea = (loop) =>
+    loop.reduce((area, point, index) => {
+      const next = loop[(index + 1) % loop.length];
+      return area + point.x * next.y - next.x * point.y;
+    }, 0) / 2;
+  const boundary = loops.sort(
+    (a, b) => Math.abs(signedArea(b)) - Math.abs(signedArea(a)),
+  )[0];
+  if (!boundary?.length) return [];
+
+  const simplifiedBoundary = simplifyClosedGridPath(
+    boundary,
+    MAX_ROUTE_BUFFER_POINTS,
+    Math.max(0.35, 2 / cellSize),
+  );
+  const path = simplifiedBoundary.map(
+    ({ x, y }) =>
+      new gm.LatLng(
+        originLat + (y * cellSize) / metersPerLat,
+        originLng + (x * cellSize) / metersPerLng,
+      ),
+  );
+  return path;
+}
+
 function normalizeMetricKey(m) {
   if (!m) return "rsrp";
   const s = String(m).toLowerCase();
@@ -394,10 +1168,12 @@ function DrawingToolsLayerComponent({
   colorizeCells = true,
   polygonOpacity = 0.35,
   polygonFillOpacity = null,
+  logPolygonOffsetMeters = 50,
   onUIChange,
 }) {
   const [activeDraft, setActiveDraft] = useState(null);
   const activeDrawingRef = useRef(null);
+  const logsRef = useRef(logs);
   const shapesRef = useRef([]);
   const collectedDrawingRef = useRef([]);
   const lastClearSignalRef = useRef(clearSignal);
@@ -415,6 +1191,9 @@ function DrawingToolsLayerComponent({
     callbacksRef.current = { onSummary, onDrawingsChange, onUIChange };
   }, [onSummary, onDrawingsChange, onUIChange]);
   useEffect(() => {
+    logsRef.current = logs;
+  }, [logs]);
+  useEffect(() => {
     shapeModeRef.current = shapeMode;
   }, [shapeMode]);
 
@@ -426,7 +1205,7 @@ function DrawingToolsLayerComponent({
       shapeObj.gridOverlays = [];
     }
 
-    const allLogs = logs || [];
+    const allLogs = shapeObj.analysisLogs || logs || [];
     const geometry = serializeOverlay(type, overlay);
     let areaInMeters = 0;
     let lengthInMeters = 0;
@@ -457,7 +1236,7 @@ function DrawingToolsLayerComponent({
     const uniqueSessionsFromLogs = Array.from(uniqueSessionsMap.values());
 
     let gridInfo = null;
-    if (pixelateRect && type !== "polyline") {
+    if (pixelateRect && type !== "polyline" && !shapeObj.suppressGridAnalysis) {
       const gridResult = pixelateShape(type, overlay, allLogs, selectedMetric, thresholds, cellSizeMeters, map, shapeObj.gridOverlays, colorizeCells);
       gridInfo = { cells: gridResult.cellsDrawn, cellsWithLogs: gridResult.cellsWithLogs, cellSizeMeters, totalGridArea: (cellSizeMeters ** 2) * gridResult.cellsWithLogs, gridRows: gridResult.gridRows, gridCols: gridResult.gridCols, cellData: gridResult.cellData };
     }
@@ -512,7 +1291,7 @@ function DrawingToolsLayerComponent({
     setActiveDraft(null);
   }, []);
 
-  const registerCompletedShape = useCallback((type, overlay) => {
+  const registerCompletedShape = useCallback((type, overlay, options = {}) => {
     if (!overlay) return;
 
     const shapeObj = {
@@ -521,14 +1300,24 @@ function DrawingToolsLayerComponent({
       overlay,
       gridOverlays: [],
       vertexMarkers: [],
+      analysisLogs: options.analysisLogs,
+      suppressVertexMarkers: options.suppressVertexMarkers === true,
+      suppressGridAnalysis: options.suppressGridAnalysis === true,
       createdAt: new Date().toISOString(),
     };
     shapesRef.current.push(shapeObj);
     const isMeasurementTool = type === "polyline";
     const entry = reAnalyzeShapeRef.current?.(shapeObj);
     const listeners = [];
-    const update = () => reAnalyzeShapeRef.current?.(shapeObj);
+    const update = () => {
+      window.clearTimeout(shapeObj.analysisTimer);
+      shapeObj.analysisTimer = window.setTimeout(
+        () => reAnalyzeShapeRef.current?.(shapeObj),
+        180,
+      );
+    };
     const rebuildVertexMarkers = () => {
+      if (shapeObj.suppressVertexMarkers) return;
       if (type !== "polygon" && type !== "polyline") return;
 
       const path = overlay.getPath?.();
@@ -710,7 +1499,131 @@ function DrawingToolsLayerComponent({
     finishActiveDrawingRef.current = finishPathShape;
     cancelActiveDrawingRef.current = () => cleanupActiveDrawing();
 
-    if (type === "polygon" || type === "polyline") {
+    if (type === "log-polygon") {
+      activeDrawingRef.current = { type, overlay: null, listeners };
+      let startPoint = null;
+      let selectionRect = null;
+      let hasDragged = false;
+
+      const resetSelection = () => {
+        selectionRect?.setMap(null);
+        selectionRect = null;
+        startPoint = null;
+        hasDragged = false;
+        activeDrawingRef.current = { type, overlay: null, listeners };
+      };
+
+      const stopRouteTool = () => {
+        callbacksRef.current.onUIChange?.({ drawEnabled: false, shapeMode: null });
+      };
+
+      const completeRouteSelection = () => {
+        if (!selectionRect || !startPoint || !hasDragged) {
+          resetSelection();
+          return;
+        }
+
+        const selectionBounds = selectionRect.getBounds();
+        const allLogs = logsRef.current || [];
+        const selectedLogs = allLogs.filter((log) => {
+          const point = toLatLng(log);
+          return point && selectionBounds?.contains(point);
+        });
+
+        selectionRect.setMap(null);
+        selectionRect = null;
+
+        if (selectedLogs.length < 2) {
+          toast.warn("At least two logs inside the selected area are required to create a route polygon.", {
+            position: "bottom-right",
+            autoClose: 2500,
+          });
+          resetSelection();
+          stopRouteTool();
+          return;
+        }
+
+        const polygonPath = createRasterRouteBufferPath(selectedLogs, logPolygonOffsetMeters);
+
+        if (polygonPath.length < 3) {
+          toast.error("Could not create a polygon around the selected route logs.", {
+            position: "bottom-right",
+            autoClose: 2500,
+          });
+          resetSelection();
+          stopRouteTool();
+          return;
+        }
+
+        const overlay = new gm.Polygon({
+          map,
+          paths: polygonPath,
+          ...getShapeOptions(
+            "polygon",
+            resolvedPolygonOpacity,
+            resolvedPolygonFillOpacity,
+          ),
+          clickable: true,
+          editable: true,
+          draggable: true,
+        });
+
+        cleanupActiveDrawing(true);
+        registerCompletedShape("polygon", overlay, {
+          analysisLogs: selectedLogs,
+          suppressVertexMarkers: true,
+          suppressGridAnalysis: true,
+        });
+        toast.info(
+          `Route polygon created around ${selectedLogs.length} selected logs with ${Math.round(Number(logPolygonOffsetMeters) || 0)} m offset.`,
+          { position: "bottom-right", autoClose: 2500 },
+        );
+      };
+
+      listeners.push(
+        gm.event.addListener(map, "mousedown", (event) => {
+          if (!event.latLng) return;
+          startPoint = event.latLng;
+          hasDragged = false;
+          selectionRect = new gm.Rectangle({
+            map,
+            bounds: createBoundsFromLatLngs(startPoint, startPoint),
+            strokeWeight: 1.5,
+            strokeColor: "#0f766e",
+            strokeOpacity: 0.9,
+            fillColor: "#14b8a6",
+            fillOpacity: 0.08,
+            clickable: false,
+            editable: false,
+            draggable: false,
+            zIndex: 450,
+          });
+          activeDrawingRef.current = { type, overlay: selectionRect, listeners };
+        }),
+      );
+
+      listeners.push(
+        gm.event.addListener(map, "mousemove", (event) => {
+          if (!selectionRect || !startPoint || !event.latLng) return;
+          const distance = gm.geometry?.spherical
+            ? gm.geometry.spherical.computeDistanceBetween(startPoint, event.latLng)
+            : 0;
+          if (distance > 1) hasDragged = true;
+          selectionRect.setBounds(createBoundsFromLatLngs(startPoint, event.latLng));
+        }),
+      );
+
+      listeners.push(
+        gm.event.addListener(map, "mouseup", () => {
+          completeRouteSelection();
+        }),
+      );
+
+      toast.info("Drag a selection box around the log route to create an offset route polygon.", {
+        position: "bottom-right",
+        autoClose: 3000,
+      });
+    } else if (type === "polygon" || type === "polyline") {
       const committedPoints = [];
       // Always preview with an OPEN polyline while drawing. A gm.Polygon would draw
       // its closing edge, making it look like a finished polygon after two points.
@@ -938,6 +1851,7 @@ function DrawingToolsLayerComponent({
     resolvedPolygonOpacity,
     resolvedPolygonFillOpacity,
     showDrawingControl,
+    logPolygonOffsetMeters,
   ]);
 
   useEffect(() => {
@@ -1002,6 +1916,7 @@ function DrawingToolsLayerComponent({
     lastClearSignalRef.current = clearSignal;
     cleanupActiveDrawing(false);
     shapesRef.current.forEach(s => {
+      window.clearTimeout(s.analysisTimer);
       s.listeners?.forEach(l => window.google.maps.event.removeListener(l));
       s.overlay?.setMap(null);
       s.gridOverlays?.forEach(r => r.setMap(null));

@@ -143,6 +143,11 @@ const getHandoverType = (from, to, type) => {
   return "lateral";
 };
 
+const isLegacy2g3gTech = (value) => {
+  const normalized = String(value ?? "").trim().toUpperCase();
+  return ["2G", "3G", "GSM", "EDGE", "GPRS", "UMTS", "WCDMA", "HSPA", "HSDPA", "HSUPA"].includes(normalized);
+};
+
 const normalizeSessionKey = (value) => {
   if (value == null) return "__session_missing__";
   const normalized = String(value).trim();
@@ -430,6 +435,20 @@ const HandoverPopup = memo(({ transition, onClose, type }) => {
     };
     return `${formatValue(sourceValue)} → ${formatValue(targetValue)}`;
   };
+  const formatSignalValue = (value, unit) => {
+    const numeric = Number(value);
+    return Number.isFinite(numeric) ? `${numeric.toFixed(1)} ${unit}` : "-";
+  };
+  const forwardNeighborRsrp =
+    transition?.forwardNeighborRsrp ?? transition?.targetNeighborRsrp;
+  const reverseNeighborRsrp = transition?.reverseNeighborRsrp;
+  const hasLegacy2g3gSide =
+    isLegacy2g3gTech(transition?.fromTechnology) ||
+    isLegacy2g3gTech(transition?.toTechnology) ||
+    (type === "technology" && (isLegacy2g3gTech(from) || isLegacy2g3gTech(to)));
+  const pciLabel = hasLegacy2g3gSide ? "PCI/BCCH" : "PCI/BCCH";
+  const rsrpLabel = hasLegacy2g3gSide ? "RxLev" : "RSRP";
+  const sinrLabel = hasLegacy2g3gSide ? "RxQual" : "SINR";
   const neighborRelationLabel = (() => {
     if (transition?.neighborRelation === "two_way") return "Two-way";
     if (transition?.neighborRelation === "one_way") {
@@ -472,11 +491,30 @@ const HandoverPopup = memo(({ transition, onClose, type }) => {
               {(transition?.fromFrequency || transition?.toFrequency) && <div className="flex justify-between gap-3"><span className="text-slate-400">EARFCN:</span><span>{transition?.fromFrequency || "-"} → {transition?.toFrequency || "-"}</span></div>}
               {(transition?.fromCellId || transition?.toCellId) && <div className="flex justify-between gap-3"><span className="text-slate-400">Cell ID:</span><span>{transition?.fromCellId || "-"} → {transition?.toCellId || "-"}</span></div>}
               {(transition?.fromNodebId || transition?.toNodebId) && <div className="flex justify-between gap-3"><span className="text-slate-400">eNodeB ID:</span><span>{transition?.fromNodebId || "-"} → {transition?.toNodebId || "-"}</span></div>}
-              {(transition?.pci || transition?.nextPci) && <div className="flex justify-between gap-3"><span className="text-slate-400">PCI:</span><span>{transition?.pci || "-"} → {transition?.nextPci || "-"}</span></div>}
+              {(transition?.pci || transition?.nextPci) && <div className="flex justify-between gap-3"><span className="text-slate-400">{pciLabel}:</span><span>{transition?.pci || "-"} → {transition?.nextPci || "-"}</span></div>}
               {(transition?.pci || transition?.nextPci) && <div className="flex justify-between gap-3"><span className="text-slate-400">Neighbor relation:</span><span>{neighborRelationLabel}</span></div>}
-              {(transition?.rsrp != null || transition?.nextRsrp != null) && <div className="flex justify-between gap-3"><span className="text-slate-400">RSRP:</span><span>{formatSignalPair(transition?.rsrp, transition?.nextRsrp, "dBm")}</span></div>}
-              {(transition?.rsrq != null || transition?.nextRsrq != null) && <div className="flex justify-between gap-3"><span className="text-slate-400">RSRQ:</span><span>{formatSignalPair(transition?.rsrq, transition?.nextRsrq, "dB")}</span></div>}
-              {(transition?.sinr != null || transition?.nextSinr != null) && <div className="flex justify-between gap-3"><span className="text-slate-400">SINR:</span><span>{formatSignalPair(transition?.sinr, transition?.nextSinr, "dB")}</span></div>}
+              {(forwardNeighborRsrp != null || reverseNeighborRsrp != null) && (
+                <div className="flex justify-between gap-3">
+                  <span className="text-slate-400">Neighbour {rsrpLabel}:</span>
+                  <span className="text-right">
+                    {forwardNeighborRsrp != null && (
+                      <span className="block">
+                        {pciLabel} {transition?.nextPci || "Target"}: {formatSignalValue(forwardNeighborRsrp, "dBm")}
+                        {transition?.pci ? ` (neighbor of ${pciLabel} ${transition.pci})` : ""}
+                      </span>
+                    )}
+                    {reverseNeighborRsrp != null && (
+                      <span className="block">
+                        {pciLabel} {transition?.pci || "Source"}: {formatSignalValue(reverseNeighborRsrp, "dBm")}
+                        {transition?.nextPci ? ` (neighbor of ${pciLabel} ${transition.nextPci})` : ""}
+                      </span>
+                    )}
+                  </span>
+                </div>
+              )}
+              {(transition?.rsrp != null || transition?.nextRsrp != null) && <div className="flex justify-between gap-3"><span className="text-slate-400">{rsrpLabel}:</span><span>{formatSignalPair(transition?.rsrp, transition?.nextRsrp, "dBm")}</span></div>}
+              {!hasLegacy2g3gSide && (transition?.rsrq != null || transition?.nextRsrq != null) && <div className="flex justify-between gap-3"><span className="text-slate-400">RSRQ:</span><span>{formatSignalPair(transition?.rsrq, transition?.nextRsrq, "dB")}</span></div>}
+              {(transition?.sinr != null || transition?.nextSinr != null) && <div className="flex justify-between gap-3"><span className="text-slate-400">{sinrLabel}:</span><span>{formatSignalPair(transition?.sinr, transition?.nextSinr, "dB")}</span></div>}
             </div>
           </div>
         </div>
@@ -620,7 +658,6 @@ const TechHandoverMarkers = ({
       ))}
       {!shouldCluster && renderedTransitions.map((t, i) => (
         <MarkerComponent 
-            // 👇 FIX: Ensure key is unique using type
            key={`handover-marker-${type}-${t.session_id}-${t.atIndex}-${i}`} 
             transition={t} 
             onClick={handleMarkerClick} 

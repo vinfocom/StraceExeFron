@@ -392,6 +392,7 @@ export default function HighPerfMap() {
     shapeMode: "polygon",
     drawPixelateRect: false,
     drawCellSizeMeters: 1,
+    drawLogPolygonOffsetMeters: 50,
     drawClearSignal: 0,
     showPrimaryLogs: true,
     showNeighbours: false,
@@ -1156,6 +1157,7 @@ const rectCoords = [
     shapeMode={ui.shapeMode} 
     onUIChange={handleUIChange}
     cellSizeMeters={ui.drawCellSizeMeters || 100}
+    logPolygonOffsetMeters={ui.drawLogPolygonOffsetMeters}
     onSummary={setAnalysis}
     clearSignal={ui.drawClearSignal || 0}
     maxCells={1500}

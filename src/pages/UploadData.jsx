@@ -304,6 +304,21 @@ const getFileExtension = (fileName) => {
   return match ? match[0] : "";
 };
 
+const getReportFileKey = (file) =>
+  `${file?.name || "log"}-${file?.size || 0}-${file?.lastModified || 0}`;
+
+const getDefaultSheetName = (file, index) => {
+  const baseName = String(file?.name || "")
+    .replace(/\.zip$/i, "")
+    .trim();
+  return baseName || `Floor ${index + 1}`;
+};
+
+const normalizePositiveGroup = (value, fallback = 1) => {
+  const parsed = Number.parseInt(value, 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+};
+
 const UploadDataPage = () => {
   const { user } = useAuth();
   const [sessionFiles, setSessionFiles] = useState([]);
@@ -331,6 +346,8 @@ const UploadDataPage = () => {
   const [reportMode, setReportMode] = useState("separate");
   const [filterByImageName, setFilterByImageName] = useState(false);
   const [showSampleCount, setShowSampleCount] = useState(false);
+  const [reportFileGroups, setReportFileGroups] = useState({});
+  const [reportSheetNames, setReportSheetNames] = useState({});
   const [reportLoading, setReportLoading] = useState(false);
   const [reportError, setReportError] = useState(null);
 
@@ -539,6 +556,10 @@ const UploadDataPage = () => {
       setDiscoveredBands([]);
       setSelectedBands([]);
       setReportTitle("");
+      if (index === null) {
+        setReportFileGroups({});
+        setReportSheetNames({});
+      }
       setReportError(null);
     }
   };
@@ -585,6 +606,26 @@ const UploadDataPage = () => {
     multiple: true,
     maxSize: MAX_FILE_SIZE,
   });
+
+  useEffect(() => {
+    setReportFileGroups((prev) => {
+      const next = {};
+      reportFiles.forEach((file, index) => {
+        const key = getReportFileKey(file);
+        next[key] = normalizePositiveGroup(prev[key], index + 1);
+      });
+      return next;
+    });
+
+    setReportSheetNames((prev) => {
+      const next = {};
+      reportFiles.forEach((file, index) => {
+        const key = getReportFileKey(file);
+        next[key] = prev[key] ?? getDefaultSheetName(file, index);
+      });
+      return next;
+    });
+  }, [reportFiles]);
 
   const handleDiscoverBands = async () => {
     if (!reportFiles.length) return;
@@ -641,6 +682,20 @@ const UploadDataPage = () => {
 
       if (reportType === "excel") {
         formData.append("ReportMode", reportMode);
+        const sheetNames = reportFiles
+          .map((file) => String(reportSheetNames[getReportFileKey(file)] || "").trim())
+          .filter(Boolean);
+
+        if (sheetNames.length) {
+          formData.append("SheetNames", sheetNames.join(","));
+        }
+
+        if (reportMode === "combined") {
+          const fileGroups = reportFiles.map((file, index) =>
+            normalizePositiveGroup(reportFileGroups[getReportFileKey(file)], index + 1),
+          );
+          formData.append("LogFileGroups", fileGroups.join(","));
+        }
       }
 
       if (selectedBands.length) {
@@ -1115,6 +1170,72 @@ const UploadDataPage = () => {
                   <p className="text-xs text-gray-200">
                     Sends <code>ReportMode</code> as <code>separate</code> or <code>combined</code>.
                   </p>
+                </div>
+              )}
+
+              {reportType === "excel" && reportFiles.length > 0 && (
+                <div className="space-y-3">
+                  <div>
+                    <label className="block text-sm font-semibold">Excel Sheet Setup</label>
+                    <p className="mt-1 text-xs text-gray-200">
+                      Sends <code>SheetNames</code> as comma-separated values. <code>LogFileGroups</code> is sent only in combined mode.
+                    </p>
+                  </div>
+
+                  <div className="space-y-2">
+                    {reportFiles.map((file, index) => {
+                      const key = getReportFileKey(file);
+                      return (
+                        <div
+                          key={key}
+                          className="grid gap-3 rounded border border-white/20 bg-white/5 p-3 md:grid-cols-[minmax(0,1fr)_160px_110px]"
+                        >
+                          <div className="min-w-0">
+                            <label className="block text-xs font-medium text-gray-200">ZIP File</label>
+                            <p className="truncate text-sm font-semibold" title={file.name}>
+                              {file.name}
+                            </p>
+                          </div>
+
+                          <div>
+                            <label className="block text-xs font-medium text-gray-200">Sheet Name</label>
+                            <Input
+                              value={reportSheetNames[key] || ""}
+                              onChange={(event) =>
+                                setReportSheetNames((prev) => ({
+                                  ...prev,
+                                  [key]: event.target.value,
+                                }))
+                              }
+                              placeholder={`Floor ${index + 1}`}
+                              disabled={reportLoading}
+                              className="h-9 bg-white text-black placeholder:text-gray-500"
+                            />
+                          </div>
+
+                          {reportMode === "combined" && (
+                            <div>
+                              <label className="block text-xs font-medium text-gray-200">Group</label>
+                              <Input
+                                type="number"
+                                min="1"
+                                step="1"
+                                value={reportFileGroups[key] ?? index + 1}
+                                onChange={(event) =>
+                                  setReportFileGroups((prev) => ({
+                                    ...prev,
+                                    [key]: normalizePositiveGroup(event.target.value, index + 1),
+                                  }))
+                                }
+                                disabled={reportLoading}
+                                className="h-9 bg-white text-black"
+                              />
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
                 </div>
               )}
 

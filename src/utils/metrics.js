@@ -327,7 +327,7 @@ export const METRIC_CONFIG = {
   coverage_violation: {
     thresholdKey: 'coverage_violation',
     label: 'Coverage Violation',
-    unit: '',
+    unit: 'dB',
     fields: ['coverage_violation'],
   },
   delta: {

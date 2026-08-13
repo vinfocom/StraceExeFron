@@ -1130,7 +1130,9 @@ const getLocationCoordinateKey = (loc) =>
 const setLookupCount = (lookup, key, count) => {
   if (!key || !Number.isFinite(count)) return;
   const prev = lookup.get(key);
-  if (prev == null || count > prev) {
+  const prevCount =
+    prev && typeof prev === "object" ? Number(prev.count) : Number(prev);
+  if (prev == null || !Number.isFinite(prevCount) || count > prevCount) {
     lookup.set(key, count);
   }
 };
@@ -1138,11 +1140,39 @@ const setLookupCount = (lookup, key, count) => {
 const getLookupCountForLocation = (loc, lookup) => {
   if (!(lookup instanceof Map)) return null;
   const idKey = getLocationIdKey(loc);
-  if (idKey && lookup.has(`id:${idKey}`)) return lookup.get(`id:${idKey}`);
+  if (idKey && lookup.has(`id:${idKey}`)) {
+    const value = lookup.get(`id:${idKey}`);
+    return value && typeof value === "object" ? value.count : value;
+  }
   const coordKey = getLocationCoordinateKey(loc);
-  if (coordKey && lookup.has(`coord:${coordKey}`))
-    return lookup.get(`coord:${coordKey}`);
+  if (coordKey && lookup.has(`coord:${coordKey}`)) {
+    const value = lookup.get(`coord:${coordKey}`);
+    return value && typeof value === "object" ? value.count : value;
+  }
   return null;
+};
+
+const setLookupValue = (lookup, key, value) => {
+  if (!key || !value || !Number.isFinite(Number(value.count))) return;
+  const prev = lookup.get(key);
+  if (!prev || Number(value.count) > Number(prev.count)) {
+    lookup.set(key, value);
+  }
+};
+
+const getLookupDetailsForLocation = (loc, lookup) => {
+  if (!(lookup instanceof Map)) return [];
+  const idKey = getLocationIdKey(loc);
+  if (idKey && lookup.has(`id:${idKey}`)) {
+    const value = lookup.get(`id:${idKey}`);
+    return Array.isArray(value?.details) ? value.details : [];
+  }
+  const coordKey = getLocationCoordinateKey(loc);
+  if (coordKey && lookup.has(`coord:${coordKey}`)) {
+    const value = lookup.get(`coord:${coordKey}`);
+    return Array.isArray(value?.details) ? value.details : [];
+  }
+  return [];
 };
 
 const getLocationIdentityKey = (loc) =>
@@ -1824,6 +1854,7 @@ const UnifiedMapView = () => {
     shapeMode: "polygon",
     drawPixelateRect: false,
     drawCellSizeMeters: 100,
+    drawLogPolygonOffsetMeters: 50,
     drawClearSignal: 0,
     colorizeCells: true,
     overlapDrawOrder: "original",
@@ -4083,17 +4114,61 @@ const UnifiedMapView = () => {
         item?.LogId ?? item?.log_id ?? item?.id ?? item?.Id,
       );
       const values = Array.isArray(item?.dominance) ? item.dominance : [];
-      const countInRange = values.filter((val) => {
+      const rawDetails = Array.isArray(item?.dominanceDetails)
+        ? item.dominanceDetails
+        : Array.isArray(item?.coverageNeighbours)
+          ? item.coverageNeighbours
+          : [];
+      const detailCandidates = rawDetails.length
+        ? rawDetails
+        : values.map((value) => ({ dominance: value }));
+      const detailsInRange = detailCandidates
+        .map((detail) => {
+          const dominanceValue =
+            detail?.dominance ??
+            detail?.DominanceValue ??
+            detail?.dominanceValue ??
+            detail;
+          const num = parseFloat(dominanceValue);
+          if (!Number.isFinite(num) || num < start || num > 0) return null;
+          return {
+            dominance: num,
+            primaryRsrp:
+              detail?.primaryRsrp ??
+              detail?.primary_rsrp ??
+              detail?.PrimaryRsrp ??
+              item?.primaryRsrp ??
+              item?.primary_rsrp,
+            neighbourPci:
+              detail?.neighbourPci ??
+              detail?.neighborPci ??
+              detail?.neighbour_pci ??
+              detail?.neighbor_pci ??
+              detail?.NeighbourPci,
+            neighbourRsrp:
+              detail?.neighbourRsrp ??
+              detail?.neighborRsrp ??
+              detail?.neighbour_rsrp ??
+              detail?.neighbor_rsrp ??
+              detail?.NeighbourRsrp,
+          };
+        })
+        .filter(Boolean);
+      const countInRange = detailsInRange.length || values.filter((val) => {
         const num = parseFloat(val);
         return Number.isFinite(num) && num >= start && num <= 0;
       }).length;
       if (countInRange > 0) {
+        const lookupValue = {
+          count: countInRange,
+          details: detailsInRange,
+        };
         if (logId) {
-          setLookupCount(idMap, `id:${logId}`, countInRange);
+          setLookupValue(idMap, `id:${logId}`, lookupValue);
         }
         const coordKey = toCoordinateKey(item?.lat, item?.lon);
         if (coordKey) {
-          setLookupCount(idMap, `coord:${coordKey}`, countInRange);
+          setLookupValue(idMap, `coord:${coordKey}`, lookupValue);
         }
       }
     });
@@ -4199,13 +4274,26 @@ const UnifiedMapView = () => {
           const count = getLookupCountForLocation(loc, coverageViolationByLogId);
           return Number.isFinite(count) && count > 0;
         })
-        .map((loc) => ({
-          ...loc,
-          coverage_violation: getLookupCountForLocation(
+        .map((loc) => {
+          const count = getLookupCountForLocation(loc, coverageViolationByLogId);
+          const coverageViolationNeighbors = getLookupDetailsForLocation(
             loc,
             coverageViolationByLogId,
-          ),
-        }));
+          );
+          const strongestViolation = coverageViolationNeighbors
+            .map((neighbor) => Number.parseFloat(neighbor?.dominance))
+            .filter(Number.isFinite)
+            .sort((a, b) => a - b)[0];
+
+          return {
+            ...loc,
+            coverage_violation: Number.isFinite(strongestViolation)
+              ? strongestViolation
+              : count,
+            coverage_violation_count: count,
+            coverageViolationNeighbors,
+          };
+        });
     }
     return result;
   }, [
@@ -4590,8 +4678,13 @@ const UnifiedMapView = () => {
     return effectiveGridColorBy;
   }, [isStoredGridOverlayVisible, storedGridMetricMode, effectiveGridColorBy, selectedMetric]);
 
+  const handoverEligibleLogs = useMemo(
+    () => (renderedLegendFilteredLocations || []).filter(shouldRenderLogOnMap),
+    [renderedLegendFilteredLocations],
+  );
+
   const baseHandoverTransitions = useMemo(() => {
-    const sourceLogs = isSampleMode ? sampleLocations : finalDisplayLocations;
+    const sourceLogs = handoverEligibleLogs;
     if (!sourceLogs?.length) {
       return {
         technologyTransitions: [],
@@ -4600,36 +4693,14 @@ const UnifiedMapView = () => {
       };
     }
 
-    // Detect mobility on the complete primary-log sequence. Display filters are
-    // applied to the resulting target markers so removed samples cannot invent
-    // a direct handover between two otherwise non-adjacent cells.
-    const built = buildHandoverTransitions(sourceLogs, {
+    // Handover eligibility follows the active data/legend filters, not DeckGL's
+    // zoom-dependent viewport sampling. Logs at an identical coordinate remain
+    // eligible and are exposed together in the primary-log overlap tooltip.
+    return buildHandoverTransitions(sourceLogs, {
       neighborLogs: polygonFilteredNeighborData,
     });
-    if (!isSampleMode || sourceLogs === finalDisplayLocations) return built;
-
-    const visibleTargets = new Set(
-      (finalDisplayLocations || [])
-        .map((row) => getLocationIdentityKey(row))
-        .filter(Boolean),
-    );
-    const keepVisibleTarget = (transition) => {
-      const targetKey =
-        transition?.sequenceLogId != null
-          ? String(transition.sequenceLogId).trim()
-          : getLocationCoordinateKey(transition);
-      return targetKey ? visibleTargets.has(targetKey) : true;
-    };
-
-    return {
-      technologyTransitions: built.technologyTransitions.filter(keepVisibleTarget),
-      bandTransitions: built.bandTransitions.filter(keepVisibleTarget),
-      pciTransitions: built.pciTransitions.filter(keepVisibleTarget),
-    };
   }, [
-    finalDisplayLocations,
-    isSampleMode,
-    sampleLocations,
+    handoverEligibleLogs,
     polygonFilteredNeighborData,
   ]);
 
@@ -4741,6 +4812,9 @@ const UnifiedMapView = () => {
         targetNeighborTimestamp: observation.observed_at ?? null,
         reverseNeighborTimestamp: observation.reverse_observed_at ?? null,
         targetNeighborRsrp: observation.rsrp ?? null,
+        forwardNeighborRsrp:
+          observation.forward_neighbour_rsrp ?? observation.rsrp ?? null,
+        reverseNeighborRsrp: observation.reverse_neighbour_rsrp ?? null,
         targetNeighborRsrq: observation.rsrq ?? null,
         targetNeighborSinr: observation.sinr ?? null,
         targetNeighborEarfcn: observation.earfcn ?? null,
@@ -7369,6 +7443,7 @@ const UnifiedMapView = () => {
                 thresholds={effectiveThresholds}
                 pixelateRect={ui.drawPixelateRect}
                 cellSizeMeters={ui.drawCellSizeMeters}
+                logPolygonOffsetMeters={ui.drawLogPolygonOffsetMeters}
                 colorizeCells={ui.colorizeCells}
                 polygonOpacity={DRAWN_POLYGON_OPACITY}
                 polygonFillOpacity={DRAWN_POLYGON_FILL_OPACITY}

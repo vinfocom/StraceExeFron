@@ -14,6 +14,8 @@ const SEVERITY_CLASS = {
   neutral: "text-slate-200",
 };
 
+const NR_RRC_MESSAGE_FIELDS = ["NR PCI", "NR ARFCN", "NR Frequency", "NR Band"];
+
 function uniqueValues(rows, key) {
   return Array.from(new Set(rows.map((row) => row[key]).filter(Boolean))).sort();
 }
@@ -70,6 +72,12 @@ const Header = ({ label, sortKey, sort, onSort, className = "" }) => (
   </th>
 );
 
+function formatCoordinate(value) {
+  if (value === null || value === undefined || String(value).trim() === "") return "—";
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric.toFixed(6) : "—";
+}
+
 function ColumnTextFilter({ value, onChange, placeholder }) {
   return (
     <input
@@ -112,7 +120,7 @@ function DirectionFilter({ value, onChange }) {
   );
 }
 
-const SignalingRow = memo(function SignalingRow({ row, selected, onSelect }) {
+const SignalingRow = memo(function SignalingRow({ row, selected, onSelect, includeLocation }) {
   const severityClass = SEVERITY_CLASS[row.severity] || SEVERITY_CLASS.neutral;
   return (
     <tr
@@ -123,6 +131,12 @@ const SignalingRow = memo(function SignalingRow({ row, selected, onSelect }) {
       <td className={`border-r border-slate-800 px-2 text-center font-mono text-[10px] text-cyan-200 whitespace-nowrap ${severityClass}`}>{laneValue(row, "ue")}</td>
       <td className={`border-r border-slate-800 px-2 text-center font-mono text-[10px] text-blue-200 whitespace-nowrap ${severityClass}`}>{laneValue(row, "radio")}</td>
       <td className={`border-r border-slate-800 px-2 text-center font-mono text-[10px] text-violet-200 whitespace-nowrap ${severityClass}`}>{laneValue(row, "core")}</td>
+      {includeLocation && (
+        <>
+          <td className={`border-r border-slate-800 px-2 font-mono text-[10px] text-slate-200 whitespace-nowrap ${severityClass}`}>{formatCoordinate(row.latitude)}</td>
+          <td className={`border-r border-slate-800 px-2 font-mono text-[10px] text-slate-200 whitespace-nowrap ${severityClass}`}>{formatCoordinate(row.longitude)}</td>
+        </>
+      )}
       <td className={`max-w-40 truncate border-r border-slate-800 px-2 text-[10px] text-slate-300 ${severityClass}`} title={row.interface}>{row.interface}</td>
       <td className="max-w-72 truncate border-r border-slate-800 px-2 text-[12px] font-medium text-white" title={row.message}>
         {row.message}
@@ -144,33 +158,19 @@ function SelectFilter({ label, value, onChange, options, allLabel = "All" }) {
 }
 
 function DetailPanel({ row }) {
-  if (!row) return <div className="flex h-72 items-center justify-center text-sm text-slate-500">Select a signaling row to inspect the message.</div>;
-  const nrRrcPayloadInsights = getNrRrcPayloadInsights(row);
-  const nrRrcFieldValue = (label) => nrRrcPayloadInsights.find((detail) => detail.label === label)?.value || "";
-  const fields = [
-    ["Timestamp", row.timestampLabel],
-    ["Source", row.sourceType?.toUpperCase()],
-    ["Call", row.callId || "—"],
-    ["Technology", row.technology],
-    ["Interface", row.interface],
-    ["Message", row.message],
-    ["PCI", nrRrcFieldValue("NR PCI")],
-    ["EARFCN", nrRrcFieldValue("NR ARFCN")],
-    ["Band", nrRrcFieldValue("NR Band")],
-    ["Direction", row.direction],
-  ];
-  const decoded = row.details || [];
+  if (!row) return <div className="flex h-full items-center justify-center text-sm text-slate-500">Select a signaling row to inspect the raw message.</div>;
+  const showDecodedNrRrc = /NR\s*RRC\s*Config\s*Info/i.test(String(row.message || ""));
+  const decodedInsights = showDecodedNrRrc
+    ? getNrRrcPayloadInsights(row).filter((detail) => NR_RRC_MESSAGE_FIELDS.includes(detail.label))
+    : [];
+  const messageText = decodedInsights.length > 0
+    ? decodedInsights.map((detail) => `${detail.label}: ${detail.value || "—"}`).join(" | ")
+    : row.rawMessage || "—";
+
   return (
-    <div className="h-72 overflow-auto bg-slate-950/70 p-4">
-      <div className="mb-3 text-[15px] font-semibold text-white">Message</div>
-      <div>
-        <div className="mb-1 text-[11px] uppercase text-slate-500">Raw Message</div>
-        <pre className="max-h-40 overflow-auto whitespace-pre-wrap rounded border border-slate-800 bg-black/30 p-3 text-[12px] leading-relaxed text-white">{row.rawMessage || "—"}</pre>
-      </div>
-      <div className="mt-3 grid grid-cols-2 gap-x-5 gap-y-2 md:grid-cols-4">
-        {fields.map(([label, value]) => <div key={label} className="min-w-0"><span className="text-[11px] uppercase text-slate-500">{label}</span><div className="truncate text-[12px] text-white" title={String(value || "—")}>{value || "—"}</div></div>)}
-      </div>
-      {decoded.length > 0 && <div className="mt-3 flex flex-wrap gap-2">{decoded.map((detail, index) => <span key={`${detail.label}-${index}`} className="rounded border border-slate-700 bg-slate-900 px-2 py-1 text-[12px] text-white"><b className="text-slate-500">{detail.label}:</b> {detail.value}</span>)}</div>}
+    <div className="h-full overflow-auto bg-slate-950/95 px-2 py-1">
+      <p>Message</p>
+      <div className="whitespace-pre-wrap text-[12px] leading-relaxed text-white">{messageText}</div>
     </div>
   );
 }
@@ -186,6 +186,7 @@ export function ExcelSignalingView({ rows = [], calls = [], selectedCall, onSele
   const [radioDirection, setRadioDirection] = useState("all");
   const [coreDirection, setCoreDirection] = useState("all");
   const [failureOnly, setFailureOnly] = useState(false);
+  const [includeLocation, setIncludeLocation] = useState(false);
   const [sort, setSort] = useState({ key: "timestamp", direction: "asc" });
   const [selectedRow, setSelectedRow] = useState(null);
   const [isDownloadingSummary, setIsDownloadingSummary] = useState(false);
@@ -241,6 +242,7 @@ export function ExcelSignalingView({ rows = [], calls = [], selectedCall, onSele
     setRadioDirection("all");
     setCoreDirection("all");
     setFailureOnly(false);
+    setIncludeLocation(false);
     onSelectCall?.(null);
   };
   const changeSort = (key) => setSort((current) => ({ key, direction: current.key === key && current.direction === "asc" ? "desc" : "asc" }));
@@ -255,6 +257,7 @@ export function ExcelSignalingView({ rows = [], calls = [], selectedCall, onSele
         rows: filtered,
         calls: exportCalls,
         selectedCall: scopedCall,
+        includeLocation,
       });
       toast.success("Summary PDF downloaded.");
     } catch (error) {
@@ -265,12 +268,15 @@ export function ExcelSignalingView({ rows = [], calls = [], selectedCall, onSele
     }
   };
 
+  const columnCount = includeLocation ? 8 : 6;
+
   return (
-    <div className="overflow-hidden rounded-lg border border-slate-700 bg-slate-900/80">
-      <div className="flex flex-wrap items-center gap-3 border-b border-slate-700 bg-slate-800/70 p-3">
+    <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-slate-900/80">
+      <div className="shrink-0 flex flex-wrap items-center gap-2 border-b border-slate-700 bg-slate-800/70 px-1 py-1">
         <SelectFilter label="Call" value={callFilter} onChange={changeCall} options={calls.map((call) => call.id)} allLabel="All Calls" />
         <SelectFilter label="Technology" value={technology} onChange={setTechnology} options={technologies} />
         <div className="flex items-center gap-2 text-[11px] text-slate-400">Source:{SOURCE_OPTIONS.map((source) => <label key={source} className="flex items-center gap-1 uppercase text-slate-300"><input type="checkbox" checked={sources.has(source)} onChange={() => toggleSource(source)} className="accent-blue-500" />{source}</label>)}</div>
+        <label className="flex items-center gap-1 text-[11px] text-slate-300"><input type="checkbox" checked={includeLocation} onChange={(event) => setIncludeLocation(event.target.checked)} className="accent-blue-500" />Include Lat/Lon</label>
         <label className="flex items-center gap-1 text-[11px] text-slate-300"><input type="checkbox" checked={failureOnly} onChange={(event) => setFailureOnly(event.target.checked)} className="accent-red-500" />Failures only</label>
         <div className="relative min-w-52 flex-1"><Search className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-slate-500" /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search signaling..." className="h-8 w-full rounded border border-slate-700 bg-slate-950 pl-8 pr-2 text-xs text-white placeholder:text-slate-500 focus:border-blue-500 focus:outline-none" /></div>
         <button type="button" onClick={clearFilters} className="flex h-8 items-center gap-1 rounded border border-slate-700 bg-slate-900 px-2 text-[11px] text-slate-300 hover:bg-slate-700"><X className="h-3 w-3" />Clear Filters</button>
@@ -284,17 +290,23 @@ export function ExcelSignalingView({ rows = [], calls = [], selectedCall, onSele
           Download Summary
         </button>
       </div>
-      <div className="flex items-center justify-between border-b border-slate-800 px-3 py-1.5 text-[10px] text-slate-400">
+      <div className="shrink-0 flex items-center justify-between border-b border-slate-800 px-1 py-0.5 text-[10px] text-slate-400">
         <span>Showing {filtered.length.toLocaleString()} matching rows ({rows.length.toLocaleString()} total)</span>
       </div>
-      <div className="max-h-[620px] overflow-auto">
-        <table className="w-full min-w-[980px] border-collapse">
+      <div className="min-h-0 flex-1 overflow-auto">
+        <table className={`w-full border-collapse ${includeLocation ? "min-w-[1180px]" : "min-w-[980px]"}`}>
           <thead>
             <tr>
               <Header label="Timestamp" sortKey="timestamp" sort={sort} onSort={changeSort} />
               <Header label="UE" />
               <Header label="eNB/gNB" />
               <Header label="MME/AMF/Core" />
+              {includeLocation && (
+                <>
+                  <Header label="Lat" />
+                  <Header label="Lon" />
+                </>
+              )}
               <Header label="Interface" sortKey="interface" sort={sort} onSort={changeSort} />
               <Header label="Message" sortKey="message" sort={sort} onSort={changeSort} />
             </tr>
@@ -303,14 +315,20 @@ export function ExcelSignalingView({ rows = [], calls = [], selectedCall, onSele
               <th className="sticky top-[33px] z-10 border-b border-r border-slate-700 bg-slate-800 px-2 py-1"><DirectionFilter value={ueDirection} onChange={setUeDirection} /></th>
               <th className="sticky top-[33px] z-10 border-b border-r border-slate-700 bg-slate-800 px-2 py-1"><DirectionFilter value={radioDirection} onChange={setRadioDirection} /></th>
               <th className="sticky top-[33px] z-10 border-b border-r border-slate-700 bg-slate-800 px-2 py-1"><DirectionFilter value={coreDirection} onChange={setCoreDirection} /></th>
+              {includeLocation && (
+                <>
+                  <th className="sticky top-[33px] z-10 border-b border-r border-slate-700 bg-slate-800 px-2 py-1" />
+                  <th className="sticky top-[33px] z-10 border-b border-r border-slate-700 bg-slate-800 px-2 py-1" />
+                </>
+              )}
               <th className="sticky top-[33px] z-10 border-b border-r border-slate-700 bg-slate-800 px-2 py-1"><ColumnSelectFilter value={interfaceColumnFilter} onChange={setInterfaceColumnFilter} options={interfaces} /></th>
               <th className="sticky top-[33px] z-10 border-b border-slate-700 bg-slate-800 px-2 py-1"><ColumnTextFilter value={messageColumnFilter} onChange={setMessageColumnFilter} placeholder="Filter message" /></th>
             </tr>
           </thead>
-          <tbody>{filtered.length ? filtered.map((row) => <SignalingRow key={row.id} row={row} selected={selectedRow?.id === row.id} onSelect={setSelectedRow} />) : <tr><td colSpan="6" className="py-16 text-center text-xs text-slate-500">No signaling rows match the current filters.</td></tr>}</tbody>
+          <tbody>{filtered.length ? filtered.map((row) => <SignalingRow key={row.id} row={row} selected={selectedRow?.id === row.id} onSelect={setSelectedRow} includeLocation={includeLocation} />) : <tr><td colSpan={columnCount} className="py-16 text-center text-xs text-slate-500">No signaling rows match the current filters.</td></tr>}</tbody>
         </table>
       </div>
-      <div className="border-t border-slate-700"><DetailPanel row={selectedRow} /></div>
+      <div className="basis-[22%] shrink-0 border-t border-slate-700 shadow-2xl shadow-black/30"><DetailPanel row={selectedRow} /></div>
     </div>
   );
 }

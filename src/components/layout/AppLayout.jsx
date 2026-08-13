@@ -40,7 +40,7 @@ const AppLayout = ({ children }) => {
     }
   }, [isCompactViewport]);
 
-  const pathsWithoutHeader = ["/mapview", "/prediction-map", "/unified-map", "/multi-map"];
+  const pathsWithoutHeader = ["/mapview", "/prediction-map", "/unified-map", "/multi-map", "/l3-events"];
   const pathsWithoutSidebar = ["/unified-map"];
 
   const shouldShowHeader = !pathsWithoutHeader.some((path) =>
@@ -81,7 +81,7 @@ const AppLayout = ({ children }) => {
       )}
 
       <div
-        className={`flex-1 flex flex-col transition-all duration-300 ease-in-out ${
+        className={`min-w-0 max-w-full flex-1 flex flex-col overflow-x-hidden transition-all duration-300 ease-in-out ${
           shouldShowSidebar && !isCompactViewport
             ? "ml-[74px] peer-hover:ml-[270px]"
             : "ml-0"

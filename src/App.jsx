@@ -58,7 +58,7 @@ const L3EventAnalyzerPage = lazy(() => import("./pages/L3EventAnalyzer"));
 // Loading Component for Suspense
 const PageLoader = ({ mode = "dashboard" }) => {
   const title =
-    mode === "logout" ? "Signing You Out" : "Opening Your Dashboard";
+    mode === "logout" ? "Signing You Out" : "Opening Your Portal";
   const description =
     mode === "logout"
       ? "Closing your active session and returning to sign in."

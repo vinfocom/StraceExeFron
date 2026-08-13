@@ -1,27 +1,14 @@
 import React, { useEffect, useMemo, useState } from "react";
 import {
-  Activity,
-  AlertTriangle,
-  CheckCircle2,
   ChevronRight,
-  Clock,
-  FileText,
   GitBranch,
   Info,
-  Layers,
-  MapPin,
   Phone,
-  Radio,
   Search,
 } from "lucide-react";
-import { GoogleMap, MarkerF, useJsApiLoader } from "@react-google-maps/api";
 import { getDirectionInfo } from "@/utils/l3Events/direction";
 import { getMatchedFlowSteps } from "@/utils/l3Events/flowModels";
-import {
-  GOOGLE_MAPS_LOADER_OPTIONS,
-  getGoogleMapsConfigError,
-  getGoogleMapsErrorMessage,
-} from "@/lib/googleMapsLoader";
+import { getNrRrcPayloadInsights } from "@/utils/l3Events/nrRrcPayloadInsights";
 
 const RESULT_CLASS = {
   Success: "bg-emerald-500/15 text-emerald-300 border-emerald-500/30",
@@ -54,7 +41,9 @@ function formatDuration(ms = 0) {
 }
 
 function formatCoordinate(value) {
-  return Number.isFinite(Number(value)) ? Number(value).toFixed(6) : "N/A";
+  if (value === null || value === undefined || String(value).trim() === "") return "N/A";
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric.toFixed(6) : "N/A";
 }
 
 function firstProcedure(procedures) {
@@ -69,9 +58,9 @@ const MESSAGE_TYPE_FILTERS = [
   { id: "event", label: "Events" },
 ];
 
-const ANALYZER_PANEL_HEIGHT_CLASS = "h-[1120px] max-h-[calc(100vh-1px)] min-h-[420px]";
-const MAP_CONTAINER_STYLE = { width: "100%", height: "100%" };
-const DEFAULT_MAP_CENTER = { lat: 20.5937, lng: 78.9629 };
+const NR_RRC_CONFIG_TOOLTIP_FIELDS = ["NR PCI", "NR ARFCN", "NR Frequency", "NR Band"];
+
+const ANALYZER_PANEL_HEIGHT_CLASS = "h-full min-h-0";
 
 function combineProcedureResults(procedures) {
   if (procedures.some((procedure) => procedure.result === "Failure")) return "Failure";
@@ -252,11 +241,7 @@ function ProcedureSummary({ procedure }) {
   const fields = [
     ["Start", formatTime(procedure.startTime)],
     ["End", formatTime(procedure.endTime)],
-    ["Duration", formatDuration(procedure.durationMs)],
-    ["Flow Model", flowModelLabel(procedure)],
     ["Access", procedure.flowModel?.access || procedure.technology || "N/A"],
-    ["Serving Cell", procedure.servingCell || "N/A"],
-    ["Target Cell", procedure.targetCell || "N/A"],
     ["PCI", procedure.pci || "N/A"],
     ["EARFCN", procedure.earfcn || "N/A"],
     ["RSRP", procedure.rsrp || "N/A"],
@@ -316,10 +301,10 @@ function ReferenceFlowModel({ procedure }) {
               <span className={`h-1.5 w-1.5 rounded-full ${modelStep.observed ? "bg-emerald-400" : "bg-slate-600"}`} />
               <span className="text-[10px] font-semibold uppercase text-slate-400">Step {index + 1}</span>
             </div>
-            <div className="mt-1 truncate text-[11px] font-semibold" title={modelStep.label}>
+            <div className="mt-1 truncate text-[11px] font-semibold">
               {modelStep.label}
             </div>
-            <div className="mt-0.5 truncate text-[10px] text-slate-400" title={`${modelStep.from} -> ${modelStep.to}`}>
+            <div className="mt-0.5 truncate text-[10px] text-slate-400">
               {modelStep.from} {"->"} {modelStep.to}
             </div>
           </div>
@@ -356,6 +341,26 @@ function isGreenPhase(item = {}) {
   );
 }
 
+function formatLadderTooltip(item = {}) {
+  const text = [item.officialName, item.title, item.rawMessage].filter(Boolean).join(" ");
+  if (!/NR\s*RRC\s*Config\s*Info/i.test(text)) {
+    return item.rawMessage || "No raw message text available.";
+  }
+
+  const decodedDetails = getNrRrcPayloadInsights({
+    rawMessage: item.rawMessage,
+    message: item.officialName || item.title,
+    protocol: item.protocol,
+    procedure: item.procedureName,
+    sourceCategory: item.sourceCategory || item.category,
+  }).filter((detail) => NR_RRC_CONFIG_TOOLTIP_FIELDS.includes(detail.label));
+
+  if (decodedDetails.length) {
+    return decodedDetails.map((detail) => `${detail.label}: ${detail.value || "—"}`).join(" | ");
+  }
+  return "No decoded NR RRC Config Info available.";
+}
+
 function SequenceArrow({ item, columns, y, selected, onSelectMessage }) {
   const fromIndex = columnIndex(columns, item.from);
   const toIndex = columnIndex(columns, item.to);
@@ -372,7 +377,7 @@ function SequenceArrow({ item, columns, y, selected, onSelectMessage }) {
       onClick={() => onSelectMessage(item)}
       className="absolute inset-x-0 h-8 text-left focus:outline-none"
       style={{ top: `${y - 12}px` }}
-      title={item.summary || item.rawMessage || item.officialName}
+      title={formatLadderTooltip(item)}
     >
       <svg className="absolute inset-0 h-8 w-full overflow-visible" viewBox="0 0 100 32" preserveAspectRatio="none">
         <line
@@ -395,38 +400,9 @@ function SequenceArrow({ item, columns, y, selected, onSelectMessage }) {
         }`}
         style={{ left: `${midX}%`, width: `${labelWidth}px`, maxWidth: "220px" }}
       >
-        <span className="block truncate">{item.type === "event" ? "EVENT: " : ""}{item.officialName}</span>
+        <span className="block truncate">{item.officialName}</span>
       </span>
     </button>
-  );
-}
-
-function VisualViewToggle({ activeVisualView, onVisualViewChange }) {
-  return (
-    <div className="inline-flex items-center rounded-md border border-slate-700 bg-slate-900/80 p-1">
-      <button
-        type="button"
-        onClick={() => onVisualViewChange("ladder")}
-        className={`rounded px-3 py-1 text-xs font-medium transition-colors ${
-          activeVisualView === "ladder"
-            ? "bg-blue-600 text-white"
-            : "text-slate-300 hover:bg-slate-800"
-        }`}
-      >
-        Ladder
-      </button>
-      <button
-        type="button"
-        onClick={() => onVisualViewChange("map")}
-        className={`rounded px-3 py-1 text-xs font-medium transition-colors ${
-          activeVisualView === "map"
-            ? "bg-blue-600 text-white"
-            : "text-slate-300 hover:bg-slate-800"
-        }`}
-      >
-        Map
-      </button>
-    </div>
   );
 }
 
@@ -437,8 +413,6 @@ function LadderDiagram({
   onSelectMessage,
   typeFilter,
   onTypeFilterChange,
-  activeVisualView,
-  onVisualViewChange,
 }) {
   const safeColumns = procedure.flowModel?.nodes?.length ? procedure.flowModel.nodes : columns.length ? columns : ["UE", "eNodeB", "MME", "IMS", "gNB"];
   const visibleItems = typeFilter && typeFilter !== "all"
@@ -448,7 +422,7 @@ function LadderDiagram({
   const procedureTitle = procedure.flowModel?.name || procedure.name;
 
   return (
-    <div className="h-full rounded-lg border border-slate-700 bg-slate-900/70 overflow-hidden flex flex-col">
+    <div className="h-full min-h-0 rounded-lg border border-slate-700 bg-slate-900/70 overflow-hidden flex flex-col">
       <div className="px-3 py-2 border-b border-slate-700 bg-slate-800/70 flex items-center justify-between gap-3">
         <div>
           <h3 className="text-sm font-semibold text-white">
@@ -456,24 +430,10 @@ function LadderDiagram({
               ? `All Procedures${procedure.callId ? ` — ${procedure.callId}` : ""}`
               : `${procedure.id} ${procedure.name}`}
           </h3>
-          <p className="text-[11px] text-slate-400">
-            Absolute and relative timing, with Event CSV annotations merged into the signaling ladder.
-          </p>
+         
         </div>
         <div className="flex items-center gap-2">
-          <VisualViewToggle
-            activeVisualView={activeVisualView}
-            onVisualViewChange={onVisualViewChange}
-          />
-          <span className={`text-[10px] px-2 py-1 rounded border ${RESULT_CLASS[procedure.result] || RESULT_CLASS.Ongoing}`}>
-            {procedure.result}
-          </span>
-        </div>
-      </div>
-
-      <div className="px-3 py-2 border-b border-slate-800 flex items-center gap-2">
-        <span className="text-[10px] uppercase tracking-wide text-slate-500">Show</span>
-        <div className="flex items-center gap-1">
+          <div className="flex items-center gap-1">
           {MESSAGE_TYPE_FILTERS.map((option) => (
             <button
               key={option.id}
@@ -489,15 +449,21 @@ function LadderDiagram({
             </button>
           ))}
         </div>
+          <span className={`text-[10px] px-2 py-1 rounded border ${RESULT_CLASS[procedure.result] || RESULT_CLASS.Ongoing}`}>
+            {procedure.result}
+          </span>
+        </div>
       </div>
 
-      <div className="p-3 border-b border-slate-800">
-        <ProcedureSummary procedure={procedure} />
+      
+
+      
+
+      <div className="shrink-0 overflow-hidden">
+        <ReferenceFlowModel procedure={procedure} />
       </div>
 
-      <ReferenceFlowModel procedure={procedure} />
-
-      <div className="min-h-0 flex-1 overflow-auto bg-slate-950 p-4">
+      <div className="min-h-0 flex-1 overflow-auto bg-slate-950 p-2">
         <div
           className="relative mx-auto min-w-[820px] max-w-[1120px] bg-white px-8 pb-8 pt-5 text-slate-950 shadow-xl ring-1 ring-slate-300"
           style={{ height: `${chartHeight}px` }}
@@ -507,75 +473,84 @@ function LadderDiagram({
           </div>
 
           <div className="absolute left-8 right-8 top-[72px] bottom-8">
-            <svg className="absolute inset-0 h-full w-full overflow-visible" viewBox="0 0 100 100" preserveAspectRatio="none">
-              <defs>
-                <marker id="seqArrowDark" markerWidth="4" markerHeight="4" refX="3.2" refY="2" orient="auto">
-                  <path d="M0,0 L4,2 L0,4 Z" fill="#111827" />
-                </marker>
-                <marker id="seqArrowGreen" markerWidth="4" markerHeight="4" refX="3.2" refY="2" orient="auto">
-                  <path d="M0,0 L4,2 L0,4 Z" fill="#22c55e" />
-                </marker>
-              </defs>
-              {safeColumns.map((column, index) => {
-                const x = nodePosition(index, safeColumns.length);
+            <div className="absolute inset-y-0 left-0 z-10 w-[104px] border-r border-slate-300 bg-white pr-3">
+              <div className="absolute left-0 top-0 text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+                Time
+              </div>
+              {visibleItems.map((item, index) => {
+                const y = index * 46 + 55;
+                const selected = item.id === selectedMessageId;
                 return (
-                  <line
-                    key={column}
-                    x1={x}
-                    y1="0"
-                    x2={x}
-                    y2="100"
-                    stroke="#9ca3af"
-                    strokeWidth="0.14"
-                  />
-                );
-              })}
-            </svg>
-
-            {safeColumns.map((column, index) => (
-              <div
-                key={column}
-                className="absolute top-0 -translate-x-1/2 rounded-sm bg-red-700 px-2 py-1 text-center text-[10px] font-bold text-white shadow"
-                style={{ left: `${nodePosition(index, safeColumns.length)}%`, minWidth: "54px", maxWidth: "110px" }}
-                title={column}
-              >
-                <span className="block truncate">{column}</span>
-              </div>
-            ))}
-
-            <div className="absolute left-0 top-0 text-[10px] font-semibold uppercase tracking-wide text-slate-500">
-              Time
-            </div>
-
-            {visibleItems.length === 0 && (
-              <div className="absolute inset-x-0 top-1/2 -translate-y-1/2 text-center text-xs text-slate-400">
-                No {typeFilter === "l3" ? "L3" : "Event"} messages in this selection.
-              </div>
-            )}
-
-            {visibleItems.map((item, index) => {
-              const y = index * 46 + 55;
-              const selected = item.id === selectedMessageId;
-              return (
-                <React.Fragment key={item.id}>
                   <div
-                    className={`absolute left-0 -translate-y-1/2 font-mono text-[10px] ${
+                    key={`${item.id}-time`}
+                    className={`absolute left-0 right-3 -translate-y-1/2 text-right font-mono text-[10px] ${
                       selected ? "font-bold text-blue-700" : "text-slate-500"
                     }`}
                     style={{ top: `${y}px` }}
                   >
                     {item.absoluteTimestamp || formatTime(item.timestamp)}
                   </div>
+                );
+              })}
+            </div>
+
+            <div className="absolute inset-y-0 left-[104px] right-0 overflow-visible">
+              <svg className="absolute inset-0 h-full w-full overflow-visible" viewBox="0 0 100 100" preserveAspectRatio="none">
+                <defs>
+                  <marker id="seqArrowDark" markerWidth="4" markerHeight="4" refX="3.2" refY="2" orient="auto">
+                    <path d="M0,0 L4,2 L0,4 Z" fill="#111827" />
+                  </marker>
+                  <marker id="seqArrowGreen" markerWidth="4" markerHeight="4" refX="3.2" refY="2" orient="auto">
+                    <path d="M0,0 L4,2 L0,4 Z" fill="#22c55e" />
+                  </marker>
+                </defs>
+                {safeColumns.map((column, index) => {
+                  const x = nodePosition(index, safeColumns.length);
+                  return (
+                    <line
+                      key={column}
+                      x1={x}
+                      y1="0"
+                      x2={x}
+                      y2="100"
+                      stroke="#9ca3af"
+                      strokeWidth="0.14"
+                    />
+                  );
+                })}
+              </svg>
+
+              {safeColumns.map((column, index) => (
+                <div
+                  key={column}
+                  className="absolute top-0 -translate-x-1/2 rounded-sm bg-red-700 px-2 py-1 text-center text-[10px] font-bold text-white shadow"
+                  style={{ left: `${nodePosition(index, safeColumns.length)}%`, minWidth: "54px", maxWidth: "110px" }}
+                >
+                  <span className="block truncate">{column}</span>
+                </div>
+              ))}
+
+              {visibleItems.length === 0 && (
+                <div className="absolute inset-x-0 top-1/2 -translate-y-1/2 text-center text-xs text-slate-400">
+                  No {typeFilter === "l3" ? "L3" : "Event"} messages in this selection.
+                </div>
+              )}
+
+              {visibleItems.map((item, index) => {
+                const y = index * 46 + 55;
+                const selected = item.id === selectedMessageId;
+                return (
                   <SequenceArrow
+                    key={item.id}
                     item={item}
                     columns={safeColumns}
                     y={y}
                     selected={selected}
                     onSelectMessage={onSelectMessage}
                   />
-                </React.Fragment>
-              );
-            })}
+                );
+              })}
+            </div>
           </div>
 
           <div className="absolute bottom-3 left-8 right-8 text-center text-[10px] text-slate-600">
@@ -583,135 +558,6 @@ function LadderDiagram({
           </div>
         </div>
       </div>
-    </div>
-  );
-}
-
-function ProcedureLocationMap({
-  procedure,
-  selectedMessage,
-  onSelectMessage,
-  typeFilter,
-  activeVisualView,
-  onVisualViewChange,
-}) {
-  const { isLoaded, loadError } = useJsApiLoader(GOOGLE_MAPS_LOADER_OPTIONS);
-  const [map, setMap] = useState(null);
-  const mapsError = getGoogleMapsConfigError() || (loadError ? getGoogleMapsErrorMessage(loadError) : null);
-
-  const mapItems = useMemo(() => {
-    const sourceItems = typeFilter && typeFilter !== "all"
-      ? procedure.items.filter((item) => item.type === typeFilter)
-      : procedure.items;
-
-    return sourceItems
-      .filter((item) => Number.isFinite(item.latitude) && Number.isFinite(item.longitude))
-      .map((item, index) => ({
-        ...item,
-        markerLabel: String(index + 1),
-      }));
-  }, [procedure.items, typeFilter]);
-
-  useEffect(() => {
-    if (!map || !window.google?.maps || mapItems.length === 0) return;
-    const bounds = new window.google.maps.LatLngBounds();
-    mapItems.forEach((item) => bounds.extend({ lat: item.latitude, lng: item.longitude }));
-    map.fitBounds(bounds, 48);
-  }, [map, mapItems]);
-
-  return (
-    <div className="h-full rounded-lg border border-slate-700 bg-slate-900/70 overflow-hidden flex flex-col">
-      <div className="px-3 py-2 border-b border-slate-700 bg-slate-800/70 flex items-center justify-between gap-3">
-        <div>
-          <div className="flex items-center gap-2 text-sm font-semibold text-white">
-            <MapPin className="h-4 w-4 text-blue-300" />
-            Event Location Map
-          </div>
-          <p className="text-[11px] text-slate-400 mt-1">
-            Visible L3/Event rows are plotted from the uploaded `latitude` and `longitude` columns.
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          <VisualViewToggle
-            activeVisualView={activeVisualView}
-            onVisualViewChange={onVisualViewChange}
-          />
-          <span className="rounded border border-slate-600 bg-slate-900 px-2 py-1 text-[10px] text-slate-300">
-            {mapItems.length} located rows
-          </span>
-        </div>
-      </div>
-
-      {!mapsError && !isLoaded && (
-        <div className="flex min-h-0 flex-1 items-center justify-center bg-slate-950 text-sm text-slate-400">
-          Loading map...
-        </div>
-      )}
-
-      {mapsError && (
-        <div className="flex min-h-0 flex-1 items-center justify-center px-6 text-center text-sm text-amber-300 bg-amber-500/10">
-          {mapsError}
-        </div>
-      )}
-
-      {!mapsError && isLoaded && mapItems.length === 0 && (
-        <div className="flex min-h-0 flex-1 items-center justify-center bg-slate-950 text-sm text-slate-400">
-          No visible rows have valid latitude/longitude values.
-        </div>
-      )}
-
-      {!mapsError && isLoaded && mapItems.length > 0 && (
-        <div className="relative min-h-0 flex-1">
-          <GoogleMap
-            mapContainerStyle={MAP_CONTAINER_STYLE}
-            center={DEFAULT_MAP_CENTER}
-            zoom={5}
-            onLoad={setMap}
-            onUnmount={() => setMap(null)}
-            options={{
-              streetViewControl: false,
-              mapTypeControl: false,
-              fullscreenControl: false,
-              gestureHandling: "greedy",
-              scrollwheel: true,
-            }}
-          >
-            {mapItems.map((item) => {
-              const isSelected = item.id === selectedMessage?.id;
-              return (
-                <MarkerF
-                  key={item.id}
-                  position={{ lat: item.latitude, lng: item.longitude }}
-                  onClick={() => onSelectMessage(item)}
-                  title={`${item.officialName || item.title || "Message"} • ${item.absoluteTimestamp || item.timestampLabel || ""}`}
-                  label={{
-                    text: item.markerLabel,
-                    color: "#ffffff",
-                    fontSize: "10px",
-                    fontWeight: "700",
-                  }}
-                  zIndex={isSelected ? 200 : 100}
-                  icon={window.google?.maps ? {
-                    path: window.google.maps.SymbolPath.CIRCLE,
-                    fillColor: isSelected ? "#2563eb" : item.type === "event" ? "#dc2626" : "#059669",
-                    fillOpacity: 1,
-                    strokeColor: "#ffffff",
-                    strokeOpacity: 0.95,
-                    strokeWeight: isSelected ? 3 : 2,
-                    scale: isSelected ? 9 : 7,
-                  } : undefined}
-                />
-              );
-            })}
-          </GoogleMap>
-
-          <div className="border-t border-slate-800 bg-slate-950/95 px-3 py-2 text-[11px] text-slate-400">
-            {selectedMessage && Number.isFinite(selectedMessage.latitude) && Number.isFinite(selectedMessage.longitude)
-              ? `Selected: ${selectedMessage.officialName || selectedMessage.title || "Message"} at ${formatCoordinate(selectedMessage.latitude)}, ${formatCoordinate(selectedMessage.longitude)}`
-              : "Click a marker to sync the map with the ladder details."}
-          </div>
-        </div>
-      )}
     </div>
   );
 }
@@ -730,7 +576,7 @@ function MessageDetails({ procedure, message }) {
         <p className="text-[11px] text-slate-400 mt-1 truncate">{selected?.officialName || "Select a ladder message"}</p>
       </div>
 
-      <div className="flex-1 overflow-auto p-3 space-y-3">
+      <div className="min-h-0 flex-1 overflow-auto p-3 space-y-3">
         <DetailSection
           title="Protocol"
           rows={[
@@ -811,74 +657,6 @@ function DetailSection({ title, rows }) {
   );
 }
 
-function RawBottomPanel({ procedure, message }) {
-  const selected = message || procedure.items[0];
-  return (
-    <div className="rounded-lg border border-slate-700 bg-slate-900/80 overflow-hidden">
-      <div className="grid grid-cols-1 lg:grid-cols-[1fr_280px_220px]">
-        <div className="p-3 border-b lg:border-b-0 lg:border-r border-slate-800">
-          <div className="flex items-center gap-2 text-[11px] uppercase tracking-wide text-slate-500 mb-2">
-            <FileText className="h-3.5 w-3.5" />
-            Raw CSV Row
-          </div>
-          <pre className="max-h-32 overflow-auto whitespace-pre-wrap text-[11px] leading-relaxed text-slate-200 bg-slate-950 rounded-md border border-slate-800 p-2">
-            {selected?.rawMessage || "No raw message text available."}
-          </pre>
-        </div>
-        <div className="p-3 border-b lg:border-b-0 lg:border-r border-slate-800">
-          <div className="flex items-center gap-2 text-[11px] uppercase tracking-wide text-slate-500 mb-2">
-            <Layers className="h-3.5 w-3.5" />
-            3GPP Reference
-          </div>
-          <div className="text-xs text-white">{selected?.spec || procedure.spec || "N/A"}</div>
-          <div className="text-xs text-slate-400 mt-1">Section {selected?.section || procedure.section || "N/A"}</div>
-          <div className="text-xs text-slate-400 mt-2">{procedure.name}</div>
-        </div>
-        <div className="p-3">
-          <div className="flex items-center gap-2 text-[11px] uppercase tracking-wide text-slate-500 mb-2">
-            <Clock className="h-3.5 w-3.5" />
-            Timing
-          </div>
-          <div className="text-xs text-white">Absolute: {selected?.absoluteTimestamp || "N/A"}</div>
-          <div className="text-xs text-white mt-1">Relative: {selected?.relativeTime || "+0 ms"}</div>
-          <div className="text-xs text-slate-400 mt-1">Procedure: {formatDuration(procedure.durationMs)}</div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function AnalyzerStats({ analysis }) {
-  const state = analysis.states || {};
-  const stats = [
-    ["Rows", `${analysis.stats.analyzedRows || 0}/${analysis.stats.totalRows || 0}`, FileText],
-    ["Procedures", analysis.stats.totalProcedures, Radio],
-    ["Calls", analysis.stats.totalCalls || 0, Phone],
-    ["Completed", analysis.stats.completedCalls || 0, CheckCircle2],
-    ["Dropped", analysis.stats.droppedCalls || 0, AlertTriangle],
-    ["Not Connected", analysis.stats.notConnectedCalls || 0, Phone],
-    ["Failures", analysis.stats.failures, AlertTriangle],
-    ["RSRP Matched", analysis.stats.rsrpProcedures || 0, Radio],
-    ["RRC State", state.rrc || "RRC_IDLE", Activity],
-    ["NAS State", state.nas || "NAS Deregistered", CheckCircle2],
-    ["IMS State", state.ims || "IMS Unregistered", CheckCircle2],
-  ];
-
-  return (
-    <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-7 gap-2">
-      {stats.map(([label, value, Icon]) => (
-        <div key={label} className="rounded-lg border border-slate-700 bg-slate-800/60 p-3">
-          <div className="flex items-center justify-between gap-2">
-            <span className="text-[10px] uppercase text-slate-500">{label}</span>
-            <Icon className="h-4 w-4 text-slate-400" />
-          </div>
-          <div className="text-sm font-semibold text-white mt-1 truncate">{value}</div>
-        </div>
-      ))}
-    </div>
-  );
-}
-
 export function ProtocolAnalyzerView({ analysis, callScoped = false }) {
   const [selectedProcedureId, setSelectedProcedureId] = useState(
     () => (callScoped ? ALL_PROCEDURES_ID : firstProcedure(analysis.procedures)?.id || ""),
@@ -886,7 +664,6 @@ export function ProtocolAnalyzerView({ analysis, callScoped = false }) {
   const [selectedMessage, setSelectedMessage] = useState(null);
   const [query, setQuery] = useState("");
   const [messageTypeFilter, setMessageTypeFilter] = useState("all");
-  const [activeVisualView, setActiveVisualView] = useState("ladder");
 
   useEffect(() => {
     if (!analysis.procedures.length) {
@@ -929,10 +706,8 @@ export function ProtocolAnalyzerView({ analysis, callScoped = false }) {
   }
 
   return (
-    <div className="space-y-3">
-      <AnalyzerStats analysis={analysis} />
-
-      <div className="grid grid-cols-1 xl:grid-cols-[290px_minmax(0,1fr)_330px] gap-3 items-start">
+    <div className="flex h-full min-h-0 w-full max-w-full flex-col overflow-hidden">
+      <div className="grid min-h-0 flex-1 grid-cols-1 gap-2 overflow-hidden xl:grid-cols-[290px_minmax(0,1fr)_330px]">
         <ProcedureTree
           procedures={analysis.procedures}
           selectedProcedureId={selectedProcedureId}
@@ -951,35 +726,20 @@ export function ProtocolAnalyzerView({ analysis, callScoped = false }) {
         />
 
         <div className={`${ANALYZER_PANEL_HEIGHT_CLASS} min-w-0 rounded-lg border border-slate-700 bg-slate-900/80 overflow-hidden flex flex-col`}>
-          <div className="min-h-0 flex-1 p-3">
-            {activeVisualView === "map" ? (
-              <ProcedureLocationMap
-                procedure={selectedProcedure}
-                selectedMessage={selectedMessage}
-                onSelectMessage={setSelectedMessage}
-                typeFilter={messageTypeFilter}
-                activeVisualView={activeVisualView}
-                onVisualViewChange={setActiveVisualView}
-              />
-            ) : (
-              <LadderDiagram
-                procedure={selectedProcedure}
-                columns={analysis.columns}
-                selectedMessageId={selectedMessage?.id}
-                onSelectMessage={setSelectedMessage}
-                typeFilter={messageTypeFilter}
-                onTypeFilterChange={setMessageTypeFilter}
-                activeVisualView={activeVisualView}
-                onVisualViewChange={setActiveVisualView}
-              />
-            )}
+          <div className="min-h-0 flex-1 overflow-hidden">
+            <LadderDiagram
+              procedure={selectedProcedure}
+              columns={analysis.columns}
+              selectedMessageId={selectedMessage?.id}
+              onSelectMessage={setSelectedMessage}
+              typeFilter={messageTypeFilter}
+              onTypeFilterChange={setMessageTypeFilter}
+            />
           </div>
         </div>
 
         <MessageDetails procedure={selectedProcedure} message={selectedMessage} />
       </div>
-
-      <RawBottomPanel procedure={selectedProcedure} message={selectedMessage} />
     </div>
   );
 }

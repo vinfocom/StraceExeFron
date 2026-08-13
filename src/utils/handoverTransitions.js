@@ -1,6 +1,7 @@
 import { normalizeBandName, normalizeTechName } from "./colorUtils.js";
 
-export const DEFAULT_HANDOVER_MAX_GAP_MS = 2 * 60 * 1000;
+export const DEFAULT_HANDOVER_MAX_GAP_MS = null;
+export const DEFAULT_HANDOVER_GAP_MULTIPLIER = 2.5;
 export const DEFAULT_NEIGHBOR_LOOKBACK_MS = 30 * 1000;
 
 const MISSING_SESSION = "__session_missing__";
@@ -210,8 +211,40 @@ const isSameServingCell = (a, b) =>
 const isContinuous = (previous, current, maxGapMs) => {
   if (!previous || !current || previous.sessionKey !== current.sessionKey) return false;
   if (previous.timestampMs == null || current.timestampMs == null) return true;
+  if (!Number.isFinite(maxGapMs) || maxGapMs <= 0) return true;
   const gap = current.timestampMs - previous.timestampMs;
   return gap >= 0 && gap <= maxGapMs;
+};
+
+const getPositiveTimestampGaps = (entries = []) => {
+  const gaps = [];
+  for (let index = 1; index < entries.length; index += 1) {
+    const previous = entries[index - 1];
+    const current = entries[index];
+    if (previous?.timestampMs == null || current?.timestampMs == null) continue;
+    const gap = current.timestampMs - previous.timestampMs;
+    if (Number.isFinite(gap) && gap > 0) gaps.push(gap);
+  }
+  return gaps;
+};
+
+const getPercentileValue = (values = [], percentile = 0.25) => {
+  if (!values.length) return null;
+  const sorted = [...values].sort((a, b) => a - b);
+  const index = Math.min(
+    sorted.length - 1,
+    Math.max(0, Math.floor((sorted.length - 1) * percentile)),
+  );
+  return sorted[index];
+};
+
+const resolveSessionMaxGapMs = (entries = [], configuredMaxGapMs) => {
+  const explicitMaxGap = Number(configuredMaxGapMs);
+  if (Number.isFinite(explicitMaxGap) && explicitMaxGap > 0) return explicitMaxGap;
+
+  const typicalGap = getPercentileValue(getPositiveTimestampGaps(entries), 0.25);
+  if (!Number.isFinite(typicalGap) || typicalGap <= 0) return null;
+  return typicalGap * DEFAULT_HANDOVER_GAP_MULTIPLIER;
 };
 
 const getMobilityCategory = (fromCell, toCell) => {
@@ -489,13 +522,15 @@ export const buildHandoverTransitions = (
   });
 
   sessions.forEach((entries) => {
+    const sessionMaxGapMs = resolveSessionMaxGapMs(entries, maxGapMs);
+
     technologyTransitions.push(
       ...buildFieldTransitions({
         entries,
         field: "technology",
         type: "technology",
         neighborLogs,
-        maxGapMs,
+        maxGapMs: sessionMaxGapMs,
         neighborLookbackMs,
         minTargetSamples,
       }),
@@ -506,13 +541,13 @@ export const buildHandoverTransitions = (
         field: "band",
         type: "band",
         neighborLogs,
-        maxGapMs,
+        maxGapMs: sessionMaxGapMs,
         neighborLookbackMs,
         minTargetSamples,
       }),
     );
 
-    const runs = buildRuns(entries, maxGapMs);
+    const runs = buildRuns(entries, sessionMaxGapMs);
     let stableRun = runs[0] || null;
 
     for (let index = 1; index < runs.length && stableRun; index += 1) {
@@ -520,7 +555,7 @@ export const buildHandoverTransitions = (
       const sourceEntry = stableRun.entries[stableRun.entries.length - 1];
       const targetEntry = candidateRun.entries[0];
 
-      if (!isContinuous(sourceEntry, targetEntry, maxGapMs)) {
+      if (!isContinuous(sourceEntry, targetEntry, sessionMaxGapMs)) {
         stableRun = candidateRun;
         continue;
       }

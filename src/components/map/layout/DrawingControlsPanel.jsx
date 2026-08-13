@@ -5,6 +5,7 @@ import {
   Square, 
   Circle, 
   Ruler, 
+  Crosshair,
   Settings2, 
   Download, 
   Trash2, 
@@ -69,6 +70,7 @@ const DrawingControlsPanel = memo(function DrawingControlsPanel({
     shapeMode: null, 
     drawPixelateRect: false,
     drawCellSizeMeters: 100,
+    drawLogPolygonOffsetMeters: 50,
     drawClearSignal: 0,
     colorizeCells: true,
     ...ui,
@@ -216,6 +218,12 @@ const DrawingControlsPanel = memo(function DrawingControlsPanel({
               active={safeUi.drawEnabled && safeUi.shapeMode === "polyline"}
               onClick={() => activateTool("polyline")}
             />
+            <ToolButton
+              icon={Crosshair}
+              title="Select Logs and Draw Offset Route Polygon"
+              active={safeUi.drawEnabled && safeUi.shapeMode === "log-polygon"}
+              onClick={() => activateTool("log-polygon")}
+            />
 
             <div className="w-px h-5 bg-gray-200 mx-1 flex-shrink-0" />
 
@@ -255,6 +263,19 @@ const DrawingControlsPanel = memo(function DrawingControlsPanel({
                         step={5}
                         value={safeUi.drawCellSizeMeters}
                         onChange={(e) => updateSetting('drawCellSizeMeters', Number(e.target.value))}
+                        className="flex-1 border rounded px-2 py-1 text-xs"
+                      />
+                      <span className="text-xs text-gray-500">m</span>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs text-gray-600 w-16">Route Offset:</span>
+                      <input
+                        type="number"
+                        min={1}
+                        step={5}
+                        value={safeUi.drawLogPolygonOffsetMeters}
+                        onChange={(e) => updateSetting('drawLogPolygonOffsetMeters', Number(e.target.value))}
                         className="flex-1 border rounded px-2 py-1 text-xs"
                       />
                       <span className="text-xs text-gray-500">m</span>

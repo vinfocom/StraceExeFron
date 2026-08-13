@@ -184,6 +184,8 @@ export const SpeedAnalysisChart = React.forwardRef(({ locations, onBarClick }, r
                 ...CHART_CONFIG.tooltip,
                 minWidth: '200px'
               }}
+              itemStyle={{ color: "#ffffff" }}
+              labelStyle={{ color: "#ffffff" }}
               formatter={(value, name, props) => {
                 const percentage = ((value / data.length) * 100).toFixed(1);
                 return [

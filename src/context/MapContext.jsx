@@ -29,6 +29,7 @@ export function MapProvider({ children }) {
     shapeMode: 'polygon',
     drawPixelateRect: false,
     drawCellSizeMeters: 100,
+    drawLogPolygonOffsetMeters: 50,
     drawClearSignal: 0,
     colorizeCells: true,
   });

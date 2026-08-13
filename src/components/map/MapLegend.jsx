@@ -758,7 +758,7 @@ const MetricThresholdLegend = ({
 
       valid++;
       const idx = normalizedThresholds.findIndex((t) =>
-        matchesMetricRange(val, t.minNum, t.maxNum, false),
+        matchesMetricRange(val, t.minNum, t.maxNum, t.isLast),
       );
 
       if (idx !== -1) {
@@ -794,7 +794,7 @@ const MetricThresholdLegend = ({
         id,
         min: parseFloat(threshold.min),
         max: parseFloat(threshold.max),
-        includeMax: false,
+        includeMax: Boolean(threshold.isLast),
         metric: selectedMetric,
       },
       onFilterChange,
@@ -946,7 +946,7 @@ const MetricThresholdLegend = ({
             id,
             min: parseFloat(t.min),
             max: parseFloat(t.max),
-            includeMax: false,
+            includeMax: Boolean(t.isLast),
             metric: selectedMetric,
           });
           const isDimmed = getLegendFilterItems(activeFilter).length > 0 && !isActive;

@@ -830,6 +830,7 @@ const UnifiedMapSidebar = ({
         { value: "tac", label: "TAC/LAC" },
         { value: "dominance", label: "Dominance Analysis" },
         { value: "coverage_violation", label: "Coverage Violation" },
+        {value: "mac_dl", label: "MAC DL"}
       ];
 
       const baseOptions = !enableGrid
