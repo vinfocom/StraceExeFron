@@ -27,6 +27,8 @@ const VIEW_TABS = [
 const valueOf = (row, ...keys) => {
   for (const key of keys) {
     if (row?.[key] !== undefined && row?.[key] !== null) return row[key];
+    const pascalKey = key ? key.charAt(0).toUpperCase() + key.slice(1) : key;
+    if (row?.[pascalKey] !== undefined && row?.[pascalKey] !== null) return row[pascalKey];
   }
   return null;
 };
@@ -37,37 +39,38 @@ const asDate = (value) => {
 };
 
 function normalizeTimelineRow(row = {}, forcedType = null) {
-  const sourceType = forcedType || valueOf(row, "sourceType", "type") || "event";
-  const rawId = valueOf(row, "id", "sourceId") ?? Math.random().toString(36).slice(2);
-  const timestampLabel = valueOf(row, "timestampLabel", "timestampText", "timestamp") || "";
-  const message = valueOf(row, "message", "eventName", "title", "category") || "Log row";
-  const detail = valueOf(row, "rawMessage", "rawText", "detail", "summary") || message;
-  const category = valueOf(row, "category", "sourceCategory") || (sourceType === "l3" ? "L3" : "Event");
+  const sourceType = forcedType || valueOf(row, "sourceType", "type", "SourceType", "Type") || "event";
+  const rawId = valueOf(row, "id", "sourceId", "Id", "SourceId") ?? Math.random().toString(36).slice(2);
+  const timestampLabel = valueOf(row, "timestampLabel", "timestampText", "timestamp", "TimestampLabel", "TimestampText", "Timestamp") || "";
+  const message = valueOf(row, "message", "eventName", "title", "officialName", "category", "Message", "EventName", "Title", "OfficialName", "Category") || "Log row";
+  const detail = valueOf(row, "rawMessage", "rawText", "detail", "summary", "RawMessage", "RawText", "Detail", "Summary") || message;
+  const category = valueOf(row, "category", "sourceCategory", "Category", "SourceCategory") || (sourceType === "l3" ? "L3" : "Event");
   return {
     ...row,
     id: String(rawId).startsWith(`${sourceType}-`) ? String(rawId) : `${sourceType}-${rawId}`,
     type: sourceType,
     sourceType,
-    timestamp: asDate(valueOf(row, "timestamp", "timestampText", "timestampLabel")),
+    timestamp: asDate(valueOf(row, "timestamp", "timestampText", "timestampLabel", "Timestamp", "TimestampText", "TimestampLabel")),
     timestampLabel,
     category,
-    sourceCategory: valueOf(row, "sourceCategory") || category,
-    domain: valueOf(row, "domain") || "Radio",
-    title: valueOf(row, "title", "message", "eventName") || message,
-    officialName: valueOf(row, "officialName", "message", "eventName") || message,
-    summary: valueOf(row, "summary", "detail") || detail,
+    sourceCategory: valueOf(row, "sourceCategory", "SourceCategory") || category,
+    domain: valueOf(row, "domain", "Domain") || "Radio",
+    title: valueOf(row, "title", "message", "eventName", "Title", "Message", "EventName") || message,
+    officialName: valueOf(row, "officialName", "message", "eventName", "OfficialName", "Message", "EventName") || message,
+    message,
+    summary: valueOf(row, "summary", "detail", "Summary", "Detail") || detail,
     rawMessage: detail,
-    sourceFile: valueOf(row, "sourceFile", "sourceFileName") || "",
-    sourceIndex: valueOf(row, "sourceIndex", "rowNo"),
-    severity: valueOf(row, "severity") || "info",
-    eventKey: valueOf(row, "eventKey", "message", "eventName"),
-    technology: valueOf(row, "technology") || "Unknown",
-    protocol: valueOf(row, "protocol") || category,
-    interface: valueOf(row, "interface") || category,
-    procedure: valueOf(row, "procedure") || category,
-    latitude: valueOf(row, "latitude"),
-    longitude: valueOf(row, "longitude"),
-    callId: valueOf(row, "callId"),
+    sourceFile: valueOf(row, "sourceFile", "sourceFileName", "SourceFile", "SourceFileName") || "",
+    sourceIndex: valueOf(row, "sourceIndex", "rowNo", "SourceIndex", "RowNo"),
+    severity: valueOf(row, "severity", "Severity") || "info",
+    eventKey: valueOf(row, "eventKey", "message", "eventName", "EventKey", "Message", "EventName"),
+    technology: valueOf(row, "technology", "Technology") || "Unknown",
+    protocol: valueOf(row, "protocol", "Protocol") || category,
+    interface: valueOf(row, "interface", "Interface") || category,
+    procedure: valueOf(row, "procedure", "Procedure") || category,
+    latitude: valueOf(row, "latitude", "Latitude"),
+    longitude: valueOf(row, "longitude", "Longitude"),
+    callId: valueOf(row, "callId", "CallId"),
     details: Array.isArray(row.details) ? row.details : [],
     metadata: row.metadata || row,
     icon: sourceType === "l3" ? "📡" : "📋",
