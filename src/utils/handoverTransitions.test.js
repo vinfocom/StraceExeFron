@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { buildHandoverTransitions } from "./handoverTransitions.js";
+import { buildHandoverTransitions, evaluateL3HandoverTimeline } from "./handoverTransitions.js";
 
 const baseTime = Date.parse("2026-08-09T10:00:00Z");
 
@@ -20,7 +20,7 @@ const row = (id, pci, offsetSeconds, extra = {}) => ({
   ...extra,
 });
 
-test("creates one inferred handover after the target PCI persists", () => {
+test("creates one handover candidate after the target PCI persists without L3 correlation", () => {
   const result = buildHandoverTransitions([
     row(1, 101, 0, { nodeb_id: "1001" }),
     row(2, 101, 1, { nodeb_id: "1001" }),
@@ -31,7 +31,7 @@ test("creates one inferred handover after the target PCI persists", () => {
   assert.equal(result.pciTransitions.length, 1);
   assert.equal(result.pciTransitions[0].from, "101");
   assert.equal(result.pciTransitions[0].to, "205");
-  assert.equal(result.pciTransitions[0].classification, "inferred_handover");
+  assert.equal(result.pciTransitions[0].classification, "handover_candidate");
   assert.equal(result.pciTransitions[0].mobilityCategory, "intra-frequency");
   assert.equal(result.pciTransitions[0].fromNodebId, "1001");
   assert.equal(result.pciTransitions[0].toNodebId, "2002");
@@ -218,4 +218,80 @@ test("keeps sessions isolated", () => {
   ]);
 
   assert.equal(result.pciTransitions.length, 0);
+});
+
+const l3 = (id, seconds, title, rawMessage, extra = {}) => ({
+  id,
+  timestamp: new Date(baseTime + seconds * 1000),
+  type: "l3",
+  category: "NR-RRC",
+  title,
+  rawMessage,
+  ...extra,
+});
+
+test("confirms an NR intra-frequency handover only after the serving PCI changes", () => {
+  const evaluation = evaluateL3HandoverTimeline([
+    l3("serving-old", 0, "Serving Cell", "Serving PCI=62 Serving NR-ARFCN=640000"),
+    l3("measurement", 1, "NR Measurement Report", "NR Measurement Report Neighbor PCI=61 Target NR-ARFCN=640000"),
+    l3("reconfiguration", 2, "NR RRC Reconfiguration", "NR RRC Reconfiguration reconfigurationWithSync Target PCI=61 Target NR-ARFCN=640000"),
+    l3("complete", 3, "NR RRC Reconfiguration Complete", "NR RRC Reconfiguration Complete"),
+    l3("serving-new", 4, "Serving Cell", "Serving PCI=61 Serving NR-ARFCN=640000"),
+  ]);
+
+  const result = evaluation.byId.get("complete");
+  assert.equal(result.classification, "confirmed_handover");
+  assert.equal(result.label, "HANDOVER COMPLETE");
+  assert.equal(result.handoverType, "NR Intra-Frequency Handover");
+  assert.equal(evaluation.summary.confirmed, 1);
+});
+
+test("identifies an NR inter-frequency handover from decoded ARFCN change", () => {
+  const evaluation = evaluateL3HandoverTimeline([
+    l3("serving-old", 0, "Serving Cell", "Serving PCI=62 Serving NR-ARFCN=640000"),
+    l3("measurement", 1, "NR Measurement Report", "NR Measurement Report Neighbor PCI=61 Target NR-ARFCN=650000"),
+    l3("reconfiguration", 2, "NR RRC Reconfiguration", "NR RRC Reconfiguration reconfigurationWithSync Target PCI=61 Target NR-ARFCN=650000"),
+    l3("complete", 3, "NR RRC Reconfiguration Complete", "NR RRC Reconfiguration Complete"),
+    l3("serving-new", 4, "Serving Cell", "Serving PCI=61 Serving NR-ARFCN=650000"),
+  ]);
+
+  assert.equal(evaluation.byId.get("complete").handoverType, "NR Inter-Frequency Handover");
+});
+
+test("keeps reconfiguration complete when the decoded serving cell is unchanged", () => {
+  const evaluation = evaluateL3HandoverTimeline([
+    l3("serving-old", 0, "Serving Cell", "Serving PCI=62 Serving NR-ARFCN=640000"),
+    l3("measurement", 1, "NR Measurement Report", "NR Measurement Report Neighbor PCI=61 Target NR-ARFCN=640000"),
+    l3("reconfiguration", 2, "NR RRC Reconfiguration", "NR RRC Reconfiguration reconfigurationWithSync Target PCI=61"),
+    l3("complete", 3, "NR RRC Reconfiguration Complete", "NR RRC Reconfiguration Complete"),
+    l3("serving-same", 4, "Serving Cell", "Serving PCI=62 Serving NR-ARFCN=640000"),
+  ]);
+
+  assert.equal(evaluation.byId.get("complete").classification, "rrc_reconfiguration_complete");
+  assert.equal(evaluation.byId.get("complete").label, "RRC RECONFIGURATION COMPLETE");
+  assert.equal(evaluation.summary.reconfigurationCompletesNotHandover, 1);
+});
+
+test("marks a correlated sequence as a candidate when serving-cell confirmation is absent", () => {
+  const evaluation = evaluateL3HandoverTimeline([
+    l3("serving-old", 0, "Serving Cell", "Serving PCI=62 Serving NR-ARFCN=640000"),
+    l3("measurement", 1, "NR Measurement Report", "NR Measurement Report Neighbor PCI=61 Target NR-ARFCN=650000"),
+    l3("reconfiguration", 2, "NR RRC Reconfiguration", "NR RRC Reconfiguration reconfigurationWithSync Target PCI=61 Target NR-ARFCN=650000"),
+    l3("complete", 3, "NR RRC Reconfiguration Complete", "NR RRC Reconfiguration Complete"),
+  ]);
+
+  assert.equal(evaluation.byId.get("complete").classification, "handover_candidate");
+  assert.equal(evaluation.byId.get("complete").label, "HANDOVER CANDIDATE");
+  assert.equal(evaluation.summary.candidates, 1);
+});
+
+test("classifies RRC recovery separately from handover", () => {
+  const evaluation = evaluateL3HandoverTimeline([
+    l3("recovery", 0, "RRC Reestablishment Request", "RRC Reestablishment Request cause rlf"),
+    l3("complete", 1, "RRC Reconfiguration Complete", "RRC Reconfiguration Complete recovery"),
+  ]);
+
+  assert.equal(evaluation.byId.get("recovery").classification, "rrc_reestablishment_recovery");
+  assert.equal(evaluation.byId.get("complete").label, "RRC REESTABLISHMENT / RECOVERY");
+  assert.equal(evaluation.summary.confirmed, 0);
 });

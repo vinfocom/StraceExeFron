@@ -3,9 +3,18 @@ import { normalizeBandName, normalizeTechName } from "./colorUtils.js";
 export const DEFAULT_HANDOVER_MAX_GAP_MS = null;
 export const DEFAULT_HANDOVER_GAP_MULTIPLIER = 2.5;
 export const DEFAULT_NEIGHBOR_LOOKBACK_MS = 30 * 1000;
+export const DEFAULT_L3_HANDOVER_CORRELATION_MS = 30 * 1000;
 
 const MISSING_SESSION = "__session_missing__";
 const INVALID_TEXT_VALUES = new Set(["", "n/a", "na", "null", "undefined", "-"]);
+
+const EXPLICIT_HANDOVER_COMPLETE_RE = /\b(?:handover|hand\s*over)\b.{0,80}\b(?:complete(?:d|ion)?|success(?:ful(?:ly)?)?)\b/i;
+const EXPLICIT_HANDOVER_FAILURE_RE = /\b(?:handover|hand\s*over)\b.{0,80}\b(?:fail(?:ed|ure)?|reject(?:ed)?|abort(?:ed)?)\b/i;
+const MEASUREMENT_REPORT_RE = /\b(?:measurement|meas)\s*report\b/i;
+const RRC_RECONFIGURATION_COMPLETE_RE = /\b(?:nr\s+)?rrc\s+(?:connection\s+)?reconfiguration\s+complete\b/i;
+const RRC_RECONFIGURATION_RE = /\b(?:nr\s+)?rrc\s+(?:connection\s+)?reconfiguration\b/i;
+const RRC_RECOVERY_RE = /\brrc\b.{0,50}\b(?:re[- ]?establish(?:ment|ed)?|recovery|recover(?:ed|y)?)\b/i;
+const MOBILITY_RECONFIGURATION_RE = /\b(?:mobilityControlInfo|reconfigurationWithSync|target\s*cell|handover|hand\s*over)\b/i;
 
 const readValue = (row, keys = []) => {
   for (const key of keys) {
@@ -53,6 +62,326 @@ export const getHandoverTimestampMs = (row) =>
       "createdAt",
     ]),
   );
+
+const safeObjectText = (value) => {
+  if (!value || typeof value !== "object") return "";
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return "";
+  }
+};
+
+const getL3ItemText = (item = {}) => [
+  item.eventKey,
+  item.title,
+  item.summary,
+  item.rawMessage,
+  item.officialName,
+  item.category,
+  item.sourceCategory,
+  item.protocol,
+  item.technology,
+  ...(item.details || []).flatMap((detail) => [detail?.label, detail?.value]),
+  safeObjectText(item.metadata),
+].filter(Boolean).join(" ");
+
+const normalizeRat = (value) => {
+  const normalized = normalizeTechName(value);
+  return normalized && normalized !== "Unknown" ? normalized : null;
+};
+
+const readNestedText = (item, keys) => readText(item, keys) || readText(item?.metadata, keys);
+
+const extractTaggedValue = (text, roles, fields, valuePattern = "[A-Za-z0-9-]+") => {
+  const rolePattern = roles.join("|");
+  const fieldPattern = fields.join("|");
+  const patterns = [
+    new RegExp(`\\b(?:${rolePattern})\\b[^\\r\\n,;]{0,40}\\b(?:${fieldPattern})\\b\\s*[:=]?\\s*(${valuePattern})`, "i"),
+    new RegExp(`\\b(?:${fieldPattern})\\b[^\\r\\n,;]{0,24}\\b(?:${rolePattern})\\b\\s*[:=]?\\s*(${valuePattern})`, "i"),
+  ];
+  for (const pattern of patterns) {
+    const match = text.match(pattern);
+    if (match?.[1]) return match[1];
+  }
+  return null;
+};
+
+const extractRatHint = (text = "") => {
+  if (/\b(?:NR|5G|gNB)\b/i.test(text)) return "5G";
+  if (/\b(?:LTE|4G|eNB|eNodeB)\b/i.test(text)) return "4G";
+  if (/\b(?:UMTS|UTRAN|3G)\b/i.test(text)) return "3G";
+  if (/\b(?:GSM|GERAN|2G)\b/i.test(text)) return "2G";
+  return null;
+};
+
+const extractL3CellEvidence = (item = {}) => {
+  const text = getL3ItemText(item);
+  const servingPci = readNestedText(item, ["servingPci", "serving_pci", "primaryPci", "primary_pci"])
+    || extractTaggedValue(text, ["serving", "source", "old", "current", "pcell"], ["pci"], "\\d+");
+  const servingCellId = readNestedText(item, ["servingNci", "serving_nci", "nci", "NCI"])
+    || extractTaggedValue(text, ["serving", "source", "old", "current", "pcell"], ["nci", "cell\\s*id"], "[A-Fa-f0-9x-]+");
+  const servingFrequency = readNestedText(item, ["servingNrarfcn", "serving_nrarfcn", "servingEarfcn", "serving_earfcn"])
+    || extractTaggedValue(text, ["serving", "source", "old", "current", "pcell"], ["nrarfcn", "nr[- ]?arfcn", "earfcn", "arfcn"], "\\d+");
+  const targetPci = readNestedText(item, ["targetPci", "target_pci", "neighborPci", "neighbor_pci", "neighbourPci", "neighbour_pci"])
+    || extractTaggedValue(text, ["target", "candidate", "neighbor", "neighbour", "new"], ["pci"], "\\d+");
+  const targetCellId = readNestedText(item, ["targetNci", "target_nci", "neighborNci", "neighbor_nci", "neighbourNci", "neighbour_nci"])
+    || extractTaggedValue(text, ["target", "candidate", "neighbor", "neighbour", "new"], ["nci", "cell\\s*id"], "[A-Fa-f0-9x-]+");
+  const targetFrequency = readNestedText(item, ["targetNrarfcn", "target_nrarfcn", "targetEarfcn", "target_earfcn", "neighborNrarfcn", "neighbor_nrarfcn"])
+    || extractTaggedValue(text, ["target", "candidate", "neighbor", "neighbour", "new"], ["nrarfcn", "nr[- ]?arfcn", "earfcn", "arfcn"], "\\d+");
+  const structuredRat = normalizeRat(readNestedText(item, ["technology", "Technology", "rat", "RAT"]));
+  const messageRat = extractRatHint(`${item.category || ""} ${item.sourceCategory || ""} ${item.protocol || ""} ${item.title || ""}`);
+  const targetRatText = extractTaggedValue(text, ["target", "candidate", "neighbor", "neighbour", "new"], ["rat", "technology"], "[A-Za-z0-9-]+");
+
+  return {
+    text,
+    serving: {
+      pci: servingPci,
+      cellId: servingCellId,
+      frequency: servingFrequency,
+      rat: (servingPci || servingCellId || servingFrequency) ? structuredRat || messageRat : null,
+    },
+    target: {
+      pci: targetPci,
+      cellId: targetCellId,
+      frequency: targetFrequency,
+      rat: normalizeRat(targetRatText) || ((targetPci || targetCellId || targetFrequency) ? messageRat : null),
+    },
+  };
+};
+
+const hasCellIdentity = (cell) => Boolean(cell?.pci || cell?.cellId);
+const mergeCellEvidence = (current = {}, next = {}) => {
+  const existing = current || {};
+  const incoming = next || {};
+  return {
+    pci: incoming.pci || existing.pci || null,
+    cellId: incoming.cellId || existing.cellId || null,
+    frequency: incoming.frequency || existing.frequency || null,
+    rat: incoming.rat || existing.rat || null,
+  };
+};
+
+const cellsDiffer = (source, target) => {
+  if (!source || !target) return false;
+  if (source.cellId && target.cellId && String(source.cellId) !== String(target.cellId)) return true;
+  if (source.pci && target.pci && String(source.pci) !== String(target.pci)) return true;
+  if (source.rat && target.rat && source.rat !== target.rat) return true;
+  return Boolean(
+    source.pci && target.pci && String(source.pci) === String(target.pci)
+    && source.frequency && target.frequency && String(source.frequency) !== String(target.frequency),
+  );
+};
+
+const cellsMatch = (expected, observed) => {
+  if (!hasCellIdentity(expected) || !hasCellIdentity(observed)) return false;
+  if (expected.cellId && observed.cellId && String(expected.cellId) !== String(observed.cellId)) return false;
+  if (expected.pci && observed.pci && String(expected.pci) !== String(observed.pci)) return false;
+  if (expected.frequency && observed.frequency && String(expected.frequency) !== String(observed.frequency)) return false;
+  if (expected.rat && observed.rat && expected.rat !== observed.rat) return false;
+  return Boolean(
+    (expected.cellId && observed.cellId)
+    || (expected.pci && observed.pci)
+  );
+};
+
+const getConfirmedHandoverType = (source, target) => {
+  if (source?.rat && target?.rat && source.rat !== target.rat) return "Inter-RAT Handover";
+  if (source?.rat !== "5G" || target?.rat !== "5G") return null;
+  if (!source.frequency || !target.frequency) return null;
+  return String(source.frequency) === String(target.frequency)
+    ? "NR Intra-Frequency Handover"
+    : "NR Inter-Frequency Handover";
+};
+
+const getL3TimeMs = (item) => {
+  const value = item?.timestamp;
+  if (value instanceof Date) return value.getTime();
+  return toEpochMilliseconds(value);
+};
+
+const withinCorrelationWindow = (earlier, later, correlationWindowMs) => {
+  const earlierMs = getL3TimeMs(earlier);
+  const laterMs = getL3TimeMs(later);
+  if (earlierMs == null || laterMs == null) return true;
+  const gap = laterMs - earlierMs;
+  return gap >= 0 && gap <= correlationWindowMs;
+};
+
+/**
+ * Correlates decoded L3 messages without treating a generic RRC
+ * Reconfiguration Complete as proof of handover. Results are keyed both by
+ * row id and original index so callers do not need to alter their row shape.
+ */
+export function evaluateL3HandoverTimeline(items = [], {
+  correlationWindowMs = DEFAULT_L3_HANDOVER_CORRELATION_MS,
+} = {}) {
+  const ordered = (items || []).map((item, originalIndex) => ({ item, originalIndex }));
+  const evidence = ordered.map(({ item }) => extractL3CellEvidence(item));
+  const byId = new Map();
+  const byIndex = new Map();
+  const outcomes = [];
+  let lastServing = null;
+  let latestMeasurement = null;
+  let pendingReconfiguration = null;
+  let latestRecovery = null;
+
+  const record = (entry, outcome) => {
+    if (entry.item?.id != null) byId.set(entry.item.id, outcome);
+    byIndex.set(entry.originalIndex, outcome);
+    outcomes.push(outcome);
+  };
+
+  ordered.forEach((entry, orderedIndex) => {
+    const rowEvidence = evidence[orderedIndex];
+    const { text } = rowEvidence;
+    const servingBeforeRow = lastServing;
+    if (hasCellIdentity(rowEvidence.serving)) {
+      lastServing = mergeCellEvidence(lastServing, rowEvidence.serving);
+    }
+
+    if (RRC_RECOVERY_RE.test(text)) {
+      latestRecovery = entry.item;
+      record(entry, {
+        classification: "rrc_reestablishment_recovery",
+        label: "RRC REESTABLISHMENT / RECOVERY",
+        severity: /fail|reject/i.test(text) ? "failure" : "warning",
+        handoverType: null,
+      });
+      pendingReconfiguration = null;
+      return;
+    }
+
+    if (EXPLICIT_HANDOVER_FAILURE_RE.test(text)) {
+      record(entry, {
+        classification: "failed_handover",
+        label: "HANDOVER FAILURE",
+        severity: "failure",
+        handoverType: null,
+      });
+      pendingReconfiguration = null;
+      return;
+    }
+
+    if (MEASUREMENT_REPORT_RE.test(text)) {
+      latestMeasurement = {
+        item: entry.item,
+        source: servingBeforeRow || lastServing,
+        target: rowEvidence.target,
+      };
+    }
+
+    if (RRC_RECONFIGURATION_RE.test(text) && !RRC_RECONFIGURATION_COMPLETE_RE.test(text)) {
+      const recentMeasurement = latestMeasurement
+        && withinCorrelationWindow(latestMeasurement.item, entry.item, correlationWindowMs)
+        ? latestMeasurement
+        : null;
+      if (recentMeasurement || MOBILITY_RECONFIGURATION_RE.test(text) || hasCellIdentity(rowEvidence.target)) {
+        pendingReconfiguration = {
+          item: entry.item,
+          measurement: recentMeasurement,
+          source: recentMeasurement?.source || servingBeforeRow || lastServing,
+          target: mergeCellEvidence(recentMeasurement?.target, rowEvidence.target),
+        };
+      }
+    }
+
+    if (EXPLICIT_HANDOVER_COMPLETE_RE.test(text)) {
+      const outcome = {
+        classification: "confirmed_handover",
+        label: "HANDOVER COMPLETE",
+        severity: "success",
+        handoverType: getConfirmedHandoverType(pendingReconfiguration?.source, pendingReconfiguration?.target),
+      };
+      record(entry, outcome);
+      pendingReconfiguration = null;
+      return;
+    }
+
+    if (!RRC_RECONFIGURATION_COMPLETE_RE.test(text)) return;
+
+    if (latestRecovery && withinCorrelationWindow(latestRecovery, entry.item, correlationWindowMs)) {
+      record(entry, {
+        classification: "rrc_reestablishment_recovery",
+        label: "RRC REESTABLISHMENT / RECOVERY",
+        severity: "warning",
+        handoverType: null,
+      });
+      pendingReconfiguration = null;
+      return;
+    }
+
+    const pending = pendingReconfiguration
+      && withinCorrelationWindow(pendingReconfiguration.item, entry.item, correlationWindowMs)
+      ? pendingReconfiguration
+      : null;
+    if (!pending) {
+      record(entry, {
+        classification: "rrc_reconfiguration_complete",
+        label: "RRC RECONFIGURATION COMPLETE",
+        severity: "success",
+        handoverType: null,
+      });
+      return;
+    }
+
+    const futureServingCells = [];
+    for (let futureIndex = orderedIndex; futureIndex < ordered.length; futureIndex += 1) {
+      if (!withinCorrelationWindow(entry.item, ordered[futureIndex].item, correlationWindowMs)) break;
+      if (hasCellIdentity(evidence[futureIndex].serving)) {
+        futureServingCells.push(evidence[futureIndex].serving);
+      }
+    }
+    const sourceKnown = hasCellIdentity(pending.source);
+    const targetKnown = hasCellIdentity(pending.target);
+    const changedServing = sourceKnown
+      ? futureServingCells.find((cell) => cellsDiffer(pending.source, cell))
+      : null;
+    const confirmedTarget = changedServing && targetKnown && cellsMatch(pending.target, changedServing);
+    const unchangedServingObserved = sourceKnown
+      && futureServingCells.some((cell) => cellsMatch(pending.source, cell));
+
+    if (pending.measurement && sourceKnown && targetKnown && confirmedTarget) {
+      record(entry, {
+        classification: "confirmed_handover",
+        label: "HANDOVER COMPLETE",
+        severity: "success",
+        handoverType: getConfirmedHandoverType(pending.source, changedServing),
+        sourceCell: pending.source,
+        targetCell: changedServing,
+      });
+    } else if (unchangedServingObserved && !changedServing) {
+      record(entry, {
+        classification: "rrc_reconfiguration_complete",
+        label: "RRC RECONFIGURATION COMPLETE",
+        severity: "success",
+        handoverType: null,
+      });
+    } else {
+      record(entry, {
+        classification: "handover_candidate",
+        label: "HANDOVER CANDIDATE",
+        severity: "warning",
+        handoverType: null,
+        reason: !sourceKnown || !targetKnown
+          ? "Serving or target cell identity is not decoded"
+          : "Serving-cell transition is not confirmed",
+      });
+    }
+    pendingReconfiguration = null;
+  });
+
+  const summary = {
+    candidates: outcomes.filter((outcome) => outcome.classification === "handover_candidate").length,
+    confirmed: outcomes.filter((outcome) => outcome.classification === "confirmed_handover").length,
+    reconfigurationCompletesNotHandover: outcomes.filter((outcome) => outcome.classification === "rrc_reconfiguration_complete").length,
+    recoveryCases: outcomes.filter((outcome) => outcome.classification === "rrc_reestablishment_recovery").length,
+    confirmedHandovers: outcomes.filter((outcome) => outcome.classification === "confirmed_handover"),
+    ambiguousCases: outcomes.filter((outcome) => outcome.classification === "handover_candidate"),
+  };
+
+  return { byId, byIndex, outcomes, summary };
+}
 
 const getSessionKey = (row) => {
   const value = readValue(row, [
@@ -143,13 +472,13 @@ const classifyEvent = (entries = []) => {
   if (/\b(?:cell\s+)?reselection(?:\s+(?:complete|success(?:ful)?))?\b/i.test(text)) {
     return { classification: "cell_reselection", confidence: "high" };
   }
-  if (/\b(?:handover|hand\s*over|ho)[\s_:-]*(?:success(?:ful)?|complete(?:d)?|completion)\b/i.test(text)) {
+  if (/\b(?:handover|hand\s*over)[\s_:-]*(?:success(?:ful)?|complete(?:d)?|completion)\b/i.test(text)) {
     return { classification: "confirmed_handover", confidence: "high" };
   }
-  if (/\b(?:handover|hand\s*over|ho)[\s_:-]*(?:fail(?:ed|ure)?|reject(?:ed)?|abort(?:ed)?)\b/i.test(text)) {
+  if (/\b(?:handover|hand\s*over)[\s_:-]*(?:fail(?:ed|ure)?|reject(?:ed)?|abort(?:ed)?)\b/i.test(text)) {
     return { classification: "failed_handover", confidence: "high" };
   }
-  return { classification: "inferred_handover", confidence: "medium" };
+  return { classification: "handover_candidate", confidence: "medium" };
 };
 
 const hasExplicitRegistrationFailure = (row) => {
@@ -461,7 +790,7 @@ const buildFieldTransitions = ({
     }
 
     const eventStatus = classifyEvent(candidateRun.entries);
-    const hasExplicitOutcome = eventStatus.classification !== "inferred_handover";
+    const hasExplicitOutcome = eventStatus.classification !== "handover_candidate";
     if (candidateRun.entries.length < Math.max(1, minTargetSamples) && !hasExplicitOutcome) {
       continue;
     }
@@ -561,7 +890,7 @@ export const buildHandoverTransitions = (
       }
 
       const eventStatus = classifyEvent(candidateRun.entries);
-      const hasExplicitOutcome = eventStatus.classification !== "inferred_handover";
+      const hasExplicitOutcome = eventStatus.classification !== "handover_candidate";
       if (candidateRun.entries.length < Math.max(1, minTargetSamples) && !hasExplicitOutcome) {
         continue;
       }

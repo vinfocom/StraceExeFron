@@ -6,7 +6,9 @@ import React, {
   useRef,
 } from "react";
 import { Upload, Loader2, AlertTriangle, X, Search, Play, Pause, RotateCcw, Rewind, FastForward } from "lucide-react";
-import { CircleF, GoogleMap, MarkerF, useJsApiLoader } from "@react-google-maps/api";
+import { GoogleMap, useJsApiLoader } from "@react-google-maps/api";
+import { GoogleMapsOverlay } from "@deck.gl/google-maps";
+import { ScatterplotLayer } from "@deck.gl/layers";
 import { Rnd } from "react-rnd";
 import { extractL3AndEventFiles } from "@/utils/l3Events/zipParser";
 import { parseL3CSV } from "@/utils/l3Events/l3Parser";
@@ -20,6 +22,7 @@ import { TimelineCard } from "./l3Events/TimelineCard";
 import { ExcelSignalingView } from "./l3Events/ExcelSignalingView";
 import { buildUnifiedSignalingRows } from "@/utils/l3Events/signalingModel";
 import { getNrRrcPayloadInsights } from "@/utils/l3Events/nrRrcPayloadInsights";
+import useColorForLog from "@/hooks/useColorForLog";
 import {
   GOOGLE_MAPS_LOADER_OPTIONS,
   getGoogleMapsConfigError,
@@ -37,6 +40,80 @@ const VIEW_TABS = [
 const NR_RRC_MESSAGE_FIELDS = ["NR PCI", "NR ARFCN", "NR Frequency", "NR Band"];
 const MAP_CONTAINER_STYLE = { width: "100%", height: "100%" };
 const DEFAULT_MAP_CENTER = { lat: 20.5937, lng: 78.9629 };
+const MAP_INTERFACE_COLOR_STORAGE_KEY = "l3-events-map-interface-colors";
+const MAP_COLOR_MODE_STORAGE_KEY = "l3-events-map-color-mode";
+const MAP_INTERFACE_COLOR_PALETTE = [
+  "#38bdf8",
+  "#a78bfa",
+  "#f59e0b",
+  "#14b8a6",
+  "#f97316",
+  "#ec4899",
+  "#84cc16",
+  "#64748b",
+];
+const MAP_UNKNOWN_RSRP_COLOR = "#64748b";
+
+const normalizeMapLabel = (value = "") => String(value)
+  .replace(/^\(new\)\s*/i, "")
+  .replace(/^.*?\s*->\s*/, "")
+  .replace(/^-?\d+\(([^)]+)\).*$/, "$1")
+  .replace(/[_-]+/g, " ")
+  .replace(/\s+/g, " ")
+  .trim()
+  .toLowerCase()
+  .replace(/\b\w/g, (character) => character.toUpperCase());
+
+function detailValue(item, label) {
+  return item?.details?.find((detail) => detail.label === label)?.value || "";
+}
+
+function getMapPointInterface(item) {
+  return normalizeMapLabel(
+    item?.interface
+      || detailValue(item, "Interface")
+      || item?.sourceCategory
+      || item?.protocol
+      || item?.category
+      || (item?.sourceType === "l3" || item?.type === "l3" ? "L3" : "Event"),
+  );
+}
+
+function getDefaultMapInterfaceColor(label, index = 0) {
+  if (/fail|drop|reject|error/i.test(label)) return "#ef4444";
+  if (/lte|4g/i.test(label)) return "#22c55e";
+  if (/nr|5g/i.test(label)) return "#38bdf8";
+  if (/nas|ims|sip|core|amf|mme/i.test(label)) return "#a78bfa";
+  if (/rrc/i.test(label)) return "#f59e0b";
+  return MAP_INTERFACE_COLOR_PALETTE[index % MAP_INTERFACE_COLOR_PALETTE.length];
+}
+
+function hexToRgbArray(hex, alpha = 255) {
+  const normalized = String(hex || "").replace("#", "");
+  if (!/^[0-9a-f]{6}$/i.test(normalized)) return [100, 116, 139, alpha];
+  return [
+    parseInt(normalized.slice(0, 2), 16),
+    parseInt(normalized.slice(2, 4), 16),
+    parseInt(normalized.slice(4, 6), 16),
+    alpha,
+  ];
+}
+
+function buildRsrpByRowId(analysis) {
+  const byId = new Map();
+  analysis?.procedures?.forEach((procedure) => {
+    if (!Number.isFinite(Number(procedure.rsrpValue))) return;
+    procedure.items?.forEach((item) => {
+      if (!item?.id || byId.has(item.id)) return;
+      byId.set(item.id, {
+        value: Number(procedure.rsrpValue),
+        label: procedure.rsrpSummary || procedure.rsrp || `${Number(procedure.rsrpValue).toFixed(0)} dBm`,
+        matchedAt: procedure.rsrpMatchedAt || "",
+      });
+    });
+  });
+  return byId;
+}
 
 export const L3EventsTab = () => {
   const [status, setStatus] = useState("idle"); // idle | loading | ready | error
@@ -135,7 +212,8 @@ export const L3EventsTab = () => {
     () => buildUnifiedSignalingRows(timeline, enrichedCallSummary.calls, fullProtocolAnalysis),
     [timeline, enrichedCallSummary.calls, fullProtocolAnalysis],
   );
-  const mapPoints = useMemo(() => buildMapPoints(timeline), [timeline]);
+  const rsrpByRowId = useMemo(() => buildRsrpByRowId(fullProtocolAnalysis), [fullProtocolAnalysis]);
+  const mapPoints = useMemo(() => buildMapPoints(signalingRows, rsrpByRowId), [signalingRows, rsrpByRowId]);
   const l3Messages = useMemo(() => timeline.filter((item) => item.type === "l3"), [timeline]);
   const eventMessages = useMemo(() => timeline.filter((item) => item.type === "event"), [timeline]);
   const visibleRawMessages = useMemo(() => {
@@ -428,7 +506,7 @@ function enrichCallSummaryTechnology(summary, procedures = []) {
   };
 }
 
-function buildMapPoints(timeline) {
+function buildMapPoints(timeline, rsrpByRowId = new Map()) {
   const toMapCoordinate = (value, min, max) => {
     if (value === null || value === undefined || String(value).trim() === "") return null;
     const numeric = Number(value);
@@ -440,16 +518,21 @@ function buildMapPoints(timeline) {
       const lat = toMapCoordinate(item?.latitude, -90, 90);
       const lng = toMapCoordinate(item?.longitude, -180, 180);
       if (lat === null || lng === null) return null;
+      const rsrpMatch = rsrpByRowId.get(item?.id) || null;
       return {
         id: item?.id || `l3-map-point-${index}`,
         lat,
         lng,
         type: item?.type || "event",
         category: item?.category || item?.sourceCategory || "",
-        title: item?.title || item?.summary || "Message",
+        title: item?.message || item?.title || item?.summary || "Message",
         summary: item?.summary || "",
         rawMessage: item?.rawMessage || "",
         severity: item?.severity || "",
+        state: getMapPointInterface(item),
+        rsrpValue: Number.isFinite(Number(rsrpMatch?.value)) ? Number(rsrpMatch.value) : null,
+        rsrpLabel: rsrpMatch?.label || "",
+        rsrpMatchedAt: rsrpMatch?.matchedAt || "",
         timestampLabel: item?.timestampLabel || item?.timestamp?.toLocaleTimeString([], { hour12: false, timeZone: "UTC" }) || "",
         timestampMs: item?.timestamp instanceof Date ? item.timestamp.getTime() : null,
         sourceFile: item?.sourceFile || "",
@@ -483,12 +566,30 @@ function isFailurePoint(point) {
 
 function L3EventsMapView({ points }) {
   const { isLoaded, loadError } = useJsApiLoader(GOOGLE_MAPS_LOADER_OPTIONS);
+  const { getThresholdInfo, getThresholdsForMetric } = useColorForLog();
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [showAllPoints, setShowAllPoints] = useState(false);
   const [playbackSpeedMs, setPlaybackSpeedMs] = useState(750);
   const [messageSearch, setMessageSearch] = useState("");
   const [messagePanelWidth, setMessagePanelWidth] = useState(340);
+  const [mapInstance, setMapInstance] = useState(null);
+  const [colorMode, setColorMode] = useState(() => {
+    try {
+      const savedMode = window.localStorage.getItem(MAP_COLOR_MODE_STORAGE_KEY);
+      return savedMode === "rsrp" ? "rsrp" : "interface";
+    } catch {
+      return "interface";
+    }
+  });
+  const [interfaceColorOverrides, setInterfaceColorOverrides] = useState(() => {
+    try {
+      const savedColors = JSON.parse(window.localStorage.getItem(MAP_INTERFACE_COLOR_STORAGE_KEY) || "{}");
+      return savedColors && typeof savedColors === "object" && !Array.isArray(savedColors) ? savedColors : {};
+    } catch {
+      return {};
+    }
+  });
   const activeCardRef = useRef(null);
   const mapStageRef = useRef(null);
   const [mapStageWidth, setMapStageWidth] = useState(0);
@@ -497,6 +598,71 @@ function L3EventsMapView({ points }) {
   const currentRawMessage = useMemo(() => formatMapRawMessage(currentPoint), [currentPoint]);
   const progressPercent = points.length > 1 ? (currentIndex / (points.length - 1)) * 100 : 100;
   const trailPoints = showAllPoints ? points : points.slice(0, currentIndex);
+  const interfaceLegend = useMemo(() => {
+    const counts = new Map();
+    points.forEach((point) => counts.set(point.state, (counts.get(point.state) || 0) + 1));
+    return Array.from(counts, ([state, count], index) => ({
+      state,
+      count,
+      color: interfaceColorOverrides[state] || getDefaultMapInterfaceColor(state, index),
+    }));
+  }, [points, interfaceColorOverrides]);
+  const interfaceColors = useMemo(
+    () => Object.fromEntries(interfaceLegend.map(({ state, color }) => [state, color])),
+    [interfaceLegend],
+  );
+  const rsrpThresholds = useMemo(() => (
+    (getThresholdsForMetric("rsrp") || [])
+      .map((threshold) => {
+        const min = Number(threshold.min);
+        const max = Number(threshold.max);
+        const range = threshold.range || `${threshold.min} to ${threshold.max}`;
+        const label = threshold.label || range;
+        return {
+          key: `${threshold.min}-${threshold.max}-${label}`,
+          min,
+          max,
+          label,
+          range,
+          color: threshold.color || MAP_UNKNOWN_RSRP_COLOR,
+        };
+      })
+      .filter((threshold) => Number.isFinite(threshold.min) && Number.isFinite(threshold.max))
+      .sort((left, right) => left.min - right.min)
+  ), [getThresholdsForMetric]);
+  const rsrpLegend = useMemo(() => {
+    const counts = new Map(rsrpThresholds.map((threshold) => [threshold.key, 0]));
+    let unknownCount = 0;
+    points.forEach((point) => {
+      const thresholdInfo = getThresholdInfo(point.rsrpValue, "rsrp");
+      if (!thresholdInfo) {
+        unknownCount += 1;
+        return;
+      }
+      const thresholdKey = `${thresholdInfo.min}-${thresholdInfo.max}-${thresholdInfo.label || thresholdInfo.range}`;
+      counts.set(thresholdKey, (counts.get(thresholdKey) || 0) + 1);
+    });
+    return [
+      ...rsrpThresholds.map((threshold) => ({
+        ...threshold,
+        count: counts.get(threshold.key) || 0,
+      })),
+      { key: "no-rsrp", label: "No RSRP", range: "No matched RSRP", color: MAP_UNKNOWN_RSRP_COLOR, count: unknownCount },
+    ];
+  }, [getThresholdInfo, points, rsrpThresholds]);
+  const getMapPointColor = useCallback((point) => (
+    colorMode === "rsrp"
+      ? getThresholdInfo(point?.rsrpValue, "rsrp")?.color || MAP_UNKNOWN_RSRP_COLOR
+      : interfaceColors[point?.state] || MAP_UNKNOWN_RSRP_COLOR
+  ), [colorMode, getThresholdInfo, interfaceColors]);
+  const deckTrailPoints = useMemo(
+    () => trailPoints.map((point) => ({ ...point, colorHex: getMapPointColor(point) })),
+    [getMapPointColor, trailPoints],
+  );
+  const deckActivePoint = useMemo(
+    () => (currentPoint ? [{ ...currentPoint, colorHex: getMapPointColor(currentPoint) }] : []),
+    [currentPoint, getMapPointColor],
+  );
   const filteredMessagePoints = useMemo(() => {
     const query = messageSearch.trim().toLowerCase();
     if (!query) return points.map((point, index) => ({ point, index }));
@@ -525,6 +691,22 @@ function L3EventsMapView({ points }) {
   }, [points]);
 
   useEffect(() => {
+    try {
+      window.localStorage.setItem(MAP_INTERFACE_COLOR_STORAGE_KEY, JSON.stringify(interfaceColorOverrides));
+    } catch {
+      // The map still works when browser storage is unavailable.
+    }
+  }, [interfaceColorOverrides]);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(MAP_COLOR_MODE_STORAGE_KEY, colorMode);
+    } catch {
+      // The selected color mode is non-critical.
+    }
+  }, [colorMode]);
+
+  useEffect(() => {
     if (!isPlaying || points.length <= 1) return undefined;
     const timer = window.setInterval(() => {
       setCurrentIndex((index) => {
@@ -539,8 +721,9 @@ function L3EventsMapView({ points }) {
   }, [isPlaying, playbackSpeedMs, points.length]);
 
   useEffect(() => {
+    if (isPlaying && playbackSpeedMs <= 350) return;
     activeCardRef.current?.scrollIntoView({ behavior: "smooth", block: "center", inline: "nearest" });
-  }, [currentIndex]);
+  }, [currentIndex, isPlaying, playbackSpeedMs]);
 
   useEffect(() => {
     if (!mapStageRef.current) return undefined;
@@ -648,6 +831,8 @@ function L3EventsMapView({ points }) {
               mapContainerStyle={MAP_CONTAINER_STYLE}
               center={center}
               zoom={points.length > 1 ? 13 : 15}
+              onLoad={setMapInstance}
+              onUnmount={() => setMapInstance(null)}
               options={{
                 fullscreenControl: false,
                 streetViewControl: false,
@@ -657,31 +842,80 @@ function L3EventsMapView({ points }) {
                 scrollwheel: true,
               }}
             >
-              {trailPoints.map((point, index) => (
-                <CircleF
-                  key={`${point.id}-trail`}
-                  center={{ lat: point.lat, lng: point.lng }}
-                  radius={6}
-                  options={{
-                    fillColor: index === 0 ? "#f59e0b" : "#38bdf8",
-                    fillOpacity: 0.85,
-                    strokeColor: "#0f172a",
-                    strokeOpacity: 0.85,
-                    strokeWeight: 1,
-                    clickable: false,
-                    zIndex: 1,
-                  }}
-                />
-              ))}
-              {currentPoint && (
-                <MarkerF
-                  key={currentPoint.id}
-                  position={{ lat: currentPoint.lat, lng: currentPoint.lng }}
-                  title={`${currentIndex + 1}. ${currentPoint.title}${currentPoint.timestampLabel ? ` - ${currentPoint.timestampLabel}` : ""}`}
-                  label={{ text: currentPoint.type === "l3" ? "L3" : "EV", color: "#ffffff", fontSize: "10px", fontWeight: "700" }}
-                />
-              )}
+              <L3MapDeckOverlay
+                map={mapInstance}
+                trailPoints={deckTrailPoints}
+                activePoints={deckActivePoint}
+              />
             </GoogleMap>
+          )}
+        </div>
+        <div
+          className="absolute top-3 z-[5] max-h-[min(320px,calc(100%-24px))] w-48 overflow-y-auto rounded-lg border border-slate-600/80 bg-slate-950/90 p-2 text-xs text-slate-200 shadow-xl backdrop-blur-sm"
+          style={{ right: messagePanelWidth + 12 }}
+          onClick={(event) => event.stopPropagation()}
+        >
+          <div className="mb-1.5 flex items-center justify-between gap-2">
+            <span className="font-semibold text-white">State Legend</span>
+          </div>
+          <div className="mb-2 grid grid-cols-2 overflow-hidden rounded border border-slate-700 bg-slate-900 p-0.5">
+            <button
+              type="button"
+              onClick={() => setColorMode("interface")}
+              className={`rounded px-1.5 py-1 text-[10px] font-medium transition-colors ${
+                colorMode === "interface" ? "bg-blue-600 text-white" : "text-slate-300 hover:bg-slate-800"
+              }`}
+            >
+              Interface
+            </button>
+            <button
+              type="button"
+              onClick={() => setColorMode("rsrp")}
+              className={`rounded px-1.5 py-1 text-[10px] font-medium transition-colors ${
+                colorMode === "rsrp" ? "bg-blue-600 text-white" : "text-slate-300 hover:bg-slate-800"
+              }`}
+            >
+              RSRP
+            </button>
+          </div>
+          <div className="space-y-1">
+            {colorMode === "rsrp" ? rsrpLegend.map(({ key, label, range, count, color }) => (
+              <div
+                key={key}
+                className="flex items-center gap-2 rounded px-1 py-1"
+                title={range}
+              >
+                <span className="h-4 w-4 shrink-0 rounded-full border border-white/70" style={{ backgroundColor: color }} />
+                <span className="min-w-0 flex-1 truncate">{label}</span>
+                <span className="shrink-0 text-[10px] text-slate-400">{count.toLocaleString()}</span>
+              </div>
+            )) : interfaceLegend.map(({ state, count, color }) => (
+              <label
+                key={state}
+                className="flex cursor-pointer items-center gap-2 rounded px-1 py-1 transition-colors hover:bg-white/10"
+                title={`Click to change the ${state} color`}
+              >
+                <span className="relative h-4 w-4 shrink-0 overflow-hidden rounded-full border border-white/70" style={{ backgroundColor: color }}>
+                  <input
+                    type="color"
+                    value={color}
+                    aria-label={`Change ${state} color`}
+                    className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
+                    onChange={(event) => setInterfaceColorOverrides((current) => ({
+                      ...current,
+                      [state]: event.target.value,
+                    }))}
+                  />
+                </span>
+                <span className="min-w-0 flex-1 truncate">{state}</span>
+                <span className="shrink-0 text-[10px] text-slate-400">{count.toLocaleString()}</span>
+              </label>
+            ))}
+          </div>
+          {colorMode === "interface" && (
+            <div className="mt-1.5 border-t border-slate-700 pt-1.5 text-[10px] text-slate-400">
+              Click a color to customize it.
+            </div>
           )}
         </div>
         <Rnd
@@ -720,6 +954,8 @@ function L3EventsMapView({ points }) {
                   key={point.id}
                   ref={index === currentIndex ? activeCardRef : null}
                   point={point}
+                  stateColor={getMapPointColor(point)}
+                  colorMode={colorMode}
                   active={index === currentIndex}
                   onClick={() => {
                     setIsPlaying(false);
@@ -839,8 +1075,85 @@ function L3EventsMapView({ points }) {
   );
 }
 
-const MapMessageCard = React.forwardRef(function MapMessageCard({ point, active, onClick }, ref) {
+function L3MapDeckOverlay({ map, trailPoints, activePoints }) {
+  const overlayRef = useRef(null);
+
+  useEffect(() => {
+    if (!map) return undefined;
+    if (!overlayRef.current) {
+      overlayRef.current = new GoogleMapsOverlay({
+        interleaved: false,
+        glOptions: { preserveDrawingBuffer: false },
+      });
+    }
+
+    overlayRef.current.setMap(map);
+    return () => {
+      if (overlayRef.current) {
+        overlayRef.current.setProps({ layers: [] });
+        overlayRef.current.setMap(null);
+      }
+    };
+  }, [map]);
+
+  const layers = useMemo(() => [
+    new ScatterplotLayer({
+      id: "l3-events-trail-points",
+      data: trailPoints,
+      getPosition: (point) => [point.lng, point.lat],
+      getFillColor: (point) => hexToRgbArray(point.colorHex, 220),
+      getLineColor: [15, 23, 42, 230],
+      getLineWidth: 1,
+      getRadius: 4,
+      lineWidthUnits: "pixels",
+      radiusUnits: "pixels",
+      stroked: true,
+      filled: true,
+      pickable: false,
+      updateTriggers: {
+        getFillColor: [trailPoints],
+      },
+    }),
+    new ScatterplotLayer({
+      id: "l3-events-active-point",
+      data: activePoints,
+      getPosition: (point) => [point.lng, point.lat],
+      getFillColor: (point) => hexToRgbArray(point.colorHex, 255),
+      getLineColor: [255, 255, 255, 255],
+      getLineWidth: 2,
+      getRadius: 10,
+      lineWidthUnits: "pixels",
+      radiusUnits: "pixels",
+      stroked: true,
+      filled: true,
+      pickable: false,
+      updateTriggers: {
+        getFillColor: [activePoints],
+      },
+    }),
+  ], [activePoints, trailPoints]);
+
+  useEffect(() => {
+    if (!overlayRef.current) return;
+    overlayRef.current.setProps({ layers });
+  }, [layers]);
+
+  useEffect(() => () => {
+    if (!overlayRef.current) return;
+    overlayRef.current.setProps({ layers: [] });
+    overlayRef.current.setMap(null);
+    overlayRef.current.finalize();
+    overlayRef.current = null;
+  }, []);
+
+  return null;
+}
+
+const MapMessageCard = React.forwardRef(function MapMessageCard({ point, stateColor, colorMode, active, onClick }, ref) {
   const failure = isFailurePoint(point);
+  const metaLabel = colorMode === "rsrp"
+    ? point.rsrpLabel || "No matched RSRP"
+    : point.state;
   return (
     <button
       ref={ref}
@@ -856,9 +1169,11 @@ const MapMessageCard = React.forwardRef(function MapMessageCard({ point, active,
             : "border-slate-800 bg-slate-900/70 text-slate-200 hover:bg-slate-800/90"
       }`}
     >
-      <div className="min-w-0 break-words text-[11px] font-semibold leading-snug sm:text-xs">
-        {point.title || "Message"}
+      <div className="flex min-w-0 items-start gap-1.5 text-[11px] font-semibold leading-snug sm:text-xs">
+        <span className="mt-1 h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: stateColor }} />
+        <span className="min-w-0 break-words">{point.title || "Message"}</span>
       </div>
+      <div className="mt-0.5 pl-3.5 text-[9px] font-medium uppercase tracking-wide opacity-70">{metaLabel}</div>
     </button>
   );
 });

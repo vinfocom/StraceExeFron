@@ -1,3 +1,5 @@
+import { evaluateL3HandoverTimeline } from "../handoverTransitions.js";
+
 const FAILURE_RE = /\b(fail(?:ed|ure)?|reject(?:ed)?|timeout|error|rlf|radio link failure|bearer loss|dropped|forbidden|unavailable)\b|\b[45]\d{2}\b/i;
 const SUCCESS_RE = /\b(complete|completed|accept|accepted|success|connected|established|registered|200 ok|active)\b/i;
 const WARNING_RE = /\b(warn(?:ing)?|retry|degraded|weak|congestion)\b/i;
@@ -6,7 +8,7 @@ const REQUEST_RE = /\b(request|command|setup|invite|paging|dial(?:ing)?|alerting
 const MILESTONE_RULES = [
   { label: "HANDOVER FAILURE", test: /\b(hand(?: |-)?over|ho)\b.*\b(fail|failure|reject|timeout)\b/i, severity: "failure" },
   { label: "RADIO LINK FAILURE", test: /\b(radio link failure|rlf)\b/i, severity: "failure" },
-  { label: "HANDOVER COMPLETE", test: /\b(hand(?: |-)?over|ho)\b.*\b(complete|success)\b|rrc\s+(?:connection\s+)?reconfiguration\s+complete/i, severity: "success" },
+  { label: "HANDOVER COMPLETE", test: /\b(?:handover|hand\s*over)\b.*\b(complete|success)\b/i, severity: "success" },
   { label: "HANDOVER START", test: /\b(hand(?: |-)?over|ho)\b.*\b(command|start|attempt|request)\b/i, severity: "request" },
   { label: "CALL START", test: /\bCALL_DIAL_INITIATED\b/i, severity: "request" },
   { label: "DIALING", test: /\bCALL_DIALING\b|\bdialing\b/i, severity: "request" },
@@ -69,6 +71,7 @@ function enrichedItems(analysis) {
 export function buildUnifiedSignalingRows(timeline = [], calls = [], analysis = null) {
   const membership = callMembership(calls);
   const enrichment = enrichedItems(analysis);
+  const handoverEvaluation = evaluateL3HandoverTimeline(timeline);
 
   return timeline.map((base, index) => {
     const match = enrichment.get(base.id);
@@ -76,7 +79,12 @@ export function buildUnifiedSignalingRows(timeline = [], calls = [], analysis = 
     const procedure = match?.procedure;
     const text = textOf(item);
     const capabilityOnly = /applyLocalCallCapabilities|applyRemoteCallCapabilities|CALL_CAPS_LOCAL|CALL_CAPS_REMOTE/i.test(text);
-    let milestone = MILESTONE_RULES.find((rule) => rule.test.test(text)) || null;
+    const handoverOutcome = handoverEvaluation.byId.get(base.id)
+      || handoverEvaluation.byIndex.get(index)
+      || null;
+    let milestone = handoverOutcome
+      ? { label: handoverOutcome.label, severity: handoverOutcome.severity }
+      : MILESTONE_RULES.find((rule) => rule.test.test(text)) || null;
     if (milestone?.label === "CONNECTED" && capabilityOnly) milestone = null;
     const call = calls.find((entry) => entry.id === (item.callId || membership.get(base.id))) || null;
     if (/\bCALL_DISCONNECTED\b/i.test(text) && call?.status === "Dropped") {
@@ -108,6 +116,9 @@ export function buildUnifiedSignalingRows(timeline = [], calls = [], analysis = 
       severity,
       callId: item.callId || membership.get(base.id) || null,
       milestone: milestone?.label || null,
+      handoverClassification: handoverOutcome?.classification || null,
+      handoverType: handoverOutcome?.handoverType || null,
+      handoverEvaluationReason: handoverOutcome?.reason || null,
       rawMessage: base.rawMessage,
       metadata: base.metadata || {},
     };

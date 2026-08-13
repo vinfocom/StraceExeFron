@@ -66,6 +66,65 @@ const normalizeDiscoveredBands = (value) =>
     })
     .filter(Boolean);
 
+const normalizeBandsByFile = (value) =>
+  toSafeArray(value)
+    .map((fileItem, index) => {
+      const availableBands = normalizeDiscoveredBands(
+        fileItem?.AvailableBands ?? fileItem?.availableBands ?? fileItem?.bands,
+      );
+      if (!availableBands.length) return null;
+
+      return {
+        FileIndex: Number(fileItem?.FileIndex ?? fileItem?.fileIndex ?? index),
+        FileName:
+          String(fileItem?.FileName ?? fileItem?.fileName ?? `File ${index + 1}`).trim() ||
+          `File ${index + 1}`,
+        TotalRows: Number(fileItem?.TotalRows ?? fileItem?.totalRows) || null,
+        AvailableBands: availableBands,
+      };
+    })
+    .filter(Boolean)
+    .sort((a, b) => a.FileIndex - b.FileIndex);
+
+const attachFileBandCounts = (bandsList, bandsByFile) =>
+  bandsList.map((band) => ({
+    ...band,
+    Files: bandsByFile
+      .map((fileItem) => {
+        const fileBand = fileItem.AvailableBands.find(
+          (item) => item.Band.toLowerCase() === band.Band.toLowerCase(),
+        );
+        if (!fileBand) return null;
+
+        return {
+          FileName: fileItem.FileName,
+          Count: fileBand.Count,
+          Percentage: fileBand.Percentage,
+        };
+      })
+      .filter(Boolean),
+  }));
+
+const getFileBandKey = (fileName, bandName) => `${fileName || "File"}::${bandName || ""}`;
+
+const getSelectedBandsFromFileBands = (discoveredBands, selectedFileBands) => {
+  const bands = new Set();
+  discoveredBands.forEach((band) => {
+    const files = Array.isArray(band.Files) ? band.Files : [];
+    if (files.length === 0 && selectedFileBands[getFileBandKey("All Files", band.Band)]) {
+      bands.add(band.Band);
+      return;
+    }
+
+    files.forEach((fileBand) => {
+      if (selectedFileBands[getFileBandKey(fileBand.FileName, band.Band)]) {
+        bands.add(band.Band);
+      }
+    });
+  });
+  return Array.from(bands);
+};
+
 const REPORT_TYPE_OPTIONS = {
   pdf: {
     label: "PDF",
@@ -341,6 +400,7 @@ const UploadDataPage = () => {
   const [reportFiles, setReportFiles] = useState([]);
   const [discoveredBands, setDiscoveredBands] = useState([]);
   const [selectedBands, setSelectedBands] = useState([]);
+  const [selectedFileBands, setSelectedFileBands] = useState({});
   const [reportTitle, setReportTitle] = useState("");
   const [reportType, setReportType] = useState("pdf");
   const [reportMode, setReportMode] = useState("separate");
@@ -555,6 +615,7 @@ const UploadDataPage = () => {
       );
       setDiscoveredBands([]);
       setSelectedBands([]);
+      setSelectedFileBands({});
       setReportTitle("");
       if (index === null) {
         setReportFileGroups({});
@@ -590,6 +651,7 @@ const UploadDataPage = () => {
     });
     setDiscoveredBands([]);
     setSelectedBands([]);
+    setSelectedFileBands({});
     setReportError(null);
   }, []);
 
@@ -608,20 +670,20 @@ const UploadDataPage = () => {
   });
 
   useEffect(() => {
-    setReportFileGroups((prev) => {
-      const next = {};
-      reportFiles.forEach((file, index) => {
-        const key = getReportFileKey(file);
-        next[key] = normalizePositiveGroup(prev[key], index + 1);
-      });
-      return next;
-    });
-
     setReportSheetNames((prev) => {
       const next = {};
       reportFiles.forEach((file, index) => {
         const key = getReportFileKey(file);
         next[key] = prev[key] ?? getDefaultSheetName(file, index);
+      });
+      return next;
+    });
+
+    setReportFileGroups((prev) => {
+      const next = {};
+      reportFiles.forEach((file, index) => {
+        const key = getReportFileKey(file);
+        next[key] = String(prev[key] ?? index + 1);
       });
       return next;
     });
@@ -633,6 +695,7 @@ const UploadDataPage = () => {
     setReportError(null);
     setDiscoveredBands([]);
     setSelectedBands([]);
+    setSelectedFileBands({});
 
     try {
       const formData = new FormData();
@@ -643,16 +706,34 @@ const UploadDataPage = () => {
       const reportHandler = REPORT_TYPE_OPTIONS[reportType] || REPORT_TYPE_OPTIONS.pdf;
       const response = await reportHandler.discover(formData);
       const bandsList = normalizeDiscoveredBands(response?.AvailableBands ?? response);
+      const bandsByFile = normalizeBandsByFile(response?.BandsByFile ?? response?.bandsByFile);
+      const displayBandsList =
+        bandsByFile.length > 0 ? attachFileBandCounts(bandsList, bandsByFile) : bandsList;
 
-      if (!bandsList.length) {
+      if (!displayBandsList.length) {
         const message = "No bands found in the selected ZIP files.";
         setReportError(message);
         toast.info(message);
         return;
       }
 
-      setDiscoveredBands(bandsList);
-      setSelectedBands(bandsList.map((band) => band.Band).filter(Boolean));
+      setDiscoveredBands(displayBandsList);
+      setSelectedBands(displayBandsList.map((band) => band.Band).filter(Boolean));
+      setSelectedFileBands(() => {
+        const next = {};
+        displayBandsList.forEach((band) => {
+          const files = Array.isArray(band.Files) ? band.Files : [];
+          if (files.length === 0) {
+            next[getFileBandKey("All Files", band.Band)] = true;
+            return;
+          }
+
+          files.forEach((fileBand) => {
+            next[getFileBandKey(fileBand.FileName, band.Band)] = true;
+          });
+        });
+        return next;
+      });
       toast.success("Bands discovered successfully!");
     } catch (err) {
       const message = err?.message || "Failed to discover bands.";
@@ -698,9 +779,20 @@ const UploadDataPage = () => {
         }
       }
 
-      if (selectedBands.length) {
-        formData.append("BandFilter", selectedBands.join(","));
-        selectedBands.forEach((band) => {
+      const bandsToSubmit =
+        Object.keys(selectedFileBands).length > 0
+          ? getSelectedBandsFromFileBands(discoveredBands, selectedFileBands)
+          : selectedBands;
+
+      if (discoveredBands.length > 0 && bandsToSubmit.length === 0) {
+        toast.warn("Please select at least one file band.");
+        setReportLoading(false);
+        return;
+      }
+
+      if (bandsToSubmit.length) {
+        formData.append("BandFilter", bandsToSubmit.join(","));
+        bandsToSubmit.forEach((band) => {
           formData.append("Bands", band);
         });
       }
@@ -709,7 +801,7 @@ const UploadDataPage = () => {
       const blob = await reportHandler.generate(formData);
       const downloadUrl = window.URL.createObjectURL(blob);
       const link = document.createElement("a");
-      const safeBands = selectedBands.join("-") || "ALL";
+      const safeBands = bandsToSubmit.join("-") || "ALL";
       const safeBaseName =
         reportFiles.length === 1
           ? reportFiles[0].name.replace(/\.zip$/i, "")
@@ -739,12 +831,12 @@ const UploadDataPage = () => {
     }
   };
 
-  const handleBandToggle = useCallback((bandValue) => {
-    setSelectedBands((prev) =>
-      prev.includes(bandValue)
-        ? prev.filter((value) => value !== bandValue)
-        : [...prev, bandValue],
-    );
+  const handleFileBandToggle = useCallback((fileName, bandValue) => {
+    const key = getFileBandKey(fileName, bandValue);
+    setSelectedFileBands((prev) => ({
+      ...prev,
+      [key]: !prev[key],
+    }));
   }, []);
 
 
@@ -1127,13 +1219,14 @@ const UploadDataPage = () => {
               <label className="block text-sm font-semibold">Report Type</label>
               <Select
                 value={reportType}
-                onValueChange={(value) => {
-                  setReportType(value);
-                  setDiscoveredBands([]);
-                  setSelectedBands([]);
-                  setReportMode("separate");
-                  setReportError(null);
-                }}
+	                onValueChange={(value) => {
+	                  setReportType(value);
+	                  setDiscoveredBands([]);
+	                  setSelectedBands([]);
+	                  setSelectedFileBands({});
+	                  setReportMode("separate");
+	                  setReportError(null);
+	                }}
                 disabled={reportLoading}
               >
                 <SelectTrigger className="bg-white text-black">
@@ -1174,26 +1267,30 @@ const UploadDataPage = () => {
               )}
 
               {reportType === "excel" && reportFiles.length > 0 && (
-                <div className="space-y-3">
-                  <div>
-                    <label className="block text-sm font-semibold">Excel Sheet Setup</label>
-                    <p className="mt-1 text-xs text-gray-200">
-                      Sends <code>SheetNames</code> as comma-separated values. <code>LogFileGroups</code> is sent only in combined mode.
+	                <div className="space-y-3">
+	                  <div>
+	                    <label className="block text-sm font-semibold">Excel Sheet Setup</label>
+	                    <p className="mt-1 text-xs text-gray-200">
+	                      Sends <code>SheetNames</code> as comma-separated values. <code>LogFileGroups</code> is sent only in combined mode.
                     </p>
                   </div>
 
-                  <div className="space-y-2">
-                    {reportFiles.map((file, index) => {
-                      const key = getReportFileKey(file);
-                      return (
-                        <div
-                          key={key}
-                          className="grid gap-3 rounded border border-white/20 bg-white/5 p-3 md:grid-cols-[minmax(0,1fr)_160px_110px]"
-                        >
-                          <div className="min-w-0">
-                            <label className="block text-xs font-medium text-gray-200">ZIP File</label>
-                            <p className="truncate text-sm font-semibold" title={file.name}>
-                              {file.name}
+	                  <div className="space-y-2">
+	                    {reportFiles.map((file, index) => {
+	                      const key = getReportFileKey(file);
+	                      return (
+	                        <div
+	                          key={key}
+	                          className={`grid gap-3 rounded border border-white/20 bg-white/5 p-3 ${
+	                            reportMode === "combined"
+	                              ? "md:grid-cols-[minmax(0,1fr)_220px_110px]"
+	                              : "md:grid-cols-[minmax(0,1fr)_220px]"
+	                          }`}
+	                        >
+	                          <div className="min-w-0">
+	                            <label className="block text-xs font-medium text-gray-200">ZIP File</label>
+	                            <p className="truncate text-sm font-semibold" title={file.name}>
+	                              {file.name}
                             </p>
                           </div>
 
@@ -1209,45 +1306,44 @@ const UploadDataPage = () => {
                               }
                               placeholder={`Floor ${index + 1}`}
                               disabled={reportLoading}
-                              className="h-9 bg-white text-black placeholder:text-gray-500"
-                            />
-                          </div>
+	                              className="h-9 bg-white text-black placeholder:text-gray-500"
+	                            />
+	                          </div>
 
-                          {reportMode === "combined" && (
-                            <div>
-                              <label className="block text-xs font-medium text-gray-200">Group</label>
-                              <Input
-                                type="number"
-                                min="1"
-                                step="1"
-                                value={reportFileGroups[key] ?? index + 1}
-                                onChange={(event) =>
-                                  setReportFileGroups((prev) => ({
-                                    ...prev,
-                                    [key]: normalizePositiveGroup(event.target.value, index + 1),
-                                  }))
-                                }
-                                disabled={reportLoading}
-                                className="h-9 bg-white text-black"
-                              />
-                            </div>
-                          )}
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              )}
+	                          {reportMode === "combined" && (
+	                            <div>
+	                              <label className="block text-xs font-medium text-gray-200">Group</label>
+	                              <Input
+	                                value={reportFileGroups[key] ?? String(index + 1)}
+	                                onChange={(event) =>
+	                                  setReportFileGroups((prev) => ({
+	                                    ...prev,
+	                                    [key]: event.target.value,
+	                                  }))
+	                                }
+	                                placeholder={`${index + 1}`}
+	                                disabled={reportLoading}
+	                                className="h-9 bg-white text-black placeholder:text-gray-500"
+	                              />
+	                            </div>
+	                          )}
+	                        </div>
+	                      );
+	                    })}
+	                  </div>
+	                </div>
+	              )}
 
               <label className="flex cursor-pointer items-start gap-3 rounded border border-white/20 bg-white/5 px-3 py-3">
                 <input
                   type="checkbox"
                   checked={filterByImageName}
-                  onChange={(event) => {
-                    setFilterByImageName(event.target.checked);
-                    setDiscoveredBands([]);
-                    setSelectedBands([]);
-                  }}
+	                  onChange={(event) => {
+	                    setFilterByImageName(event.target.checked);
+	                    setDiscoveredBands([]);
+	                    setSelectedBands([]);
+	                    setSelectedFileBands({});
+	                  }}
                   disabled={reportLoading}
                   className="mt-1 h-4 w-4"
                 />
@@ -1300,32 +1396,53 @@ const UploadDataPage = () => {
             {/* Selection & Download UI (Appears after Discovery) */}
             {discoveredBands.length > 0 && (
               <div className="mt-6 border-t border-gray-500 pt-4 space-y-4">
-                <div>
-                  <label className="block text-sm font-semibold mb-1">Select Discovered Bands</label>
-                  <div className="max-h-64 space-y-2 overflow-y-auto rounded-md bg-white p-3 text-black">
-                    {discoveredBands.map((band, idx) => (
-                      <label
-                        key={`${band.Band}-${idx}`}
-                        className="flex cursor-pointer items-center gap-3 rounded border border-gray-200 px-3 py-2 hover:bg-gray-50"
-                      >
-                        <input
-                          type="checkbox"
-                          checked={selectedBands.includes(band.Band)}
-                          onChange={() => handleBandToggle(band.Band)}
-                          className="h-4 w-4"
-                        />
-                        <span className="text-sm">
-                          {band.Band}
-                          {band.Count !== null ? ` (${band.Count})` : ""}
-                          {band.Percentage !== null ? ` - ${band.Percentage}%` : ""}
-                        </span>
-                      </label>
-                    ))}
-                  </div>
-                  <p className="mt-2 text-xs text-gray-200">
-                    Tick one or more bands. All discovered bands are selected by default.
-                  </p>
-                </div>
+	                <div>
+	                  <label className="block text-sm font-semibold mb-1">Select Discovered File Bands</label>
+	                  <div className="max-h-64 space-y-2 overflow-y-auto rounded-md bg-white p-3 text-black">
+	                    {discoveredBands.map((band, idx) => {
+	                      const files = Array.isArray(band.Files) && band.Files.length > 0
+	                        ? band.Files
+	                        : [{ FileName: "All Files", Count: band.Count, Percentage: band.Percentage }];
+	                      return (
+	                        <div
+	                          key={`${band.Band}-${idx}`}
+	                          className="rounded border border-gray-200 px-3 py-2"
+	                        >
+	                          <div className="text-sm font-semibold">
+	                            {band.Band}
+	                            {band.Count !== null ? ` total ${band.Count}` : ""}
+	                            {band.Percentage !== null ? ` - ${band.Percentage}%` : ""}
+	                          </div>
+	                          <div className="mt-2 space-y-1">
+	                            {files.map((fileBand, fileIdx) => {
+	                              const fileBandKey = getFileBandKey(fileBand.FileName, band.Band);
+	                              return (
+	                                <label
+	                                  key={`${band.Band}-${fileBand.FileName}-${fileIdx}`}
+	                                  className="flex cursor-pointer items-center gap-3 rounded px-2 py-1 text-xs hover:bg-gray-50"
+	                                >
+	                                  <input
+	                                    type="checkbox"
+	                                    checked={Boolean(selectedFileBands[fileBandKey])}
+	                                    onChange={() => handleFileBandToggle(fileBand.FileName, band.Band)}
+	                                    className="h-4 w-4"
+	                                  />
+	                                  <span className="min-w-0 truncate" title={fileBand.FileName}>
+	                                    {fileBand.FileName}: {fileBand.Count ?? 0}
+	                                    {fileBand.Percentage !== null ? ` (${fileBand.Percentage}%)` : ""}
+	                                  </span>
+	                                </label>
+	                              );
+	                            })}
+	                          </div>
+	                        </div>
+	                      );
+	                    })}
+	                  </div>
+	                  <p className="mt-2 text-xs text-gray-200">
+	                    Tick file-specific band rows. The Excel API receives the unique selected band names.
+	                  </p>
+	                </div>
 
                 
 

@@ -1,5 +1,5 @@
 import React, { memo, useEffect, useMemo, useState } from "react";
-import { Download, Loader2, Search, X } from "lucide-react";
+import { ChevronDown, Download, Loader2, Search, X } from "lucide-react";
 import toast from "react-hot-toast";
 import { downloadExcelSignalingSummaryPdf } from "@/utils/l3Events/pdfReport";
 import { getNrRrcPayloadInsights } from "@/utils/l3Events/nrRrcPayloadInsights";
@@ -90,7 +90,7 @@ function ColumnTextFilter({ value, onChange, placeholder }) {
   );
 }
 
-function ColumnSelectFilter({ value, onChange, options }) {
+function ColumnSelectFilter({ value, onChange, options, allLabel = "All" }) {
   return (
     <select
       value={value}
@@ -98,9 +98,99 @@ function ColumnSelectFilter({ value, onChange, options }) {
       onClick={(event) => event.stopPropagation()}
       className="h-7 w-full rounded border border-slate-700 bg-slate-950 px-1.5 text-[11px] font-normal normal-case text-white focus:border-blue-500 focus:outline-none"
     >
-      <option value="all">All Interfaces</option>
+      <option value="all">{allLabel}</option>
       {options.map((option) => <option key={option} value={option}>{option}</option>)}
     </select>
+  );
+}
+
+function MessageColumnFilter({ value, onChange, options }) {
+  const [isOpen, setIsOpen] = useState(false);
+  const [showAll, setShowAll] = useState(false);
+  const needle = value.trim().toLowerCase();
+  const visibleOptions = (showAll || !needle
+    ? options
+    : options.filter((option) => String(option).toLowerCase().includes(needle))
+  ).slice(0, 100);
+
+  const selectMessage = (message) => {
+    onChange(message);
+    setIsOpen(false);
+    setShowAll(false);
+  };
+
+  return (
+    <div className="relative min-w-0">
+      <input
+        value={value}
+        onChange={(event) => {
+          onChange(event.target.value);
+          setIsOpen(true);
+          setShowAll(false);
+        }}
+        onClick={(event) => {
+          event.stopPropagation();
+          setIsOpen(true);
+          setShowAll(false);
+        }}
+        onFocus={() => {
+          setIsOpen(true);
+          setShowAll(false);
+        }}
+        onBlur={() => window.setTimeout(() => setIsOpen(false), 120)}
+        placeholder="Search message"
+        className="h-7 w-full rounded border border-slate-700 bg-slate-950 py-0 pl-2 pr-8 text-[11px] font-normal normal-case text-white placeholder:text-slate-500 focus:border-blue-500 focus:outline-none"
+      />
+      <button
+        type="button"
+        onMouseDown={(event) => event.preventDefault()}
+        onClick={(event) => {
+          event.stopPropagation();
+          setShowAll(true);
+          setIsOpen((current) => !current || !showAll);
+        }}
+        className="absolute right-1 top-1 flex h-5 w-5 items-center justify-center rounded text-slate-400 hover:bg-slate-800 hover:text-white"
+        aria-label="Show message options"
+      >
+        <ChevronDown className="h-3.5 w-3.5" />
+      </button>
+      {isOpen && (
+        <div className="absolute left-0 right-0 top-8 z-30 max-h-56 overflow-auto rounded border border-slate-700 bg-slate-950 py-1 text-left shadow-xl shadow-black/30">
+          {value && (
+            <button
+              type="button"
+              onMouseDown={(event) => event.preventDefault()}
+              onClick={(event) => {
+                event.stopPropagation();
+                onChange("");
+                setIsOpen(false);
+                setShowAll(false);
+              }}
+              className="block w-full px-2 py-1.5 text-left text-[11px] text-slate-300 hover:bg-slate-800 hover:text-white"
+            >
+              All Messages
+            </button>
+          )}
+          {visibleOptions.length ? visibleOptions.map((option) => (
+            <button
+              key={option}
+              type="button"
+              title={option}
+              onMouseDown={(event) => event.preventDefault()}
+              onClick={(event) => {
+                event.stopPropagation();
+                selectMessage(option);
+              }}
+              className="block w-full truncate px-2 py-1.5 text-left text-[11px] text-slate-200 hover:bg-blue-500/20 hover:text-white"
+            >
+              {option}
+            </button>
+          )) : (
+            <div className="px-2 py-2 text-[11px] text-slate-500">No messages found</div>
+          )}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -195,6 +285,7 @@ export function ExcelSignalingView({ rows = [], calls = [], selectedCall, onSele
 
   const technologies = useMemo(() => uniqueValues(rows, "technology"), [rows]);
   const interfaces = useMemo(() => uniqueValues(rows, "interface"), [rows]);
+  const messages = useMemo(() => uniqueValues(rows, "message"), [rows]);
   const filtered = useMemo(() => {
     const needle = query.trim().toLowerCase();
     const messageNeedle = messageColumnFilter.trim().toLowerCase();
@@ -321,8 +412,14 @@ export function ExcelSignalingView({ rows = [], calls = [], selectedCall, onSele
                   <th className="sticky top-[33px] z-10 border-b border-r border-slate-700 bg-slate-800 px-2 py-1" />
                 </>
               )}
-              <th className="sticky top-[33px] z-10 border-b border-r border-slate-700 bg-slate-800 px-2 py-1"><ColumnSelectFilter value={interfaceColumnFilter} onChange={setInterfaceColumnFilter} options={interfaces} /></th>
-              <th className="sticky top-[33px] z-10 border-b border-slate-700 bg-slate-800 px-2 py-1"><ColumnTextFilter value={messageColumnFilter} onChange={setMessageColumnFilter} placeholder="Filter message" /></th>
+              <th className="sticky top-[33px] z-10 border-b border-r border-slate-700 bg-slate-800 px-2 py-1"><ColumnSelectFilter value={interfaceColumnFilter} onChange={setInterfaceColumnFilter} options={interfaces} allLabel="All Interfaces" /></th>
+              <th className="sticky top-[33px] z-10 border-b border-slate-700 bg-slate-800 px-2 py-1">
+                <MessageColumnFilter
+                  value={messageColumnFilter}
+                  onChange={setMessageColumnFilter}
+                  options={messages}
+                />
+              </th>
             </tr>
           </thead>
           <tbody>{filtered.length ? filtered.map((row) => <SignalingRow key={row.id} row={row} selected={selectedRow?.id === row.id} onSelect={setSelectedRow} includeLocation={includeLocation} />) : <tr><td colSpan={columnCount} className="py-16 text-center text-xs text-slate-500">No signaling rows match the current filters.</td></tr>}</tbody>

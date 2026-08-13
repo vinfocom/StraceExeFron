@@ -1,3 +1,5 @@
+import { evaluateL3HandoverTimeline } from "../handoverTransitions.js";
+
 const START_EVENT_RE = /^CALL_DIAL_INITIATED$/i;
 const ACTIVE_EVENT_RE = /^CALL_ACTIVE$/i;
 const END_EVENT_RE = /^CALL_DISCONNECTED$/i;
@@ -37,7 +39,6 @@ const CODEC_NEGOTIATED_RE = /\bCODEC_(?:AMR_(?:NB|WB)|EVS)\b|updateMediaCapabili
 const RADIO_FAILURE_RE = /\b(radio link failure|rlf|rrc re[- ]?establishment failure|rrc reestablishment failure|unexpected rrc release|bearer loss|scgfail|scg failure)\b/i;
 const HANDOVER_FAILURE_RE = /\b(hand(?: |-)?over|ho)\b.*\b(fail|failure|reject|drop|timeout)\b/i;
 const HANDOVER_ATTEMPT_RE = /\b(hand(?: |-)?over|ho)\b.*\b(command|start|attempt|request)\b/i;
-const HANDOVER_SUCCESS_RE = /\b(hand(?: |-)?over|ho)\b.*\b(complete|success)\b|\brrc\s+(?:connection\s+)?reconfiguration\s+complete\b/i;
 const IMS_FAILURE_RE = /\b(ims registration lost|ims deregistration|ims deregistered|ims unregistered|sip 408|sip 503)\b/i;
 const RRC_REESTABLISHMENT_REQUEST_RE = /\brrc.*re[- ]?establishment.*request\b/i;
 const RRC_REESTABLISHMENT_SUCCESS_RE = /\brrc.*re[- ]?establishment.*complete\b|\brrc.*re[- ]?established\b/i;
@@ -460,6 +461,7 @@ function finalizeSessionMilestones(session) {
   const callTypeConnected = [];
   const mediaConnected = [];
   const codecNegotiated = [];
+  const handoverEvaluation = evaluateL3HandoverTimeline(session.events);
   let radioFailureOpen = false;
 
   for (const item of session.events) {
@@ -506,7 +508,7 @@ function finalizeSessionMilestones(session) {
     }
     if (HANDOVER_ATTEMPT_RE.test(text)) session.handoverAttempts.push(item);
     if (HANDOVER_FAILURE_RE.test(text)) session.failedHandovers.push(item);
-    if (HANDOVER_SUCCESS_RE.test(text) && (session.handoverAttempts.length > 0 || /\b(hand(?: |-)?over|ho)\b/i.test(text))) {
+    if (handoverEvaluation.byId.get(item.id)?.classification === "confirmed_handover") {
       session.successfulHandovers.push(item);
     }
     if (RRC_REESTABLISHMENT_REQUEST_RE.test(text)) {

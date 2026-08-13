@@ -271,7 +271,7 @@ test("remote normal cause=2 completes an established call", () => {
   assert.equal(summary.calls[0].causeCode, 2);
 });
 
-test("successful handover followed by normal release stays connected", () => {
+test("generic RRC reconfiguration complete does not prove handover success", () => {
   const summary = buildCallSummary([
     event({ seconds: 0, eventKey: "CALL_DIAL_INITIATED", rawMessage: "Dial" }),
     event({ seconds: 2, eventKey: "CALL_ACTIVE", rawMessage: "active" }),
@@ -283,8 +283,23 @@ test("successful handover followed by normal release stays connected", () => {
   assert.equal(summary.calls[0].status, "Connected");
   assert.equal(summary.calls[0].detailedStatus, "Completed");
   assert.equal(summary.calls[0].handoverAttempts.length, 1);
-  assert.equal(summary.calls[0].successfulHandovers.length, 1);
+  assert.equal(summary.calls[0].successfulHandovers.length, 0);
   assert.equal(summary.calls[0].failedHandovers.length, 0);
+});
+
+test("call summary counts a handover only when the serving-cell transition is decoded", () => {
+  const summary = buildCallSummary([
+    event({ seconds: 0, eventKey: "CALL_DIAL_INITIATED", rawMessage: "Dial" }),
+    event({ seconds: 1, eventKey: "CALL_ACTIVE", rawMessage: "active" }),
+    event({ seconds: 2, category: "NR-RRC", type: "l3", title: "Serving Cell", rawMessage: "Serving PCI=62 Serving NR-ARFCN=640000" }),
+    event({ seconds: 3, category: "NR-RRC", type: "l3", title: "NR Measurement Report", rawMessage: "NR Measurement Report Neighbor PCI=61 Target NR-ARFCN=640000" }),
+    event({ seconds: 4, category: "NR-RRC", type: "l3", title: "NR RRC Reconfiguration", rawMessage: "NR RRC Reconfiguration reconfigurationWithSync Target PCI=61" }),
+    event({ seconds: 5, category: "NR-RRC", type: "l3", title: "NR RRC Reconfiguration Complete", rawMessage: "NR RRC Reconfiguration Complete" }),
+    event({ seconds: 6, category: "NR-RRC", type: "l3", title: "Serving Cell", rawMessage: "Serving PCI=61 Serving NR-ARFCN=640000" }),
+    event({ seconds: 10, eventKey: "CALL_DISCONNECTED", rawMessage: "normal disconnect" }),
+  ]);
+
+  assert.equal(summary.calls[0].successfulHandovers.length, 1);
 });
 
 test("generic RRC Release after an established call is normal cleanup", () => {
