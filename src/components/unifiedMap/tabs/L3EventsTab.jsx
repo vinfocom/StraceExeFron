@@ -5,7 +5,7 @@ import React, {
   useCallback,
   useRef,
 } from "react";
-import { Upload, Loader2, AlertTriangle, X, Search, Play, Pause, RotateCcw, Rewind, FastForward } from "lucide-react";
+import { Upload, Loader2, AlertTriangle, X, Search, Play, Pause, RotateCcw, Rewind, FastForward, Hand, PhoneCall, PhoneOff } from "lucide-react";
 import { GoogleMap, InfoWindow, OverlayView, useJsApiLoader } from "@react-google-maps/api";
 import { GoogleMapsOverlay } from "@deck.gl/google-maps";
 import { ScatterplotLayer } from "@deck.gl/layers";
@@ -50,6 +50,7 @@ const MAP_INTERFACE_COLOR_STORAGE_KEY = "l3-events-map-interface-colors";
 const MAP_COLOR_MODE_STORAGE_KEY = "l3-events-map-color-mode";
 const MAX_VISIBLE_EVENT_MARKERS = 75;
 const MAX_VISIBLE_MAP_MESSAGES = 1000;
+const CALL_MARKER_TYPES = new Set(["call-start", "disconnect", "dropped", "not-connected"]);
 const MAP_INTERFACE_COLOR_PALETTE = [
   "#38bdf8",
   "#a78bfa",
@@ -585,6 +586,10 @@ function getMapEventMarker(item = {}) {
   return null;
 }
 
+function isCallMarker(point) {
+  return CALL_MARKER_TYPES.has(point?.markerType);
+}
+
 export function buildMapPoints(timeline, rsrpByRowId = new Map()) {
   const toMapCoordinate = (value, min, max) => {
     if (value === null || value === undefined || String(value).trim() === "") return null;
@@ -764,14 +769,15 @@ export function L3EventsMapView({ points }) {
     [currentPoint, getMapPointColor],
   );
   const deckEventMarkers = useMemo(() => {
-    const visiblePoints = showAllPoints
-      ? points
-      : points.slice(Math.max(0, currentIndex - 250), currentIndex + 1);
-    return visiblePoints
-      .filter((point) => point.markerSymbol)
-      .slice(-MAX_VISIBLE_EVENT_MARKERS)
+    const eventPoints = points.filter((point) => point.markerSymbol);
+    const callMarkers = eventPoints.filter(isCallMarker);
+    const otherMarkers = eventPoints
+      .filter((point) => !isCallMarker(point))
+      .slice(-MAX_VISIBLE_EVENT_MARKERS);
+
+    return [...otherMarkers, ...callMarkers]
       .map((point) => ({ ...point, colorHex: point.markerColor || getMapPointColor(point) }));
-  }, [currentIndex, getMapPointColor, points, showAllPoints]);
+  }, [getMapPointColor, points]);
   const eventMarkerStats = useMemo(() => {
     const stats = {
       handover: 0,
@@ -1023,101 +1029,101 @@ export function L3EventsMapView({ points }) {
           )}
         </div>
         <div
-          className="absolute top-3 z-[5] max-h-[min(320px,calc(100%-24px))] w-48 overflow-y-auto rounded-lg border border-slate-600/80 bg-slate-950/90 p-2 text-xs text-slate-200 shadow-xl backdrop-blur-sm"
+          className="absolute top-3 z-[5] flex max-h-[calc(100%-24px)] w-48 flex-col gap-2 text-xs text-slate-200"
           style={{ right: messagePanelWidth + 12 }}
           onClick={(event) => event.stopPropagation()}
         >
-          <div className="mb-1.5 flex items-center justify-between gap-2">
-            <span className="font-semibold text-white">State Legend</span>
-          </div>
-          <div className="mb-2 rounded border border-slate-700 bg-slate-900/90 p-1.5">
-            <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-slate-400">Events</div>
+          <div className="shrink-0 rounded-lg border border-slate-600/80 bg-slate-950/90 p-2 shadow-xl backdrop-blur-sm">
+            <div className="mb-1.5 font-semibold text-white">Event Legend</div>
             <div className="grid grid-cols-2 gap-1 text-[10px]">
               <div className="flex items-center justify-between gap-1 rounded bg-slate-950 px-1.5 py-1">
-                <span className="text-amber-400">✋ HO</span>
+                <span className="flex items-center gap-1 text-amber-400"><Hand className="h-3 w-3" /> HO</span>
                 <span className="font-mono text-slate-200">{eventMarkerStats.handover.toLocaleString()}</span>
               </div>
               <div className="flex items-center justify-between gap-1 rounded bg-slate-950 px-1.5 py-1">
-                <span className="text-red-400">✋ Fail</span>
+                <span className="flex items-center gap-1 text-red-400"><Hand className="h-3 w-3" /> Fail</span>
                 <span className="font-mono text-slate-200">{eventMarkerStats.handoverFailure.toLocaleString()}</span>
               </div>
               <div className="flex items-center justify-between gap-1 rounded bg-slate-950 px-1.5 py-1">
-                <span className="text-emerald-400">☎ Start</span>
+                <span className="flex items-center gap-1 text-emerald-400"><PhoneCall className="h-3 w-3" /> Start</span>
                 <span className="font-mono text-slate-200">{eventMarkerStats.callStart.toLocaleString()}</span>
               </div>
               <div className="flex items-center justify-between gap-1 rounded bg-slate-950 px-1.5 py-1">
-                <span className="text-red-400">☎ End</span>
+                <span className="flex items-center gap-1 text-red-400"><PhoneOff className="h-3 w-3" /> End</span>
                 <span className="font-mono text-slate-200">{eventMarkerStats.disconnect.toLocaleString()}</span>
               </div>
               <div className="flex items-center justify-between gap-1 rounded bg-slate-950 px-1.5 py-1">
-                <span className="text-red-400">☎ Drop</span>
+                <span className="flex items-center gap-1 text-red-400"><PhoneOff className="h-3 w-3" /> Drop</span>
                 <span className="font-mono text-slate-200">{eventMarkerStats.dropped.toLocaleString()}</span>
               </div>
               <div className="flex items-center justify-between gap-1 rounded bg-slate-950 px-1.5 py-1">
-                <span className="text-yellow-300">☎ NC</span>
+                <span className="flex items-center gap-1 text-yellow-300"><PhoneOff className="h-3 w-3" /> NC</span>
                 <span className="font-mono text-slate-200">{eventMarkerStats.notConnected.toLocaleString()}</span>
               </div>
             </div>
           </div>
-          <div className="mb-2 grid grid-cols-2 overflow-hidden rounded border border-slate-700 bg-slate-900 p-0.5">
-            <button
-              type="button"
-              onClick={() => setColorMode("interface")}
-              className={`rounded px-1.5 py-1 text-[10px] font-medium transition-colors ${
-                colorMode === "interface" ? "bg-blue-600 text-white" : "text-slate-300 hover:bg-slate-800"
-              }`}
-            >
-              Interface
-            </button>
-            <button
-              type="button"
-              onClick={() => setColorMode("rsrp")}
-              className={`rounded px-1.5 py-1 text-[10px] font-medium transition-colors ${
-                colorMode === "rsrp" ? "bg-blue-600 text-white" : "text-slate-300 hover:bg-slate-800"
-              }`}
-            >
-              RSRP
-            </button>
-          </div>
-          <div className="space-y-1">
-            {colorMode === "rsrp" ? rsrpLegend.map(({ key, label, range, count, color }) => (
-              <div
-                key={key}
-                className="flex items-center gap-2 rounded px-1 py-1"
-                title={range}
+          <div className="min-h-0 overflow-y-auto rounded-lg border border-slate-600/80 bg-slate-950/90 p-2 shadow-xl backdrop-blur-sm">
+            <div className="mb-1.5 font-semibold text-white">State Legend</div>
+            <div className="mb-2 grid grid-cols-2 overflow-hidden rounded border border-slate-700 bg-slate-900 p-0.5">
+              <button
+                type="button"
+                onClick={() => setColorMode("interface")}
+                className={`rounded px-1.5 py-1 text-[10px] font-medium transition-colors ${
+                  colorMode === "interface" ? "bg-blue-600 text-white" : "text-slate-300 hover:bg-slate-800"
+                }`}
               >
-                <span className="h-4 w-4 shrink-0 rounded-full border border-white/70" style={{ backgroundColor: color }} />
-                <span className="min-w-0 flex-1 truncate">{label}</span>
-                <span className="shrink-0 text-[10px] text-slate-400">{count.toLocaleString()}</span>
-              </div>
-            )) : interfaceLegend.map(({ state, count, color }) => (
-              <label
-                key={state}
-                className="flex cursor-pointer items-center gap-2 rounded px-1 py-1 transition-colors hover:bg-white/10"
-                title={`Click to change the ${state} color`}
+                Interface
+              </button>
+              <button
+                type="button"
+                onClick={() => setColorMode("rsrp")}
+                className={`rounded px-1.5 py-1 text-[10px] font-medium transition-colors ${
+                  colorMode === "rsrp" ? "bg-blue-600 text-white" : "text-slate-300 hover:bg-slate-800"
+                }`}
               >
-                <span className="relative h-4 w-4 shrink-0 overflow-hidden rounded-full border border-white/70" style={{ backgroundColor: color }}>
-                  <input
-                    type="color"
-                    value={color}
-                    aria-label={`Change ${state} color`}
-                    className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
-                    onChange={(event) => setInterfaceColorOverrides((current) => ({
-                      ...current,
-                      [state]: event.target.value,
-                    }))}
-                  />
-                </span>
-                <span className="min-w-0 flex-1 truncate">{state}</span>
-                <span className="shrink-0 text-[10px] text-slate-400">{count.toLocaleString()}</span>
-              </label>
-            ))}
-          </div>
-          {colorMode === "interface" && (
-            <div className="mt-1.5 border-t border-slate-700 pt-1.5 text-[10px] text-slate-400">
-              Click a color to customize it.
+                RSRP
+              </button>
             </div>
-          )}
+            <div className="space-y-1">
+              {colorMode === "rsrp" ? rsrpLegend.map(({ key, label, range, count, color }) => (
+                <div
+                  key={key}
+                  className="flex items-center gap-2 rounded px-1 py-1"
+                  title={range}
+                >
+                  <span className="h-4 w-4 shrink-0 rounded-full border border-white/70" style={{ backgroundColor: color }} />
+                  <span className="min-w-0 flex-1 truncate">{label}</span>
+                  <span className="shrink-0 text-[10px] text-slate-400">{count.toLocaleString()}</span>
+                </div>
+              )) : interfaceLegend.map(({ state, count, color }) => (
+                <label
+                  key={state}
+                  className="flex cursor-pointer items-center gap-2 rounded px-1 py-1 transition-colors hover:bg-white/10"
+                  title={`Click to change the ${state} color`}
+                >
+                  <span className="relative h-4 w-4 shrink-0 overflow-hidden rounded-full border border-white/70" style={{ backgroundColor: color }}>
+                    <input
+                      type="color"
+                      value={color}
+                      aria-label={`Change ${state} color`}
+                      className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
+                      onChange={(event) => setInterfaceColorOverrides((current) => ({
+                        ...current,
+                        [state]: event.target.value,
+                      }))}
+                    />
+                  </span>
+                  <span className="min-w-0 flex-1 truncate">{state}</span>
+                  <span className="shrink-0 text-[10px] text-slate-400">{count.toLocaleString()}</span>
+                </label>
+              ))}
+            </div>
+            {colorMode === "interface" && (
+              <div className="mt-1.5 border-t border-slate-700 pt-1.5 text-[10px] text-slate-400">
+                Click a color to customize it.
+              </div>
+            )}
+          </div>
         </div>
         <Rnd
           size={{ width: messagePanelWidth, height: "100%" }}
@@ -1282,10 +1288,13 @@ export function L3EventsMapView({ points }) {
 }
 
 function L3EventMapMarker({ point, onSelect }) {
+  const callMarker = isCallMarker(point);
+
   return (
     <OverlayView
       position={{ lat: point.lat, lng: point.lng }}
       mapPaneName={OverlayView.OVERLAY_MOUSE_TARGET}
+      zIndex={callMarker ? 1000 : 500}
     >
       <button
         type="button"
@@ -1294,13 +1303,28 @@ function L3EventMapMarker({ point, onSelect }) {
           event.stopPropagation();
           onSelect(point);
         }}
-        className="pointer-events-auto flex h-8 w-8 -translate-x-1/2 -translate-y-full items-center justify-center rounded-full border-2 border-white bg-slate-950 text-base font-bold shadow-lg"
+        className={`pointer-events-auto flex -translate-x-1/2 -translate-y-full items-center justify-center rounded-full border-2 border-white bg-slate-950 font-bold shadow-lg ${
+          callMarker ? "h-10 w-10 ring-2 ring-slate-950/70" : "h-8 w-8"
+        }`}
         style={{ color: point.markerColor || point.colorHex }}
       >
-        {point.markerSymbol}
+        <EventMarkerGlyph point={point} className={callMarker ? "h-5 w-5" : "h-4 w-4"} />
       </button>
     </OverlayView>
   );
+}
+
+function EventMarkerGlyph({ point, className = "h-4 w-4" }) {
+  if (point?.markerType === "handover" || point?.markerType === "handover-failure") {
+    return <Hand className={className} />;
+  }
+  if (point?.markerType === "call-start") {
+    return <PhoneCall className={className} />;
+  }
+  if (isCallMarker(point)) {
+    return <PhoneOff className={className} />;
+  }
+  return <span>{point?.markerSymbol}</span>;
 }
 
 function formatMapCell(cell) {
@@ -1337,7 +1361,7 @@ function L3EventMarkerInfo({ point }) {
           className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-slate-950 text-base font-bold"
           style={{ color: point.markerColor || point.colorHex }}
         >
-          {point.markerSymbol}
+          <EventMarkerGlyph point={point} />
         </span>
         <div className="min-w-0">
           <div className="truncate text-sm font-semibold">{point.markerLabel || point.title}</div>
