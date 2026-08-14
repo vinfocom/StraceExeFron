@@ -2,7 +2,6 @@ import React, { memo, useEffect, useMemo, useState } from "react";
 import { ChevronDown, Download, Loader2, Search, X } from "lucide-react";
 import toast from "react-hot-toast";
 import { downloadExcelSignalingSummaryPdf } from "@/utils/l3Events/pdfReport";
-import { getNrRrcPayloadInsights } from "@/utils/l3Events/nrRrcPayloadInsights";
 
 const SOURCE_OPTIONS = ["l3", "event"];
 
@@ -13,8 +12,6 @@ const SEVERITY_CLASS = {
   request: "bg-cyan-500/[0.06] text-slate-100",
   neutral: "text-slate-200",
 };
-
-const NR_RRC_MESSAGE_FIELDS = ["NR PCI", "NR ARFCN", "NR Frequency", "NR Band"];
 
 function uniqueValues(rows, key) {
   return Array.from(new Set(rows.map((row) => row[key]).filter(Boolean))).sort();
@@ -250,18 +247,11 @@ function SelectFilter({ label, value, onChange, options, allLabel = "All" }) {
 
 function DetailPanel({ row }) {
   if (!row) return <div className="flex h-full items-center justify-center text-sm text-slate-500">Select a signaling row to inspect the raw message.</div>;
-  const showDecodedNrRrc = /NR\s*RRC\s*Config\s*Info/i.test(String(row.message || ""));
-  const decodedInsights = showDecodedNrRrc
-    ? getNrRrcPayloadInsights(row).filter((detail) => NR_RRC_MESSAGE_FIELDS.includes(detail.label))
-    : [];
-  const messageText = decodedInsights.length > 0
-    ? decodedInsights.map((detail) => `${detail.label}: ${detail.value || "—"}`).join(" | ")
-    : row.rawMessage || "—";
 
   return (
     <div className="h-full overflow-auto bg-slate-950/95 px-2 py-1">
       <p>Message</p>
-      <div className="whitespace-pre-wrap text-[12px] leading-relaxed text-white">{messageText}</div>
+      <div className="whitespace-pre-wrap text-[12px] leading-relaxed text-white">{row.rawMessage || "—"}</div>
     </div>
   );
 }
