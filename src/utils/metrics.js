@@ -1,3 +1,5 @@
+import { resolveMacDetailMetricKey } from "@/utils/colorUtils";
+
 export const PCI_COLOR_PALETTE = [
   "#FF6B6B", "#4ECDC4", "#45B7D1", "#FFA07A", "#98D8C8",
   "#F7DC6F", "#BB8FCE", "#85C1E2", "#F8B739", "#52BE80",
@@ -336,6 +338,78 @@ export const METRIC_CONFIG = {
     unit: '',
     fields: ['delta', 'difference', 'value', 'metric_value'],
   },
+  mac_dl: {
+    thresholdKey: 'mac_dl',
+    label: 'MAC DL',
+    unit: 'Mbps',
+    fields: [],
+  },
+  mac_dl_delivered: {
+    thresholdKey: 'mac_dl_delivered',
+    label: 'MAC DL Delivered',
+    unit: 'Mbps',
+    fields: [],
+  },
+  mac_ul: {
+    thresholdKey: 'mac_ul',
+    label: 'MAC UL',
+    unit: 'Mbps',
+    fields: [],
+  },
+  mac_ul_delivered: {
+    thresholdKey: 'mac_ul_delivered',
+    label: 'MAC UL Delivered',
+    unit: 'Mbps',
+    fields: [],
+  },
+  mac_bler: {
+    thresholdKey: 'mac_bler',
+    label: 'MAC BLER',
+    unit: '%',
+    fields: [],
+  },
+  mac_bler_init: {
+    thresholdKey: 'mac_bler_init',
+    label: 'MAC BLER Init',
+    unit: '%',
+    fields: [],
+  },
+  mac_mcs: {
+    thresholdKey: 'mac_mcs',
+    label: 'MAC MCS',
+    unit: '',
+    fields: [],
+  },
+  mac_retx: {
+    thresholdKey: 'mac_retx',
+    label: 'MAC Retx',
+    unit: '%',
+    fields: [],
+  },
+  mac_rb: {
+    thresholdKey: 'mac_rb',
+    label: 'MAC RB',
+    unit: '',
+    fields: [],
+  },
+  mac_grants: {
+    thresholdKey: 'mac_grants',
+    label: 'MAC Grants/Sec',
+    unit: '',
+    fields: [],
+  },
+  mac_tx_power: {
+    thresholdKey: 'mac_tx_power',
+    label: 'MAC Tx Power',
+    unit: 'dBm',
+    fields: [],
+  },
+  mac_modulation_pct: {
+    thresholdKey: 'mac_modulation_pct',
+    label: 'MAC Modulation %',
+    unit: '%',
+    fields: [],
+  },
 };
 
 const METRIC_ALIASES = {
@@ -369,6 +443,14 @@ export const getMetricConfig = (metric) => {
   const aliasKey = METRIC_ALIASES[normalized];
   if (aliasKey && METRIC_CONFIG[aliasKey]) {
     return { ...METRIC_CONFIG[aliasKey], key: aliasKey };
+  }
+
+  // Raw extra_json MAC-detail field (e.g. "lte_mac_dl_delivered_mbps") — route
+  // it to the matching MAC threshold bucket instead of falling through to the
+  // generic fuzzy match (which could otherwise misfire) or the RSRP default.
+  const macKey = resolveMacDetailMetricKey(normalized);
+  if (macKey && METRIC_CONFIG[macKey]) {
+    return { ...METRIC_CONFIG[macKey], key: macKey, label: metric, fields: [] };
   }
 
   const configKeys = Object.keys(METRIC_CONFIG);
@@ -425,6 +507,16 @@ export const getMetricValueFromLog = (log, metric) => {
     const val = log[field];
     if (val !== undefined && val !== null && val !== '') {
       const parsed = parseFloat(val);
+      if (Number.isFinite(parsed)) {
+        return parsed;
+      }
+    }
+  }
+
+  if (log?.extra_fields && typeof log.extra_fields === 'object') {
+    const rawExtraValue = log.extra_fields[metric];
+    if (rawExtraValue !== undefined && rawExtraValue !== null && rawExtraValue !== '') {
+      const parsed = parseFloat(rawExtraValue);
       if (Number.isFinite(parsed)) {
         return parsed;
       }

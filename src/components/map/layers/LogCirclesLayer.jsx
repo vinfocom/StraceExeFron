@@ -113,6 +113,11 @@ export default function LogCirclesLayer({
         return getLogColor("pci", pciValue);
       }
 
+      if (colorBy === "mac_detail") {
+        const macDetailValue = log?.mac_detail;
+        return getLogColor("mac_detail", macDetailValue);
+      }
+
       return getColorForMetric(selectedMetric, metricValue, thresholds);
     },
     [colorBy, selectedMetric, thresholds]

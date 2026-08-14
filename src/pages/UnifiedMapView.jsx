@@ -3215,7 +3215,13 @@ const UnifiedMapView = () => {
     }
   }, [projectId, lteGridSizeMeters, setProject, storedGridScenarioId, storedGridTechnology]);
 
-  const handleDeltaGridManualFetch = useCallback(async ({ version, scenarioId, forceFetch = false } = {}) => {
+  const handleDeltaGridManualFetch = useCallback(async ({
+    version,
+    scenarioId,
+    technology,
+    forceFetch = false,
+    visible,
+  } = {}) => {
     if (deltaGridApiState?.computing || deltaGridApiState?.fetching) return false;
 
     const requestedVersion = String(version || "").trim().toLowerCase();
@@ -3224,12 +3230,54 @@ const UnifiedMapView = () => {
     )
       .trim()
       .toLowerCase();
+    const requestedTechnology = String(
+      technology || deltaGridApiState?.storedGridTechnology || storedGridTechnology || "ALL",
+    )
+      .trim()
+      .toUpperCase();
+    const currentTechnology = String(
+      deltaGridApiState?.storedGridTechnology || storedGridTechnology || "ALL",
+    )
+      .trim()
+      .toUpperCase();
+    const desiredVisible =
+      typeof visible === "boolean" ? Boolean(visible) : null;
+
+    if (desiredVisible === false) {
+      setDeltaGridApiState((prev) => ({
+        ...prev,
+        gridVisible: false,
+        lastStatus: "idle",
+        lastMessage: "",
+        lastError: "",
+        grids: [],
+        gridsCount: 0,
+        lastUpdatedAt: new Date().toISOString(),
+      }));
+      toast.info("Stored grid hidden.");
+      return true;
+    }
+
+    if (desiredVisible === true) {
+      return handleDeltaGridFetchStored({
+        version: requestedVersion || currentVersion,
+        scenarioId,
+        technology: requestedTechnology,
+      });
+    }
+
     const shouldRefreshVisibleGrid =
       Boolean(deltaGridApiState?.gridVisible) &&
-      (forceFetch || (requestedVersion && requestedVersion !== currentVersion));
+      (forceFetch ||
+        (requestedVersion && requestedVersion !== currentVersion) ||
+        requestedTechnology !== currentTechnology);
 
     if (shouldRefreshVisibleGrid) {
-      return handleDeltaGridFetchStored({ version: requestedVersion || currentVersion, scenarioId });
+      return handleDeltaGridFetchStored({
+        version: requestedVersion || currentVersion,
+        scenarioId,
+        technology: requestedTechnology,
+      });
     }
 
     if (Boolean(deltaGridApiState?.gridVisible)) {
@@ -3246,13 +3294,19 @@ const UnifiedMapView = () => {
       toast.info("Stored grid hidden.");
       return true;
     }
-    return handleDeltaGridFetchStored({ version, scenarioId });
+    return handleDeltaGridFetchStored({
+      version,
+      scenarioId,
+      technology: requestedTechnology,
+    });
   }, [
     deltaGridApiState?.computing,
     deltaGridApiState?.fetching,
     deltaGridApiState?.gridVisible,
     deltaGridApiState?.storedGridVersion,
+    deltaGridApiState?.storedGridTechnology,
     storedGridVersion,
+    storedGridTechnology,
     handleDeltaGridFetchStored,
   ]);
 
@@ -3527,6 +3581,31 @@ const UnifiedMapView = () => {
     deltaGridApiState?.storedGridVersion,
     storedGridVersion,
     sitePredictionVersion,
+  ]);
+
+  const effectiveSiteFiltersForMap = useMemo(() => {
+    const baseFilters = siteFilters || DEFAULT_SITE_FILTERS;
+    if (!isStoredGridOverlayVisible) {
+      return baseFilters;
+    }
+
+    const technology = String(
+      deltaGridApiState?.storedGridTechnology || storedGridTechnology || "ALL",
+    )
+      .trim()
+      .toUpperCase();
+    if (technology === "4G" || technology === "5G") {
+      return {
+        ...baseFilters,
+        technologies: [technology],
+      };
+    }
+    return baseFilters;
+  }, [
+    siteFilters,
+    isStoredGridOverlayVisible,
+    deltaGridApiState?.storedGridTechnology,
+    storedGridTechnology,
   ]);
 
   
@@ -4387,8 +4466,12 @@ const UnifiedMapView = () => {
     const technologies = new Set();
     const cellIds = new Set();
     const apps = new Set();
+    const macDetailFields = new Set();
 
     (renderedLegendFilteredLocations || []).forEach((loc) => {
+      if (loc?.extra_fields && typeof loc.extra_fields === "object") {
+        Object.keys(loc.extra_fields).forEach((key) => macDetailFields.add(key));
+      }
       const providerName = getProviderDisplayName(loc);
       if (providerName && !isUnknownOption(providerName)) {
         providers.add(providerName);
@@ -4444,6 +4527,7 @@ const UnifiedMapView = () => {
         return a.localeCompare(b);
       }),
       apps: [...apps].sort((a, b) => a.localeCompare(b)),
+      macDetailFields: [...macDetailFields].sort((a, b) => a.localeCompare(b)),
     };
   }, [renderedLegendFilteredLocations, polygonFilteredNeighborData]);
   const effectiveGridColorBy = useMemo(() => colorBy, [colorBy]);
@@ -7588,7 +7672,7 @@ const UnifiedMapView = () => {
                   onSectorGridSettingChange={handleSectorGridSettingChange}
                   triangleScaleMultiplier={triangleScaleMultiplier}
                   siteLegendFilter={siteLegendFilter}
-                  siteFilters={siteFilters}
+                  siteFilters={effectiveSiteFiltersForMap}
                   siteColorOverrides={siteColorOverrides}
                   options={{
                     scale: 0.6,

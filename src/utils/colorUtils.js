@@ -1,3 +1,35 @@
+// Maps a raw extra_json MAC-detail field name (e.g. "lte_mac_dl_delivered_mbps",
+// "nr_dl_bler_init", "pusch_tx") to one of the configurable threshold buckets,
+// so numeric MAC/PHY performance fields get range-based coloring instead of
+// categorical/hash coloring. Fields with no match here (dl_mod, nr_serving,
+// nr_dl_pci, nr_dl_arfcn, ...) stay categorical.
+export const resolveMacDetailMetricKey = (fieldName) => {
+  const name = String(fieldName || "").trim().toLowerCase();
+  if (!name) return null;
+
+  if (name.endsWith("mbps")) {
+    const isDelivered = name.includes("delivered");
+    if (/(^|_)ul(_|$)/.test(name)) return isDelivered ? "mac_ul_delivered" : "mac_ul";
+    if (/(^|_)dl(_|$)/.test(name)) return isDelivered ? "mac_dl_delivered" : "mac_dl";
+    return null;
+  }
+
+  // Initial BLER (pre-retransmission) must be checked before the generic
+  // "bler" match since its name is a superset ("..._bler_init").
+  if (name.includes("bler_init")) return "mac_bler_init";
+  if (name.includes("bler")) return "mac_bler";
+  if (/(^|_)mcs(_|$)/.test(name)) return "mac_mcs";
+  if (name.includes("retx")) return "mac_retx";
+  if (/(^|_)rb(_|$)/.test(name)) return "mac_rb";
+  if (name.includes("grants")) return "mac_grants";
+  if (name.endsWith("pct") && (name.includes("qpsk") || name.includes("qam"))) {
+    return "mac_modulation_pct";
+  }
+  if (/(^|_)tx(_|$)/.test(name)) return "mac_tx_power";
+
+  return null;
+};
+
 const stringToColor = (str) => {
   if (!str) return "#a8a6a2";
   
@@ -51,6 +83,7 @@ const dynamicColorCache = {
   earfcn: {},
   pci: {},
   tac: {},
+  mac_detail: {},
 };
 
 const hashString = (str) => {
@@ -339,6 +372,9 @@ export const COLOR_SCHEMES = {
   tac: {
     Unknown: "#a8a6a2",
   },
+  mac_detail: {
+    Unknown: "#a8a6a2",
+  },
 };
 
 const DEFAULT_TECHNOLOGY_SCHEME = {
@@ -477,6 +513,7 @@ export const clearDynamicColorCache = () => {
   dynamicColorCache.earfcn = {};
   dynamicColorCache.pci = {};
   dynamicColorCache.tac = {};
+  dynamicColorCache.mac_detail = {};
 };
 
 export const registerColor = (colorBy, value, color) => {

@@ -11,9 +11,74 @@ import {
   getStoredRedirectTarget,
 } from "../utils/authSession";
 
-const APP_VERSION = "2.2.2";
+const APP_VERSION = "2.3.0";
 const TRANSITION_INTENT_KEY = "authTransitionIntent";
 const GENERIC_LOGIN_ERROR = "Something went wrong. Please try again.";
+const REMEMBERED_USER_ID_KEY = "sTracerRememberedUserId";
+
+const getLoginPreferencesApi = () => {
+  if (typeof window === "undefined") {
+    return null;
+  }
+
+  return window.electronLoginPreferences || null;
+};
+
+const readRememberedUserId = async () => {
+  try {
+    const preferencesApi = getLoginPreferencesApi();
+    if (preferencesApi?.getRememberedUserId) {
+      const userId = await preferencesApi.getRememberedUserId();
+      return typeof userId === "string" ? userId : "";
+    }
+
+    if (typeof localStorage !== "undefined") {
+      return localStorage.getItem(REMEMBERED_USER_ID_KEY) || "";
+    }
+  } catch (_error) {
+    return "";
+  }
+
+  return "";
+};
+
+const saveRememberedUserId = async (userId) => {
+  const normalizedUserId = String(userId || "").trim();
+
+  try {
+    const preferencesApi = getLoginPreferencesApi();
+    if (preferencesApi?.setRememberedUserId) {
+      await preferencesApi.setRememberedUserId(normalizedUserId);
+      return;
+    }
+
+    if (typeof localStorage !== "undefined") {
+      if (normalizedUserId) {
+        localStorage.setItem(REMEMBERED_USER_ID_KEY, normalizedUserId);
+      } else {
+        localStorage.removeItem(REMEMBERED_USER_ID_KEY);
+      }
+    }
+  } catch (_error) {
+    // Remembering the user ID is a convenience only; login should continue.
+  }
+};
+
+const clearRememberedUserId = async () => {
+  try {
+    const preferencesApi = getLoginPreferencesApi();
+    if (preferencesApi?.clearRememberedUserId) {
+      await preferencesApi.clearRememberedUserId();
+      return;
+    }
+
+    if (typeof localStorage !== "undefined") {
+      localStorage.removeItem(REMEMBERED_USER_ID_KEY);
+    }
+  } catch (_error) {
+    // Remembering the user ID is a convenience only; login should continue.
+  }
+};
 
 const formatActiveLoginDetails = (activeLogin) => {
   if (!activeLogin || typeof activeLogin !== "object") {
@@ -53,6 +118,7 @@ const LoginPage = () => {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
+  const [rememberUserId, setRememberUserId] = useState(true);
   const [loading, setLoading] = useState(false);
   const { login, isLoggedIn } = useAuth();
   const navigate = useNavigate();
@@ -72,17 +138,46 @@ const LoginPage = () => {
   }, []);
 
   useEffect(() => {
+    let isMounted = true;
+
+    readRememberedUserId().then((rememberedUserId) => {
+      if (!isMounted || !rememberedUserId) {
+        return;
+      }
+
+      setEmail((currentEmail) => currentEmail || rememberedUserId);
+    });
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  useEffect(() => {
     if (isLoggedIn) {
       navigateAfterLogin();
     }
   }, [isLoggedIn, navigateAfterLogin]);
 
+  const persistRememberedUserId = useCallback(
+    async (userId) => {
+      if (rememberUserId) {
+        await saveRememberedUserId(userId);
+        return;
+      }
+
+      await clearRememberedUserId();
+    },
+    [rememberUserId]
+  );
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     setLoading(true);
     sessionStorage.setItem(TRANSITION_INTENT_KEY, "dashboard");
+    const normalizedEmail = email.trim();
 
-    if (!email || !password) {
+    if (!normalizedEmail || !password) {
       toast.error("Please enter both email and password.");
       sessionStorage.removeItem(TRANSITION_INTENT_KEY);
       setLoading(false);
@@ -91,13 +186,14 @@ const LoginPage = () => {
 
     try {
       const response = await login({
-        Email: email,
+        Email: normalizedEmail,
         Password: password,
         IP: "",
         ForceLogin: false,
       });
 
       if (response.success) {
+        await persistRememberedUserId(normalizedEmail);
         toast.success("Login successful!");
         navigateAfterLogin();
       } else {
@@ -113,13 +209,14 @@ const LoginPage = () => {
 
           if (shouldForceLogin) {
             const forceResponse = await login({
-              Email: email,
+              Email: normalizedEmail,
               Password: password,
               IP: "",
               ForceLogin: true,
             });
 
             if (forceResponse.success) {
+              await persistRememberedUserId(normalizedEmail);
               toast.success("Login successful!");
               navigateAfterLogin();
               return;
@@ -161,13 +258,14 @@ const LoginPage = () => {
         if (shouldForceLogin) {
           try {
             const forceResponse = await login({
-              Email: email,
+              Email: normalizedEmail,
               Password: password,
               IP: "",
               ForceLogin: true,
             });
 
             if (forceResponse?.success) {
+              await persistRememberedUserId(normalizedEmail);
               toast.success("Login successful!");
               navigateAfterLogin();
               return;
@@ -346,11 +444,11 @@ const LoginPage = () => {
                 <label className="flex items-center gap-2 text-slate-500">
                   <input
                     type="checkbox"
-                    checked
-                    readOnly
+                    checked={rememberUserId}
+                    onChange={(event) => setRememberUserId(event.target.checked)}
                     className="h-4 w-4 rounded border-slate-300 text-sky-500 focus:ring-sky-400"
                   />
-                  Remember this device
+                  Remember user ID
                 </label>
                 <span className="font-medium text-sky-600">
                   Secure access

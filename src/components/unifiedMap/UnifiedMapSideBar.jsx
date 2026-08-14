@@ -211,7 +211,7 @@ const SelectRow = memo(
         <SelectTrigger className="h-8 w-full min-w-0 bg-slate-800 border-slate-600 text-xs text-white [&>span]:truncate">
           <SelectValue placeholder={placeholder} />
         </SelectTrigger>
-        <SelectContent className="max-w-[340px] min-w-[240px] bg-slate-900 border-slate-700 text-white">
+        <SelectContent className="max-w-[340px] min-w-[240px] max-h-60 overflow-y-auto bg-slate-900 border-slate-700 text-white">
           {options.map((opt) => (
             <SelectItem
               key={opt.value}
@@ -701,7 +701,8 @@ const UnifiedMapSidebar = ({
     bands: [],
     technologies: [],
     cellIds: [],
-    apps: []
+    apps: [],
+    macDetailFields: []
   });
 
   useEffect(() => {
@@ -710,18 +711,19 @@ const UnifiedMapSidebar = ({
       bands: [],
       technologies: [],
       cellIds: [],
-      apps: []
+      apps: [],
+      macDetailFields: []
     });
   }, [projectId, sessionIds]);
 
   useEffect(() => {
     if (!availableFilterOptions) return;
-    
+
     setAccumulatedFilterOptions(prev => {
       let hasChanges = false;
       const next = { ...prev };
-      
-      const keys = ['providers', 'bands', 'technologies', 'cellIds', 'apps'];
+
+      const keys = ['providers', 'bands', 'technologies', 'cellIds', 'apps', 'macDetailFields'];
       keys.forEach(key => {
         const incoming = availableFilterOptions[key];
         if (Array.isArray(incoming) && incoming.length > 0) {
@@ -832,7 +834,6 @@ const UnifiedMapSidebar = ({
         { value: "tac", label: "TAC/LAC" },
         { value: "dominance", label: "Dominance Analysis" },
         { value: "coverage_violation", label: "Coverage Violation" },
-        {value: "mac_dl", label: "MAC DL"}
       ];
 
       const baseOptions = !enableGrid
@@ -867,6 +868,35 @@ const UnifiedMapSidebar = ({
     }
   }, [isSecondaryOnlyMode, metric, metricOptions, setMetric]);
 
+  const macDetailMetricOptions = useMemo(
+    () =>
+      (accumulatedFilterOptions.macDetailFields || []).map((field) => ({
+        value: field,
+        label: field,
+      })),
+    [accumulatedFilterOptions.macDetailFields],
+  );
+
+  useEffect(() => {
+    if (colorBy !== "mac_detail") return;
+    if (macDetailMetricOptions.length === 0) return;
+
+    const hasCurrentField = macDetailMetricOptions.some((option) => option.value === metric);
+    if (hasCurrentField) return;
+
+    setMetric?.(macDetailMetricOptions[0].value);
+  }, [colorBy, metric, macDetailMetricOptions, setMetric]);
+
+  useEffect(() => {
+    if (colorBy === "mac_detail") return;
+    if (metricOptions.some((option) => option.value === metric)) return;
+
+    const fallbackMetric = metricOptions.find((option) => !option.disabled)?.value;
+    if (fallbackMetric) {
+      setMetric?.(fallbackMetric);
+    }
+  }, [colorBy, metric, metricOptions, setMetric]);
+
   const colorOptions = useMemo(
     () => {
       if (enableGrid) {
@@ -879,6 +909,7 @@ const UnifiedMapSidebar = ({
           { value: "cell_id", label: "Best Cell ID" },
           { value: "nodebid", label: "Best NodeB ID" },
           { value: "pci", label: "Best Server" },
+          { value: "mac_detail", label: "MAC Detail" },
         ];
       }
       return [
@@ -889,6 +920,7 @@ const UnifiedMapSidebar = ({
         { value: "earfcn", label: "By EARFCN" },
         { value: "cell_id", label: "By Cell ID" },
         { value: "nodebid", label: "By NodeB ID" },
+        { value: "mac_detail", label: "MAC Detail" },
       ];
     },
     [enableGrid],
@@ -3267,13 +3299,16 @@ const UnifiedMapSidebar = ({
                  <span className="text-xs text-slate-400">KPI Filters</span>
 
                 <SelectRow
+                  label={colorBy === "mac_detail" ? "MAC Detail Field" : undefined}
                   value={metric}
                   onChange={setMetric}
-                  options={metricOptions}
-                  placeholder="Select metric"
+                  options={colorBy === "mac_detail" ? macDetailMetricOptions : metricOptions}
+                  placeholder={
+                    colorBy === "mac_detail" ? "Select MAC detail field" : "Select metric"
+                  }
                 />
 
-                {String(metric || "").toLowerCase() === "dominance" && (
+                {colorBy !== "mac_detail" && String(metric || "").toLowerCase() === "dominance" && (
                   <div className="border border-slate-700/50 rounded-lg p-2.5 bg-slate-900/40 space-y-3">
                     <div className="text-xs font-semibold text-amber-300">
                       Dominance Analysis
@@ -3319,7 +3354,7 @@ const UnifiedMapSidebar = ({
                   </div>
                 )}
 
-                {String(metric || "").toLowerCase() === "coverage_violation" && (
+                {colorBy !== "mac_detail" && String(metric || "").toLowerCase() === "coverage_violation" && (
                   <div className="border border-slate-700/50 rounded-lg p-2.5 bg-slate-900/40 space-y-3">
                     <div className="text-xs font-semibold text-amber-300">
                       Coverage Violation
@@ -4019,8 +4054,13 @@ const UnifiedMapSidebar = ({
                       : ""
                 }
                 checked={Boolean(deltaGridApiState?.gridVisible)}
-                onChange={() =>
-                  onDeltaGridFetchStored?.({ version: normalizedStoredGridVersion })
+                onChange={(nextChecked) =>
+                  onDeltaGridFetchStored?.({
+                    version: normalizedStoredGridVersion,
+                    scenarioId: storedGridScenarioId,
+                    technology: storedGridTechnology,
+                    visible: Boolean(nextChecked),
+                  })
                 }
                 disabled={
                   deltaGridButtonsDisabled ||

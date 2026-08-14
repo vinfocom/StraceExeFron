@@ -58,6 +58,16 @@ const isPointInPolygon = (point, polygon) => {
   return inside;
 };
 
+const parseExtraJsonObject = (rawExtraJson) => {
+  if (!rawExtraJson || typeof rawExtraJson !== 'string') return null;
+  try {
+    const parsed = JSON.parse(rawExtraJson);
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+};
+
 const isMacAddress = (value) =>
   /^(?:[0-9a-f]{2}:){5}[0-9a-f]{2}$/i.test(String(value || "").trim());
 
@@ -320,6 +330,8 @@ const parseLogEntry = (log, sessionId) => {
     indoor_outdoor: indout(log.indoor_outdoor) || null,
     apps: log.apps || '',
     image_path: log.image_path || '',
+    extra_json: log.extra_json || '',
+    extra_fields: parseExtraJsonObject(log.extra_json) || {},
   };
 };
 

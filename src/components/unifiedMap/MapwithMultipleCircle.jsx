@@ -7,7 +7,7 @@ import { Zap, Layers, Radio, Square, Circle } from "lucide-react";
 // import TechHandoverMarkers from "../unifiedMap/TechHandoverMarkers";
 import useColorForLog from "@/hooks/useColorForLog";
 import { getMetricValueFromLog, getPciColor, getEarfcnColor } from "@/utils/metrics";
-import { normalizeProviderName, normalizeTechName, normalizeBandName, getLogColor, getRegisteredColor, generateColorFromHash } from "@/utils/colorUtils";
+import { normalizeProviderName, normalizeTechName, normalizeBandName, getLogColor, getRegisteredColor, generateColorFromHash, resolveMacDetailMetricKey } from "@/utils/colorUtils";
 
 const DEFAULT_CENTER = { lat: 28.64453086, lng: 77.37324242 };
 const isElectronRuntime =
@@ -76,7 +76,7 @@ const getOverridableEarfcnColor = (value) =>
 const getOverridableTacColor = (value) =>
   getRegisteredColor("tac", value) || generateColorFromHash(String(value));
 
-const getLegendCategoryKeyFromLog = (log, colorBy) => {
+const getLegendCategoryKeyFromLog = (log, colorBy, macDetailField) => {
   const key = String(colorBy || "").trim().toLowerCase();
 
   if (key === "provider") {
@@ -140,6 +140,13 @@ const getLegendCategoryKeyFromLog = (log, colorBy) => {
       10,
     );
     return Number.isFinite(pci) ? String(pci) : "Unknown";
+  }
+
+  if (key === "mac_detail") {
+    if (!macDetailField) return "Unknown";
+    const raw = log?.extra_fields?.[macDetailField];
+    const value = String(raw ?? "").trim();
+    return value || "Unknown";
   }
 
   return "Unknown";
@@ -1549,11 +1556,16 @@ const MapWithMultipleCircles = ({
       return getOverridableEarfcnColor(value);
     }
 
-    if (['provider', 'technology', 'band', 'operator', 'cell_id'].includes(typeKey)) {
+    if (['provider', 'technology', 'band', 'operator', 'cell_id', 'mac_detail'].includes(typeKey)) {
         return getLogColor(typeKey, value);
     }
-    
+
+    // Raw extra_json MAC-detail field (e.g. "lte_mac_dl_delivered_mbps") — route
+    // to its matching MAC threshold bucket for range-based coloring.
+    const macBucketKey = resolveMacDetailMetricKey(typeKey);
+
     const metricKey =
+      macBucketKey ? macBucketKey :
       typeKey === 'dl_tpt' || typeKey === 'dl_rpt' ? 'dl_thpt' :
       typeKey === 'ul_tpt' || typeKey === 'ul_rpt' ? 'ul_thpt' : typeKey;
 
@@ -2091,7 +2103,11 @@ const MapWithMultipleCircles = ({
 
   const getPrimaryColor = useCallback((loc) => {
     if (colorBy && colorBy !== 'metric') {
-        const value = getLegendCategoryKeyFromLog(loc, colorBy);
+        if (colorBy === 'mac_detail' && resolveMacDetailMetricKey(selectedMetric)) {
+          const numValue = getMetricValueFromLog(loc, selectedMetric);
+          return resolveColor(numValue, selectedMetric);
+        }
+        const value = getLegendCategoryKeyFromLog(loc, colorBy, selectedMetric);
         return resolveColor(value, colorBy);
     }
     if (String(selectedMetric || "").trim().toLowerCase() === "nodebid") {
@@ -2112,7 +2128,11 @@ const MapWithMultipleCircles = ({
 
   const getNeighborColor = useCallback((neighbor) => {
     if (colorBy && colorBy !== 'metric') {
-        const value = getLegendCategoryKeyFromLog(neighbor, colorBy);
+        if (colorBy === 'mac_detail' && resolveMacDetailMetricKey(selectedMetric)) {
+          const numValue = getMetricValueFromLog(neighbor, selectedMetric);
+          return resolveColor(numValue, selectedMetric);
+        }
+        const value = getLegendCategoryKeyFromLog(neighbor, colorBy, selectedMetric);
         return resolveColor(value, colorBy);
     }
     const value = neighbor?.metricValue;

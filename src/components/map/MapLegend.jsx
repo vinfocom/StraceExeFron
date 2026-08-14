@@ -23,6 +23,7 @@ import {
   getLogColor,
   getRegisteredColor,
   registerColor,
+  resolveMacDetailMetricKey,
 } from "@/utils/colorUtils";
 import { useSettingsDialog } from "@/context/SettingsDialogContext";
 
@@ -217,7 +218,7 @@ const toggleLegendFilter = (activeFilter, nextFilter, onFilterChange) => {
   }
 };
 
-const getNormalizedKey = (log, colorBy, scheme) => {
+const getNormalizedKey = (log, colorBy, scheme, macDetailField) => {
   switch (colorBy) {
     case "provider":
       return resolveProviderDisplayName(log);
@@ -274,12 +275,18 @@ const getNormalizedKey = (log, colorBy, scheme) => {
       const earfcn = String(raw ?? "").trim();
       return earfcn || "Unknown";
     }
+    case "mac_detail": {
+      if (!macDetailField) return "Unknown";
+      const raw = log?.extra_fields?.[macDetailField];
+      const value = String(raw ?? "").trim();
+      return value || "Unknown";
+    }
     default:
       return "Unknown";
   }
 };
 
-const ColorSchemeLegend = ({ colorBy, logs, activeFilter, onFilterChange }) => {
+const ColorSchemeLegend = ({ colorBy, logs, activeFilter, onFilterChange, macDetailField }) => {
   const scheme = COLOR_SCHEMES[colorBy] || {};
   const [openColorKey, setOpenColorKey] = useState(null);
   const [customColorValue, setCustomColorValue] = useState("");
@@ -289,7 +296,7 @@ const ColorSchemeLegend = ({ colorBy, logs, activeFilter, onFilterChange }) => {
     const tempCounts = {};
 
     logs?.forEach((log) => {
-      const key = getNormalizedKey(log, colorBy, scheme);
+      const key = getNormalizedKey(log, colorBy, scheme, macDetailField);
       tempCounts[key] = (tempCounts[key] || 0) + 1;
     });
 
@@ -310,7 +317,7 @@ const ColorSchemeLegend = ({ colorBy, logs, activeFilter, onFilterChange }) => {
       ]);
 
     return { counts: tempCounts, total: logs?.length || 0, usedEntries: used };
-  }, [logs, colorBy, scheme, colorOverrides]);
+  }, [logs, colorBy, scheme, colorOverrides, macDetailField]);
 
   
   const handleRowClick = (key) => {
@@ -1333,6 +1340,28 @@ export default function MapLegend({
   };
 
   const { content, title } = useMemo(() => {
+    const macDetailMetricKey =
+      colorBy === "mac_detail" ? resolveMacDetailMetricKey(selectedMetric) : null;
+
+    // MAC-detail fields ending in "mbps" (e.g. lte_mac_dl_mbps) are numeric
+    // throughput values — show the standard range+color threshold legend
+    // instead of the categorical per-value breakdown.
+    if (macDetailMetricKey) {
+      const config = getMetricConfig(selectedMetric);
+      return {
+        content: (
+          <MetricThresholdLegend
+            thresholds={thresholds}
+            selectedMetric={selectedMetric}
+            logs={logs}
+            activeFilter={activeFilter}
+            onFilterChange={onFilterChange}
+          />
+        ),
+        title: `${config.label || selectedMetric}${config.unit ? ` (${config.unit})` : ""}`,
+      };
+    }
+
     if (colorBy) {
       const colorByTitle =
         colorBy === "earfcn"
@@ -1341,6 +1370,10 @@ export default function MapLegend({
           ? "Cell ID"
           : colorBy === "nodebid"
           ? "NodeB ID"
+          : colorBy === "mac_detail"
+          ? selectedMetric
+            ? `MAC Detail: ${selectedMetric}`
+            : "MAC Detail"
           : colorBy.charAt(0).toUpperCase() + colorBy.slice(1);
       return {
         content: (
@@ -1349,6 +1382,7 @@ export default function MapLegend({
             logs={logs}
             activeFilter={activeFilter}
             onFilterChange={onFilterChange}
+            macDetailField={colorBy === "mac_detail" ? selectedMetric : null}
           />
         ),
         title: colorByTitle,
