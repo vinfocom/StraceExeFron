@@ -79,12 +79,7 @@ function getSiteId(site) {
     site?.site ??
       site?.site_id ??
       site?.siteId ??
-      site?.site_key_inferred ??
-      site?.siteKeyInferred ??
-      site?.nodeb_id ??
-      site?.node_b_id ??
-      site?.node_b ??
-      site?.nodebId ??
+   
       "",
   );
 }
@@ -141,7 +136,7 @@ function getSiteLabelText(site, labelField = "none") {
     site_id: getDisplaySiteId(site),
     cell_id: getSiteCellId(site),
     technology: site?.technology ?? site?.rawSite?.technology ?? site?.rawSite?.Technology,
-    nodeb_id: site?.nodebId ?? extractNodebId(site?.rawSite) ?? site?.rawSite?.nodeb_id,
+    nodeb_id: extractStrictNodebId(site?.rawSite),
     pci: site?.pci ?? site?.rawSite?.pci ?? site?.rawSite?.PCI,
     band: resolveSiteBandValue(site),
   };
@@ -3226,14 +3221,7 @@ const NetworkPlannerMap = ({
           nextSector.rawSite?.cellId ??
           "",
       ).trim();
-      const optimizedNodeBId = String(
-        nextSector.nodebId ??
-          extractStrictNodebId(nextSector) ??
-          extractStrictNodebId(nextSector.rawSite) ??
-          nextSector.rawSite?.node_b_id ??
-          nextSector.rawSite?.nodeb_id ??
-          "",
-      ).trim();
+      const optimizedNodeBId = String(extractStrictNodebId(nextSector.rawSite) ?? "").trim();
       const optimizedCellId = String(sectorValueForLookup || fallbackCellId || "").trim();
       const combinedCellId = (() => {
         const fallback = String(fallbackCellId || "").trim();
@@ -3295,6 +3283,7 @@ const NetworkPlannerMap = ({
                   sitePredictionApi.getOptimised({
                     project_id: projectId,
                     node_b_id: optimizedNodeBId || undefined,
+                    site_id: nextSector.siteId || undefined,
                     cell_id: candidate || undefined,
                     sector: sectorValueForLookup || undefined,
                     sector_id: sectorValueForLookup || undefined,
@@ -3313,6 +3302,7 @@ const NetworkPlannerMap = ({
                   sitePredictionApi.getBase({
                     project_id: projectId,
                     node_b_id: optimizedNodeBId || undefined,
+                    site_id: nextSector.siteId || undefined,
                     cell_id: candidate || undefined,
                     sector: sectorValueForLookup || undefined,
                     sector_id: sectorValueForLookup || undefined,
@@ -3770,7 +3760,7 @@ const NetworkPlannerMap = ({
 
       if (value === undefined) {
         if (field === "site_name") value = sector.siteNameRaw ?? sector.siteName ?? null;
-        else if (field === "node_id") value = sector.nodebId ?? extractStrictNodebId(sector) ?? null;
+        else if (field === "node_id") value = extractStrictNodebId(sector?.rawSite) ?? null;
         else if (field === "sector") value = sector.sector ?? null;
         else if (field === "cell_id") value = sector.cellId ?? sector.cellIdRepresentative ?? null;
         else if (field === "pci") value = sector.pci ?? null;
@@ -4792,7 +4782,10 @@ const NetworkPlannerMap = ({
                   <div>Site ID: {infoSectorSiteId || "N/A"}</div>
                   <div>Cell ID: {infoSector.cellId || infoSector.cellIdRepresentative || "N/A"}</div>
                   <div>Sector: {infoSector.sector || "N/A"}</div>
-                  <div>NodeB ID: {infoSector.nodebId || "N/A"}</div>
+                  <div>
+                    NodeB ID:{" "}
+                    {extractStrictNodebId(infoSector.rawSite) ?? ""}
+                  </div>
                   <div>PCI: {infoSector.pci || "N/A"}</div>
                   <div>Network: {infoSector.network || "N/A"}</div>
                   <div>Technology: {infoSector.technology || "N/A"}</div>

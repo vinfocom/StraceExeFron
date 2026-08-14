@@ -697,7 +697,7 @@ export const predictionApi = {
         payload.polygon_ids = params.polygon_ids;
       }
 
-      const response = await pythonApi.post("/api/lte-prediction/run", payload, {
+      const response = await pythonApi.post("/api/lte-prediction-offset/run", payload, {
         timeout: 600000, // 10 minutes
       });
       return response;
@@ -1104,7 +1104,7 @@ export const predictionApi = {
   getLtePredictionStatus: async (jobId) => {
     try {
       if (!jobId) throw new Error("jobId is required");
-      return await pythonApi.get(`/api/lte-prediction/status/${jobId}`);
+      return await pythonApi.get(`/api/lte-prediction-offset/status/${jobId}`);
     } catch (error) {
       console.error("LTE Prediction status error:", error);
       throw error;
@@ -1127,7 +1127,7 @@ export const predictionApi = {
   getLtePredictionResult: async (jobId) => {
     try {
       if (!jobId) throw new Error("jobId is required");
-      return await pythonApi.get(`/api/lte-prediction/result/${jobId}`);
+      return await pythonApi.get(`/api/lte-prediction-offset/result/${jobId}`);
     } catch (error) {
       console.error("LTE Prediction result error:", error);
       throw error;

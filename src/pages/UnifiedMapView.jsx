@@ -1918,6 +1918,7 @@ const UnifiedMapView = () => {
   const [storedGridVersion, setStoredGridVersion] = useState("original");
   const [storedGridScenarioId, setStoredGridScenarioId] = useState(null);
   const [storedGridScenarioOptions, setStoredGridScenarioOptions] = useState([]);
+  const [storedGridTechnology, setStoredGridTechnology] = useState("ALL");
   const [deltaGridScope, setDeltaGridScope] = useState("selected");
   const [deltaGridApiState, setDeltaGridApiState] = useState({
     computing: false,
@@ -2790,7 +2791,7 @@ const UnifiedMapView = () => {
     window.dispatchEvent(new CustomEvent("map:selectAllSectors"));
   }, [isDeltaGridCompleteMode, lteGridEnabled]);
 
-  const handleDeltaGridFetchStored = useCallback(async ({ version, scenarioId } = {}) => {
+  const handleDeltaGridFetchStored = useCallback(async ({ version, scenarioId, technology } = {}) => {
     const numericProjectId = Number(projectId);
     if (!Number.isFinite(numericProjectId) || numericProjectId <= 0) {
       toast.error("Select a valid project before fetching grid analytics.");
@@ -2801,6 +2802,7 @@ const UnifiedMapView = () => {
       .trim()
       .toLowerCase();
     const effectiveScenarioId = Number(scenarioId ?? storedGridScenarioId) || undefined;
+    const effectiveTechnology = String(technology || storedGridTechnology || "ALL").trim().toUpperCase();
     const requestedGridSize = Math.max(5, Number(lteGridSizeMeters) || 50);
     setDeltaGridApiState((prev) => ({
       ...prev,
@@ -2819,6 +2821,7 @@ const UnifiedMapView = () => {
           normalizedVersion === "updated" || normalizedVersion === "optimized" || normalizedVersion === "optimised" || normalizedVersion === "delta"
             ? effectiveScenarioId
             : undefined,
+        technology: effectiveTechnology,
       });
       const root =
         response?.data && typeof response.data === "object" ? response.data : response || {};
@@ -2846,6 +2849,7 @@ const UnifiedMapView = () => {
         gridsCount,
         grids,
         storedGridVersion: normalizedVersion,
+        storedGridTechnology: effectiveTechnology,
         gridVisible: true,
         gridSizeMeters: fetchedGridSize,
         requestedGridSize,
@@ -2869,6 +2873,7 @@ const UnifiedMapView = () => {
         lastMessage: "",
         grids: [],
         storedGridVersion: normalizedVersion,
+        storedGridTechnology: effectiveTechnology,
         gridVisible: false,
         requestedGridSize,
         lastUpdatedAt: new Date().toISOString(),
@@ -2876,7 +2881,7 @@ const UnifiedMapView = () => {
       toast.error(message);
       return false;
     }
-  }, [projectId, lteGridSizeMeters, setLteGridSizeMeters, storedGridVersion, storedGridScenarioId]);
+  }, [projectId, lteGridSizeMeters, setLteGridSizeMeters, storedGridVersion, storedGridScenarioId, storedGridTechnology]);
 
   useEffect(() => {
     const normalizedVersion = String(storedGridVersion || "original").trim().toLowerCase();
@@ -3101,7 +3106,7 @@ const UnifiedMapView = () => {
   
 
   const handleDeltaGridComputeStore = useCallback(
-    async ({ showGridAfterCompute = false, scenarioId } = {}) => {
+    async ({ showGridAfterCompute = false, scenarioId, technology } = {}) => {
     const numericProjectId = Number(projectId);
     if (!Number.isFinite(numericProjectId) || numericProjectId <= 0) {
       toast.error("Select a valid project before computing grid analytics.");
@@ -3110,6 +3115,7 @@ const UnifiedMapView = () => {
 
     const requestedGridSize = Math.max(5, Number(lteGridSizeMeters) || 50);
     const effectiveScenarioId = Number(scenarioId ?? storedGridScenarioId);
+    const effectiveTechnology = String(technology || storedGridTechnology || "ALL").trim().toUpperCase();
     const computeToastId = toast.loading(`Computing grid (${requestedGridSize}m)...`);
     setDeltaGridApiState((prev) => ({
       ...prev,
@@ -3129,6 +3135,7 @@ const UnifiedMapView = () => {
           Number.isFinite(effectiveScenarioId) && effectiveScenarioId > 0
             ? effectiveScenarioId
             : undefined,
+        technology: effectiveTechnology,
       });
       const root =
         response?.data && typeof response.data === "object" ? response.data : response || {};
@@ -3160,6 +3167,7 @@ const UnifiedMapView = () => {
         gridsCount: resolvedCount,
         grids: showGridAfterCompute ? grids : [],
         gridVisible,
+        storedGridTechnology: effectiveTechnology,
         gridSizeMeters: requestedGridSize,
         requestedGridSize,
         lastUpdatedAt: new Date().toISOString(),
@@ -3205,7 +3213,7 @@ const UnifiedMapView = () => {
       });
       return false;
     }
-  }, [projectId, lteGridSizeMeters, setProject, storedGridScenarioId]);
+  }, [projectId, lteGridSizeMeters, setProject, storedGridScenarioId, storedGridTechnology]);
 
   const handleDeltaGridManualFetch = useCallback(async ({ version, scenarioId, forceFetch = false } = {}) => {
     if (deltaGridApiState?.computing || deltaGridApiState?.fetching) return false;
@@ -3433,6 +3441,7 @@ const UnifiedMapView = () => {
           optimizedBestOperator,
           bestOperator: providerLabel,
           provider: providerLabel,
+          technology: row?.technology ?? row?.Technology ?? deltaGridApiState?.storedGridTechnology ?? storedGridTechnology ?? "ALL",
           lat: centerLat,
           lng: centerLon,
           color,
@@ -3471,9 +3480,11 @@ const UnifiedMapView = () => {
     deltaGridApiState?.storedGridVersion,
     deltaGridApiState?.gridSizeMeters,
     deltaGridApiState?.requestedGridSize,
+    deltaGridApiState?.storedGridTechnology,
     selectedMetric,
     storedGridMetricMode,
     storedGridVersion,
+    storedGridTechnology,
     sitePredictionVersion,
     lteGridSizeMeters,
     baseThresholds,
@@ -7251,6 +7262,8 @@ const UnifiedMapView = () => {
         onSectorGridSettingChange={handleSectorGridSettingChange}
         storedGridVersion={storedGridVersion}
         setStoredGridVersion={setStoredGridVersion}
+        storedGridTechnology={storedGridTechnology}
+        setStoredGridTechnology={setStoredGridTechnology}
         storedGridScenarioId={storedGridScenarioId}
         setStoredGridScenarioId={setStoredGridScenarioId}
         storedGridScenarioOptions={storedGridScenarioOptions}

@@ -647,6 +647,8 @@ const UnifiedMapSidebar = ({
   onSectorGridSettingChange = null,
   storedGridVersion = "original",
   setStoredGridVersion,
+  storedGridTechnology = "ALL",
+  setStoredGridTechnology,
   storedGridScenarioId = null,
   setStoredGridScenarioId,
   storedGridScenarioOptions = [],
@@ -1517,11 +1519,33 @@ const UnifiedMapSidebar = ({
       if (Boolean(deltaGridApiState?.gridVisible)) {
         onDeltaGridFetchStored?.({
           version: nextVersion,
+          technology: storedGridTechnology,
           forceFetch: true,
         });
       }
     },
-    [setStoredGridVersion, deltaGridApiState?.gridVisible, onDeltaGridFetchStored],
+    [setStoredGridVersion, deltaGridApiState?.gridVisible, onDeltaGridFetchStored, storedGridTechnology],
+  );
+  const handleStoredGridTechnologyChange = useCallback(
+    (nextTechnology) => {
+      const normalizedTechnology = String(nextTechnology || "ALL").trim().toUpperCase();
+      setStoredGridTechnology?.(normalizedTechnology);
+      if (Boolean(deltaGridApiState?.gridVisible)) {
+        onDeltaGridFetchStored?.({
+          version: normalizedStoredGridVersion,
+          scenarioId: storedGridScenarioId,
+          technology: normalizedTechnology,
+          forceFetch: true,
+        });
+      }
+    },
+    [
+      setStoredGridTechnology,
+      deltaGridApiState?.gridVisible,
+      onDeltaGridFetchStored,
+      normalizedStoredGridVersion,
+      storedGridScenarioId,
+    ],
   );
   const handleStoredGridScenarioChange = useCallback(
     (nextScenarioId) => {
@@ -1531,6 +1555,7 @@ const UnifiedMapSidebar = ({
         onDeltaGridFetchStored?.({
           version: normalizedStoredGridVersion,
           scenarioId: Number.isFinite(parsedScenarioId) && parsedScenarioId > 0 ? parsedScenarioId : undefined,
+          technology: storedGridTechnology,
           forceFetch: true,
         });
       }
@@ -1540,6 +1565,7 @@ const UnifiedMapSidebar = ({
       deltaGridApiState?.gridVisible,
       onDeltaGridFetchStored,
       normalizedStoredGridVersion,
+      storedGridTechnology,
     ],
   );
   const stopLtePredictionMonitoring = useCallback((dismissToast = false) => {
@@ -4022,6 +4048,17 @@ const UnifiedMapSidebar = ({
                       Boolean(deltaGridApiState?.fetching)
                     }
                   />
+                  <SelectRow
+                    label="Technology"
+                    value={String(storedGridTechnology || "ALL").trim().toUpperCase()}
+                    onChange={handleStoredGridTechnologyChange}
+                    options={[
+                      { value: "ALL", label: "All" },
+                      { value: "4G", label: "4G" },
+                      { value: "5G", label: "5G" },
+                    ]}
+                    placeholder="Select technology"
+                  />
                   {(normalizedStoredGridVersion === "updated" ||
                     normalizedStoredGridVersion === "delta") && (
                     <div className="min-w-0 flex-1 space-y-1.5 relative">
@@ -4129,6 +4166,7 @@ const UnifiedMapSidebar = ({
                               normalizedStoredGridVersion === "delta"
                                 ? storedGridScenarioId
                                 : undefined,
+                            technology: storedGridTechnology,
                           })
                         }
                         disabled={

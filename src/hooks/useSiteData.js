@@ -318,15 +318,7 @@ const normalizeSitePredictionRows = (rows = [], options = {}) => {
           item.site ||
           item.site_id ||
           item.siteId ||
-          item.site_key_inferred ||
-          item.siteKeyInferred ||
-          item.nodeb_id ||
-          item.nodeB_id ||
-          item.node_b_id ||
-          item.nodebId ||
-          item.cell_id_representative ||
-          item.cellIdRepresentative ||
-          `site_${index}`,
+       
         lat,
         lng,
         azimuth: getFirstFiniteNumber([item.azimuth_deg_5, item.azimuth_deg_5_soft, item.azimuth], 0),
@@ -340,6 +332,7 @@ const normalizeSitePredictionRows = (rows = [], options = {}) => {
         operator: item.provider || item.cluster || item.network || item.Network || item.operator_name || "Unknown",
         band: item.band || item.frequency_band || item.frequency || "Unknown",
         technology: item.technology || item.Technology || item.tech || inferredTechnology,
+        nodebid: item.nodeid || "NA",
         pci:
           item.pci ??
           item.PCI ??
