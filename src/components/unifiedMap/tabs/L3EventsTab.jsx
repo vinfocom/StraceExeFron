@@ -6,7 +6,7 @@ import React, {
   useRef,
 } from "react";
 import { Upload, Loader2, AlertTriangle, X, Search, Play, Pause, RotateCcw, Rewind, FastForward } from "lucide-react";
-import { GoogleMap, useJsApiLoader } from "@react-google-maps/api";
+import { GoogleMap, InfoWindow, OverlayView, useJsApiLoader } from "@react-google-maps/api";
 import { GoogleMapsOverlay } from "@deck.gl/google-maps";
 import { ScatterplotLayer } from "@deck.gl/layers";
 import { Rnd } from "react-rnd";
@@ -48,6 +48,8 @@ const MAP_CONTAINER_STYLE = { width: "100%", height: "100%" };
 const DEFAULT_MAP_CENTER = { lat: 20.5937, lng: 78.9629 };
 const MAP_INTERFACE_COLOR_STORAGE_KEY = "l3-events-map-interface-colors";
 const MAP_COLOR_MODE_STORAGE_KEY = "l3-events-map-color-mode";
+const MAX_VISIBLE_EVENT_MARKERS = 75;
+const MAX_VISIBLE_MAP_MESSAGES = 1000;
 const MAP_INTERFACE_COLOR_PALETTE = [
   "#38bdf8",
   "#a78bfa",
@@ -521,6 +523,58 @@ export function enrichCallSummaryTechnology(summary, procedures = []) {
   };
 }
 
+function getMapEventMarker(item = {}) {
+  const text = [
+    item.milestone,
+    item.message,
+    item.title,
+    item.summary,
+    item.rawMessage,
+    item.result,
+    item.severity,
+    item.status,
+    item.detailedStatus,
+  ].filter(Boolean).join(" ");
+
+  if (/\b(hand(?: |-)?over|handover|ho)\b/i.test(text)) {
+    return {
+      markerType: "handover",
+      markerSymbol: "✋",
+      markerLabel: item.milestone || "Handover",
+      markerColor: "#f59e0b",
+    };
+  }
+
+  if (/\bnot connected\b|\bnot[- ]connected\b/i.test(text)) {
+    return {
+      markerType: "not-connected",
+      markerSymbol: "☎",
+      markerLabel: "Not Connected",
+      markerColor: "#facc15",
+    };
+  }
+
+  if (/\bdropped\b|\bcall disconnect(?:ed)?\b|\bdisconnect(?:ed|ion)?\b/i.test(text)) {
+    return {
+      markerType: "disconnect",
+      markerSymbol: "☎",
+      markerLabel: item.milestone === "DROPPED" ? "Dropped Call" : "Call Disconnected",
+      markerColor: "#ef4444",
+    };
+  }
+
+  if (/\bcall start\b|\bCALL_DIAL_INITIATED\b|\bdial initiated\b/i.test(text)) {
+    return {
+      markerType: "call-start",
+      markerSymbol: "☎",
+      markerLabel: "Call Start",
+      markerColor: "#22c55e",
+    };
+  }
+
+  return null;
+}
+
 export function buildMapPoints(timeline, rsrpByRowId = new Map()) {
   const toMapCoordinate = (value, min, max) => {
     if (value === null || value === undefined || String(value).trim() === "") return null;
@@ -534,6 +588,7 @@ export function buildMapPoints(timeline, rsrpByRowId = new Map()) {
       const lng = toMapCoordinate(item?.longitude, -180, 180);
       if (lat === null || lng === null) return null;
       const rsrpMatch = rsrpByRowId.get(item?.id) || null;
+      const eventMarker = getMapEventMarker(item);
       return {
         id: item?.id || `l3-map-point-${index}`,
         lat,
@@ -547,6 +602,12 @@ export function buildMapPoints(timeline, rsrpByRowId = new Map()) {
         summary: item?.summary || "",
         rawMessage: item?.rawMessage || "",
         severity: item?.severity || "",
+        milestone: item?.milestone || "",
+        callId: item?.callId || "",
+        markerType: eventMarker?.markerType || "",
+        markerSymbol: eventMarker?.markerSymbol || "",
+        markerLabel: eventMarker?.markerLabel || "",
+        markerColor: eventMarker?.markerColor || "",
         state: getMapPointInterface(item),
         rsrpValue: Number.isFinite(Number(rsrpMatch?.value)) ? Number(rsrpMatch.value) : null,
         rsrpLabel: rsrpMatch?.label || "",
@@ -594,6 +655,7 @@ export function L3EventsMapView({ points }) {
   const [messageSearch, setMessageSearch] = useState("");
   const [messagePanelWidth, setMessagePanelWidth] = useState(340);
   const [mapInstance, setMapInstance] = useState(null);
+  const [selectedEventMarker, setSelectedEventMarker] = useState(null);
   const [colorMode, setColorMode] = useState(() => {
     try {
       const savedMode = window.localStorage.getItem(MAP_COLOR_MODE_STORAGE_KEY);
@@ -684,6 +746,30 @@ export function L3EventsMapView({ points }) {
     () => (currentPoint ? [{ ...currentPoint, colorHex: getMapPointColor(currentPoint) }] : []),
     [currentPoint, getMapPointColor],
   );
+  const deckEventMarkers = useMemo(() => {
+    const visiblePoints = showAllPoints
+      ? points
+      : points.slice(Math.max(0, currentIndex - 250), currentIndex + 1);
+    return visiblePoints
+      .filter((point) => point.markerSymbol)
+      .slice(-MAX_VISIBLE_EVENT_MARKERS)
+      .map((point) => ({ ...point, colorHex: point.markerColor || getMapPointColor(point) }));
+  }, [currentIndex, getMapPointColor, points, showAllPoints]);
+  const eventMarkerStats = useMemo(() => {
+    const stats = {
+      handover: 0,
+      callStart: 0,
+      disconnect: 0,
+      notConnected: 0,
+    };
+    points.forEach((point) => {
+      if (point.markerType === "handover") stats.handover += 1;
+      if (point.markerType === "call-start") stats.callStart += 1;
+      if (point.markerType === "disconnect") stats.disconnect += 1;
+      if (point.markerType === "not-connected") stats.notConnected += 1;
+    });
+    return stats;
+  }, [points]);
   const filteredMessagePoints = useMemo(() => {
     const query = messageSearch.trim().toLowerCase();
     if (!query) return points.map((point, index) => ({ point, index }));
@@ -697,6 +783,10 @@ export function L3EventsMapView({ points }) {
         point.sourceFile,
       ].filter(Boolean).join(" ").toLowerCase().includes(query));
   }, [messageSearch, points]);
+  const visibleMessagePoints = useMemo(
+    () => filteredMessagePoints.slice(0, MAX_VISIBLE_MAP_MESSAGES),
+    [filteredMessagePoints],
+  );
   const center = points.length
     ? {
         lat: currentPoint?.lat ?? points.reduce((sum, point) => sum + point.lat, 0) / points.length,
@@ -709,6 +799,7 @@ export function L3EventsMapView({ points }) {
     setCurrentIndex(0);
     setShowAllPoints(false);
     setMessageSearch("");
+    setSelectedEventMarker(null);
   }, [points]);
 
   useEffect(() => {
@@ -891,6 +982,22 @@ export function L3EventsMapView({ points }) {
                 trailPoints={deckTrailPoints}
                 activePoints={deckActivePoint}
               />
+              {deckEventMarkers.map((point) => (
+                <L3EventMapMarker
+                  key={`event-marker-${point.id}`}
+                  point={point}
+                  onSelect={setSelectedEventMarker}
+                />
+              ))}
+              {selectedEventMarker && (
+                <InfoWindow
+                  position={{ lat: selectedEventMarker.lat, lng: selectedEventMarker.lng }}
+                  onCloseClick={() => setSelectedEventMarker(null)}
+                  options={{ pixelOffset: new window.google.maps.Size(0, -34) }}
+                >
+                  <L3EventMarkerInfo point={selectedEventMarker} />
+                </InfoWindow>
+              )}
             </GoogleMap>
           )}
         </div>
@@ -901,6 +1008,27 @@ export function L3EventsMapView({ points }) {
         >
           <div className="mb-1.5 flex items-center justify-between gap-2">
             <span className="font-semibold text-white">State Legend</span>
+          </div>
+          <div className="mb-2 rounded border border-slate-700 bg-slate-900/90 p-1.5">
+            <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-slate-400">Events</div>
+            <div className="grid grid-cols-2 gap-1 text-[10px]">
+              <div className="flex items-center justify-between gap-1 rounded bg-slate-950 px-1.5 py-1">
+                <span className="text-amber-400">✋ HO</span>
+                <span className="font-mono text-slate-200">{eventMarkerStats.handover.toLocaleString()}</span>
+              </div>
+              <div className="flex items-center justify-between gap-1 rounded bg-slate-950 px-1.5 py-1">
+                <span className="text-emerald-400">☎ Start</span>
+                <span className="font-mono text-slate-200">{eventMarkerStats.callStart.toLocaleString()}</span>
+              </div>
+              <div className="flex items-center justify-between gap-1 rounded bg-slate-950 px-1.5 py-1">
+                <span className="text-red-400">☎ Drop</span>
+                <span className="font-mono text-slate-200">{eventMarkerStats.disconnect.toLocaleString()}</span>
+              </div>
+              <div className="flex items-center justify-between gap-1 rounded bg-slate-950 px-1.5 py-1">
+                <span className="text-yellow-300">☎ NC</span>
+                <span className="font-mono text-slate-200">{eventMarkerStats.notConnected.toLocaleString()}</span>
+              </div>
+            </div>
           </div>
           <div className="mb-2 grid grid-cols-2 overflow-hidden rounded border border-slate-700 bg-slate-900 p-0.5">
             <button
@@ -993,7 +1121,12 @@ export function L3EventsMapView({ points }) {
               </div>
             </div>
             <div ref={messageListRef} className="min-h-0 flex-1 w-full max-w-full min-w-0 overflow-y-auto overflow-x-hidden">
-              {filteredMessagePoints.length > 0 ? filteredMessagePoints.map(({ point, index }) => (
+              {filteredMessagePoints.length > MAX_VISIBLE_MAP_MESSAGES && (
+                <div className="border-b border-slate-800 bg-slate-900/80 px-2 py-1 text-[10px] text-slate-400">
+                  Showing {MAX_VISIBLE_MAP_MESSAGES.toLocaleString()} of {filteredMessagePoints.length.toLocaleString()} messages. Search to narrow.
+                </div>
+              )}
+              {visibleMessagePoints.length > 0 ? visibleMessagePoints.map(({ point, index }) => (
                 <MapMessageCard
                   key={point.id}
                   ref={index === currentIndex ? activeCardRef : null}
@@ -1114,6 +1247,70 @@ export function L3EventsMapView({ points }) {
           </select>
           <span className="shrink-0 font-mono text-slate-400">{currentIndex + 1} / {points.length.toLocaleString()}</span>
         </div>
+      </div>
+    </div>
+  );
+}
+
+function L3EventMapMarker({ point, onSelect }) {
+  return (
+    <OverlayView
+      position={{ lat: point.lat, lng: point.lng }}
+      mapPaneName={OverlayView.OVERLAY_MOUSE_TARGET}
+    >
+      <button
+        type="button"
+        title={point.markerLabel || point.title}
+        onClick={(event) => {
+          event.stopPropagation();
+          onSelect(point);
+        }}
+        className="pointer-events-auto flex h-8 w-8 -translate-x-1/2 -translate-y-full items-center justify-center rounded-full border-2 border-white bg-slate-950 text-base font-bold shadow-lg"
+        style={{ color: point.markerColor || point.colorHex }}
+      >
+        {point.markerSymbol}
+      </button>
+    </OverlayView>
+  );
+}
+
+function L3EventMarkerInfo({ point }) {
+  const rawMessage = formatMapRawMessage(point);
+  const details = [
+    ["Time", point.timestampLabel],
+    ["Type", point.markerLabel || point.milestone || point.title],
+    ["Call ID", point.callId],
+    ["Procedure", point.procedure],
+    ["Protocol", point.protocol || point.category],
+    ["Interface", point.interface || point.state],
+    ["Result", point.severity || point.result],
+    ["Source", point.sourceFile],
+  ].filter(([, value]) => value);
+
+  return (
+    <div className="max-w-[320px] text-slate-900">
+      <div className="mb-2 flex items-center gap-2 border-b border-slate-200 pb-2">
+        <span
+          className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-slate-950 text-base font-bold"
+          style={{ color: point.markerColor || point.colorHex }}
+        >
+          {point.markerSymbol}
+        </span>
+        <div className="min-w-0">
+          <div className="truncate text-sm font-semibold">{point.markerLabel || point.title}</div>
+          <div className="text-[11px] text-slate-500">{point.markerType || "event"}</div>
+        </div>
+      </div>
+      <div className="space-y-1 text-xs">
+        {details.map(([label, value]) => (
+          <div key={label} className="grid grid-cols-[72px_1fr] gap-2">
+            <span className="font-semibold text-slate-500">{label}</span>
+            <span className="break-words text-slate-800">{value}</span>
+          </div>
+        ))}
+      </div>
+      <div className="mt-2 max-h-28 overflow-auto whitespace-pre-wrap rounded border border-slate-200 bg-slate-50 p-2 text-[11px] leading-4 text-slate-700">
+        {point.summary || rawMessage || "No additional event details available."}
       </div>
     </div>
   );
