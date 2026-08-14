@@ -4,6 +4,7 @@ export const DEFAULT_HANDOVER_MAX_GAP_MS = null;
 export const DEFAULT_HANDOVER_GAP_MULTIPLIER = 2.5;
 export const DEFAULT_NEIGHBOR_LOOKBACK_MS = 30 * 1000;
 export const DEFAULT_L3_HANDOVER_CORRELATION_MS = 30 * 1000;
+export const DEFAULT_SERVING_TRANSITION_CONFIRMATION_MS = 2 * 1000;
 
 const MISSING_SESSION = "__session_missing__";
 const INVALID_TEXT_VALUES = new Set(["", "n/a", "na", "null", "undefined", "-"]);
@@ -14,7 +15,7 @@ const MEASUREMENT_REPORT_RE = /\b(?:measurement|meas)\s*report\b/i;
 const RRC_RECONFIGURATION_COMPLETE_RE = /\b(?:nr\s+)?rrc\s+(?:connection\s+)?reconfiguration\s+complete\b/i;
 const RRC_RECONFIGURATION_RE = /\b(?:nr\s+)?rrc\s+(?:connection\s+)?reconfiguration\b/i;
 const RRC_RECOVERY_RE = /\brrc\b.{0,50}\b(?:re[- ]?establish(?:ment|ed)?|recovery|recover(?:ed|y)?)\b/i;
-const MOBILITY_RECONFIGURATION_RE = /\b(?:mobilityControlInfo|reconfigurationWithSync|target\s*cell|handover|hand\s*over)\b/i;
+const MOBILITY_RECONFIGURATION_RE = /\bmobilityControlInfo\b.{0,30}\b(?:present|handover)\b|\breconfigurationWithSync\b|\btarget\s*cell\b|\bhandover\b|\bhand\s*over\b/i;
 
 const readValue = (row, keys = []) => {
   for (const key of keys) {
@@ -115,20 +116,62 @@ const extractRatHint = (text = "") => {
   return null;
 };
 
+const firstMatch = (text, patterns = []) => {
+  for (const pattern of patterns) {
+    const match = text.match(pattern);
+    if (match?.[1]) return match[1];
+  }
+  return null;
+};
+
+const extractDecodedServingPci = (text = "") => firstMatch(text, [
+  /\b(?:NR\s+)?SrvCell\s+PCI\s*[:=]?\s*(\d+)\b/i,
+  /\bPCell\s+PCI\s*[:=]?\s*(\d+)\b/i,
+  /\bphyCellId\s*[:=]\s*(\d+)\b/i,
+]);
+
+const extractDecodedServingCellId = (text = "") => firstMatch(text, [
+  /\bNR\s+SIB1\b[^\r\n]*?\bNCI\s*[:=]?\s*([A-Fa-f0-9x-]+)\b/i,
+  /\bSIB1\b[^\r\n]*?\bcellIdentity\s*[:=]\s*([A-Fa-f0-9x-]+)\b/i,
+]);
+
+const extractDecodedServingFrequency = (text = "") => firstMatch(text, [
+  /\b(?:NR\s+)?SrvCell\b[^\r\n]*?\bNARFCN\s*[:=]?\s*(\d+)\b/i,
+  /\bPCell\b[^\r\n]*?\b(?:NARFCN|NR[- ]?ARFCN|EARFCN|freq)\s*[:=]?\s*(\d+)\b/i,
+  /\bphyCellId\s*[:=]\s*\d+[^\r\n]*?\bfreq\s*[:=]\s*(\d+)\b/i,
+]);
+
+const extractDecodedTargetPci = (text = "") => firstMatch(text, [
+  /\bHANDOVER\s*->\s*PCI\s*[:=]?\s*(\d+)\b/i,
+  /\bhandover\s+target\]?\s*PCI\s*[:=]?\s*(\d+)\b/i,
+  /\b(?:nb|neighbor|neighbour)\s+PCI\s*[:=]?\s*(\d+)\b/i,
+]);
+
+const extractDecodedTargetFrequency = (text = "") => firstMatch(text, [
+  /\bHANDOVER\s*->\s*PCI\s*[:=]?\s*\d+[^\r\n]*?\b(?:NARFCN|NR[- ]?ARFCN|EARFCN)\s*[:=]?\s*(\d+)\b/i,
+  /\bhandover\s+target\]?\s*PCI\s*[:=]?\s*\d+[^\r\n]*?\b(?:NARFCN|NR[- ]?ARFCN|EARFCN)\s*[:=]?\s*(\d+)\b/i,
+]);
+
 const extractL3CellEvidence = (item = {}) => {
   const text = getL3ItemText(item);
   const servingPci = readNestedText(item, ["servingPci", "serving_pci", "primaryPci", "primary_pci"])
+    || extractDecodedServingPci(text)
     || extractTaggedValue(text, ["serving", "source", "old", "current", "pcell"], ["pci"], "\\d+");
   const servingCellId = readNestedText(item, ["servingNci", "serving_nci", "nci", "NCI"])
-    || extractTaggedValue(text, ["serving", "source", "old", "current", "pcell"], ["nci", "cell\\s*id"], "[A-Fa-f0-9x-]+");
+    || extractTaggedValue(text, ["serving", "source", "old", "current", "pcell"], ["nci", "cell\\s*id"], "[A-Fa-f0-9x-]+")
+    || extractDecodedServingCellId(text);
   const servingFrequency = readNestedText(item, ["servingNrarfcn", "serving_nrarfcn", "servingEarfcn", "serving_earfcn"])
+    || extractDecodedServingFrequency(text)
     || extractTaggedValue(text, ["serving", "source", "old", "current", "pcell"], ["nrarfcn", "nr[- ]?arfcn", "earfcn", "arfcn"], "\\d+");
   const targetPci = readNestedText(item, ["targetPci", "target_pci", "neighborPci", "neighbor_pci", "neighbourPci", "neighbour_pci"])
+    || extractDecodedTargetPci(text)
     || extractTaggedValue(text, ["target", "candidate", "neighbor", "neighbour", "new"], ["pci"], "\\d+");
   const targetCellId = readNestedText(item, ["targetNci", "target_nci", "neighborNci", "neighbor_nci", "neighbourNci", "neighbour_nci"])
     || extractTaggedValue(text, ["target", "candidate", "neighbor", "neighbour", "new"], ["nci", "cell\\s*id"], "[A-Fa-f0-9x-]+");
   const targetFrequency = readNestedText(item, ["targetNrarfcn", "target_nrarfcn", "targetEarfcn", "target_earfcn", "neighborNrarfcn", "neighbor_nrarfcn"])
-    || extractTaggedValue(text, ["target", "candidate", "neighbor", "neighbour", "new"], ["nrarfcn", "nr[- ]?arfcn", "earfcn", "arfcn"], "\\d+");
+    || extractDecodedTargetFrequency(text)
+    || extractTaggedValue(text, ["target", "candidate", "neighbor", "neighbour", "new"], ["nrarfcn", "nr[- ]?arfcn", "earfcn", "arfcn"], "\\d+")
+    || (targetPci ? firstMatch(text, [/\b(?:NARFCN|NR[- ]?ARFCN)\s*[:=]\s*(\d+)\b/i]) : null);
   const structuredRat = normalizeRat(readNestedText(item, ["technology", "Technology", "rat", "RAT"]));
   const messageRat = extractRatHint(`${item.category || ""} ${item.sourceCategory || ""} ${item.protocol || ""} ${item.title || ""}`);
   const targetRatText = extractTaggedValue(text, ["target", "candidate", "neighbor", "neighbour", "new"], ["rat", "technology"], "[A-Za-z0-9-]+");
@@ -187,11 +230,11 @@ const cellsMatch = (expected, observed) => {
 
 const getConfirmedHandoverType = (source, target) => {
   if (source?.rat && target?.rat && source.rat !== target.rat) return "Inter-RAT Handover";
-  if (source?.rat !== "5G" || target?.rat !== "5G") return null;
   if (!source.frequency || !target.frequency) return null;
-  return String(source.frequency) === String(target.frequency)
-    ? "NR Intra-Frequency Handover"
-    : "NR Inter-Frequency Handover";
+  const frequencyType = String(source.frequency) === String(target.frequency) ? "Intra-Frequency" : "Inter-Frequency";
+  if (source?.rat === "5G" && target?.rat === "5G") return `NR ${frequencyType} Handover`;
+  if (source?.rat === "4G" && target?.rat === "4G") return `LTE ${frequencyType} Handover`;
+  return null;
 };
 
 const getL3TimeMs = (item) => {
@@ -276,12 +319,17 @@ export function evaluateL3HandoverTimeline(items = [], {
         && withinCorrelationWindow(latestMeasurement.item, entry.item, correlationWindowMs)
         ? latestMeasurement
         : null;
-      if (recentMeasurement || MOBILITY_RECONFIGURATION_RE.test(text) || hasCellIdentity(rowEvidence.target)) {
+      const explicitMobility = MOBILITY_RECONFIGURATION_RE.test(text);
+      const nrMeasurementMobility = recentMeasurement
+        && (rowEvidence.serving.rat === "5G" || recentMeasurement.source?.rat === "5G");
+      const correlatedMeasurement = (nrMeasurementMobility || explicitMobility) ? recentMeasurement : null;
+      if (nrMeasurementMobility || explicitMobility || hasCellIdentity(rowEvidence.target)) {
         pendingReconfiguration = {
           item: entry.item,
-          measurement: recentMeasurement,
-          source: recentMeasurement?.source || servingBeforeRow || lastServing,
-          target: mergeCellEvidence(recentMeasurement?.target, rowEvidence.target),
+          measurement: nrMeasurementMobility ? correlatedMeasurement : null,
+          explicitMobility,
+          source: correlatedMeasurement?.source || servingBeforeRow || lastServing,
+          target: mergeCellEvidence(correlatedMeasurement?.target, rowEvidence.target),
         };
       }
     }
@@ -292,6 +340,8 @@ export function evaluateL3HandoverTimeline(items = [], {
         label: "HANDOVER COMPLETE",
         severity: "success",
         handoverType: getConfirmedHandoverType(pendingReconfiguration?.source, pendingReconfiguration?.target),
+        sourceCell: pendingReconfiguration?.source || null,
+        targetCell: pendingReconfiguration?.target || null,
       };
       record(entry, outcome);
       pendingReconfiguration = null;
@@ -327,21 +377,24 @@ export function evaluateL3HandoverTimeline(items = [], {
 
     const futureServingCells = [];
     for (let futureIndex = orderedIndex; futureIndex < ordered.length; futureIndex += 1) {
-      if (!withinCorrelationWindow(entry.item, ordered[futureIndex].item, correlationWindowMs)) break;
+      if (!withinCorrelationWindow(entry.item, ordered[futureIndex].item, DEFAULT_SERVING_TRANSITION_CONFIRMATION_MS)) break;
       if (hasCellIdentity(evidence[futureIndex].serving)) {
         futureServingCells.push(evidence[futureIndex].serving);
       }
     }
     const sourceKnown = hasCellIdentity(pending.source);
     const targetKnown = hasCellIdentity(pending.target);
-    const changedServing = sourceKnown
-      ? futureServingCells.find((cell) => cellsDiffer(pending.source, cell))
+    const firstFutureServing = futureServingCells[0] || null;
+    const changedServing = sourceKnown && firstFutureServing && cellsDiffer(pending.source, firstFutureServing)
+      ? firstFutureServing
       : null;
     const confirmedTarget = changedServing && targetKnown && cellsMatch(pending.target, changedServing);
-    const unchangedServingObserved = sourceKnown
-      && futureServingCells.some((cell) => cellsMatch(pending.source, cell));
+    const unchangedServingObserved = sourceKnown && firstFutureServing && cellsMatch(pending.source, firstFutureServing);
 
-    if (pending.measurement && sourceKnown && targetKnown && confirmedTarget) {
+    if (sourceKnown && changedServing && (
+      (pending.measurement && targetKnown && confirmedTarget)
+      || pending.explicitMobility
+    )) {
       record(entry, {
         classification: "confirmed_handover",
         label: "HANDOVER COMPLETE",

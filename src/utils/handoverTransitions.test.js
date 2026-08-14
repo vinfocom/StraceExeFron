@@ -295,3 +295,44 @@ test("classifies RRC recovery separately from handover", () => {
   assert.equal(evaluation.byId.get("complete").label, "RRC REESTABLISHMENT / RECOVERY");
   assert.equal(evaluation.summary.confirmed, 0);
 });
+
+test("confirms handovers from the decoded NR SrvCell and nb PCI export format", () => {
+  const evaluation = evaluateL3HandoverTimeline([
+    l3("serving-old", 0, "NR_RRC_Serv_Cell_Info", "NR SrvCell PCI=62 NARFCN=528750"),
+    l3("measurement", 1, "NR Measurement Report", "NR MeasReport id=3 NARFCN=528750(measId) PCell PCI62 -88.0dBm | nb PCI61 -80.0dBm"),
+    l3("reconfiguration", 2, "NR RRC Reconfiguration", "NR Reconfig measCfg: +MO1→528750 +id1→MO1 -id3"),
+    l3("complete", 3, "NR RRC Reconfiguration Complete", "NR RRCReconfigComplete xact=1"),
+    l3("serving-new", 4, "NR_RRC_Serv_Cell_Info", "NR SrvCell PCI=61 NARFCN=528750"),
+  ]);
+
+  const result = evaluation.byId.get("complete");
+  assert.equal(result.classification, "confirmed_handover");
+  assert.equal(result.handoverType, "NR Intra-Frequency Handover");
+  assert.equal(result.sourceCell.pci, "62");
+  assert.equal(result.targetCell.pci, "61");
+});
+
+test("confirms LTE handover commands and reports source and target cells", () => {
+  const evaluation = evaluateL3HandoverTimeline([
+    l3(
+      "command",
+      0,
+      "RRC Connection Reconfiguration : Handover Command",
+      "RRCReconfig HANDOVER -> PCI3 EARFCN1421 | phyCellId : 351 | freq : 40940 | mobilityControlInfo : present (handover) | [handover target] PCI 3 EARFCN 1421",
+      { category: "LTE-RRC", technology: "LTE" },
+    ),
+    l3(
+      "complete",
+      1,
+      "RRC Connection Reconfiguration Complete",
+      "RRC Connection Reconfiguration Complete | phyCellId : 3 | freq : 1421",
+      { category: "LTE-RRC", technology: "LTE" },
+    ),
+  ]);
+
+  const result = evaluation.byId.get("complete");
+  assert.equal(result.classification, "confirmed_handover");
+  assert.equal(result.handoverType, "LTE Inter-Frequency Handover");
+  assert.equal(result.sourceCell.pci, "351");
+  assert.equal(result.targetCell.pci, "3");
+});

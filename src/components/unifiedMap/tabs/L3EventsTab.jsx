@@ -524,28 +524,29 @@ export function enrichCallSummaryTechnology(summary, procedures = []) {
 }
 
 function getMapEventMarker(item = {}) {
-  const text = [
-    item.milestone,
-    item.message,
-    item.title,
-    item.summary,
-    item.rawMessage,
-    item.result,
-    item.severity,
-    item.status,
-    item.detailedStatus,
-  ].filter(Boolean).join(" ");
+  const milestone = String(item.milestone || "").trim().toUpperCase();
+  const eventKey = String(item.eventKey || "").trim().toUpperCase();
+  const handoverClassification = String(item.handoverClassification || "").trim().toLowerCase();
 
-  if (/\b(hand(?: |-)?over|handover|ho)\b/i.test(text)) {
+  if (handoverClassification === "confirmed_handover" || milestone === "HANDOVER COMPLETE") {
     return {
       markerType: "handover",
       markerSymbol: "✋",
-      markerLabel: item.milestone || "Handover",
+      markerLabel: item.handoverType || "Handover Complete",
       markerColor: "#f59e0b",
     };
   }
 
-  if (/\bnot connected\b|\bnot[- ]connected\b/i.test(text)) {
+  if (handoverClassification === "failed_handover" || milestone === "HANDOVER FAILURE") {
+    return {
+      markerType: "handover-failure",
+      markerSymbol: "✋",
+      markerLabel: "Handover Failure",
+      markerColor: "#ef4444",
+    };
+  }
+
+  if (milestone === "NOT CONNECTED") {
     return {
       markerType: "not-connected",
       markerSymbol: "☎",
@@ -554,16 +555,25 @@ function getMapEventMarker(item = {}) {
     };
   }
 
-  if (/\bdropped\b|\bcall disconnect(?:ed)?\b|\bdisconnect(?:ed|ion)?\b/i.test(text)) {
+  if (milestone === "DROPPED") {
     return {
-      markerType: "disconnect",
+      markerType: "dropped",
       markerSymbol: "☎",
-      markerLabel: item.milestone === "DROPPED" ? "Dropped Call" : "Call Disconnected",
+      markerLabel: "Dropped Call",
       markerColor: "#ef4444",
     };
   }
 
-  if (/\bcall start\b|\bCALL_DIAL_INITIATED\b|\bdial initiated\b/i.test(text)) {
+  if (milestone === "CALL DISCONNECT" || eventKey === "CALL_DISCONNECTED") {
+    return {
+      markerType: "disconnect",
+      markerSymbol: "☎",
+      markerLabel: "Call End",
+      markerColor: "#ef4444",
+    };
+  }
+
+  if (milestone === "CALL START" || eventKey === "CALL_DIAL_INITIATED") {
     return {
       markerType: "call-start",
       markerSymbol: "☎",
@@ -604,6 +614,13 @@ export function buildMapPoints(timeline, rsrpByRowId = new Map()) {
         severity: item?.severity || "",
         milestone: item?.milestone || "",
         callId: item?.callId || "",
+        eventKey: item?.eventKey || "",
+        result: item?.result || "",
+        handoverClassification: item?.handoverClassification || "",
+        handoverType: item?.handoverType || "",
+        handoverEvaluationReason: item?.handoverEvaluationReason || "",
+        handoverSourceCell: item?.handoverSourceCell || null,
+        handoverTargetCell: item?.handoverTargetCell || null,
         markerType: eventMarker?.markerType || "",
         markerSymbol: eventMarker?.markerSymbol || "",
         markerLabel: eventMarker?.markerLabel || "",
@@ -758,14 +775,18 @@ export function L3EventsMapView({ points }) {
   const eventMarkerStats = useMemo(() => {
     const stats = {
       handover: 0,
+      handoverFailure: 0,
       callStart: 0,
       disconnect: 0,
+      dropped: 0,
       notConnected: 0,
     };
     points.forEach((point) => {
       if (point.markerType === "handover") stats.handover += 1;
+      if (point.markerType === "handover-failure") stats.handoverFailure += 1;
       if (point.markerType === "call-start") stats.callStart += 1;
       if (point.markerType === "disconnect") stats.disconnect += 1;
+      if (point.markerType === "dropped") stats.dropped += 1;
       if (point.markerType === "not-connected") stats.notConnected += 1;
     });
     return stats;
@@ -1017,12 +1038,20 @@ export function L3EventsMapView({ points }) {
                 <span className="font-mono text-slate-200">{eventMarkerStats.handover.toLocaleString()}</span>
               </div>
               <div className="flex items-center justify-between gap-1 rounded bg-slate-950 px-1.5 py-1">
+                <span className="text-red-400">✋ Fail</span>
+                <span className="font-mono text-slate-200">{eventMarkerStats.handoverFailure.toLocaleString()}</span>
+              </div>
+              <div className="flex items-center justify-between gap-1 rounded bg-slate-950 px-1.5 py-1">
                 <span className="text-emerald-400">☎ Start</span>
                 <span className="font-mono text-slate-200">{eventMarkerStats.callStart.toLocaleString()}</span>
               </div>
               <div className="flex items-center justify-between gap-1 rounded bg-slate-950 px-1.5 py-1">
-                <span className="text-red-400">☎ Drop</span>
+                <span className="text-red-400">☎ End</span>
                 <span className="font-mono text-slate-200">{eventMarkerStats.disconnect.toLocaleString()}</span>
+              </div>
+              <div className="flex items-center justify-between gap-1 rounded bg-slate-950 px-1.5 py-1">
+                <span className="text-red-400">☎ Drop</span>
+                <span className="font-mono text-slate-200">{eventMarkerStats.dropped.toLocaleString()}</span>
               </div>
               <div className="flex items-center justify-between gap-1 rounded bg-slate-950 px-1.5 py-1">
                 <span className="text-yellow-300">☎ NC</span>
@@ -1274,16 +1303,30 @@ function L3EventMapMarker({ point, onSelect }) {
   );
 }
 
+function formatMapCell(cell) {
+  if (!cell) return "";
+  return [
+    cell.pci ? `PCI ${cell.pci}` : "",
+    cell.cellId ? `Cell ${cell.cellId}` : "",
+    cell.frequency ? `ARFCN ${cell.frequency}` : "",
+    cell.rat || "",
+  ].filter(Boolean).join(" · ");
+}
+
 function L3EventMarkerInfo({ point }) {
   const rawMessage = formatMapRawMessage(point);
   const details = [
     ["Time", point.timestampLabel],
     ["Type", point.markerLabel || point.milestone || point.title],
     ["Call ID", point.callId],
+    ["HO Type", point.handoverType],
+    ["From", formatMapCell(point.handoverSourceCell)],
+    ["To", formatMapCell(point.handoverTargetCell)],
     ["Procedure", point.procedure],
     ["Protocol", point.protocol || point.category],
     ["Interface", point.interface || point.state],
     ["Result", point.severity || point.result],
+    ["Evidence", point.handoverEvaluationReason],
     ["Source", point.sourceFile],
   ].filter(([, value]) => value);
 

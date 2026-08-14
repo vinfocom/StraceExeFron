@@ -119,6 +119,8 @@ export function buildUnifiedSignalingRows(timeline = [], calls = [], analysis = 
       handoverClassification: handoverOutcome?.classification || null,
       handoverType: handoverOutcome?.handoverType || null,
       handoverEvaluationReason: handoverOutcome?.reason || null,
+      handoverSourceCell: handoverOutcome?.sourceCell || null,
+      handoverTargetCell: handoverOutcome?.targetCell || null,
       rawMessage: base.rawMessage,
       metadata: base.metadata || {},
     };
