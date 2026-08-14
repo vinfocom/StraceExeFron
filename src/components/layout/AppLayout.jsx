@@ -45,7 +45,6 @@ const AppLayout = ({ children }) => {
     "/prediction-map",
     "/unified-map",
     "/multi-map",
-    "/l3-events",
     "/project-l3-events",
   ];
   const pathsWithoutSidebar = ["/unified-map"];

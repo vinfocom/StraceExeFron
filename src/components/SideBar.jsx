@@ -43,7 +43,7 @@ const SideBar = ({ compact = false }) => {
       allowedRoles: [ROLES.SUPER_ADMIN, ROLES.ADMIN],
     },
     { icon: Map, text: 'Map View', path: '/mapview' },
-    { icon: Radio, text: 'L3 Events', path: '/l3-events' },
+    { icon: Radio, text: 'Backend L3 Parser', path: '/project-l3-events' },
     {
       icon: Building,
       text: 'Licenses',
