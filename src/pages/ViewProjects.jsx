@@ -503,7 +503,7 @@ const ViewProjectsPage = () => {
                                     type="button"
                                     onClick={() => handleOpenL3Events(project)}
                                     className="inline-flex items-center gap-1 rounded border border-indigo-200 bg-indigo-50 px-1.5 py-0.5 text-[11px] font-semibold text-indigo-700 hover:bg-indigo-100"
-                                    title={projectHasL3(project) ? "Open L3/Event upload history" : "Upload L3/Event data"}
+                                    title={projectHasL3(project) ? "Open L3 Session" : "Upload L3/Event data"}
                                   >
                                     <Radio className="h-3 w-3" />{projectHasL3(project) ? "L3" : "Add L3"}
                                   </button>
