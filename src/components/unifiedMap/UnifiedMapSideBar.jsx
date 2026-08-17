@@ -909,7 +909,7 @@ const UnifiedMapSidebar = ({
           { value: "cell_id", label: "Best Cell ID" },
           { value: "nodebid", label: "Best NodeB ID" },
           { value: "pci", label: "Best Server" },
-          { value: "mac_detail", label: "MAC Detail" },
+          { value: "mac_detail", label: "L3 Detail" },
         ];
       }
       return [

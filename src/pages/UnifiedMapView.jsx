@@ -1918,6 +1918,7 @@ const UnifiedMapView = () => {
   const [lteGridSizeMeters, setLteGridSizeMeters] = useState(50);
   const [lteGridAggregationMethod, setLteGridAggregationMethod] =
     useState("mean");
+  const [storedGridOpacity, setStoredGridOpacity] = useState(0.55);
   const [storedGridMetricMode, setStoredGridMetricMode] = useState("max");
   const [storedGridVersion, setStoredGridVersion] = useState("original");
   const [storedGridScenarioId, setStoredGridScenarioId] = useState(null);
@@ -2244,7 +2245,7 @@ const UnifiedMapView = () => {
 
   const [project, setProject] = useState(passedProject || null);
 
-  const projectAreaGridSizeMeters = useMemo(() => {
+  const projectPredictionGridSizeMeters = useMemo(() => {
     const raw =
       project?.grid_size ??
       project?.gridSize ??
@@ -2354,13 +2355,13 @@ const UnifiedMapView = () => {
 
   useEffect(() => {
     if (
-      Number.isFinite(projectAreaGridSizeMeters) &&
-      projectAreaGridSizeMeters > 0
+      Number.isFinite(projectPredictionGridSizeMeters) &&
+      projectPredictionGridSizeMeters > 0
     ) {
       setLteGridSizeMeters((prev) =>
-        Math.abs((Number(prev) || 0) - projectAreaGridSizeMeters) < 0.001
+        Math.abs((Number(prev) || 0) - projectPredictionGridSizeMeters) < 0.001
           ? prev
-          : projectAreaGridSizeMeters,
+          : projectPredictionGridSizeMeters,
       );
     }
 
@@ -2374,7 +2375,7 @@ const UnifiedMapView = () => {
           : projectLogGridSizeMeters,
       );
     }
-  }, [projectAreaGridSizeMeters, projectLogGridSizeMeters]);
+  }, [projectPredictionGridSizeMeters, projectLogGridSizeMeters]);
 
   const handleTriangleScaleMultiplierChange = useCallback((nextValueOrUpdater) => {
     setTriangleScaleMultiplier((prev) => {
@@ -7126,6 +7127,8 @@ const UnifiedMapView = () => {
         onDeleteSitePredictionScenario={handleDeleteSitePredictionScenario}
         siteLabelField={siteLabelField}
         setSiteLabelField={setSiteLabelField}
+        storedGridOpacity={storedGridOpacity}
+        setStoredGridOpacity={setStoredGridOpacity}
         isRestoringFromStorage={isRestoringFromStorage}
       />
 
@@ -7582,6 +7585,7 @@ const UnifiedMapView = () => {
                       ? filteredStoredDeltaGridCells
                       : EMPTY_LIST
                   }
+                  storedGridOpacity={storedGridOpacity}
                   mlGridEnabled={mlGridEnabled}
                   mlGridSize={mlGridSize}
                   mlGridAggregation={mlGridAggregation}

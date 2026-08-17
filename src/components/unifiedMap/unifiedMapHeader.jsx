@@ -515,6 +515,8 @@ function UnifiedHeader({
   onDeleteSitePredictionScenario,
   siteLabelField = "none",
   setSiteLabelField,
+  storedGridOpacity = 0.55,
+  setStoredGridOpacity,
   isRestoringFromStorage = false,
 }) {
   const { user, logout } = useAuth();
@@ -693,6 +695,10 @@ function UnifiedHeader({
 
   const isMapPage = location.pathname.includes("unified-map");
   const currentOpacityPercent = Math.round((opacity ?? 0.8) * 100);
+  const currentStoredGridOpacityPercent = Math.round(
+    (Number.isFinite(Number(storedGridOpacity)) ? Number(storedGridOpacity) : 0.55) *
+      100,
+  );
   const currentLogRadius = Number.isFinite(Number(logRadius))
     ? Number(logRadius)
     : 12;
@@ -727,6 +733,22 @@ function UnifiedHeader({
     const nextPercent = Number(rawValue);
     if (!Number.isFinite(nextPercent)) return;
     setOpacity(Math.max(0, Math.min(100, nextPercent)) / 100);
+  };
+
+  const adjustStoredGridOpacity = (deltaPercent) => {
+    if (!setStoredGridOpacity) return;
+    const nextPercent = Math.max(
+      10,
+      Math.min(100, currentStoredGridOpacityPercent + deltaPercent),
+    );
+    setStoredGridOpacity(nextPercent / 100);
+  };
+
+  const updateStoredGridOpacityFromInput = (rawValue) => {
+    if (!setStoredGridOpacity) return;
+    const nextPercent = Number(rawValue);
+    if (!Number.isFinite(nextPercent)) return;
+    setStoredGridOpacity(Math.max(10, Math.min(100, nextPercent)) / 100);
   };
 
   const adjustLogRadius = (delta) => {
@@ -813,6 +835,11 @@ function UnifiedHeader({
       action: () => setOpenImportDialog(true),
     },
     { label: "Opacity", action: () => toggleQuickControl("opacity") },
+    {
+      label: "Baseline Opacity",
+      action: () => toggleQuickControl("stored-grid-opacity"),
+      disabled: typeof setStoredGridOpacity !== "function",
+    },
     { label: "Log Radius", action: () => toggleQuickControl("radius") },
     {
       label: "Secondary Radius",
@@ -871,6 +898,10 @@ function UnifiedHeader({
       }
       if (action === "opacity") {
         toggleQuickControl("opacity");
+        return;
+      }
+      if (action === "stored-grid-opacity") {
+        toggleQuickControl("stored-grid-opacity");
         return;
       }
       if (action === "log-radius") {
@@ -1065,6 +1096,41 @@ function UnifiedHeader({
                   onClick={() => adjustOpacity(5)}
                   className="h-6 w-6 rounded bg-slate-600 hover:bg-slate-500 flex items-center justify-center"
                   title="Increase opacity"
+                >
+                  <Plus className="h-3 w-3" />
+                </button>
+                <span className="text-xs text-blue-300 font-medium">%</span>
+              </div>
+            )}
+
+            {activeQuickControl === "stored-grid-opacity" && (
+              <div className="flex max-w-full flex-wrap items-center gap-2 bg-gray-700/80 rounded-lg px-3 py-1.5 border border-gray-600">
+                <span className="text-xs text-gray-300 font-medium">
+                  Baseline Opacity
+                </span>
+                <button
+                  type="button"
+                  onClick={() => adjustStoredGridOpacity(-5)}
+                  className="h-6 w-6 rounded bg-slate-600 hover:bg-slate-500 flex items-center justify-center"
+                  title="Decrease baseline opacity"
+                >
+                  <Minus className="h-3 w-3" />
+                </button>
+                <Input
+                  type="number"
+                  min={10}
+                  max={100}
+                  value={currentStoredGridOpacityPercent}
+                  onChange={(e) =>
+                    updateStoredGridOpacityFromInput(e.target.value)
+                  }
+                  className="h-7 w-14 bg-slate-800 border-slate-600 text-white text-xs text-center px-1"
+                />
+                <button
+                  type="button"
+                  onClick={() => adjustStoredGridOpacity(5)}
+                  className="h-6 w-6 rounded bg-slate-600 hover:bg-slate-500 flex items-center justify-center"
+                  title="Increase baseline opacity"
                 >
                   <Plus className="h-3 w-3" />
                 </button>

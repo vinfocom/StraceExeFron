@@ -322,6 +322,7 @@ const LtePredictionLocationLayer = ({
   sectorAggregationOverrides = null,
   deltaComparisonMode = false,
   externalGridCells = [],
+  storedGridOpacity = 0.55,
   aggregateOverlaps = false,
   mlGridEnabled = false,
   mlGridSize = 50,
@@ -331,6 +332,11 @@ const LtePredictionLocationLayer = ({
   const overlayRef = useRef(null);
   const [zoomLevel, setZoomLevel] = useState(13);
   const [hovered, setHovered] = useState(null);
+  const normalizedStoredGridOpacity = useMemo(() => {
+    const nextOpacity = Number(storedGridOpacity);
+    if (!Number.isFinite(nextOpacity)) return 0.55;
+    return Math.max(0.1, Math.min(1, nextOpacity));
+  }, [storedGridOpacity]);
 
   const polygonPaths = useMemo(() => {
     if (!Array.isArray(filterPolygons) || filterPolygons.length === 0) return [];
@@ -582,7 +588,17 @@ const LtePredictionLocationLayer = ({
           technology: cell?.technology ?? cell?.Technology ?? null,
           pci: cell?.pci ?? cell?.PCI ?? null,
           selectedMetric,
-          color: Array.isArray(cell?.color) ? cell.color : [107, 114, 128, 190],
+          color: Array.isArray(cell?.color)
+            ? [
+                Number(cell.color[0]) || 0,
+                Number(cell.color[1]) || 0,
+                Number(cell.color[2]) || 0,
+                Math.round(
+                  Math.min(255, Math.max(0, Number(cell.color[3]) || 255)) *
+                    normalizedStoredGridOpacity,
+                ),
+              ]
+            : [107, 114, 128, Math.round(190 * normalizedStoredGridOpacity)],
         }))
         .filter((cell) => Array.isArray(cell.polygon) && cell.polygon.length >= 3)
         .filter((cell) => matchesLegendFilter(cell, legendFilter, selectedMetric))
@@ -781,6 +797,7 @@ const LtePredictionLocationLayer = ({
     resolveMetricColor,
     deltaComparisonMode,
     externalGridCells,
+    normalizedStoredGridOpacity,
     legendFilter,
   ]);
 

@@ -239,6 +239,7 @@ const ElectronWindowBar = () => {
           actions={[
             { label: "Add Site", onClick: () => emitUtilityAction("add-site") },
             { label: "Opacity", onClick: () => emitUtilityAction("opacity") },
+            { label: "Baseline Opacity", onClick: () => emitUtilityAction("stored-grid-opacity") },
             { label: "Log Radius", onClick: () => emitUtilityAction("log-radius") },
             { label: "Secondary Radius", onClick: () => emitUtilityAction("neighbor-radius") },
             { label: "Site Size", onClick: () => emitUtilityAction("triangle-size") },
