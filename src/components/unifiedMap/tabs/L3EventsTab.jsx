@@ -590,6 +590,10 @@ function isCallMarker(point) {
   return CALL_MARKER_TYPES.has(point?.markerType);
 }
 
+function isHandoverMarker(point) {
+  return point?.markerType === "handover" || point?.markerType === "handover-failure";
+}
+
 export function buildMapPoints(timeline, rsrpByRowId = new Map()) {
   const toMapCoordinate = (value, min, max) => {
     if (value === null || value === undefined || String(value).trim() === "") return null;
@@ -673,6 +677,8 @@ export function L3EventsMapView({ points }) {
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [showAllPoints, setShowAllPoints] = useState(false);
+  const [showCallMarkers, setShowCallMarkers] = useState(true);
+  const [showHandoverMarkers, setShowHandoverMarkers] = useState(true);
   const [playbackSpeedMs, setPlaybackSpeedMs] = useState(750);
   const [messageSearch, setMessageSearch] = useState("");
   const [messagePanelWidth, setMessagePanelWidth] = useState(340);
@@ -769,7 +775,13 @@ export function L3EventsMapView({ points }) {
     [currentPoint, getMapPointColor],
   );
   const deckEventMarkers = useMemo(() => {
-    const eventPoints = points.filter((point) => point.markerSymbol);
+    const eventPoints = points
+      .filter((point) => point.markerSymbol)
+      .filter((point) => {
+        if (isCallMarker(point)) return showCallMarkers;
+        if (isHandoverMarker(point)) return showHandoverMarkers;
+        return true;
+      });
     const callMarkers = eventPoints.filter(isCallMarker);
     const otherMarkers = eventPoints
       .filter((point) => !isCallMarker(point))
@@ -777,7 +789,7 @@ export function L3EventsMapView({ points }) {
 
     return [...otherMarkers, ...callMarkers]
       .map((point) => ({ ...point, colorHex: point.markerColor || getMapPointColor(point) }));
-  }, [getMapPointColor, points]);
+  }, [getMapPointColor, points, showCallMarkers, showHandoverMarkers]);
   const eventMarkerStats = useMemo(() => {
     const stats = {
       handover: 0,
@@ -895,6 +907,17 @@ export function L3EventsMapView({ points }) {
     observer.observe(mapStageRef.current);
     return () => observer.disconnect();
   }, []);
+
+  useEffect(() => {
+    if (!selectedEventMarker) return;
+    if (isCallMarker(selectedEventMarker) && !showCallMarkers) {
+      setSelectedEventMarker(null);
+      return;
+    }
+    if (isHandoverMarker(selectedEventMarker) && !showHandoverMarkers) {
+      setSelectedEventMarker(null);
+    }
+  }, [selectedEventMarker, showCallMarkers, showHandoverMarkers]);
 
   const togglePlayback = () => {
     if (currentIndex >= points.length - 1) setCurrentIndex(0);
@@ -1270,6 +1293,34 @@ export function L3EventsMapView({ points }) {
             />
             Plot All
           </label>
+          <button
+            type="button"
+            onClick={() => setShowCallMarkers((value) => !value)}
+            aria-pressed={showCallMarkers}
+            className={`inline-flex h-8 shrink-0 items-center gap-1 rounded-full border px-2 transition-colors duration-200 ${
+              showCallMarkers
+                ? "border-emerald-500/70 bg-emerald-500/15 text-emerald-200 hover:bg-emerald-500/25"
+                : "border-slate-600 bg-slate-900 text-slate-400 hover:bg-slate-800"
+            }`}
+            title={showCallMarkers ? "Hide call markers" : "Show call markers"}
+          >
+            <PhoneCall className="h-3.5 w-3.5" />
+            Call
+          </button>
+          <button
+            type="button"
+            onClick={() => setShowHandoverMarkers((value) => !value)}
+            aria-pressed={showHandoverMarkers}
+            className={`inline-flex h-8 shrink-0 items-center gap-1 rounded-full border px-2 transition-colors duration-200 ${
+              showHandoverMarkers
+                ? "border-amber-500/70 bg-amber-500/15 text-amber-200 hover:bg-amber-500/25"
+                : "border-slate-600 bg-slate-900 text-slate-400 hover:bg-slate-800"
+            }`}
+            title={showHandoverMarkers ? "Hide handover markers" : "Show handover markers"}
+          >
+            <Hand className="h-3.5 w-3.5" />
+            Handover
+          </button>
           <select
             value={playbackSpeedMs}
             onChange={(event) => setPlaybackSpeedMs(Number(event.target.value))}
