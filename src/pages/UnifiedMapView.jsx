@@ -149,6 +149,10 @@ const DEFAULT_SITE_FILTERS = Object.freeze({
 const SITE_CLUSTER_COLOR_PATTERN =
   /^(#(?:[0-9a-f]{3}|[0-9a-f]{4}|[0-9a-f]{6}|[0-9a-f]{8})|rgba?\([^)]{1,80}\)|hsla?\([^)]{1,80}\))$/i;
 
+// extra_json fields that should never appear as selectable "MAC Detail" fields
+// in the Color By / KPI Filters field dropdown.
+const HIDDEN_MAC_DETAIL_FIELDS = new Set(["ps_data"]);
+
 const SITE_OPERATOR_COLOR_PREFIX = "operator:";
 
 const normalizeStoredGridDeltaVariant = (value) => {
@@ -4470,7 +4474,9 @@ const UnifiedMapView = () => {
 
     (renderedLegendFilteredLocations || []).forEach((loc) => {
       if (loc?.extra_fields && typeof loc.extra_fields === "object") {
-        Object.keys(loc.extra_fields).forEach((key) => macDetailFields.add(key));
+        Object.keys(loc.extra_fields).forEach((key) => {
+          if (!HIDDEN_MAC_DETAIL_FIELDS.has(key)) macDetailFields.add(key);
+        });
       }
       const providerName = getProviderDisplayName(loc);
       if (providerName && !isUnknownOption(providerName)) {
