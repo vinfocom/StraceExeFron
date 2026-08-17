@@ -20,6 +20,7 @@ import {
 
 const TAKE = 50000;
 const VIEW_TABS = [
+  { id: "summary", label: "Call Summary" },
   { id: "map", label: "Map View" },
   { id: "excel", label: "Excel View" },
   { id: "analyzer", label: "Analyzer" },
@@ -441,7 +442,7 @@ function UploadHistoryLanding({ projectId, projectName, onOpenAnalysis, onBack }
 function BackendAnalyzer({ sessionIds, analysisId, projectName, onBack }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [activeView, setActiveView] = useState(null);
+  const [activeView, setActiveView] = useState("summary");
   const [search, setSearch] = useState("");
   const [selectedCall, setSelectedCall] = useState(null);
   const [counts, setCounts] = useState({});
@@ -509,13 +510,14 @@ function BackendAnalyzer({ sessionIds, analysisId, projectName, onBack }) {
   const mapPoints = useMemo(() => buildMapPoints(mapSignalingRows, rsrpByRowId), [mapSignalingRows, rsrpByRowId]);
   const rawRows = activeView === "events" ? eventMessages : l3Messages;
   const countForTab = useCallback((tabId) => {
+    if (tabId === "summary") return enrichedSummary?.totalCalls ?? 0;
     if (tabId === "map") return mapPoints.length;
     if (tabId === "excel") return signalingRows.length || counts.excel_view_count || 0;
     if (tabId === "analyzer") return protocolAnalysis?.stats?.totalProcedures ?? counts.analyzer_count ?? 0;
     if (tabId === "l3") return l3Messages.length || counts.l3_count || 0;
     if (tabId === "events") return eventMessages.length || counts.event_count || 0;
     return 0;
-  }, [counts.analyzer_count, counts.event_count, counts.excel_view_count, counts.l3_count, eventMessages.length, l3Messages.length, mapPoints.length, protocolAnalysis?.stats?.totalProcedures, signalingRows.length]);
+  }, [counts.analyzer_count, counts.event_count, counts.excel_view_count, counts.l3_count, enrichedSummary?.totalCalls, eventMessages.length, l3Messages.length, mapPoints.length, protocolAnalysis?.stats?.totalProcedures, signalingRows.length]);
   const visibleRawRows = useMemo(() => {
     const needle = search.trim().toLowerCase();
     if (!needle) return rawRows;
@@ -546,7 +548,7 @@ function BackendAnalyzer({ sessionIds, analysisId, projectName, onBack }) {
         <button type="button" onClick={() => downloadPdf("summary")} className="inline-flex items-center gap-1 rounded border border-blue-500/50 px-2 py-1.5 text-xs"><Download className="h-3.5 w-3.5" />L3 PDF</button>
       </header>
       <main className="flex min-h-0 flex-1 flex-col overflow-hidden">
-        {!activeView && <div className="h-full overflow-auto p-3"><HomeCallSummary summary={enrichedSummary} /></div>}
+        {activeView === "summary" && <div className="h-full overflow-auto p-3"><HomeCallSummary summary={enrichedSummary} /></div>}
         {activeView === "analyzer" && selectedCall && (
           <div className="shrink-0 flex items-center justify-between gap-2 border-b border-blue-500/30 bg-blue-500/10 px-2 py-1 text-xs">
             <span className="truncate text-blue-300">

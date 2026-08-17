@@ -30,6 +30,7 @@ import {
 } from "@/lib/googleMapsLoader";
 
 const VIEW_TABS = [
+  { id: "summary", label: "Call Summary" },
   { id: "map", label: "Map View" },
   { id: "excel", label: "Excel View" },
   { id: "analyzer", label: "Analyzer" },
@@ -132,7 +133,7 @@ export const L3EventsTab = () => {
   const [timeline, setTimeline] = useState([]);
   const [networkLogRows, setNetworkLogRows] = useState([]);
   const [selectedCall, setSelectedCall] = useState(null);
-  const [activeView, setActiveView] = useState(null);
+  const [activeView, setActiveView] = useState("summary");
   const [search, setSearch] = useState("");
 
   const fileInputRef = useRef(null);
@@ -148,7 +149,7 @@ export const L3EventsTab = () => {
     setWarningMessage("");
     setFileName(selectedFiles.length === 1 ? selectedFiles[0].name : `${selectedFiles.length} files selected`);
     setSelectedCall(null);
-    setActiveView(null);
+    setActiveView("summary");
     setSearch("");
 
     try {
@@ -256,7 +257,7 @@ export const L3EventsTab = () => {
             {status === "ready" && (
               <div className="scrollbar-hide flex min-w-0 flex-1 justify-end gap-2 overflow-x-auto overflow-y-hidden">
                 {VIEW_TABS.map((tab) => {
-                  const count = tab.id === "map" ? mapPoints.length : tab.id === "excel" ? signalingRows.length : tab.id === "l3" ? l3Messages.length : tab.id === "events" ? eventMessages.length : protocolAnalysis.stats.totalProcedures;
+                  const count = tab.id === "summary" ? (enrichedCallSummary?.totalCalls ?? 0) : tab.id === "map" ? mapPoints.length : tab.id === "excel" ? signalingRows.length : tab.id === "l3" ? l3Messages.length : tab.id === "events" ? eventMessages.length : protocolAnalysis.stats.totalProcedures;
                   const isActive = activeView === tab.id;
                   return (
                     <button
@@ -314,7 +315,7 @@ export const L3EventsTab = () => {
             </div>
           )}
 
-          {!activeView && (
+          {activeView === "summary" && (
             <div className="min-h-0 flex-1 overflow-auto">
               <HomeCallSummary summary={enrichedCallSummary} />
             </div>
@@ -424,7 +425,6 @@ export function HomeCallSummary({ summary }) {
                 <th className="border-b border-r border-slate-700 px-3 py-2 text-left">Start</th>
                 <th className="border-b border-r border-slate-700 px-3 py-2 text-left">End</th>
                 <th className="border-b border-r border-slate-700 px-3 py-2 text-left">Technology</th>
-                <th className="border-b border-r border-slate-700 px-3 py-2 text-left">Result</th>
                 <th className="border-b border-r border-slate-700 px-3 py-2 text-left">Setup Time</th>
                 <th className="border-b border-r border-slate-700 px-3 py-2 text-left">Call Duration</th>
                 <th className="border-b border-slate-700 px-3 py-2 text-left">Reason</th>
@@ -435,21 +435,12 @@ export function HomeCallSummary({ summary }) {
                 const technology = call.technologyStart && call.technologyEnd && call.technologyStart !== call.technologyEnd
                   ? `${call.technologyStart} → ${call.technologyEnd}`
                   : call.technologyStart || call.technologyEnd || "Unknown";
-                const statusClass = call.status === "Connected"
-                  ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-300"
-                  : call.status === "Dropped"
-                    ? "border-red-500/30 bg-red-500/10 text-red-300"
-                    : "border-amber-500/30 bg-amber-500/10 text-amber-300";
                 return (
                   <tr key={call.id} className="border-b border-slate-800/90 bg-slate-950/40 text-slate-200 last:border-b-0 hover:bg-slate-800/50">
                     <td className="border-r border-slate-800 px-3 py-2 font-mono font-semibold text-blue-300">{call.id}</td>
                     <td className="border-r border-slate-800 px-3 py-2 font-mono whitespace-nowrap">{formatHomeCallTime(call.startTime)}</td>
                     <td className="border-r border-slate-800 px-3 py-2 font-mono whitespace-nowrap">{formatHomeCallTime(call.terminationTime || call.endTime)}</td>
                     <td className="border-r border-slate-800 px-3 py-2 whitespace-nowrap">{technology}</td>
-                    <td className="border-r border-slate-800 px-3 py-2">
-                      <span className={`inline-flex rounded-full border px-2 py-0.5 text-[10px] font-medium ${statusClass}`}>{call.status}</span>
-                      <div className="mt-1 text-[10px] text-slate-500">{call.detailedStatus || "Unknown"}</div>
-                    </td>
                     <td className="border-r border-slate-800 px-3 py-2 whitespace-nowrap">
                       {formatHomeCallDuration(call.callSetupTimeMs, call.connectionEstimated)}
                     </td>
@@ -775,7 +766,8 @@ export function L3EventsMapView({ points }) {
     [currentPoint, getMapPointColor],
   );
   const deckEventMarkers = useMemo(() => {
-    const eventPoints = points
+    const reachedPoints = showAllPoints ? points : points.slice(0, currentIndex + 1);
+    const eventPoints = reachedPoints
       .filter((point) => point.markerSymbol)
       .filter((point) => {
         if (isCallMarker(point)) return showCallMarkers;
@@ -789,7 +781,7 @@ export function L3EventsMapView({ points }) {
 
     return [...otherMarkers, ...callMarkers]
       .map((point) => ({ ...point, colorHex: point.markerColor || getMapPointColor(point) }));
-  }, [getMapPointColor, points, showCallMarkers, showHandoverMarkers]);
+  }, [currentIndex, getMapPointColor, points, showAllPoints, showCallMarkers, showHandoverMarkers]);
   const eventMarkerStats = useMemo(() => {
     const stats = {
       handover: 0,
@@ -822,10 +814,16 @@ export function L3EventsMapView({ points }) {
         point.sourceFile,
       ].filter(Boolean).join(" ").toLowerCase().includes(query));
   }, [messageSearch, points]);
-  const visibleMessagePoints = useMemo(
-    () => filteredMessagePoints.slice(0, MAX_VISIBLE_MAP_MESSAGES),
-    [filteredMessagePoints],
-  );
+  const visibleMessagePoints = useMemo(() => {
+    if (filteredMessagePoints.length <= MAX_VISIBLE_MAP_MESSAGES) return filteredMessagePoints;
+    const activePos = filteredMessagePoints.findIndex(({ index }) => index === currentIndex);
+    if (activePos === -1) return filteredMessagePoints.slice(0, MAX_VISIBLE_MAP_MESSAGES);
+    const half = Math.floor(MAX_VISIBLE_MAP_MESSAGES / 2);
+    let start = Math.max(0, activePos - half);
+    const end = Math.min(filteredMessagePoints.length, start + MAX_VISIBLE_MAP_MESSAGES);
+    start = Math.max(0, end - MAX_VISIBLE_MAP_MESSAGES);
+    return filteredMessagePoints.slice(start, end);
+  }, [filteredMessagePoints, currentIndex]);
   const center = points.length
     ? {
         lat: currentPoint?.lat ?? points.reduce((sum, point) => sum + point.lat, 0) / points.length,
@@ -897,7 +895,7 @@ export function L3EventsMapView({ points }) {
         behavior: isPlaying ? "auto" : "smooth",
       });
     }
-  }, [currentIndex, isPlaying, filteredMessagePoints.length]);
+  }, [currentIndex, isPlaying, visibleMessagePoints]);
 
   useEffect(() => {
     if (!mapStageRef.current) return undefined;
@@ -1354,26 +1352,26 @@ function L3EventMapMarker({ point, onSelect }) {
           event.stopPropagation();
           onSelect(point);
         }}
-        className={`pointer-events-auto flex -translate-x-1/2 -translate-y-full items-center justify-center rounded-full border-2 border-white bg-slate-950 font-bold shadow-lg ${
-          callMarker ? "h-10 w-10 ring-2 ring-slate-950/70" : "h-8 w-8"
+        className={`pointer-events-auto flex -translate-x-1/2 -translate-y-full items-center justify-center drop-shadow-[0_1px_2px_rgba(0,0,0,0.8)] ${
+          callMarker ? "h-6 w-6" : "h-5 w-5"
         }`}
         style={{ color: point.markerColor || point.colorHex }}
       >
-        <EventMarkerGlyph point={point} className={callMarker ? "h-5 w-5" : "h-4 w-4"} />
+        <EventMarkerGlyph point={point} className={callMarker ? "h-5 w-5" : "h-4 w-4"} color={point.markerColor || point.colorHex} />
       </button>
     </OverlayView>
   );
 }
 
-function EventMarkerGlyph({ point, className = "h-4 w-4" }) {
+function EventMarkerGlyph({ point, className = "h-4 w-4", color }) {
   if (point?.markerType === "handover" || point?.markerType === "handover-failure") {
-    return <Hand className={className} />;
+    return <Hand className={className} fill={color} />;
   }
   if (point?.markerType === "call-start") {
-    return <PhoneCall className={className} />;
+    return <PhoneCall className={className} fill={color} />;
   }
   if (isCallMarker(point)) {
-    return <PhoneOff className={className} />;
+    return <PhoneOff className={className} fill={color} />;
   }
   return <span>{point?.markerSymbol}</span>;
 }

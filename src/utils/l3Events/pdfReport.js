@@ -1009,7 +1009,8 @@ export function downloadExcelSignalingSummaryPdf({
   const technologies = uniqueNonEmpty(rows.map((row) => categoryValue(row.technology, "")));
   const technologyCounts = new Map();
   rows.forEach((row) => {
-    const technology = categoryValue(row.technology, "Unknown");
+    const technology = categoryValue(row.technology, "");
+    if (!technology) return;
     const current = technologyCounts.get(technology) || { count: 0, interfaces: new Set() };
     current.count += 1;
     if (row.interface) current.interfaces.add(row.interface);
@@ -1031,18 +1032,18 @@ export function downloadExcelSignalingSummaryPdf({
   layout.addLine("Call Summary", { font: FONT_BOLD, size: 13, spacing: 5 });
   if (calls.length) {
     layout.addTable(
-      ["Call", "Status", "Start Tech", "End Tech", "Start", "End", "Setup", "Duration"],
+      ["Call", "Start Tech", "End Tech", "Start", "End", "Setup", "Duration", "Reason"],
       calls.map((call) => [
         call.id || "N/A",
-        call.detailedStatus || call.status || "N/A",
         categoryValue(call.technologyStart),
         categoryValue(call.technologyEnd),
         formatClock(call.startTime),
         formatClock(call.terminationTime || call.endTime),
         formatNullableDuration(call.callSetupTimeMs, call.connectionEstimated),
         formatNullableDuration(call.connectedDurationMs, call.connectionEstimated),
+        call.disconnectReason || call.dropReason || call.reason || call.causeName || "N/A",
       ]),
-      [8, 14, 10, 10, 8, 8, 9, 9],
+      [8, 8, 8, 7, 7, 8, 8, 14],
     );
   } else {
     layout.addWrapped("No call session is associated with the filtered signaling rows.", { size: 10, spacing: 3 });
