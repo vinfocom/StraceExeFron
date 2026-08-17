@@ -920,11 +920,29 @@ const UnifiedMapSidebar = ({
         { value: "earfcn", label: "By EARFCN" },
         { value: "cell_id", label: "By Cell ID" },
         { value: "nodebid", label: "By NodeB ID" },
-        { value: "mac_detail", label: "MAC Detail" },
+        { value: "mac_detail", label: "L3 detail" },
       ];
     },
     [enableGrid],
   );
+
+  const handleColorByChange = useCallback(
+    (value) => {
+      const nextColorBy = value === "metric" ? null : value;
+      setColorBy?.(nextColorBy);
+
+      if (nextColorBy === "mac_detail") {
+        setShowSessionNeighbors?.(false);
+      }
+    },
+    [setColorBy, setShowSessionNeighbors],
+  );
+
+  useEffect(() => {
+    if (colorBy === "mac_detail" && showSessionNeighbors) {
+      setShowSessionNeighbors?.(false);
+    }
+  }, [colorBy, showSessionNeighbors, setShowSessionNeighbors]);
 
   // Filter handlers
   const updateDataFilter = useCallback(
@@ -3048,10 +3066,13 @@ const UnifiedMapSidebar = ({
               }
               checked={Boolean(showSessionNeighbors)}
               onChange={(checked) => {
+                if (colorBy === "mac_detail") return;
                 if (!neighborLogsAvailable) return;
                 setShowSessionNeighbors?.(checked);
               }}
-              disabled={!neighborLogsAvailable || sessionNeighborLoading}
+              disabled={
+                colorBy === "mac_detail" || !neighborLogsAvailable || sessionNeighborLoading
+              }
               useSwitch={true}
             />
 
@@ -3402,7 +3423,7 @@ const UnifiedMapSidebar = ({
                 <SelectRow
                   label="Color By"
                   value={colorBy || "metric"}
-                  onChange={(v) => setColorBy?.(v === "metric" ? null : v)}
+                  onChange={handleColorByChange}
                   options={colorOptions}
                   placeholder="Select color scheme"
                   disabled={!enableDataToggle}

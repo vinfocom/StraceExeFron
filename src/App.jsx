@@ -62,7 +62,7 @@ const PageLoader = ({ mode = "dashboard" }) => {
   const description =
     mode === "logout"
       ? "Closing your active session and returning to sign in."
-      : "Loading your workspace with a smooth handoff from sign in.";
+      : "Loading your workspace.";
 
   return (
   <div className="relative flex min-h-screen w-full items-center justify-center overflow-hidden bg-[#edf5fb]">

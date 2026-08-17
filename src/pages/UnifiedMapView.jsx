@@ -151,7 +151,7 @@ const SITE_CLUSTER_COLOR_PATTERN =
 
 // extra_json fields that should never appear as selectable "MAC Detail" fields
 // in the Color By / KPI Filters field dropdown.
-const HIDDEN_MAC_DETAIL_FIELDS = new Set(["ps_data"]);
+const HIDDEN_MAC_DETAIL_FIELDS = new Set(["ps_data","ca_cc","ca_cc_count"]);
 
 const SITE_OPERATOR_COLOR_PREFIX = "operator:";
 
