@@ -188,11 +188,11 @@ const DashboardPage = () => {
       <div className="mx-auto max-w-[1920px] space-y-4 p-3 sm:space-y-6 sm:p-4 lg:p-6">
         <div className="overflow-hidden rounded-[2rem] border border-sky-100 bg-[linear-gradient(135deg,rgba(255,255,255,0.96)_0%,rgba(240,249,255,0.98)_52%,rgba(224,242,254,0.92)_100%)] p-4 shadow-[0_18px_55px_rgba(14,165,233,0.10)] sm:p-5 lg:p-6">
           <div className="mb-5 flex flex-wrap items-start justify-between gap-4">
-            <div className="space-y-1">
-              <p className="text-3xl font-bold tracking-tight text-slate-900 sm:text-4xl">
+            <div className="min-w-0 flex-1 space-y-1">
+              <p className="text-clamp-2 text-3xl font-bold tracking-tight text-slate-900 sm:text-4xl">
                 Hey {firstName}
               </p>
-              <p className="text-sm font-medium text-slate-600 sm:text-base">
+              <p className="text-clamp-2 text-sm font-medium text-slate-600 sm:text-base">
                 Your latest insights are ready.
               </p>
             </div>

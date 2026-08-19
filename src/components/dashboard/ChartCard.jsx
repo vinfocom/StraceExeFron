@@ -173,9 +173,9 @@ const ChartCard = ({
       <CardHeader className="border-b border-gray-100 bg-gradient-to-r from-gray-50 to-white pb-4">
         <div className="flex justify-between items-center gap-3">
           <div className="flex-1 min-w-0">
-            <CardTitle className="text-base font-bold text-gray-900 flex items-center gap-2 truncate">
+            <CardTitle className="text-base font-bold text-gray-900 flex items-start gap-2">
               <ChartBar className="h-5 w-5 text-blue-600 flex-shrink-0" />
-              <span className="truncate">{title}</span>
+              <span className="text-clamp-2 min-w-0">{title}</span>
             </CardTitle>
             {activeChartFiltersCount > 0 && (
               <div className="flex items-center flex-wrap gap-2 mt-2">
@@ -183,7 +183,7 @@ const ChartCard = ({
                   {activeChartFiltersCount} filter{activeChartFiltersCount > 1 ? 's' : ''} active
                 </Badge>
                 {activeChartFilterLabels.map((label) => (
-                  <Badge key={label} variant="outline" className="text-[10px] font-medium">
+                  <Badge key={label} variant="outline" className="text-clamp-1 max-w-full text-[10px] font-medium">
                     {label}
                   </Badge>
                 ))}

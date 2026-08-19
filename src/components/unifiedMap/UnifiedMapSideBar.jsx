@@ -163,7 +163,6 @@ const CollapsibleSection = memo(
 );
 CollapsibleSection.displayName = "CollapsibleSection";
 
-// Toggle Row with Checkbox
 const ToggleRow = memo(
   ({
     label,
@@ -194,7 +193,6 @@ const ToggleRow = memo(
 );
 ToggleRow.displayName = "ToggleRow";
 
-// Compact Select Row (Single Select)
 const SelectRow = memo(
   ({
     label,
@@ -291,8 +289,7 @@ const MultiSelectRow = memo(
       return () => document.removeEventListener("mousedown", handleClickOutside);
     }, []);
 
-    // Prevent the sidebar's own wheel/trackpad scroll while the user is
-    // scrolling inside the dropdown options list.
+    
     useEffect(() => {
       const panel = panelRef.current;
       if (!isOpen || !panel) return undefined;

@@ -56,6 +56,76 @@ body {
     radial-gradient(circle at bottom left, rgba(37, 99, 235, 0.09), transparent 40%);
 }
 
+body,
+#root {
+  overflow-wrap: anywhere;
+}
+
+button,
+input,
+select,
+textarea {
+  min-width: 0;
+}
+
+.text-balance-safe {
+  text-wrap: balance;
+  overflow-wrap: anywhere;
+}
+
+.text-clamp-1,
+.text-clamp-2,
+.text-clamp-3 {
+  display: -webkit-box;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+}
+
+.text-clamp-1 {
+  -webkit-line-clamp: 1;
+  line-clamp: 1;
+}
+
+.text-clamp-2 {
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+}
+
+.text-clamp-3 {
+  -webkit-line-clamp: 3;
+  line-clamp: 3;
+}
+
+@media (max-width: 640px) {
+  .text-3xl {
+    font-size: clamp(1.375rem, 7vw, 1.875rem);
+    line-height: 1.15;
+  }
+
+  .text-4xl {
+    font-size: clamp(1.625rem, 8vw, 2.25rem);
+    line-height: 1.12;
+  }
+
+  .text-5xl {
+    font-size: clamp(1.875rem, 9vw, 3rem);
+    line-height: 1.08;
+  }
+}
+
+@media (max-width: 420px) {
+  .text-xl {
+    font-size: clamp(1rem, 5.5vw, 1.25rem);
+    line-height: 1.25;
+  }
+
+  .text-2xl {
+    font-size: clamp(1.125rem, 6vw, 1.5rem);
+    line-height: 1.2;
+  }
+}
+
 .dark body {
   /* Dark mode is supported globally via the `.dark` class on root/body */
   @apply bg-slate-950 text-slate-100;

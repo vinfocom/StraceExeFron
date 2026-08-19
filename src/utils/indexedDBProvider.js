@@ -1,9 +1,49 @@
 // src/utils/indexedDBProvider.js
+import { readStoredUser, resolveCompanyId, resolveUserRegion } from "@/utils/authSession";
 
 const DB_NAME = 'swr-cache-db';
 const STORE_NAME = 'cache';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 const CACHE_EXPIRY = 7 * 24 * 60 * 60 * 1000; // 7 days
+
+const serializeCacheKey = (key) => {
+  if (typeof key === 'string') return key;
+  try {
+    return JSON.stringify(key);
+  } catch {
+    return String(key);
+  }
+};
+
+const normalizeScopePart = (value, fallback) => {
+  const normalized = String(value ?? '').trim().toLowerCase();
+  return normalized || fallback;
+};
+
+const getCurrentUserScope = () => {
+  const user = readStoredUser();
+  if (!user) return 'guest';
+
+  const userIdentity =
+    user?.id ??
+    user?.Id ??
+    user?.user_id ??
+    user?.UserId ??
+    user?.email ??
+    user?.Email ??
+    'unknown-user';
+  const companyId = resolveCompanyId(user) || 'no-company';
+  const region = resolveUserRegion(user) || user?.country_id || user?.CountryId || 'no-country';
+
+  return [
+    normalizeScopePart(userIdentity, 'unknown-user'),
+    normalizeScopePart(companyId, 'no-company'),
+    normalizeScopePart(region, 'no-country'),
+  ].join(':');
+};
+
+const createScopedStorageKey = (scope, key) =>
+  `${scope}::${serializeCacheKey(key)}`;
 
 class IndexedDBCache extends Map {
   constructor() {
@@ -11,6 +51,7 @@ class IndexedDBCache extends Map {
     this.db = null;
     this.writeQueue = new Map();
     this.writeTimer = null;
+    this.activeScope = getCurrentUserScope();
     this.initPromise = this.init();
   }
 
@@ -33,12 +74,24 @@ class IndexedDBCache extends Map {
 
       request.onupgradeneeded = (event) => {
         const db = event.target.result;
+        if (db.objectStoreNames.contains(STORE_NAME)) {
+          db.deleteObjectStore(STORE_NAME);
+        }
         if (!db.objectStoreNames.contains(STORE_NAME)) {
-          // Create store with 'key' as the primary key
-          db.createObjectStore(STORE_NAME, { keyPath: 'key' });
+          db.createObjectStore(STORE_NAME, { keyPath: 'storageKey' });
         }
       };
     });
+  }
+
+  ensureScope() {
+    const nextScope = getCurrentUserScope();
+    if (nextScope === this.activeScope) return;
+
+    super.clear();
+    this.writeQueue.clear();
+    this.activeScope = nextScope;
+    void this.loadFromDB();
   }
 
   async cleanup() {
@@ -53,7 +106,11 @@ class IndexedDBCache extends Map {
     request.onsuccess = (event) => {
       const cursor = event.target.result;
       if (cursor) {
-        if (cursor.value.timestamp && now - cursor.value.timestamp > CACHE_EXPIRY) {
+        if (
+          !cursor.value.scope ||
+          !cursor.value.timestamp ||
+          now - cursor.value.timestamp > CACHE_EXPIRY
+        ) {
           cursor.delete();
         }
         cursor.continue();
@@ -71,10 +128,12 @@ class IndexedDBCache extends Map {
 
       request.onsuccess = () => {
         const entries = request.result;
+        const scope = this.activeScope;
         if (Array.isArray(entries)) {
           entries.forEach(item => {
-            // Populate the parent Map directly
-            super.set(item.key, item.value);
+            if (item?.scope === scope) {
+              super.set(item.key, item.value);
+            }
           });
         }
         resolve();
@@ -87,12 +146,47 @@ class IndexedDBCache extends Map {
     });
   }
 
+  get(key) {
+    this.ensureScope();
+    return super.get(key);
+  }
+
+  has(key) {
+    this.ensureScope();
+    return super.has(key);
+  }
+
+  keys() {
+    this.ensureScope();
+    return super.keys();
+  }
+
+  values() {
+    this.ensureScope();
+    return super.values();
+  }
+
+  entries() {
+    this.ensureScope();
+    return super.entries();
+  }
+
+  [Symbol.iterator]() {
+    this.ensureScope();
+    return super[Symbol.iterator]();
+  }
+
   set(key, value) {
+    this.ensureScope();
     // 1. Update in-memory Map immediately (synchronous)
     super.set(key, value);
 
     // 2. Queue for async write (prevents UI blocking)
-    this.writeQueue.set(key, {
+    const scope = this.activeScope;
+    const storageKey = createScopedStorageKey(scope, key);
+    this.writeQueue.set(storageKey, {
+      storageKey,
+      scope,
       key,
       value,
       timestamp: Date.now()
@@ -103,10 +197,21 @@ class IndexedDBCache extends Map {
   }
 
   delete(key) {
+    this.ensureScope();
     super.delete(key);
-    this.writeQueue.set(key, null); // null indicates deletion
+    this.writeQueue.set(createScopedStorageKey(this.activeScope, key), null); // null indicates deletion
     this.scheduleWrite();
     return true;
+  }
+
+  clear() {
+    this.ensureScope();
+    const scope = this.activeScope;
+    Array.from(super.keys()).forEach((key) => {
+      this.writeQueue.set(createScopedStorageKey(scope, key), null);
+    });
+    super.clear();
+    this.scheduleWrite();
   }
 
   scheduleWrite() {
@@ -130,9 +235,9 @@ class IndexedDBCache extends Map {
       const transaction = this.db.transaction(STORE_NAME, 'readwrite');
       const store = transaction.objectStore(STORE_NAME);
 
-      currentQueue.forEach((item, key) => {
+      currentQueue.forEach((item, storageKey) => {
         if (item === null) {
-          store.delete(key);
+          store.delete(storageKey);
         } else {
           store.put(item);
         }

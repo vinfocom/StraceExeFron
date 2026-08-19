@@ -9,6 +9,7 @@ import {
   ensureNegative
 } from '../utils/dashboardUtils';
 import { normalizeBandName, normalizeProviderName, normalizeTechName } from '@/utils/colorUtils';
+import { readStoredUser, resolveCompanyId, resolveUserRegion } from '@/utils/authSession';
 
 
 
@@ -72,8 +73,37 @@ const METRIC_FIELD_FALLBACKS = {
   ulTpt: ['avg_ul_tpt', 'avgUlTpt', 'ul_tpt', 'uploadSpeed'],
 };
 
+const normalizeScopePart = (value, fallback) => {
+  const normalized = String(value ?? '').trim().toLowerCase();
+  return normalized || fallback;
+};
+
+const getDashboardCacheScope = () => {
+  const user = readStoredUser();
+  if (!user) return 'guest';
+
+  const userIdentity =
+    user?.id ??
+    user?.Id ??
+    user?.user_id ??
+    user?.UserId ??
+    user?.email ??
+    user?.Email ??
+    'unknown-user';
+  const companyId = resolveCompanyId(user) || 'no-company';
+  const region = resolveUserRegion(user) || user?.country_id || user?.CountryId || 'no-country';
+
+  return [
+    normalizeScopePart(userIdentity, 'unknown-user'),
+    normalizeScopePart(companyId, 'no-company'),
+    normalizeScopePart(region, 'no-country'),
+  ].join(':');
+};
+
 const createCacheKey = (base, filters) => {
-  if (!filters || Object.keys(filters).length === 0) return base;
+  const scopedBase = `dashboard:${getDashboardCacheScope()}:${base}`;
+
+  if (!filters || Object.keys(filters).length === 0) return scopedBase;
   
   const normalized = Object.keys(filters)
     .sort()
@@ -94,8 +124,8 @@ const createCacheKey = (base, filters) => {
     }, {});
   
   return Object.keys(normalized).length > 0 
-    ? `${base}::${JSON.stringify(normalized)}` 
-    : base;
+    ? `${scopedBase}::${JSON.stringify(normalized)}` 
+    : scopedBase;
 };
 
 const extractData = (response, fallback = []) => {
@@ -378,7 +408,7 @@ const parseDurationToHours = (duration) => {
 
 export const useTotals = () => {
   return useSWR(
-    'totals',
+    createCacheKey('totals'),
     createFetcher(() => adminApi.getTotalsV2?.(), {}),
     { 
       ...SWR_CONFIG, 
@@ -512,7 +542,7 @@ export const useBandDistribution = (filters) => {
 
 export const useBandCount = () => {
   const { data: rawData, ...rest } = useSWR(
-    'bandCount',
+    createCacheKey('bandCount'),
     createFetcher(
       () => adminApi.getBandDistributionV2?.(),
       []
@@ -742,7 +772,7 @@ export const useIndOut =(filters = {}) =>{
 
 export const useHoles = () => {
   const { data: rawData, ...rest } = useSWR(
-    "holes",
+    createCacheKey('holes'),
     async () => {
       try {
         const response = await adminApi.getHoles();
@@ -783,7 +813,7 @@ export const useHoles = () => {
 
 export const useHandsetPerformance = () => {
   const { data: rawData, ...rest } = useSWR(
-    'handsetAvg',
+    createCacheKey('handsetAvg'),
     async () => {
       try {
         const response = await adminApi.getHandsetDistributionV2();
@@ -838,7 +868,7 @@ export const useOperatorsAndNetworks = () => {
     isLoading: operatorsLoading, 
     error: operatorsError 
   } = useSWR(
-    'operators',
+    createCacheKey('operators'),
     async () => {
       const response = await adminApi.getOperatorsV2?.();
       const extracted = extractData(response, []);
@@ -852,7 +882,7 @@ export const useOperatorsAndNetworks = () => {
     isLoading: networksLoading, 
     error: networksError 
   } = useSWR(
-    'networks',
+    createCacheKey('networks'),
     async () => {
       const response = await adminApi.getNetworksV2?.();
       const extracted = extractData(response, []);
@@ -1029,7 +1059,7 @@ export const useParallelMetrics = (metrics = [], filters) => {
 
 export const useAppData = () => {
   const { data: rawData, isLoading, error, isValidating, mutate, ...rest } = useSWR(
-    'appData:all',
+    createCacheKey('appData:all'),
     async () => {
       try {
         if (!adminApi.getAppValue) {
@@ -1218,7 +1248,7 @@ export const useBoxData = (options = {}) => {
     : undefined;
 
   const { data: rawData, ...rest } = useSWR(
-    ['boxData', metric, from || 'all', to || 'all'],
+    createCacheKey('boxData', { metric, from: from || 'all', to: to || 'all' }),
     async () => {
       try {
         const params = {};

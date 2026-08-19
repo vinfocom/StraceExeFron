@@ -58,6 +58,12 @@ const formatSpeed = (mbps) => {
   return mbps >= 1 ? `${mbps.toFixed(2)} Mbps` : `${(mbps * 1000).toFixed(0)} kbps`;
 };
 
+const formatMetricNumber = (value, decimals = 3) => {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric) || numeric <= 0) return "N/A";
+  return numeric.toFixed(decimals);
+};
+
 const formatBytes = (gb, toUnit = "GB") => {
   if (!gb || gb <= 0) return "0.00";
   if (toUnit === "GB") {
@@ -281,7 +287,7 @@ export const OverviewTab = ({
       return null;
     }
 
-    const aggregated = {};
+    const rows = [];
 
     Object.entries(providerVolume).forEach(([sessionId, providers]) => {
       if (typeof providers !== "object" || providers === null) return;
@@ -297,117 +303,56 @@ export const OverviewTab = ({
           if (!normalizedTech || normalizedTech === "Unknown") return;
 
           if (volumeData && typeof volumeData === "object") {
-            const key = `${normalizedProvider.toLowerCase()}_${normalizedTech.toLowerCase()}`;
-
-            if (!aggregated[key]) {
-              aggregated[key] = {
-                provider: normalizedProvider,
-                technology: normalizedTech,
-                dl_gb: 0,
-                ul_gb: 0,
-                durationSec: 0,
-                dlSpeedDurationTotal: 0,
-                dlSpeedDurationSec: 0,
-                ulSpeedDurationTotal: 0,
-                ulSpeedDurationSec: 0,
-                dlSpeedSampleTotal: 0,
-                dlSpeedSampleCount: 0,
-                ulSpeedSampleTotal: 0,
-                ulSpeedSampleCount: 0,
-                sampleCount: 0,
-                constantThroughputSessions: 0,
-                sessionCount: 0,
-                sessions: [],
-                providerColor: getLogColor("provider", normalizedProvider),
-                techColor: getLogColor("technology", normalizedTech),
-              };
-            }
-
-            aggregated[key].dl_gb += volumeData?.dl_gb || 0;
-            aggregated[key].ul_gb += volumeData?.ul_gb || 0;
-            aggregated[key].durationSec += volumeData?.duration_sec || 0;
-
             const durationSec = volumeData?.duration_sec || 0;
             const sampleCount = volumeData?.sample_count || 0;
-            aggregated[key].sampleCount += sampleCount;
+            const dlGb = volumeData?.dl_gb || 0;
+            const ulGb = volumeData?.ul_gb || 0;
 
-            if (volumeData?.avg_dl_mbps && durationSec > 0) {
-              aggregated[key].dlSpeedDurationTotal +=
-                volumeData.avg_dl_mbps * durationSec;
-              aggregated[key].dlSpeedDurationSec += durationSec;
-            }
-            if (volumeData?.avg_ul_mbps && durationSec > 0) {
-              aggregated[key].ulSpeedDurationTotal +=
-                volumeData.avg_ul_mbps * durationSec;
-              aggregated[key].ulSpeedDurationSec += durationSec;
-            }
-            if (volumeData?.avg_dl_mbps && sampleCount > 0) {
-              aggregated[key].dlSpeedSampleTotal +=
-                volumeData.avg_dl_mbps * sampleCount;
-              aggregated[key].dlSpeedSampleCount += sampleCount;
-            }
-            if (volumeData?.avg_ul_mbps && sampleCount > 0) {
-              aggregated[key].ulSpeedSampleTotal +=
-                volumeData.avg_ul_mbps * sampleCount;
-              aggregated[key].ulSpeedSampleCount += sampleCount;
-            }
-            if (volumeData?.is_constant_tpt) {
-              aggregated[key].constantThroughputSessions += 1;
-            }
-
-            aggregated[key].sessionCount += 1;
-            if (!aggregated[key].sessions.includes(sessionId)) {
-              aggregated[key].sessions.push(sessionId);
-            }
+            rows.push({
+              sessionId,
+              provider: normalizedProvider,
+              technology: normalizedTech,
+              downloadGb: formatBytes(dlGb, "GB"),
+              uploadGb: formatBytes(ulGb, "GB"),
+              totalGb: formatBytes(dlGb + ulGb, "GB"),
+              dl_gb: dlGb,
+              ul_gb: ulGb,
+              durationSec,
+              durationFormatted: formatDuration(durationSec),
+              avgDlSpeedMbps: volumeData?.avg_dl_mbps || 0,
+              avgUlSpeedMbps: volumeData?.avg_ul_mbps || 0,
+              avgDlSpeedFormatted: formatSpeed(volumeData?.avg_dl_mbps || 0),
+              avgUlSpeedFormatted: formatSpeed(volumeData?.avg_ul_mbps || 0),
+              minDlSpeedFormatted: formatSpeed(volumeData?.min_dl_mbps || 0),
+              maxDlSpeedFormatted: formatSpeed(volumeData?.max_dl_mbps || 0),
+              medianDlSpeedFormatted: formatSpeed(volumeData?.median_dl_mbps || 0),
+              stddevDlSpeedFormatted: formatMetricNumber(volumeData?.stddev_dl_mbps),
+              minUlSpeedFormatted: formatSpeed(volumeData?.min_ul_mbps || 0),
+              maxUlSpeedFormatted: formatSpeed(volumeData?.max_ul_mbps || 0),
+              medianUlSpeedFormatted: formatSpeed(volumeData?.median_ul_mbps || 0),
+              stddevUlSpeedFormatted: formatMetricNumber(volumeData?.stddev_ul_mbps),
+              sampleCount,
+              constantThroughputSessions: volumeData?.is_constant_tpt ? 1 : 0,
+              isConstantTpt: Boolean(volumeData?.is_constant_tpt),
+              sessionCount: 1,
+              sessions: [sessionId],
+              providerColor: getLogColor("provider", normalizedProvider),
+              techColor: getLogColor("technology", normalizedTech),
+            });
           }
         });
       });
     });
 
-    const processed = Object.values(aggregated).map((item) => {
-      const avgDlSpeed =
-        item.dlSpeedSampleCount > 0
-          ? item.dlSpeedSampleTotal / item.dlSpeedSampleCount
-          : item.dlSpeedDurationSec > 0
-          ? item.dlSpeedDurationTotal / item.dlSpeedDurationSec
-          : 0;
-      const avgUlSpeed =
-        item.ulSpeedSampleCount > 0
-          ? item.ulSpeedSampleTotal / item.ulSpeedSampleCount
-          : item.ulSpeedDurationSec > 0
-          ? item.ulSpeedDurationTotal / item.ulSpeedDurationSec
-          : 0;
-
-      return {
-        provider: item.provider,
-        technology: item.technology,
-        downloadGb: formatBytes(item.dl_gb, "GB"),
-        uploadGb: formatBytes(item.ul_gb, "GB"),
-        totalGb: formatBytes(item.dl_gb + item.ul_gb, "GB"),
-        dl_gb: item.dl_gb,
-        ul_gb: item.ul_gb,
-        durationSec: item.durationSec,
-        durationFormatted: formatDuration(item.durationSec),
-        avgDlSpeedMbps: avgDlSpeed,
-        avgUlSpeedMbps: avgUlSpeed,
-        avgDlSpeedFormatted: formatSpeed(avgDlSpeed),
-        avgUlSpeedFormatted: formatSpeed(avgUlSpeed),
-        sampleCount: item.sampleCount,
-        constantThroughputSessions: item.constantThroughputSessions,
-        sessionCount: item.sessionCount,
-        sessions: item.sessions,
-        providerColor: item.providerColor,
-        techColor: item.techColor,
-      };
-    });
-
-    processed.sort((a, b) => {
+    rows.sort((a, b) => {
+      const sessionCompare = String(a.sessionId).localeCompare(String(b.sessionId));
+      if (sessionCompare !== 0) return sessionCompare;
       const providerCompare = a.provider.localeCompare(b.provider);
       if (providerCompare !== 0) return providerCompare;
       return a.technology.localeCompare(b.technology);
     });
 
-    return processed.length > 0 ? processed : null;
+    return rows.length > 0 ? rows : null;
   }, [providerVolume]);
 
   const volumeSummaryStats = useMemo(() => {
@@ -707,15 +652,13 @@ export const OverviewTab = ({
         <PCIReferenceCard topPCIs={topPCIs} />
       )}
 
-      {sessionIds.length > 0 && (
-        <ProviderVolumeCard
-          providerVolume={processedProviderVolume}
-          summaryStats={volumeSummaryStats}
-          loading={loading}
-          sessionIds={sessionIds}
-          error={error}
-        />
-      )}
+      <ProviderVolumeCard
+        providerVolume={processedProviderVolume}
+        summaryStats={volumeSummaryStats}
+        loading={loading}
+        sessionIds={sessionIds}
+        error={error}
+      />
 
       {/* {volume && (
         <DataVolumeCard volume={volume} sessionWiseVolume={sessionWiseVolume} />
@@ -828,12 +771,7 @@ const ProviderVolumeCard = ({
     return providerVolume.filter((item) => {
       const normalizedProvider = normalizeProviderName(item.provider);
       if (normalizedProvider === "Unknown") return false;
-
-      const downloadValue = parseFloat(item.downloadGb) || 0;
-      const uploadValue = parseFloat(item.uploadGb) || 0;
-      const totalValue = parseFloat(item.totalGb) || 0;
-
-      return downloadValue > 0 || uploadValue > 0 || totalValue > 0;
+      return true;
     });
   }, [providerVolume]);
 
@@ -865,9 +803,11 @@ const ProviderVolumeCard = ({
       <h4 className="text-sm font-semibold text-white mb-3 flex items-center gap-2">
         <Wifi className="h-4 w-4" />
         Provider Volume by Technology
-        <span className="text-xs text-white font-normal ml-2">
-          ({sessionIds.length} session{sessionIds.length > 1 ? "s" : ""})
-        </span>
+        {sessionIds.length > 0 && (
+          <span className="text-xs text-white font-normal ml-2">
+            ({sessionIds.length} session{sessionIds.length > 1 ? "s" : ""})
+          </span>
+        )}
       </h4>
 
       {loading ? (
@@ -911,6 +851,9 @@ const ProviderVolumeCard = ({
                     Tech
                   </th>
                   <th className="text-right px-2 py-2 text-white font-medium whitespace-nowrap">
+                    Samples
+                  </th>
+                  <th className="text-right px-2 py-2 text-white font-medium whitespace-nowrap">
                     <div className="flex items-center justify-end gap-1">
                       <Download className="h-3 w-3" />
                       DL (GB)
@@ -929,10 +872,34 @@ const ProviderVolumeCard = ({
                     </div>
                   </th>
                   <th className="text-right px-2 py-2 text-white font-medium whitespace-nowrap">
+                    Min DL
+                  </th>
+                  <th className="text-right px-2 py-2 text-white font-medium whitespace-nowrap">
+                    Median DL
+                  </th>
+                  <th className="text-right px-2 py-2 text-white font-medium whitespace-nowrap">
+                    Max DL
+                  </th>
+                  <th className="text-right px-2 py-2 text-white font-medium whitespace-nowrap">
+                    Std DL
+                  </th>
+                  <th className="text-right px-2 py-2 text-white font-medium whitespace-nowrap">
                     <div className="flex items-center justify-end gap-1">
                       <Gauge className="h-3 w-3" />
                       Avg UL
                     </div>
+                  </th>
+                  <th className="text-right px-2 py-2 text-white font-medium whitespace-nowrap">
+                    Min UL
+                  </th>
+                  <th className="text-right px-2 py-2 text-white font-medium whitespace-nowrap">
+                    Median UL
+                  </th>
+                  <th className="text-right px-2 py-2 text-white font-medium whitespace-nowrap">
+                    Max UL
+                  </th>
+                  <th className="text-right px-2 py-2 text-white font-medium whitespace-nowrap">
+                    Std UL
                   </th>
                   <th className="text-right px-2 py-2 text-white font-medium whitespace-nowrap">
                     <div className="flex items-center justify-end gap-1">
@@ -946,7 +913,7 @@ const ProviderVolumeCard = ({
                 {filteredProviderVolume.length === 0 ? (
                   <tr>
                     <td
-                      colSpan="7"
+                      colSpan="16"
                       className="px-2 py-8 text-center text-white text-sm"
                     >
                       No data available for known providers
@@ -977,6 +944,9 @@ const ProviderVolumeCard = ({
                           {item.technology}
                         </span>
                       </td>
+                      <td className="px-2 py-2 text-right text-white font-medium">
+                        {item.sampleCount}
+                      </td>
                       <td className="px-2 py-2 text-right text-blue-400 font-medium">
                         {item.downloadGb}
                       </td>
@@ -986,8 +956,32 @@ const ProviderVolumeCard = ({
                       <td className="px-2 py-2 text-right text-cyan-400 font-medium whitespace-nowrap">
                         {item.avgDlSpeedFormatted}
                       </td>
+                      <td className="px-2 py-2 text-right text-cyan-300 font-medium whitespace-nowrap">
+                        {item.minDlSpeedFormatted}
+                      </td>
+                      <td className="px-2 py-2 text-right text-cyan-300 font-medium whitespace-nowrap">
+                        {item.medianDlSpeedFormatted}
+                      </td>
+                      <td className="px-2 py-2 text-right text-cyan-300 font-medium whitespace-nowrap">
+                        {item.maxDlSpeedFormatted}
+                      </td>
+                      <td className="px-2 py-2 text-right text-cyan-300 font-medium whitespace-nowrap">
+                        {item.stddevDlSpeedFormatted}
+                      </td>
                       <td className="px-2 py-2 text-right text-teal-400 font-medium whitespace-nowrap">
                         {item.avgUlSpeedFormatted}
+                      </td>
+                      <td className="px-2 py-2 text-right text-teal-300 font-medium whitespace-nowrap">
+                        {item.minUlSpeedFormatted}
+                      </td>
+                      <td className="px-2 py-2 text-right text-teal-300 font-medium whitespace-nowrap">
+                        {item.medianUlSpeedFormatted}
+                      </td>
+                      <td className="px-2 py-2 text-right text-teal-300 font-medium whitespace-nowrap">
+                        {item.maxUlSpeedFormatted}
+                      </td>
+                      <td className="px-2 py-2 text-right text-teal-300 font-medium whitespace-nowrap">
+                        {item.stddevUlSpeedFormatted}
                       </td>
                       <td className="px-2 py-2 text-right text-orange-400 font-medium whitespace-nowrap">
                         {item.durationFormatted}
