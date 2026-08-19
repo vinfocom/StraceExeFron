@@ -1926,7 +1926,12 @@ function UnifiedDetailLogs({
         </div>
       </div>
 
-      <div className="flex gap-2 p-3 bg-slate-900 border-b border-slate-700 overflow-x-auto  shrink-0" onMouseDown={(e) => e.stopPropagation()} onWheel={(e) => e.stopPropagation()}>
+      <div
+        className="flex min-w-0 flex-nowrap gap-2 overflow-x-auto overflow-y-hidden border-b border-slate-700 bg-slate-900 p-3 shrink-0 overscroll-x-contain"
+        onMouseDown={(e) => e.stopPropagation()}
+        onWheel={(e) => e.stopPropagation()}
+        style={{ overflowWrap: "normal" }}
+      >
         {availableTabs.map((tab) => (
           <TabButton
             key={tab.id}
@@ -1937,7 +1942,7 @@ function UnifiedDetailLogs({
             }}
             className={tab.id === "n78" ? "bg-purple-900/30 border-purple-700/50" : ""}
           >
-            {tab.id === "n78" && <Radio className="h-3 w-3 mr-1" />}
+            {tab.id === "n78" && <Radio className="h-3 w-3 flex-shrink-0" />}
             {tab.label}
           </TabButton>
         ))}

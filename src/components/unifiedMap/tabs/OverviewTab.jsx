@@ -12,6 +12,7 @@ import {
   Timer,
   Gauge,
   Square,
+  SlidersHorizontal,
 } from "lucide-react";
 import { StatCard } from "../common/StatCard";
 import { PCI_COLOR_PALETTE } from "@/components/map/layers/MultiColorCirclesLayer";
@@ -73,6 +74,114 @@ const formatBytes = (gb, toUnit = "GB") => {
   }
   return gb.toFixed(2);
 };
+
+const PROVIDER_VOLUME_DEFAULT_COLUMNS = ["downloadGb", "uploadGb", "avgDlSpeedFormatted", "avgUlSpeedFormatted"];
+
+const PROVIDER_VOLUME_OPTIONAL_COLUMNS = [
+  {
+    key: "sampleCount",
+    label: "Samples",
+    headerClassName: "text-right min-w-[5rem]",
+    cellClassName: "text-right text-white",
+    render: (item) => item.sampleCount,
+  },
+  {
+    key: "downloadGb",
+    label: "DL (GB)",
+    icon: Download,
+    headerClassName: "text-right min-w-[5.5rem]",
+    cellClassName: "text-right text-blue-400",
+    render: (item) => item.downloadGb,
+  },
+  {
+    key: "uploadGb",
+    label: "UL (GB)",
+    icon: Upload,
+    headerClassName: "text-right min-w-[5.5rem]",
+    cellClassName: "text-right text-green-400",
+    render: (item) => item.uploadGb,
+  },
+  {
+    key: "avgDlSpeedFormatted",
+    label: "Avg DL",
+    icon: Gauge,
+    headerClassName: "text-right min-w-[6.5rem]",
+    cellClassName: "text-right text-cyan-400",
+    render: (item) => item.avgDlSpeedFormatted,
+  },
+  {
+    key: "minDlSpeedFormatted",
+    label: "Min DL",
+    headerClassName: "text-right min-w-[6.5rem]",
+    cellClassName: "text-right text-cyan-300",
+    render: (item) => item.minDlSpeedFormatted,
+  },
+  {
+    key: "medianDlSpeedFormatted",
+    label: "Median DL",
+    headerClassName: "text-right min-w-[7rem]",
+    cellClassName: "text-right text-cyan-300",
+    render: (item) => item.medianDlSpeedFormatted,
+  },
+  {
+    key: "maxDlSpeedFormatted",
+    label: "Max DL",
+    headerClassName: "text-right min-w-[6.5rem]",
+    cellClassName: "text-right text-cyan-300",
+    render: (item) => item.maxDlSpeedFormatted,
+  },
+  {
+    key: "stddevDlSpeedFormatted",
+    label: "Std DL",
+    headerClassName: "text-right min-w-[5.5rem]",
+    cellClassName: "text-right text-cyan-300",
+    render: (item) => item.stddevDlSpeedFormatted,
+  },
+  {
+    key: "avgUlSpeedFormatted",
+    label: "Avg UL",
+    icon: Gauge,
+    headerClassName: "text-right min-w-[6.5rem]",
+    cellClassName: "text-right text-teal-400",
+    render: (item) => item.avgUlSpeedFormatted,
+  },
+  {
+    key: "minUlSpeedFormatted",
+    label: "Min UL",
+    headerClassName: "text-right min-w-[6.5rem]",
+    cellClassName: "text-right text-teal-300",
+    render: (item) => item.minUlSpeedFormatted,
+  },
+  {
+    key: "medianUlSpeedFormatted",
+    label: "Median UL",
+    headerClassName: "text-right min-w-[7rem]",
+    cellClassName: "text-right text-teal-300",
+    render: (item) => item.medianUlSpeedFormatted,
+  },
+  {
+    key: "maxUlSpeedFormatted",
+    label: "Max UL",
+    headerClassName: "text-right min-w-[6.5rem]",
+    cellClassName: "text-right text-teal-300",
+    render: (item) => item.maxUlSpeedFormatted,
+  },
+  {
+    key: "stddevUlSpeedFormatted",
+    label: "Std UL",
+    headerClassName: "text-right min-w-[5.5rem]",
+    cellClassName: "text-right text-teal-300",
+    render: (item) => item.stddevUlSpeedFormatted,
+  },
+  {
+    key: "durationFormatted",
+    label: "Duration",
+    icon: Timer,
+    headerClassName: "text-right min-w-[6.5rem]",
+    cellClassName: "text-right text-orange-400",
+    render: (item) => item.durationFormatted,
+  },
+];
 
 export const OverviewTab = ({
   totalLocations,
@@ -756,6 +865,10 @@ const ProviderVolumeCard = ({
   sessionIds,
   error,
 }) => {
+  const [visibleColumnKeys, setVisibleColumnKeys] = useState(() =>
+    new Set(PROVIDER_VOLUME_DEFAULT_COLUMNS)
+  );
+
   const getTechBadgeStyle = (tech) => {
     const color = getLogColor("technology", tech);
     return {
@@ -797,18 +910,75 @@ const ProviderVolumeCard = ({
 
   const hasValidData = filteredProviderVolume && filteredProviderVolume.length > 0;
   const hasTechData = Object.keys(filteredTechSummary).length > 0;
+  const visibleColumns = useMemo(
+    () => PROVIDER_VOLUME_OPTIONAL_COLUMNS.filter((column) => visibleColumnKeys.has(column.key)),
+    [visibleColumnKeys]
+  );
+
+  const toggleColumn = useCallback((key) => {
+    setVisibleColumnKeys((current) => {
+      const next = new Set(current);
+      if (next.has(key)) {
+        if (next.size > 1) next.delete(key);
+      } else {
+        next.add(key);
+      }
+      return next;
+    });
+  }, []);
+
+  const resetColumns = useCallback(() => {
+    setVisibleColumnKeys(new Set(PROVIDER_VOLUME_DEFAULT_COLUMNS));
+  }, []);
 
   return (
     <div className="bg-slate-900 rounded-lg p-4 border border-slate-700">
-      <h4 className="text-sm font-semibold text-white mb-3 flex items-center gap-2">
-        <Wifi className="h-4 w-4" />
-        Provider Volume by Technology
-        {sessionIds.length > 0 && (
-          <span className="text-xs text-white font-normal ml-2">
-            ({sessionIds.length} session{sessionIds.length > 1 ? "s" : ""})
-          </span>
-        )}
-      </h4>
+      <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
+        <h4 className="text-sm font-semibold text-white flex min-w-0 items-center gap-2">
+          <Wifi className="h-4 w-4 flex-shrink-0" />
+          <span className="text-clamp-2">Provider Volume by Technology</span>
+          {sessionIds.length > 0 && (
+            <span className="text-xs text-white font-normal">
+              ({sessionIds.length} session{sessionIds.length > 1 ? "s" : ""})
+            </span>
+          )}
+        </h4>
+
+        <details className="group relative">
+          <summary className="inline-flex cursor-pointer list-none items-center gap-1.5 rounded border border-slate-700 bg-slate-800 px-2.5 py-1.5 text-xs font-medium text-white hover:border-slate-500 hover:bg-slate-700">
+            <SlidersHorizontal className="h-3.5 w-3.5" />
+            Columns
+          </summary>
+          <div className="absolute right-0 z-20 mt-2 w-[min(20rem,calc(100vw-2rem))] rounded border border-slate-700 bg-slate-900 p-3 shadow-xl">
+            <div className="mb-2 flex items-center justify-between gap-2">
+              <span className="text-xs font-semibold text-white">Show columns</span>
+              <button
+                type="button"
+                onClick={resetColumns}
+                className="rounded px-2 py-1 text-[11px] font-medium text-slate-300 hover:bg-slate-800 hover:text-white"
+              >
+                Default
+              </button>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              {PROVIDER_VOLUME_OPTIONAL_COLUMNS.map((column) => (
+                <label
+                  key={column.key}
+                  className="flex min-w-0 cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-xs text-slate-200 hover:bg-slate-800"
+                >
+                  <input
+                    type="checkbox"
+                    checked={visibleColumnKeys.has(column.key)}
+                    onChange={() => toggleColumn(column.key)}
+                    className="h-3.5 w-3.5 flex-shrink-0 accent-blue-500"
+                  />
+                  <span className="whitespace-nowrap">{column.label}</span>
+                </label>
+              ))}
+            </div>
+          </div>
+        </details>
+      </div>
 
       {loading ? (
         <div className="flex items-center justify-center py-8">
@@ -840,80 +1010,37 @@ const ProviderVolumeCard = ({
         </div>
       ) : (
         <>
-          <div className="overflow-x-auto scrollbar-hide bg-slate-800/50 rounded">
-            <table className="w-full text-xs">
+          <div className="overflow-x-auto bg-slate-800/50 rounded">
+            <table className="min-w-max w-full text-xs" style={{ overflowWrap: "normal" }}>
               <thead>
                 <tr className="border-b border-slate-700 bg-slate-800">
-                  <th className="text-left px-2 py-2 text-white font-medium">
+                  <th className="min-w-[8rem] whitespace-nowrap px-2 py-2 text-left font-medium text-white">
                     Provider
                   </th>
-                  <th className="text-left px-2 py-2 text-white font-medium">
+                  <th className="min-w-[5.5rem] whitespace-nowrap px-2 py-2 text-left font-medium text-white">
                     Tech
                   </th>
-                  <th className="text-right px-2 py-2 text-white font-medium whitespace-nowrap">
-                    Samples
-                  </th>
-                  <th className="text-right px-2 py-2 text-white font-medium whitespace-nowrap">
-                    <div className="flex items-center justify-end gap-1">
-                      <Download className="h-3 w-3" />
-                      DL (GB)
-                    </div>
-                  </th>
-                  <th className="text-right px-2 py-2 text-white font-medium whitespace-nowrap">
-                    <div className="flex items-center justify-end gap-1">
-                      <Upload className="h-3 w-3" />
-                      UL (GB)
-                    </div>
-                  </th>
-                  <th className="text-right px-2 py-2 text-white font-medium whitespace-nowrap">
-                    <div className="flex items-center justify-end gap-1">
-                      <Gauge className="h-3 w-3" />
-                      Avg DL
-                    </div>
-                  </th>
-                  <th className="text-right px-2 py-2 text-white font-medium whitespace-nowrap">
-                    Min DL
-                  </th>
-                  <th className="text-right px-2 py-2 text-white font-medium whitespace-nowrap">
-                    Median DL
-                  </th>
-                  <th className="text-right px-2 py-2 text-white font-medium whitespace-nowrap">
-                    Max DL
-                  </th>
-                  <th className="text-right px-2 py-2 text-white font-medium whitespace-nowrap">
-                    Std DL
-                  </th>
-                  <th className="text-right px-2 py-2 text-white font-medium whitespace-nowrap">
-                    <div className="flex items-center justify-end gap-1">
-                      <Gauge className="h-3 w-3" />
-                      Avg UL
-                    </div>
-                  </th>
-                  <th className="text-right px-2 py-2 text-white font-medium whitespace-nowrap">
-                    Min UL
-                  </th>
-                  <th className="text-right px-2 py-2 text-white font-medium whitespace-nowrap">
-                    Median UL
-                  </th>
-                  <th className="text-right px-2 py-2 text-white font-medium whitespace-nowrap">
-                    Max UL
-                  </th>
-                  <th className="text-right px-2 py-2 text-white font-medium whitespace-nowrap">
-                    Std UL
-                  </th>
-                  <th className="text-right px-2 py-2 text-white font-medium whitespace-nowrap">
-                    <div className="flex items-center justify-end gap-1">
-                      <Timer className="h-3 w-3" />
-                      Duration
-                    </div>
-                  </th>
+                  {visibleColumns.map((column) => {
+                    const Icon = column.icon;
+                    return (
+                      <th
+                        key={column.key}
+                        className={`whitespace-nowrap px-2 py-2 font-medium text-white ${column.headerClassName}`}
+                      >
+                        <div className="flex items-center justify-end gap-1 whitespace-nowrap">
+                          {Icon && <Icon className="h-3 w-3 flex-shrink-0" />}
+                          <span>{column.label}</span>
+                        </div>
+                      </th>
+                    );
+                  })}
                 </tr>
               </thead>
               <tbody>
                 {filteredProviderVolume.length === 0 ? (
                   <tr>
                     <td
-                      colSpan="16"
+                      colSpan={2 + visibleColumns.length}
                       className="px-2 py-8 text-center text-white text-sm"
                     >
                       No data available for known providers
@@ -925,67 +1052,33 @@ const ProviderVolumeCard = ({
                       key={idx}
                       className="border-b border-slate-800 hover:bg-slate-700/30 transition-colors"
                     >
-                      <td className="px-2 py-2 text-white">
+                      <td className="min-w-[8rem] max-w-[12rem] whitespace-nowrap px-2 py-2 text-white">
                         <div className="flex items-center gap-1.5">
                           <div
                             className="w-3 h-3 rounded-full flex-shrink-0"
                             style={{ backgroundColor: item.providerColor }}
                           />
-                          <span className="capitalize font-medium">
+                          <span className="truncate capitalize font-medium">
                             {item.provider}
                           </span>
                         </div>
                       </td>
-                      <td className="px-2 py-2">
+                      <td className="min-w-[5.5rem] whitespace-nowrap px-2 py-2">
                         <span
-                          className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium border"
+                          className="inline-flex items-center whitespace-nowrap px-1.5 py-0.5 rounded text-[10px] font-medium border"
                           style={getTechBadgeStyle(item.technology)}
                         >
                           {item.technology}
                         </span>
                       </td>
-                      <td className="px-2 py-2 text-right text-white font-medium">
-                        {item.sampleCount}
-                      </td>
-                      <td className="px-2 py-2 text-right text-blue-400 font-medium">
-                        {item.downloadGb}
-                      </td>
-                      <td className="px-2 py-2 text-right text-green-400 font-medium">
-                        {item.uploadGb}
-                      </td>
-                      <td className="px-2 py-2 text-right text-cyan-400 font-medium whitespace-nowrap">
-                        {item.avgDlSpeedFormatted}
-                      </td>
-                      <td className="px-2 py-2 text-right text-cyan-300 font-medium whitespace-nowrap">
-                        {item.minDlSpeedFormatted}
-                      </td>
-                      <td className="px-2 py-2 text-right text-cyan-300 font-medium whitespace-nowrap">
-                        {item.medianDlSpeedFormatted}
-                      </td>
-                      <td className="px-2 py-2 text-right text-cyan-300 font-medium whitespace-nowrap">
-                        {item.maxDlSpeedFormatted}
-                      </td>
-                      <td className="px-2 py-2 text-right text-cyan-300 font-medium whitespace-nowrap">
-                        {item.stddevDlSpeedFormatted}
-                      </td>
-                      <td className="px-2 py-2 text-right text-teal-400 font-medium whitespace-nowrap">
-                        {item.avgUlSpeedFormatted}
-                      </td>
-                      <td className="px-2 py-2 text-right text-teal-300 font-medium whitespace-nowrap">
-                        {item.minUlSpeedFormatted}
-                      </td>
-                      <td className="px-2 py-2 text-right text-teal-300 font-medium whitespace-nowrap">
-                        {item.medianUlSpeedFormatted}
-                      </td>
-                      <td className="px-2 py-2 text-right text-teal-300 font-medium whitespace-nowrap">
-                        {item.maxUlSpeedFormatted}
-                      </td>
-                      <td className="px-2 py-2 text-right text-teal-300 font-medium whitespace-nowrap">
-                        {item.stddevUlSpeedFormatted}
-                      </td>
-                      <td className="px-2 py-2 text-right text-orange-400 font-medium whitespace-nowrap">
-                        {item.durationFormatted}
-                      </td>
+                      {visibleColumns.map((column) => (
+                        <td
+                          key={column.key}
+                          className={`whitespace-nowrap px-2 py-2 font-medium ${column.cellClassName}`}
+                        >
+                          {column.render(item)}
+                        </td>
+                      ))}
                     </tr>
                   ))
                 )}
