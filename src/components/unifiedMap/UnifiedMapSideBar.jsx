@@ -2633,7 +2633,7 @@ const UnifiedMapSidebar = ({
         setPciOptimizationResult(resultResponse);
         setIsRunningPciOptimization(false);
         const recommendationCount = Number(
-          resultResponse?.summary?.recommendation_count,
+          resultResponse?.summary?.recommendation_count ?? resultResponse?.recommendation_count,
         );
         const suffix = Number.isFinite(recommendationCount)
           ? ` (${recommendationCount} recommendations)`
@@ -2646,6 +2646,22 @@ const UnifiedMapSidebar = ({
           closeOnClick: true,
           draggable: true,
         });
+
+        // Same auto-download UX as LTE tilt recommendation: fetch a fresh
+        // copy through the job-scoped /download route instead of ever
+        // touching the live server file directly.
+        const excelPath = resultResponse?.excel_path ?? resultResponse?.summary?.excel_path;
+        if (excelPath) {
+          await predictionApi.downloadPciOptimizationReport(excelPath).catch((error) => {
+            toast.error(error?.message || "PCI optimisation report download failed.");
+          });
+        } else {
+          const excelError = resultResponse?.excel_error ?? resultResponse?.summary?.excel_error;
+          if (excelError) {
+            toast.warning(`PCI optimisation Excel report was not generated: ${excelError}`);
+          }
+        }
+
         pciOptimizationToastIdRef.current = null;
         return;
       }
@@ -2692,14 +2708,18 @@ const UnifiedMapSidebar = ({
       return;
     }
 
+    // Mod is optional -- an empty/cleared field correctly means "no Mod
+    // rule checked", not an error that blocks the run. Only the backend's
+    // actual valid values are ever sent; anything else (including a stray
+    // 0 from Number("") on a blank field, or an out-of-range number) is
+    // silently dropped instead of crashing the job with a ZeroDivisionError.
+    const PCI_MOD_RULE_ALLOWED_VALUES = new Set([1, 3, 6, 7, 8, 9]);
     const parsedModRules = String(pciOptimizationModRules || "")
       .split(/[,\s]+/)
+      .map((value) => value.trim())
+      .filter((value) => value.length > 0)
       .map((value) => Number(value))
-      .filter((value) => Number.isFinite(value) && value >= 0);
-    if (parsedModRules.length === 0) {
-      toast.error("Please enter at least one valid mod rule.");
-      return;
-    }
+      .filter((value) => Number.isFinite(value) && PCI_MOD_RULE_ALLOWED_VALUES.has(value));
 
     const parsedSiteIds = String(pciOptimizationSiteIds || "")
       .split(/[,\s]+/)

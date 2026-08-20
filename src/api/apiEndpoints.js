@@ -71,6 +71,11 @@ const LTE_RECOMMENDATION_OPTIMIZED_DEFAULTS = Object.freeze({
   max_interference_sites: 10,
 });
 
+// The only Mod values the backend can actually evaluate (Mod0 is a
+// ZeroDivisionError server-side, not a real rule) -- kept in sync with
+// ML/tools/pci_optimization/engine.py's MOD_RULE_VALUES.
+const PCI_MOD_RULE_ALLOWED_VALUES = new Set([1, 3, 6, 7, 8, 9]);
+
 const PCI_OPTIMIZATION_DEFAULTS = Object.freeze({
   region: "india",
   operator: "Airtel",
@@ -1031,10 +1036,16 @@ export const predictionApi = {
             .map((value) => Number(value))
             .filter((value) => Number.isFinite(value) && value > 0)
         : [];
-      const normalizedModRules = Array.isArray(params?.rules?.mod)
+      // Mod is optional -- distinguish "caller explicitly passed an array"
+      // (respect it as-is, even if it filters down to empty, meaning "no
+      // Mod rule checked") from "caller didn't specify rules.mod at all"
+      // (only THAT case falls back to the default). Only the backend's
+      // actual valid values are ever sent; a stray 0 no longer survives.
+      const modRulesProvided = Array.isArray(params?.rules?.mod);
+      const normalizedModRules = modRulesProvided
         ? params.rules.mod
             .map((value) => Number(value))
-            .filter((value) => Number.isFinite(value) && value >= 0)
+            .filter((value) => Number.isFinite(value) && PCI_MOD_RULE_ALLOWED_VALUES.has(value))
         : PCI_OPTIMIZATION_DEFAULTS.rules.mod;
 
       const payload = {
@@ -1053,9 +1064,7 @@ export const predictionApi = {
         rules: {
           collision: params?.rules?.collision ?? PCI_OPTIMIZATION_DEFAULTS.rules.collision,
           confusion: params?.rules?.confusion ?? PCI_OPTIMIZATION_DEFAULTS.rules.confusion,
-          mod: normalizedModRules.length > 0
-            ? normalizedModRules
-            : PCI_OPTIMIZATION_DEFAULTS.rules.mod,
+          mod: modRulesProvided ? normalizedModRules : PCI_OPTIMIZATION_DEFAULTS.rules.mod,
           grouped: params?.rules?.grouped ?? PCI_OPTIMIZATION_DEFAULTS.rules.grouped,
           co_centric:
             params?.rules?.co_centric ?? PCI_OPTIMIZATION_DEFAULTS.rules.co_centric,
@@ -1099,6 +1108,13 @@ export const predictionApi = {
       console.error("PCI optimization result error:", error);
       throw error;
     }
+  },
+
+  downloadPciOptimizationReport: (filePath) => {
+    if (!filePath) return Promise.resolve({ success: false });
+    const url = `${PYTHON_BASE_URL_EXPORT}/api/pci-optimization/download?file=${encodeURIComponent(filePath)}`;
+    const filename = String(filePath).split(/[\\/]/).pop() || "PCI_Optimization_Report.xlsx";
+    return downloadUrlAsBlob(url, filename);
   },
 
   getLtePredictionStatus: async (jobId) => {
