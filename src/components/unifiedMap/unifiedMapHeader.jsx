@@ -508,7 +508,6 @@ function UnifiedHeader({
   siteToggle,
   setSiteToggle,
   sitePredictionVersion = "original",
-  setSitePredictionVersion,
   sitePredictionScenarioId = null,
   setSitePredictionScenarioId,
   sitePredictionScenarioOptions = [],
@@ -1332,7 +1331,7 @@ function UnifiedHeader({
               </div>
             )}
             {enableSiteToggle && (
-              <div className="grid min-w-[320px] grid-cols-4 gap-2 xl:min-w-[430px]">
+              <div className="grid min-w-[280px] grid-cols-3 gap-2 xl:min-w-[360px]">
                 <SelectRow
                   className="pt-0"
                   value={siteToggle}
@@ -1342,19 +1341,6 @@ function UnifiedHeader({
                     { value: "NoML", label: "ML" },
                   ]}
                 />
-                {siteToggle === "Cell" && (
-                  <SelectRow
-                    value={sitePredictionVersion}
-                    onChange={(nextValue) => setSitePredictionVersion?.(nextValue)}
-                    options={[
-                      { value: "original", label: "Baseline" },
-                      { value: "updated", label: "Optimized" },
-                      { value: "delta", label: "Delta" },
-                    ]}
-                    placeholder="Select cell version"
-                    className="pt-0"
-                  />
-                )}
                 <SelectRow
                   className="pt-0"
                   value={siteLabelField || "none"}

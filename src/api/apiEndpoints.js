@@ -939,7 +939,7 @@ export const predictionApi = {
         const debugPayload = {
           project_id: params.project_id,
           operator: operator || undefined,
-          session_ids: validSessionIds,
+          session_ids: parsedSessionIds,
           rsrp: params.rsrp,
           rsrq: params.rsrq,
           sinr: params.sinr,
@@ -2323,6 +2323,31 @@ export const settingApi = {
 };
 
 export const excelApi = {
+  startChunkUpload: async (formData) =>
+    api.post("/ExcelUpload/StartChunkUpload", formData, {
+      timeout: 300000,
+      dedupe: false,
+    }),
+
+  uploadChunk: async (formData, onUploadProgress = null) =>
+    api.post("/ExcelUpload/UploadChunk", formData, {
+      timeout: 300000,
+      dedupe: false,
+      onUploadProgress,
+    }),
+
+  completeChunkUpload: async (formData) =>
+    api.post("/ExcelUpload/CompleteChunkUpload", formData, {
+      timeout: 7200000,
+      dedupe: false,
+    }),
+
+  getChunkUploadStatus: async (uploadId) =>
+    api.get("/ExcelUpload/GetChunkUploadStatus", {
+      params: { uploadId },
+      dedupe: false,
+    }),
+
   uploadFile: async (formData, onUploadProgress = null) => {
     try {
       return await api.post("/ExcelUpload/UploadExcelFile", formData, {

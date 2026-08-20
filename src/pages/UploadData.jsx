@@ -385,9 +385,7 @@ const buildReportFileGroups = (files, groupsByFile) =>
 
 const buildReportSheetNames = (files, sheetNamesByFile, reportMode, fileGroups = []) => {
   if (reportMode !== "combined") {
-    return files
-      .map((file) => String(sheetNamesByFile[getReportFileKey(file)] || "").trim())
-      .filter(Boolean);
+    return [];
   }
 
   const firstNameByGroup = new Map();
@@ -1294,14 +1292,12 @@ const UploadDataPage = () => {
                 </div>
               )}
 
-              {reportType === "excel" && reportFiles.length > 0 && (
+              {reportType === "excel" && reportMode === "combined" && reportFiles.length > 0 && (
 	                <div className="space-y-3">
 	                  <div>
 	                    <label className="block text-sm font-semibold">Excel Sheet Setup</label>
 	                    <p className="mt-1 text-xs text-gray-200">
-	                      {reportMode === "combined"
-	                        ? "In combined mode, the first file in each group provides that group's sheet name."
-	                        : "Sends SheetNames as comma-separated values."}
+	                      In combined mode, the first file in each group provides that group's sheet name.
                     </p>
                   </div>
 
@@ -1311,11 +1307,7 @@ const UploadDataPage = () => {
 	                      return (
 	                        <div
 	                          key={key}
-	                          className={`grid gap-3 rounded border border-white/20 bg-white/5 p-3 ${
-	                            reportMode === "combined"
-	                              ? "md:grid-cols-[minmax(0,1fr)_220px_110px]"
-	                              : "md:grid-cols-[minmax(0,1fr)_220px]"
-	                          }`}
+	                          className="grid gap-3 rounded border border-white/20 bg-white/5 p-3 md:grid-cols-[minmax(0,1fr)_220px_110px]"
 	                        >
 	                          <div className="min-w-0">
 	                            <label className="block text-xs font-medium text-gray-200">ZIP File</label>
