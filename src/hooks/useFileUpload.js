@@ -6,10 +6,6 @@ import { toast } from 'react-toastify';
 import { excelApi } from '../api/apiEndpoints';
 
 const UPLOAD_TIMEOUT_LABEL = "2 hours";
-const CHUNKED_UPLOAD_THRESHOLD_BYTES = 100 * 1024 * 1024;
-const CHUNK_SIZE_BYTES = 10 * 1024 * 1024;
-const CHUNK_STATUS_POLL_MS = 5000;
-const CHUNK_STATUS_MAX_POLLS = 12;
 
 const isLikelyBackgroundProcessingError = (message) => {
   const msg = String(message || "").toLowerCase();
@@ -55,42 +51,6 @@ const getFormValue = (formData, key) => {
   } catch {
     return undefined;
   }
-};
-
-const appendIfPresent = (formData, key, value) => {
-  if (value !== undefined && value !== null && value !== "") {
-    formData.append(key, value);
-  }
-};
-
-const valueOf = (payload, ...keys) => {
-  for (const key of keys) {
-    if (payload?.[key] !== undefined && payload?.[key] !== null) return payload[key];
-  }
-
-  const nested = payload?.Data ?? payload?.data;
-  if (nested && nested !== payload) return valueOf(nested, ...keys);
-  return undefined;
-};
-
-const normalizeChunkStatus = (payload) => {
-  const statusValue = valueOf(payload, "Status", "status");
-  const statusText = String(valueOf(payload, "UploadStatus", "uploadStatus", "State", "state", "StatusText", "statusText") ?? "").toLowerCase();
-
-  if (statusValue === 1 || ["success", "completed", "complete", "processed"].includes(statusText)) return "success";
-  if (statusValue === 0 || ["failed", "failure", "error"].includes(statusText)) return "error";
-  if (statusValue === 2 || ["processing", "merging", "uploaded", "queued", "started"].includes(statusText)) return "processing";
-  return "processing";
-};
-
-const getChunkPayloadMessage = (payload, fallback = "") =>
-  valueOf(payload, "Message", "message", "ErrorMessage", "errorMessage") || fallback;
-
-const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-
-const shouldUseChunkUpload = (formData) => {
-  const mainFile = formData.get("UploadFile");
-  return mainFile instanceof File && mainFile.size >= CHUNKED_UPLOAD_THRESHOLD_BYTES;
 };
 
 const extractFailureReasons = (payload) => {
@@ -159,124 +119,6 @@ const logUploadFailure = ({ formData, response, error, message }) => {
   console.groupEnd();
 };
 
-const buildChunkUploadMetadata = (sourceFormData, file, totalChunks, uploadId = null) => {
-  const metadata = new FormData();
-  appendIfPresent(metadata, "UploadId", uploadId);
-  appendIfPresent(metadata, "FileName", file.name);
-  appendIfPresent(metadata, "OriginalFileName", file.name);
-  appendIfPresent(metadata, "FileSize", file.size);
-  appendIfPresent(metadata, "TotalSize", file.size);
-  appendIfPresent(metadata, "ChunkSize", CHUNK_SIZE_BYTES);
-  appendIfPresent(metadata, "TotalChunks", totalChunks);
-  appendIfPresent(metadata, "UploadFileType", getFormValue(sourceFormData, "UploadFileType"));
-  appendIfPresent(metadata, "remarks", getFormValue(sourceFormData, "remarks"));
-  appendIfPresent(metadata, "ProjectName", getFormValue(sourceFormData, "ProjectName"));
-  appendIfPresent(metadata, "SessionIds", getFormValue(sourceFormData, "SessionIds"));
-  return metadata;
-};
-
-const uploadFileInChunks = async (formData, onUploadProgress = null) => {
-  const file = formData.get("UploadFile");
-  const totalChunks = Math.ceil(file.size / CHUNK_SIZE_BYTES);
-  const startResponse = await excelApi.startChunkUpload(
-    buildChunkUploadMetadata(formData, file, totalChunks),
-  );
-  const uploadId = valueOf(
-    startResponse,
-    "UploadId",
-    "uploadId",
-    "UploadSessionId",
-    "uploadSessionId",
-    "SessionUploadId",
-    "sessionUploadId",
-    "Id",
-    "id",
-  );
-
-  if (!uploadId) {
-    throw new Error(getChunkPayloadMessage(startResponse, "Chunk upload session was not created."));
-  }
-
-  let uploadedBytes = 0;
-  for (let chunkIndex = 0; chunkIndex < totalChunks; chunkIndex += 1) {
-    const start = chunkIndex * CHUNK_SIZE_BYTES;
-    const end = Math.min(start + CHUNK_SIZE_BYTES, file.size);
-    const chunk = file.slice(start, end);
-    const chunkFormData = new FormData();
-    chunkFormData.append("Chunk", chunk, file.name);
-    chunkFormData.append("UploadId", uploadId);
-    chunkFormData.append("ChunkIndex", chunkIndex);
-    chunkFormData.append("ChunkNumber", chunkIndex + 1);
-    chunkFormData.append("TotalChunks", totalChunks);
-    chunkFormData.append("FileName", file.name);
-
-    await excelApi.uploadChunk(chunkFormData, (progressEvent) => {
-      if (!onUploadProgress) return;
-      const chunkLoaded = Math.min(Number(progressEvent?.loaded || 0), chunk.size);
-      onUploadProgress({
-        loaded: uploadedBytes + chunkLoaded,
-        total: file.size,
-      });
-    });
-
-    uploadedBytes = end;
-    if (onUploadProgress) {
-      onUploadProgress({ loaded: uploadedBytes, total: file.size });
-    }
-  }
-
-  const completeResponse = await excelApi.completeChunkUpload(
-    buildChunkUploadMetadata(formData, file, totalChunks, uploadId),
-  );
-
-  const completeUploadId = valueOf(
-    completeResponse,
-    "UploadId",
-    "uploadId",
-    "UploadSessionId",
-    "uploadSessionId",
-    "Id",
-    "id",
-  ) || uploadId;
-
-  const completeStatus = normalizeChunkStatus(completeResponse);
-  if (completeStatus === "error") {
-    throw new Error(getChunkPayloadMessage(completeResponse, "Chunk upload processing failed."));
-  }
-
-  for (let attempt = 0; attempt < CHUNK_STATUS_MAX_POLLS; attempt += 1) {
-    const statusResponse = await excelApi.getChunkUploadStatus(completeUploadId);
-    const status = normalizeChunkStatus(statusResponse);
-    const message = getChunkPayloadMessage(statusResponse, getChunkPayloadMessage(completeResponse));
-
-    if (status === "success") {
-      return {
-        Status: 1,
-        Message: message || "File uploaded successfully.",
-        UploadId: valueOf(statusResponse, "UploadId", "uploadId", "UploadHistoryId", "uploadHistoryId") ?? completeUploadId,
-        UploadIds: [valueOf(statusResponse, "UploadId", "uploadId", "UploadHistoryId", "uploadHistoryId") ?? completeUploadId],
-      };
-    }
-
-    if (status === "error") {
-      return {
-        Status: 0,
-        Message: message || "Chunk upload failed.",
-        UploadId: valueOf(statusResponse, "UploadId", "uploadId", "UploadHistoryId", "uploadHistoryId") ?? completeUploadId,
-      };
-    }
-
-    await wait(CHUNK_STATUS_POLL_MS);
-  }
-
-  return {
-    Status: 2,
-    Message: getChunkPayloadMessage(completeResponse, "File uploaded. Processing is running in the background."),
-    UploadId: valueOf(completeResponse, "UploadHistoryId", "uploadHistoryId", "UploadId", "uploadId") ?? completeUploadId,
-    UploadIds: [valueOf(completeResponse, "UploadHistoryId", "uploadHistoryId", "UploadId", "uploadId") ?? completeUploadId],
-  };
-};
-
 export const useFileUpload = () => {
   const [loading, setLoading] = useState(false);
   const [errorLog, setErrorLog] = useState("");
@@ -285,9 +127,8 @@ export const useFileUpload = () => {
     setLoading(true);
     setErrorLog("");
     try {
-      const resp = shouldUseChunkUpload(formData)
-        ? await uploadFileInChunks(formData, onUploadProgress)
-        : await excelApi.uploadFile(formData, onUploadProgress);
+      // FIX: Changed uploadApi.uploadFile to excelApi.uploadFile
+      const resp = await excelApi.uploadFile(formData, onUploadProgress);
       if (resp.Status === 1) {
         return {
           success: true,

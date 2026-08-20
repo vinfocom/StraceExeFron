@@ -128,14 +128,7 @@ const ToggleSwitch = memo(({ checked, onChange, disabled = false }) => (
 ToggleSwitch.displayName = "ToggleSwitch";
 
 const CollapsibleSection = memo(
-  ({
-    title,
-    icon: Icon,
-    children,
-    defaultOpen = false,
-    badge = null,
-    contentClassName = "",
-  }) => {
+  ({ title, icon: Icon, children, defaultOpen = false, badge = null }) => {
     const [isOpen, setIsOpen] = useState(defaultOpen);
 
     return (
@@ -160,11 +153,7 @@ const CollapsibleSection = memo(
           )}
         </button>
         {isOpen && (
-          <div
-            className={`px-3 pb-3 pt-1 border-t border-slate-700/50 ${
-              contentClassName || "space-y-3"
-            }`}
-          >
+          <div className="px-3 pb-3 pt-1 space-y-3 border-t border-slate-700/50">
             {children}
           </div>
         )}
@@ -646,12 +635,13 @@ const UnifiedMapSidebar = ({
   gridAggregationSummary = null,
   canEnableGridView = false,
   lteGridAvailable = false,
-  lteGridEnabled = false,
-  setLteGridEnabled,
   lteGridSizeMeters,
   setLteGridSizeMeters,
   lteGridAggregationMethod,
   setLteGridAggregationMethod,
+  loadedSectorGridOptions = [],
+  sectorGridSettings = {},
+  onSectorGridSettingChange = null,
   storedGridVersion = "original",
   setStoredGridVersion,
   storedGridTechnology = "ALL",
@@ -1040,14 +1030,6 @@ const UnifiedMapSidebar = ({
       toast.error(message);
     }
   }, [siteToggle]);
-
-  const handleClearClickedSiteData = useCallback(() => {
-    if (typeof window !== "undefined") {
-      window.dispatchEvent(new Event("map:clearSelectedSites"));
-    }
-    setLteGridEnabled?.(false);
-    toast.info("Clicked site data cleared.");
-  }, [setLteGridEnabled]);
 
   const activeDataFiltersCount = useMemo(() => {
     if (!dataFilters) return 0;
@@ -1513,16 +1495,6 @@ const UnifiedMapSidebar = ({
     if (normalizedMode === "min" || normalizedMode === "operator_min") return "min";
     return "max";
   }, [storedGridMetricMode]);
-  const displayedGridAggregationMethod = useMemo(() => {
-    if (Boolean(deltaGridApiState?.gridVisible)) {
-      return storedGridAggregateMode === "avg" ? "mean" : storedGridAggregateMode;
-    }
-    return normalizedLteGridAggregationMethod;
-  }, [
-    deltaGridApiState?.gridVisible,
-    normalizedLteGridAggregationMethod,
-    storedGridAggregateMode,
-  ]);
   const normalizedStoredGridVersion = useMemo(() => {
     const normalizedVersion = String(storedGridVersion || "original").trim().toLowerCase();
     if (
@@ -1585,35 +1557,8 @@ const UnifiedMapSidebar = ({
       const storedAggregateValue =
         normalizedValue === "min" || normalizedValue === "max" ? normalizedValue : "avg";
       handleStoredGridAggregateModeChange(storedAggregateValue);
-      if (Boolean(deltaGridApiState?.gridVisible)) {
-        onDeltaGridFetchStored?.({
-          version: normalizedStoredGridVersion,
-          scenarioId: storedGridScenarioId,
-          technology: storedGridTechnology,
-          aggregateMode: storedAggregateValue,
-          forceFetch: true,
-        });
-      }
     },
-    [
-      setLteGridAggregationMethod,
-      handleStoredGridAggregateModeChange,
-      deltaGridApiState?.gridVisible,
-      onDeltaGridFetchStored,
-      normalizedStoredGridVersion,
-      storedGridScenarioId,
-      storedGridTechnology,
-    ],
-  );
-  const handleLteGridEnabledChange = useCallback(
-    (nextChecked) => {
-      const enabled = Boolean(nextChecked);
-      setLteGridEnabled?.(enabled);
-      if (enabled && Boolean(deltaGridApiState?.gridVisible)) {
-        onDeltaGridFetchStored?.({ visible: false });
-      }
-    },
-    [setLteGridEnabled, deltaGridApiState?.gridVisible, onDeltaGridFetchStored],
+    [setLteGridAggregationMethod, handleStoredGridAggregateModeChange],
   );
   const handleStoredGridVersionChange = useCallback(
     (nextVersion) => {
@@ -1627,13 +1572,6 @@ const UnifiedMapSidebar = ({
       }
     },
     [setStoredGridVersion, deltaGridApiState?.gridVisible, onDeltaGridFetchStored, storedGridTechnology],
-  );
-  const handlePredictionVersionChange = useCallback(
-    (nextVersion) => {
-      setSitePredictionVersion?.(nextVersion);
-      handleStoredGridVersionChange(nextVersion);
-    },
-    [handleStoredGridVersionChange, setSitePredictionVersion],
   );
   const handleStoredGridTechnologyChange = useCallback(
     (nextTechnology) => {
@@ -1659,10 +1597,7 @@ const UnifiedMapSidebar = ({
   const handleStoredGridScenarioChange = useCallback(
     (nextScenarioId) => {
       const parsedScenarioId = Number(nextScenarioId);
-      const normalizedScenarioId =
-        Number.isFinite(parsedScenarioId) && parsedScenarioId > 0 ? parsedScenarioId : null;
-      setStoredGridScenarioId?.(normalizedScenarioId);
-      setSitePredictionScenarioId?.(normalizedScenarioId);
+      setStoredGridScenarioId?.(Number.isFinite(parsedScenarioId) && parsedScenarioId > 0 ? parsedScenarioId : null);
       if (Boolean(deltaGridApiState?.gridVisible)) {
         onDeltaGridFetchStored?.({
           version: normalizedStoredGridVersion,
@@ -1674,7 +1609,6 @@ const UnifiedMapSidebar = ({
     },
     [
       setStoredGridScenarioId,
-      setSitePredictionScenarioId,
       deltaGridApiState?.gridVisible,
       onDeltaGridFetchStored,
       normalizedStoredGridVersion,
@@ -3286,6 +3220,7 @@ const UnifiedMapSidebar = ({
                   <>
                     <ToggleRow
                       label="Grid View"
+                      description="Aggregate logs into threshold-colored cells"
                       checked={Boolean(enableGrid)}
                       onChange={setEnableGrid}
                       disabled={!canEnableGridView}
@@ -3296,7 +3231,7 @@ const UnifiedMapSidebar = ({
                       <div className="rounded-lg border border-cyan-700/40 bg-cyan-950/20 p-2 text-xs space-y-2">
                         <SelectRow
                           label="Grid Aggregate"
-	                          value={displayedGridAggregationMethod}
+                          value={normalizedLteGridAggregationMethod}
                           onChange={handleLteGridAggregationMethodChange}
                           options={[
                             { value: "median", label: "Median" },
@@ -3334,6 +3269,38 @@ const UnifiedMapSidebar = ({
                     )}
                   </>
                 )}
+
+                <ToggleRow
+                  label="Sites"
+                  checked={enableSiteToggle}
+                  onChange={handleSiteToggleChange}
+                  disabled={!hasValidProjectId}
+                  useSwitch={true}
+                />
+
+                {enableSiteToggle && (
+                  <div className="ml-3 rounded-lg border border-slate-700/50 bg-slate-900/40 p-2.5 space-y-2">
+                    <div className="text-xs font-medium text-slate-200">Show Site</div>
+                    <ToggleRow
+                      label="Circle"
+                      description="Show site circle markers"
+                      checked={Boolean(showSiteMarkers)}
+                      onChange={(checked) => setShowSiteMarkers?.(checked)}
+                      disabled={!hasValidProjectId}
+                      useSwitch={true}
+                    />
+                    <ToggleRow
+                      label="Sector"
+                      description="Show network planner sector triangles"
+                      checked={Boolean(showSiteSectors)}
+                      onChange={(checked) => setShowSiteSectors?.(checked)}
+                      disabled={!hasValidProjectId}
+                      useSwitch={true}
+                    />
+                  </div>
+                )}
+
+                
 
                 <ToggleRow
                   label="Metric Labels"
@@ -3791,104 +3758,9 @@ const UnifiedMapSidebar = ({
           {activeSidebarTab === "optimisation" && (
             <>
           {activeSidebarTab === "optimisation" && (
-          <CollapsibleSection
-            title="Site and Prediction"
-            icon={Radio}
-            contentClassName="flex flex-col gap-3"
-          >
-            <ToggleRow
-              label="Site"
-              checked={enableSiteToggle}
-              onChange={(checked) => {
-                handleSiteToggleChange(checked);
-                if (!checked) {
-                  setLteGridEnabled?.(false);
-                  if (Boolean(deltaGridApiState?.gridVisible)) {
-                    onDeltaGridFetchStored?.({ visible: false });
-                  }
-                  if (typeof window !== "undefined") {
-                    window.dispatchEvent(new Event("map:clearSelectedSites"));
-                  }
-                }
-              }}
-              disabled={!hasValidProjectId}
-              useSwitch={true}
-            />
+          <CollapsibleSection title="Prediction" icon={Radio}>
             {enableSiteToggle && (
               <>
-                <div className="mt-2 rounded-lg border border-slate-700/50 bg-slate-900/40 p-2.5 space-y-2">
-                  <div className="text-xs font-medium text-slate-200">Show Site</div>
-                  <ToggleRow
-                    label="Circle"
-                    description="Show site circle markers"
-                    checked={Boolean(showSiteMarkers)}
-                    onChange={(checked) => setShowSiteMarkers?.(checked)}
-                    disabled={!hasValidProjectId}
-                    useSwitch={true}
-                  />
-                  <ToggleRow
-                    label="Sector"
-                    description="Show network planner sector triangles"
-                    checked={Boolean(showSiteSectors)}
-                    onChange={(checked) => setShowSiteSectors?.(checked)}
-                    disabled={!hasValidProjectId}
-                    useSwitch={true}
-                  />
-                </div>
-
-                {isCellMode && (
-                  <div className="mt-2 space-y-2 rounded-lg border border-slate-700/50 bg-slate-900/40 p-2.5">
-                    <Label className="text-xs font-semibold text-blue-400">
-                      Site and Prediction Mode
-                    </Label>
-                    <SegmentedControl
-                      value={sitePredictionVersion}
-                      onChange={handlePredictionVersionChange}
-                      options={[
-                        { value: "original", label: "Baseline" },
-                        { value: "updated", label: "Optimized" },
-                        { value: "delta", label: "Delta" },
-                      ]}
-                    />
-                  </div>
-                )}
-
-                <div className="mt-2 rounded-lg border border-slate-700/50 bg-slate-900/40 p-2.5">
-                  <SelectRow
-                    label="Aggregate"
-	                    value={displayedGridAggregationMethod}
-                    onChange={handleLteGridAggregationMethodChange}
-                    options={[
-                      { value: "median", label: "Median" },
-                      { value: "mean", label: "Mean" },
-                      { value: "min", label: "Min" },
-                      { value: "max", label: "Max" },
-                    ]}
-                    placeholder="Select aggregate"
-                  />
-                </div>
-
-                {!Boolean(deltaGridApiState?.gridVisible) && (
-                  <div className="mt-2 space-y-2">
-	                    <ToggleRow
-	                      label="Grid View"
-	                      checked={Boolean(lteGridEnabled)}
-	                      onChange={handleLteGridEnabledChange}
-	                      disabled={!lteGridAvailable}
-	                      useSwitch={true}
-	                    />
-                    <Button
-                      type="button"
-                      variant="outline"
-                      onClick={handleClearClickedSiteData}
-                      disabled={!lteGridAvailable}
-                      className="h-8 w-full text-xs bg-blue-600 hover:bg-blue-500 text-white rounded-md"
-                    >
-                      <Trash2 className="mr-1.5 h-3.5 w-3.5 bg-red-500 text-white " />
-                      Clear Clicked Site Data
-                    </Button>
-                  </div>
-                )}
                 
                 <div className="mt-3 pt-3 border-t border-slate-700/50 space-y-2">
                   
@@ -3913,208 +3785,97 @@ const UnifiedMapSidebar = ({
                         </div>
                       )}
 
+                      <SelectRow
+                        label="Aggregation"
+                        value={normalizedLteGridAggregationMethod}
+                        onChange={handleLteGridAggregationMethodChange}
+                        options={[
+                          { value: "median", label: "Median" },
+                          { value: "mean", label: "Mean" },
+                          { value: "min", label: "Min" },
+                          { value: "max", label: "Max" },
+                        ]}
+                        placeholder="Select aggregation"
+                      />
+                      <p className="text-[10px] text-slate-500">
+                        Also sets the aggregate used by "Show Stored Baseline Grid" (KPI) below.
+                      </p>
                     </>
                   ) : (
                     <p className="text-[10px] text-slate-400">
                       Select any site or sector prediction first.
                     </p>
                   )}
-                   {enableSiteToggle && canUseGridApi && (
-            <div className="order-2 pt-2 border-t border-slate-700/50 space-y-2">
-              <ToggleRow
-                label={`Show Stored ${
-                  normalizedStoredGridVersion === "updated"
-                    ? "Optimized"
-                    : normalizedStoredGridVersion === "delta"
-                      ? "Delta"
-                      : "Baseline"
-                } Grid`}
-                description={
-                  deltaGridApiState?.computing
-                    ? "Computing grid..."
-                    : deltaGridApiState?.fetching
-                      ? "Fetching stored grid..."
-                      : ""
-                }
-                checked={Boolean(deltaGridApiState?.gridVisible)}
-                onChange={(nextChecked) =>
-                  onDeltaGridFetchStored?.({
-                    version: normalizedStoredGridVersion,
-                    scenarioId: storedGridScenarioId,
-                    technology: storedGridTechnology,
-                    visible: Boolean(nextChecked),
-                  })
-                }
-                disabled={
-                  deltaGridButtonsDisabled ||
-                  Boolean(deltaGridApiState?.computing) ||
-                  Boolean(deltaGridApiState?.fetching)
-                }
-                useSwitch={true}
-              />
-              {Boolean(deltaGridApiState?.gridVisible) && (
-                <div className="pt-1 bg-slate-900/40 rounded-lg p-2 space-y-2">
-                  <SelectRow
-                    label="Technology"
-                    value={String(storedGridTechnology || "ALL").trim().toUpperCase()}
-                    onChange={handleStoredGridTechnologyChange}
-                    options={[
-                      { value: "ALL", label: "All" },
-                      { value: "4G", label: "4G" },
-                      { value: "5G", label: "5G" },
-                    ]}
-                    placeholder="Select technology"
-                  />
-                  {(normalizedStoredGridVersion === "updated" ||
-                    normalizedStoredGridVersion === "delta") && (
-                    <div className="min-w-0 flex-1 space-y-1.5 relative">
-                      <Label className="text-sm font-semibold text-white">Scenario</Label>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          if (
-                            deltaGridButtonsDisabled ||
-                            Boolean(deltaGridApiState?.computing) ||
-                            Boolean(deltaGridApiState?.fetching) ||
-                            !Array.isArray(storedGridScenarioOptions) ||
-                            storedGridScenarioOptions.length === 0
-                          ) return;
-                          setStoredGridScenarioMenuOpen((prev) => !prev);
-                        }}
-                        className="h-8 w-full min-w-0 bg-slate-800 border border-slate-600 rounded px-2 text-xs text-white flex items-center justify-between disabled:opacity-50"
-                        disabled={
-                          deltaGridButtonsDisabled ||
-                          Boolean(deltaGridApiState?.computing) ||
-                          Boolean(deltaGridApiState?.fetching) ||
-                          !Array.isArray(storedGridScenarioOptions) ||
-                          storedGridScenarioOptions.length === 0
-                        }
-                      >
-                        <span className="truncate">
-                          {Number.isFinite(Number(storedGridScenarioId)) && Number(storedGridScenarioId) > 0
-                            ? `Scenario ${storedGridScenarioId}`
-                            : "No scenarios"}
-                        </span>
-                        <ChevronDown className="h-3.5 w-3.5 text-slate-300 shrink-0" />
-                      </button>
-                      {storedGridScenarioMenuOpen && (
-                        <div className="absolute left-0 right-0 z-[2300] mt-1 rounded border border-slate-600 bg-slate-900 shadow-lg max-h-56 overflow-y-auto">
-                          {Array.isArray(storedGridScenarioOptions) &&
-                          storedGridScenarioOptions.length > 0 ? (
-                            storedGridScenarioOptions.map((item) => {
-                              const scenarioId = getStoredGridPublicScenarioId(item);
-                              const internalScenarioId = Number(
-                                item?.internal_scenario_id ?? item?.internalScenarioId,
-                              );
-                              const isSelected =
-                                Number.isFinite(scenarioId) &&
-                                Number(storedGridScenarioId) === scenarioId;
-                              return (
-                                <div
-                                  key={`stored-grid-scenario-${scenarioId}`}
-                                  className="flex items-center gap-1 px-2 py-1.5 border-b border-slate-800 last:border-b-0"
-                                >
-                                  <button
-                                    type="button"
-                                    onClick={() => {
-                                      handleStoredGridScenarioChange(String(scenarioId));
-                                      setStoredGridScenarioMenuOpen(false);
-                                    }}
-                                    className={`flex-1 text-left text-xs truncate ${isSelected ? "text-cyan-300" : "textwhite"}`}
+
+                  {enableSiteToggle && (
+                    <div className="pt-1 bg-slate-800/50 rounded-lg p-2 space-y-2">
+                      <span className="text-xs text-slate-400">Sector Grid</span>
+                      {loadedSectorGridOptions.length === 0 ? (
+                        <p className="text-[10px] text-slate-400">
+                          Click a sector triangle on the map to manage its grid settings.
+                        </p>
+                      ) : (
+                        <div className="max-h-64 overflow-y-auto space-y-2 pr-1">
+                          {loadedSectorGridOptions.map((option) => {
+                            const setting = sectorGridSettings?.[option.renderKey] || {};
+                            const includeInGrid = setting.includeInGrid !== false;
+                            const aggregationOverride = setting.aggregationMethod || "";
+                            return (
+                              <div
+                                key={option.renderKey}
+                                className="rounded border border-slate-600 bg-slate-900/60 px-2 py-1.5"
+                              >
+                                <div className="flex items-center justify-between gap-2">
+                                  <span
+                                    className="truncate text-[11px] text-white"
+                                    title={`${option.siteId} / ${option.sector}`}
                                   >
-                                    {`Scenario ${scenarioId}${item?.status ? ` (${item.status})` : ""}`}
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={() => onDeleteStoredGridScenario?.(scenarioId)}
-                                    className="h-6 w-6 rounded bg-red-600/90 hover:bg-red-500 text-white inline-flex items-center justify-center"
-                                    title={
-                                      Number.isFinite(internalScenarioId) && internalScenarioId > 0
-                                        ? `Delete Scenario ${scenarioId}`
-                                        : `Delete Scenario ${scenarioId}`
-                                    }
-                                  >
-                                    <Trash2 className="h-3.5 w-3.5" />
-                                  </button>
+                                    {option.siteId || "Site"} / {option.sector || "Sector"}
+                                  </span>
+                                  <span className="shrink-0 text-[10px] text-slate-400">
+                                    {option.pointCount} pts
+                                  </span>
                                 </div>
-                              );
-                            })
-                          ) : (
-                            <div className="px-2 py-2 text-xs text-slate-400">No scenarios</div>
-                          )}
+                                <div className="mt-1 flex items-center justify-between gap-2">
+                                  <label className="flex items-center gap-1 text-[11px] text-slate-200">
+                                    <input
+                                      type="checkbox"
+                                      checked={includeInGrid}
+                                      onChange={(e) =>
+                                        onSectorGridSettingChange?.(option.renderKey, {
+                                          includeInGrid: e.target.checked,
+                                        })
+                                      }
+                                    />
+                                    In grid
+                                  </label>
+                                  <select
+                                    value={aggregationOverride}
+                                    disabled={!includeInGrid}
+                                    onChange={(e) =>
+                                      onSectorGridSettingChange?.(option.renderKey, {
+                                        aggregationMethod: e.target.value || null,
+                                      })
+                                    }
+                                    className="h-6 rounded border border-slate-600 bg-slate-800 px-1 text-[10px] text-white disabled:opacity-50"
+                                  >
+                                    <option value="">Default</option>
+                                    <option value="median">Median</option>
+                                    <option value="mean">Mean</option>
+                                    <option value="min">Min</option>
+                                    <option value="max">Max</option>
+                                  </select>
+                                </div>
+                              </div>
+                            );
+                          })}
                         </div>
                       )}
                     </div>
                   )}
-                </div>
-              )}
-              {(deltaGridApiState?.computing || deltaGridApiState?.fetching) && (
-                <p className="pt-1 text-[10px] text-blue-300">
-                  {deltaGridApiState?.computing
-                    ? "Computing grid..."
-                    : "Fetching stored grid..."}
-                </p>
-              )}
-
-              {showDeltaGridAdvancedControls && (
-                <>
-                  <div className="pt-1 bg-slate-900/40 rounded-lg p-2">
-                    <div className="flex items-center justify-between text-xs mb-2">
-                      <span className="text-slate-400">Manual Grid Size</span>
-                      <button
-                        type="button"
-                        onClick={() =>
-                          onDeltaGridComputeStore?.({
-                            scenarioId:
-                              normalizedStoredGridVersion === "updated" ||
-                              normalizedStoredGridVersion === "optimized" ||
-                              normalizedStoredGridVersion === "optimised" ||
-                              normalizedStoredGridVersion === "delta"
-                                ? storedGridScenarioId
-                                : undefined,
-                            technology: storedGridTechnology,
-                          })
-                        }
-                        disabled={
-                          deltaGridButtonsDisabled ||
-                          Boolean(deltaGridApiState?.computing) ||
-                          Boolean(deltaGridApiState?.fetching)
-                        }
-                        className="px-2 py-1 rounded text-[10px] font-semibold bg-blue-600 hover:bg-blue-500 text-white disabled:opacity-50 disabled:cursor-not-allowed"
-                        title={!canUseGridApi ? "Disabled by license" : "Compute and store with current manual grid size"}
-                      >
-                        {deltaGridApiState?.computing ? "Computing..." : "Compute"}
-                      </button>
-                    </div>
-                    <ThresholdInput
-                      value={Number(lteGridSizeMeters) || 50}
-                      onChange={(next) => setLteGridSizeMeters?.(Math.round(next))}
-                      min={5}
-                      max={500}
-                      step={5}
-                      unit="m"
-                      showButtons={false}
-                    />
-                  </div>
-
-                  <SelectRow
-                    label="Layer"
-                    value={storedGridLayerMode}
-                    onChange={handleStoredGridLayerModeChange}
-                    options={[
-                      { value: "kpi", label: "KPI" },
-                      { value: "operator", label: "Customer Benchmark" },
-                    ]}
-                    placeholder="Select layer"
-                  />
-
-                </>
-              )}
-            </div>
-          )}
 
                   {isCellMode && (
-                    <div className="order-3 pt-1 bg-slate-800/50 rounded-lg p-2 space-y-2">
+                    <div className="pt-1 bg-slate-800/50 rounded-lg p-2 space-y-2">
                       {isBaselineCellMode && canRunPrediction && (
                         <div className="pt-1 bg-slate-900/40 rounded-lg p-2 space-y-2">
                           <Label className="text-xs font-semibold text-blue-400 flex items-center gap-1">
@@ -4313,7 +4074,229 @@ const UnifiedMapSidebar = ({
             )}
 
 
-         
+          {canUseGridApi && (
+            <div className="pt-2 border-t border-slate-700/50 space-y-2">
+              <ToggleRow
+                label={`Show Stored ${
+                  normalizedStoredGridVersion === "updated"
+                    ? "Optimized"
+                    : normalizedStoredGridVersion === "delta"
+                      ? "Delta"
+                      : "Baseline"
+                } Grid`}
+                description={
+                  deltaGridApiState?.computing
+                    ? "Computing grid..."
+                    : deltaGridApiState?.fetching
+                      ? "Fetching stored grid..."
+                      : ""
+                }
+                checked={Boolean(deltaGridApiState?.gridVisible)}
+                onChange={(nextChecked) =>
+                  onDeltaGridFetchStored?.({
+                    version: normalizedStoredGridVersion,
+                    scenarioId: storedGridScenarioId,
+                    technology: storedGridTechnology,
+                    visible: Boolean(nextChecked),
+                  })
+                }
+                disabled={
+                  deltaGridButtonsDisabled ||
+                  Boolean(deltaGridApiState?.computing) ||
+                  Boolean(deltaGridApiState?.fetching)
+                }
+                useSwitch={true}
+              />
+              {Boolean(deltaGridApiState?.gridVisible) && (
+                <div className="pt-1 bg-slate-900/40 rounded-lg p-2 space-y-2">
+                  <Label className="text-xs font-semibold text-blue-400 flex items-center gap-1">
+                    <Grid3X3 className="w-3 h-3" /> Stored Grid Version
+                  </Label>
+                  <SegmentedControl
+                    value={normalizedStoredGridVersion}
+                    onChange={handleStoredGridVersionChange}
+                    options={[
+                      { value: "original", label: "Baseline" },
+                      { value: "updated", label: "Optimized" },
+                      { value: "delta", label: "Delta" },
+                    ]}
+                    disabled={
+                      deltaGridButtonsDisabled ||
+                      Boolean(deltaGridApiState?.computing) ||
+                      Boolean(deltaGridApiState?.fetching)
+                    }
+                  />
+                  <SelectRow
+                    label="Technology"
+                    value={String(storedGridTechnology || "ALL").trim().toUpperCase()}
+                    onChange={handleStoredGridTechnologyChange}
+                    options={[
+                      { value: "ALL", label: "All" },
+                      { value: "4G", label: "4G" },
+                      { value: "5G", label: "5G" },
+                    ]}
+                    placeholder="Select technology"
+                  />
+                  {(normalizedStoredGridVersion === "updated" ||
+                    normalizedStoredGridVersion === "delta") && (
+                    <div className="min-w-0 flex-1 space-y-1.5 relative">
+                      <Label className="text-sm font-semibold text-white">Scenario</Label>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (
+                            deltaGridButtonsDisabled ||
+                            Boolean(deltaGridApiState?.computing) ||
+                            Boolean(deltaGridApiState?.fetching) ||
+                            !Array.isArray(storedGridScenarioOptions) ||
+                            storedGridScenarioOptions.length === 0
+                          ) return;
+                          setStoredGridScenarioMenuOpen((prev) => !prev);
+                        }}
+                        className="h-8 w-full min-w-0 bg-slate-800 border border-slate-600 rounded px-2 text-xs text-white flex items-center justify-between disabled:opacity-50"
+                        disabled={
+                          deltaGridButtonsDisabled ||
+                          Boolean(deltaGridApiState?.computing) ||
+                          Boolean(deltaGridApiState?.fetching) ||
+                          !Array.isArray(storedGridScenarioOptions) ||
+                          storedGridScenarioOptions.length === 0
+                        }
+                      >
+                        <span className="truncate">
+                          {Number.isFinite(Number(storedGridScenarioId)) && Number(storedGridScenarioId) > 0
+                            ? `Scenario ${storedGridScenarioId}`
+                            : "No scenarios"}
+                        </span>
+                        <ChevronDown className="h-3.5 w-3.5 text-slate-300 shrink-0" />
+                      </button>
+                      {storedGridScenarioMenuOpen && (
+                        <div className="absolute left-0 right-0 z-[2300] mt-1 rounded border border-slate-600 bg-slate-900 shadow-lg max-h-56 overflow-y-auto">
+                          {Array.isArray(storedGridScenarioOptions) &&
+                          storedGridScenarioOptions.length > 0 ? (
+                            storedGridScenarioOptions.map((item) => {
+                              const scenarioId = getStoredGridPublicScenarioId(item);
+                              const internalScenarioId = Number(
+                                item?.internal_scenario_id ?? item?.internalScenarioId,
+                              );
+                              const isSelected =
+                                Number.isFinite(scenarioId) &&
+                                Number(storedGridScenarioId) === scenarioId;
+                              return (
+                                <div
+                                  key={`stored-grid-scenario-${scenarioId}`}
+                                  className="flex items-center gap-1 px-2 py-1.5 border-b border-slate-800 last:border-b-0"
+                                >
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      handleStoredGridScenarioChange(String(scenarioId));
+                                      setStoredGridScenarioMenuOpen(false);
+                                    }}
+                                    className={`flex-1 text-left text-xs truncate ${isSelected ? "text-cyan-300" : "textwhite"}`}
+                                  >
+                                    {`Scenario ${scenarioId}${item?.status ? ` (${item.status})` : ""}`}
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => onDeleteStoredGridScenario?.(scenarioId)}
+                                    className="h-6 w-6 rounded bg-red-600/90 hover:bg-red-500 text-white inline-flex items-center justify-center"
+                                    title={
+                                      Number.isFinite(internalScenarioId) && internalScenarioId > 0
+                                        ? `Delete Scenario ${scenarioId}`
+                                        : `Delete Scenario ${scenarioId}`
+                                    }
+                                  >
+                                    <Trash2 className="h-3.5 w-3.5" />
+                                  </button>
+                                </div>
+                              );
+                            })
+                          ) : (
+                            <div className="px-2 py-2 text-xs text-slate-400">No scenarios</div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+              {(deltaGridApiState?.computing || deltaGridApiState?.fetching) && (
+                <p className="pt-1 text-[10px] text-blue-300">
+                  {deltaGridApiState?.computing
+                    ? "Computing grid..."
+                    : "Fetching stored grid..."}
+                </p>
+              )}
+
+              {showDeltaGridAdvancedControls && (
+                <>
+                  <div className="pt-1 bg-slate-900/40 rounded-lg p-2">
+                    <div className="flex items-center justify-between text-xs mb-2">
+                      <span className="text-slate-400">Manual Grid Size</span>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          onDeltaGridComputeStore?.({
+                            scenarioId:
+                              normalizedStoredGridVersion === "updated" ||
+                              normalizedStoredGridVersion === "optimized" ||
+                              normalizedStoredGridVersion === "optimised" ||
+                              normalizedStoredGridVersion === "delta"
+                                ? storedGridScenarioId
+                                : undefined,
+                            technology: storedGridTechnology,
+                          })
+                        }
+                        disabled={
+                          deltaGridButtonsDisabled ||
+                          Boolean(deltaGridApiState?.computing) ||
+                          Boolean(deltaGridApiState?.fetching)
+                        }
+                        className="px-2 py-1 rounded text-[10px] font-semibold bg-blue-600 hover:bg-blue-500 text-white disabled:opacity-50 disabled:cursor-not-allowed"
+                        title={!canUseGridApi ? "Disabled by license" : "Compute and store with current manual grid size"}
+                      >
+                        {deltaGridApiState?.computing ? "Computing..." : "Compute"}
+                      </button>
+                    </div>
+                    <ThresholdInput
+                      value={Number(lteGridSizeMeters) || 50}
+                      onChange={(next) => setLteGridSizeMeters?.(Math.round(next))}
+                      min={5}
+                      max={500}
+                      step={5}
+                      unit="m"
+                      showButtons={false}
+                    />
+                  </div>
+
+                  <SelectRow
+                    label="Layer"
+                    value={storedGridLayerMode}
+                    onChange={handleStoredGridLayerModeChange}
+                    options={[
+                      { value: "kpi", label: "KPI" },
+                      { value: "operator", label: "Customer Benchmark" },
+                    ]}
+                    placeholder="Select layer"
+                  />
+
+                  <SelectRow
+                    label="Aggregate"
+                    value={storedGridAggregateMode}
+                    onChange={handleStoredGridAggregateModeChange}
+                    options={[
+                      { value: "avg", label: "Average" },
+                      { value: "min", label: "Minimum" },
+                      { value: "max", label: "Maximum" },
+                    ]}
+                    placeholder="Select aggregate"
+                  />
+
+                  
+                </>
+              )}
+            </div>
+          )}
           </CollapsibleSection>
           )}
 

@@ -1554,7 +1554,6 @@ const NetworkPlannerMap = ({
   siteLegendFilter = null,
   siteFilters = null,
   siteColorOverrides = {},
-  gridAggregationMethod = "mean",
   sectorGridSettings = null,
   onSectorGridSettingChange = null,
 }) => {
@@ -4795,10 +4794,7 @@ const NetworkPlannerMap = ({
                   {selectedSectorPredictionRows.length > 0 && (() => {
                     const gridSetting = sectorGridSettings?.[sectorRenderKey] || {};
                     const includeInGrid = gridSetting.includeInGrid !== false;
-                    const globalAggregationMethod =
-                      String(gridAggregationMethod || "mean").trim().toLowerCase() || "mean";
                     const aggregationOverride = gridSetting.aggregationMethod || "";
-                    const displayedAggregationMethod = aggregationOverride || "__default__";
                     return (
                       <div className="mt-2 border-t border-slate-200 pt-2">
                         <label className="flex items-center gap-1.5 text-[11px] text-slate-700">
@@ -4816,17 +4812,16 @@ const NetworkPlannerMap = ({
                         <label className="mt-1 flex items-center gap-1.5 text-[11px] text-slate-700">
                           Aggregation:
                           <select
-                            value={displayedAggregationMethod}
+                            value={aggregationOverride}
                             disabled={!includeInGrid}
                             onChange={(e) =>
                               onSectorGridSettingChange?.(sectorRenderKey, {
-                                aggregationMethod:
-                                  e.target.value === "__default__" ? null : e.target.value,
+                                aggregationMethod: e.target.value || null,
                               })
                             }
                             className="rounded border border-slate-300 bg-white px-1 py-0.5 text-[11px] disabled:opacity-50"
                           >
-                            <option value="__default__">Default ({globalAggregationMethod})</option>
+                            <option value="">Default (global)</option>
                             <option value="median">Median</option>
                             <option value="mean">Mean</option>
                             <option value="min">Min</option>
