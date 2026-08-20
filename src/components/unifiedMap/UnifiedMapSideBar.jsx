@@ -1590,7 +1590,6 @@ const UnifiedMapSidebar = ({
           version: normalizedStoredGridVersion,
           scenarioId: storedGridScenarioId,
           technology: storedGridTechnology,
-          aggregateMode: storedAggregateValue,
           forceFetch: true,
         });
       }

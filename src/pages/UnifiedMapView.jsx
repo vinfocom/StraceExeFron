@@ -1883,6 +1883,33 @@ const UnifiedMapView = () => {
       ? normalized
       : "mean";
   }, [lteGridAggregationMethod]);
+  const handleLteGridAggregationMethodChange = useCallback((nextMethod) => {
+    setLteGridAggregationMethod(nextMethod);
+
+    // A selection in the sidebar is the global grid aggregate. Remove only
+    // per-sector aggregate overrides so every included sector responds to it;
+    // keep each sector's include/exclude choice intact.
+    setSectorGridSettings((previousSettings) => {
+      let changed = false;
+      const nextSettings = {};
+
+      Object.entries(previousSettings || {}).forEach(([sectorKey, setting]) => {
+        if (!setting?.aggregationMethod) {
+          nextSettings[sectorKey] = setting;
+          return;
+        }
+
+        changed = true;
+        const nextSetting = { ...setting };
+        delete nextSetting.aggregationMethod;
+        if (nextSetting.includeInGrid === false) {
+          nextSettings[sectorKey] = nextSetting;
+        }
+      });
+
+      return changed ? nextSettings : previousSettings;
+    });
+  }, []);
   const [storedGridOpacity, setStoredGridOpacity] = useState(0.55);
   const [storedGridMetricMode, setStoredGridMetricMode] = useState("max");
   const [storedGridVersion, setStoredGridVersion] = useState("original");
@@ -4620,6 +4647,9 @@ const UnifiedMapView = () => {
       : EMPTY_LIST;
 
     if (isDataPredictionMode) return finalDisplayLocations || EMPTY_LIST;
+    if (lteGridEnabled && sectorPoints.length > 0) {
+      return sectorPoints;
+    }
 
     if (isDeltaSiteGridMode) {
       // Delta grid compares baseline vs optimized from sector prediction points.
@@ -4667,6 +4697,7 @@ const UnifiedMapView = () => {
     isDataPredictionMode,
     isDeltaGridCompleteMode,
     isDeltaSiteGridMode,
+    lteGridEnabled,
     ltePredictionLocations,
     selectedSites,
     sectorPredictionGridPoints,
@@ -7398,7 +7429,7 @@ const UnifiedMapView = () => {
         lteGridSizeMeters={lteGridSizeMeters}
         setLteGridSizeMeters={setLteGridSizeMeters}
         lteGridAggregationMethod={lteGridAggregationMethod}
-        setLteGridAggregationMethod={setLteGridAggregationMethod}
+        setLteGridAggregationMethod={handleLteGridAggregationMethodChange}
         storedGridVersion={storedGridVersion}
         setStoredGridVersion={setStoredGridVersion}
         storedGridTechnology={storedGridTechnology}

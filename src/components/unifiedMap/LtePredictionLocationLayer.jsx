@@ -337,6 +337,12 @@ const LtePredictionLocationLayer = ({
     if (!Number.isFinite(nextOpacity)) return 0.55;
     return Math.max(0.1, Math.min(1, nextOpacity));
   }, [storedGridOpacity]);
+  const normalizedGridAggregationMethod = useMemo(() => {
+    const normalized = String(gridAggregationMethod || "mean").trim().toLowerCase();
+    return Object.prototype.hasOwnProperty.call(AGGREGATION_METHODS, normalized)
+      ? normalized
+      : "mean";
+  }, [gridAggregationMethod]);
 
   const polygonPaths = useMemo(() => {
     if (!Array.isArray(filterPolygons) || filterPolygons.length === 0) return [];
@@ -631,7 +637,7 @@ const LtePredictionLocationLayer = ({
     }
 
     const aggregateFn =
-      AGGREGATION_METHODS[gridAggregationMethod] || AGGREGATION_METHODS.mean;
+      AGGREGATION_METHODS[normalizedGridAggregationMethod] || AGGREGATION_METHODS.mean;
 
     const gridEligiblePoints =
       excludedSectorKeys && excludedSectorKeys.size > 0
@@ -787,7 +793,7 @@ const LtePredictionLocationLayer = ({
     filteredPoints,
     filterInsidePolygons,
     gridSizeMeters,
-    gridAggregationMethod,
+    normalizedGridAggregationMethod,
     excludedSectorKeys,
     sectorAggregationOverrides,
     polygonPaths,
@@ -886,7 +892,7 @@ const LtePredictionLocationLayer = ({
           getFillColor: (d) => d.color,
           onHover: handleHover,
             updateTriggers: {
-              getFillColor: [selectedMetric, thresholds, gridAggregationMethod, deltaComparisonMode],
+              getFillColor: [selectedMetric, thresholds, normalizedGridAggregationMethod, deltaComparisonMode],
             },
           }),
       );
@@ -948,7 +954,7 @@ const LtePredictionLocationLayer = ({
     pointLayerData,
     selectedMetric,
     thresholds,
-    gridAggregationMethod,
+    normalizedGridAggregationMethod,
     deltaComparisonMode,
     mlGridEnabled,
     mlGridAggregation,
