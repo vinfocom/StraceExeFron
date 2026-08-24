@@ -1781,6 +1781,7 @@ const UnifiedMapView = () => {
   const [showSiteSectors, setShowSiteSectors] = useState(true);
   const [showNeighbors, setShowNeighbors] = useState(false);
   const [showSubSession, setShowSubSession] = useState(false);
+  const [subSessionTypeFilter, setSubSessionTypeFilter] = useState("all");
   const [selectedSubSessionTarget, setSelectedSubSessionTarget] = useState(null);
   const [selectedSubSessionTargets, setSelectedSubSessionTargets] = useState([]);
 
@@ -3728,6 +3729,19 @@ const UnifiedMapView = () => {
     error: subSessionError,
     refetch: refetchSubSessionAnalytics,
   } = useSubSessionAnalytics(sessionIds, showSubSession);
+
+  const visibleSubSessionMarkers = useMemo(() => {
+    if (subSessionTypeFilter === "all") return subSessionMarkers;
+
+    return (Array.isArray(subSessionMarkers) ? subSessionMarkers : []).filter(
+      (marker) => {
+        const markerType = String(marker?.subSessionType ?? "").trim().toUpperCase();
+        return subSessionTypeFilter === "CS"
+          ? markerType === "2" || markerType === "CS"
+          : markerType === "1" || markerType === "PS";
+      },
+    );
+  }, [subSessionMarkers, subSessionTypeFilter]);
 
   useEffect(() => {
     if (!isSampleMode || sessionIds.length > 0) return;
@@ -7404,8 +7418,10 @@ const UnifiedMapView = () => {
         setShowNeighbors={setShowNeighbors}
         showSubSession={showSubSession}
         setShowSubSession={setShowSubSession}
+        subSessionTypeFilter={subSessionTypeFilter}
+        setSubSessionTypeFilter={setSubSessionTypeFilter}
         secondaryMetricAvailability={secondaryMetricAvailability}
-        subSessionMarkerCount={subSessionMarkers?.length || 0}
+        subSessionMarkerCount={visibleSubSessionMarkers?.length || 0}
         subSessionLoading={subSessionLoading}
         subSessionError={subSessionError}
         neighborStats={neighborStats}
@@ -7805,7 +7821,7 @@ const UnifiedMapView = () => {
                
               <SubSessionMarkers
                 show={showSubSession}
-                markers={subSessionMarkers}
+                markers={visibleSubSessionMarkers}
                 thresholds={effectiveThresholds}
                 networkLogData={filteredLocations}
                 selectedMarkerId={selectedSubSessionTarget?.markerId ?? null}

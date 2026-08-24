@@ -464,110 +464,6 @@ export const OverviewTab = ({
     return rows.length > 0 ? rows : null;
   }, [providerVolume]);
 
-  const volumeSummaryStats = useMemo(() => {
-    if (!processedProviderVolume || processedProviderVolume.length === 0)
-      return null;
-
-    const totalDownloadGb = processedProviderVolume.reduce(
-      (sum, item) => sum + (item.dl_gb || 0),
-      0
-    );
-    const totalUploadGb = processedProviderVolume.reduce(
-      (sum, item) => sum + (item.ul_gb || 0),
-      0
-    );
-    const totalDurationSec = processedProviderVolume.reduce(
-      (sum, item) => sum + (item.durationSec || 0),
-      0
-    );
-    const totalSampleCount = processedProviderVolume.reduce(
-      (sum, item) => sum + (item.sampleCount || 0),
-      0
-    );
-
-    const avgDlSpeed =
-      totalSampleCount > 0
-        ? processedProviderVolume.reduce(
-            (sum, item) =>
-              sum + (item.avgDlSpeedMbps || 0) * (item.sampleCount || 0),
-            0
-          ) / totalSampleCount
-        : totalDurationSec > 0
-        ? processedProviderVolume.reduce(
-            (sum, item) =>
-              sum + (item.avgDlSpeedMbps || 0) * (item.durationSec || 0),
-            0
-          ) / totalDurationSec
-        : 0;
-    const avgUlSpeed =
-      totalSampleCount > 0
-        ? processedProviderVolume.reduce(
-            (sum, item) =>
-              sum + (item.avgUlSpeedMbps || 0) * (item.sampleCount || 0),
-            0
-          ) / totalSampleCount
-        : totalDurationSec > 0
-        ? processedProviderVolume.reduce(
-            (sum, item) =>
-              sum + (item.avgUlSpeedMbps || 0) * (item.durationSec || 0),
-            0
-          ) / totalDurationSec
-        : 0;
-
-    const byProvider = {};
-    processedProviderVolume.forEach((item) => {
-      if (isUnknownOrEmpty(item.provider)) return;
-
-      const providerKey = item.provider.toLowerCase();
-      if (!byProvider[providerKey]) {
-        byProvider[providerKey] = {
-          name: item.provider,
-          dl_gb: 0,
-          ul_gb: 0,
-          durationSec: 0,
-          technologies: [],
-          color: item.providerColor,
-        };
-      }
-      byProvider[providerKey].dl_gb += item.dl_gb || 0;
-      byProvider[providerKey].ul_gb += item.ul_gb || 0;
-      byProvider[providerKey].durationSec += item.durationSec || 0;
-      if (!byProvider[providerKey].technologies.includes(item.technology)) {
-        byProvider[providerKey].technologies.push(item.technology);
-      }
-    });
-
-    const byTech = {};
-    processedProviderVolume.forEach((item) => {
-      if (isUnknownOrEmpty(item.technology)) return;
-
-      const techKey = item.technology.toUpperCase();
-      if (!byTech[techKey]) {
-        byTech[techKey] = {
-          dl_gb: 0,
-          ul_gb: 0,
-          durationSec: 0,
-          color: item.techColor,
-        };
-      }
-      byTech[techKey].dl_gb += item.dl_gb || 0;
-      byTech[techKey].ul_gb += item.ul_gb || 0;
-      byTech[techKey].durationSec += item.durationSec || 0;
-    });
-
-    return {
-      totalDownload: formatBytes(totalDownloadGb, "GB"),
-      totalUpload: formatBytes(totalUploadGb, "GB"),
-      totalData: formatBytes(totalDownloadGb + totalUploadGb, "GB"),
-      totalDuration: formatDuration(totalDurationSec),
-      avgDlSpeed: formatSpeed(avgDlSpeed),
-      avgUlSpeed: formatSpeed(avgUlSpeed),
-      byProvider,
-      byTech,
-      sessionsCount: sessionIds.length,
-    };
-  }, [processedProviderVolume, sessionIds, isUnknownOrEmpty]);
-
   const providerVolumeDurationRows = useMemo(() => {
     if (!processedProviderVolume || processedProviderVolume.length === 0) {
       return [];
@@ -763,7 +659,6 @@ export const OverviewTab = ({
 
       <ProviderVolumeCard
         providerVolume={processedProviderVolume}
-        summaryStats={volumeSummaryStats}
         loading={loading}
         sessionIds={sessionIds}
         error={error}
@@ -860,7 +755,6 @@ const SessionDurationCard = ({ duration }) => (
 
 const ProviderVolumeCard = ({
   providerVolume,
-  summaryStats,
   loading,
   sessionIds,
   error,
@@ -888,28 +782,7 @@ const ProviderVolumeCard = ({
     });
   }, [providerVolume]);
 
-  const filteredTechSummary = useMemo(() => {
-    if (!summaryStats?.byTech) return {};
-
-    const filtered = {};
-
-    Object.entries(summaryStats.byTech).forEach(([tech, data]) => {
-      const normalizedTech = normalizeTechName(tech);
-      if (normalizedTech === "Unknown") return;
-
-      const dlValue = parseFloat(data.dl_gb) || 0;
-      const ulValue = parseFloat(data.ul_gb) || 0;
-
-      if (dlValue > 0 || ulValue > 0) {
-        filtered[tech] = data;
-      }
-    });
-
-    return filtered;
-  }, [summaryStats]);
-
   const hasValidData = filteredProviderVolume && filteredProviderVolume.length > 0;
-  const hasTechData = Object.keys(filteredTechSummary).length > 0;
   const visibleColumns = useMemo(
     () => PROVIDER_VOLUME_OPTIONAL_COLUMNS.filter((column) => visibleColumnKeys.has(column.key)),
     [visibleColumnKeys]
@@ -1086,28 +959,6 @@ const ProviderVolumeCard = ({
             </table>
           </div>
 
-          {hasTechData && (
-            <div className="mt-4 pt-3 border-t border-slate-700">
-              <h5 className="text-xs font-semibold text-white mb-2">
-                By Technology
-              </h5>
-              <div className="flex flex-wrap text-white gap-2">
-                {Object.entries(filteredTechSummary).map(([tech, data]) => (
-                  <div
-                    key={tech}
-                    className="inline-flex items-center gap-2 text-white px-3 py-1.5 rounded-lg border"
-                    style={getTechBadgeStyle(tech)}
-                  >
-                    <span className="font-medium text-white/80">{tech}</span>
-                    <span className="text-xs text-white/80">
-                      {formatBytes(data.dl_gb, "GB")} GB /{" "}
-                      {formatBytes(data.ul_gb, "GB")} GB
-                    </span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
         </>
       )}
     </div>

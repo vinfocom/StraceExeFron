@@ -621,6 +621,8 @@ const UnifiedMapSidebar = ({
   setShowNeighbors,
   showSubSession,
   setShowSubSession,
+  subSessionTypeFilter = "all",
+  setSubSessionTypeFilter,
   showSessionNeighbors,
   setShowSessionNeighbors,
   secondaryMetricAvailability = {},
@@ -760,8 +762,7 @@ const UnifiedMapSidebar = ({
   }, [availableFilterOptions]);
 
 
-  // Draft for the "Log Grid Size" control. The slider edits this draft; the grid
-  // only recomputes (and the value persists to the DB) when the user hits Save.
+
   const appliedLogGridSize = Number(logSizeMeters) || 25;
   const [logGridDraft, setLogGridDraft] = useState(appliedLogGridSize);
   useEffect(() => {
@@ -3280,6 +3281,23 @@ const UnifiedMapSidebar = ({
                   }}
                   useSwitch={true}
                 />
+
+                {showSubSession && (
+                  <div className="rounded-lg border border-slate-700 bg-slate-900/40 p-2">
+                    <div className="mb-2 text-xs font-medium text-slate-300">
+                      Sub-Session Type
+                    </div>
+                    <SegmentedControl
+                      value={subSessionTypeFilter}
+                      onChange={(value) => setSubSessionTypeFilter?.(value)}
+                      options={[
+                        { value: "all", label: "All" },
+                        { value: "CS", label: "CS only" },
+                        { value: "PS", label: "PS only" },
+                      ]}
+                    />
+                  </div>
+                )}
 
                 {enableDataToggle && (
                   <>
