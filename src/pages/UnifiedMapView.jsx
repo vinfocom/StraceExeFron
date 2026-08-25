@@ -6818,12 +6818,6 @@ const UnifiedMapView = () => {
 
   const handleSidebarOpenChange = useCallback((isOpen) => {
     setIsSideOpen(isOpen);
-    if (!isOpen) {
-      // Reset all handover toggles when sidebar is closed to clear ghost lines.
-      setTechHandOver(false);
-      setBandHandover(false);
-      setPciHandover(false);
-    }
   }, []);
 
   const handleAddSiteClick = useCallback(() => {
