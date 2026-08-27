@@ -1161,8 +1161,8 @@ const LegendRow = ({
           style={{ backgroundColor: color }}
         />
       )}
-      <span className="text-[11px] text-white flex-1 truncate">{label}</span>
-      <span className="text-[11px] tabular-nums text-white min-w-[84px] text-right">
+      <span className="cq-text-sm text-white flex-1 truncate">{label}</span>
+      <span className="cq-text-sm tabular-nums text-white min-w-[84px] text-right">
         {safeCount.toLocaleString()}
         {percentage !== null ? ` (${percentage.toFixed(1)}%)` : ""}
       </span>
@@ -1179,22 +1179,22 @@ const LegendFooter = ({
   <div className="mt-1.5 border-t border-gray-700/50 px-0.5 pt-1.5 space-y-0.5">
     {uniqueCount !== undefined && (
       <div className="flex justify-between">
-        <span className="text-[10px] text-gray-500">Unique</span>
-        <span className="text-[10px] tabular-nums text-gray-400">
+        <span className="cq-text-xs text-gray-500">Unique</span>
+        <span className="cq-text-xs tabular-nums text-gray-400">
           {uniqueCount}
         </span>
       </div>
     )}
     <div className="flex justify-between">
-      <span className="text-[10px] text-gray-500">Total</span>
-      <span className="text-[10px] tabular-nums text-gray-400">
+      <span className="cq-text-xs text-gray-500">Total</span>
+      <span className="cq-text-xs tabular-nums text-gray-400">
         {total.toLocaleString()}
       </span>
     </div>
     {invalidCount > 0 && (
       <div className="flex justify-between">
-        <span className="text-[10px] text-gray-500">{invalidLabel}</span>
-        <span className="text-[10px] tabular-nums text-amber-400/80">
+        <span className="cq-text-xs text-gray-500">{invalidLabel}</span>
+        <span className="cq-text-xs tabular-nums text-amber-400/80">
           {invalidCount.toLocaleString()}
         </span>
       </div>
@@ -1615,7 +1615,7 @@ export default function MapLegend({
           }}
         >
           <div
-            className={`flex h-full flex-col overflow-hidden bg-gray-900/95 backdrop-blur-lg border border-gray-700/40 rounded-lg shadow-xl shadow-black/20 transition-all duration-200 ${
+            className={`cq-container flex h-full flex-col overflow-hidden bg-gray-900/95 backdrop-blur-lg border border-gray-700/40 rounded-lg shadow-xl shadow-black/20 transition-all duration-200 ${
               collapsed ? "" : "min-w-[240px]"
             }`}
           >
@@ -1642,7 +1642,7 @@ export default function MapLegend({
               ) : (
                 <div className="flex items-center gap-1.5">
                   <Layers className="w-4 h-4 text-gray-400" />
-                  <span className="text-sm font-medium text-gray-100">{title}</span>
+                  <span className="cq-text-title font-medium text-gray-100">{title}</span>
                   {activeFilter && (
                     <span className="ml-1 flex h-2 w-2 rounded-full bg-blue-500 animate-pulse" />
                   )}

@@ -4747,7 +4747,7 @@ const NetworkPlannerMap = ({
                 label={{
                   text: sectorLabelText,
                   color: "#111827",
-                  fontSize: "11px",
+                  fontSize: "15px",
                   fontWeight: "700",
                 }}
                 zIndex={5400}

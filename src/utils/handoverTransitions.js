@@ -10,7 +10,7 @@ const MISSING_SESSION = "__session_missing__";
 const INVALID_TEXT_VALUES = new Set(["", "n/a", "na", "null", "undefined", "-"]);
 
 const EXPLICIT_HANDOVER_COMPLETE_RE = /\b(?:handover|hand\s*over)\b.{0,80}\b(?:complete(?:d|ion)?|success(?:ful(?:ly)?)?)\b/i;
-const EXPLICIT_HANDOVER_FAILURE_RE = /\b(?:handover|hand\s*over)\b.{0,80}\b(?:fail(?:ed|ure)?|reject(?:ed)?|abort(?:ed)?)\b/i;
+const EXPLICIT_HANDOVER_FAILURE_RE = /\b(?:handover|hand\s*over)\b.{0,80}\b(?:fail(?:ed|ure|uire)?|reject(?:ed)?|abort(?:ed)?)\b|\bhandover\s*fail(?:ure|uire)?\b/i;
 const MEASUREMENT_REPORT_RE = /\b(?:measurement|meas)\s*report\b/i;
 const RRC_RECONFIGURATION_COMPLETE_RE = /\b(?:nr\s+)?rrc\s+(?:connection\s+)?reconfiguration\s+complete\b/i;
 const RRC_RECONFIGURATION_RE = /\b(?:nr\s+)?rrc\s+(?:connection\s+)?reconfiguration\b/i;
@@ -528,7 +528,7 @@ const classifyEvent = (entries = []) => {
   if (/\b(?:handover|hand\s*over)[\s_:-]*(?:success(?:ful)?|complete(?:d)?|completion)\b/i.test(text)) {
     return { classification: "confirmed_handover", confidence: "high" };
   }
-  if (/\b(?:handover|hand\s*over)[\s_:-]*(?:fail(?:ed|ure)?|reject(?:ed)?|abort(?:ed)?)\b/i.test(text)) {
+  if (/\b(?:handover|hand\s*over)[\s_:-]*(?:fail(?:ed|ure|uire)?|reject(?:ed)?|abort(?:ed)?)\b/i.test(text)) {
     return { classification: "failed_handover", confidence: "high" };
   }
   return { classification: "handover_candidate", confidence: "medium" };

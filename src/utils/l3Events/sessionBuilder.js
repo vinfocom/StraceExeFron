@@ -37,7 +37,7 @@ const SIP_CONTEXT_RE = /\bSIP(?:\/2\.0)?\b/i;
 const MEDIA_ESTABLISHED_RE = /\b(media|voice bearer|bearer|rtp|qos flow)\b.*\b(established|active|connected|setup (?:complete|success(?:ful)?))\b/i;
 const CODEC_NEGOTIATED_RE = /\bCODEC_(?:AMR_(?:NB|WB)|EVS)\b|updateMediaCapabilities.{0,160}\bcodec\s*=/i;
 const RADIO_FAILURE_RE = /\b(radio link failure|rlf|rrc re[- ]?establishment failure|rrc reestablishment failure|unexpected rrc release|bearer loss|scgfail|scg failure)\b/i;
-const HANDOVER_FAILURE_RE = /\b(hand(?: |-)?over|ho)\b.*\b(fail|failure|reject|drop|timeout)\b/i;
+const HANDOVER_FAILURE_RE = /\b(?:hand(?: |-)?over|ho)\b.*\b(fail|failure|failuire|reject|drop|timeout)\b|\bhandover\s*fail(?:ure|uire)?\b/i;
 const HANDOVER_ATTEMPT_RE = /\b(hand(?: |-)?over|ho)\b.*\b(command|start|attempt|request)\b/i;
 const IMS_FAILURE_RE = /\b(ims registration lost|ims deregistration|ims deregistered|ims unregistered|sip 408|sip 503)\b/i;
 const RRC_REESTABLISHMENT_REQUEST_RE = /\brrc.*re[- ]?establishment.*request\b/i;

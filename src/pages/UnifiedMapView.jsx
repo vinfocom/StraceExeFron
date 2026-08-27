@@ -1781,6 +1781,7 @@ const UnifiedMapView = () => {
   const [showSiteSectors, setShowSiteSectors] = useState(true);
   const [showNeighbors, setShowNeighbors] = useState(false);
   const [showSubSession, setShowSubSession] = useState(false);
+  const [subSessionTypeFilter, setSubSessionTypeFilter] = useState("all");
   const [selectedSubSessionTarget, setSelectedSubSessionTarget] = useState(null);
   const [selectedSubSessionTargets, setSelectedSubSessionTargets] = useState([]);
 
@@ -1918,6 +1919,39 @@ const UnifiedMapView = () => {
   const [lteGridSizeMeters, setLteGridSizeMeters] = useState(50);
   const [lteGridAggregationMethod, setLteGridAggregationMethod] =
     useState("mean");
+  const normalizedLteGridAggregationMethod = useMemo(() => {
+    const normalized = String(lteGridAggregationMethod || "mean").trim().toLowerCase();
+    return normalized === "median" || normalized === "min" || normalized === "max"
+      ? normalized
+      : "mean";
+  }, [lteGridAggregationMethod]);
+  const handleLteGridAggregationMethodChange = useCallback((nextMethod) => {
+    setLteGridAggregationMethod(nextMethod);
+
+    // A selection in the sidebar is the global grid aggregate. Remove only
+    // per-sector aggregate overrides so every included sector responds to it;
+    // keep each sector's include/exclude choice intact.
+    setSectorGridSettings((previousSettings) => {
+      let changed = false;
+      const nextSettings = {};
+
+      Object.entries(previousSettings || {}).forEach(([sectorKey, setting]) => {
+        if (!setting?.aggregationMethod) {
+          nextSettings[sectorKey] = setting;
+          return;
+        }
+
+        changed = true;
+        const nextSetting = { ...setting };
+        delete nextSetting.aggregationMethod;
+        if (nextSetting.includeInGrid === false) {
+          nextSettings[sectorKey] = nextSetting;
+        }
+      });
+
+      return changed ? nextSettings : previousSettings;
+    });
+  }, []);
   const [storedGridOpacity, setStoredGridOpacity] = useState(0.55);
   const [storedGridMetricMode, setStoredGridMetricMode] = useState("max");
   const [storedGridVersion, setStoredGridVersion] = useState("original");
@@ -3702,6 +3736,19 @@ const UnifiedMapView = () => {
     refetch: refetchSubSessionAnalytics,
   } = useSubSessionAnalytics(sessionIds, showSubSession);
 
+  const visibleSubSessionMarkers = useMemo(() => {
+    if (subSessionTypeFilter === "all") return subSessionMarkers;
+
+    return (Array.isArray(subSessionMarkers) ? subSessionMarkers : []).filter(
+      (marker) => {
+        const markerType = String(marker?.subSessionType ?? "").trim().toUpperCase();
+        return subSessionTypeFilter === "CS"
+          ? markerType === "2" || markerType === "CS"
+          : markerType === "1" || markerType === "PS";
+      },
+    );
+  }, [subSessionMarkers, subSessionTypeFilter]);
+
   useEffect(() => {
     if (!isSampleMode || sessionIds.length > 0) return;
     console.warn(
@@ -4545,7 +4592,7 @@ const UnifiedMapView = () => {
     selectedMetric,
     colorBy: effectiveGridColorBy,
     gridSizeMeters,
-    aggregationMethod: lteGridAggregationMethod,
+    aggregationMethod: normalizedLteGridAggregationMethod,
   });
 
   const gridFilteredData = useUnifiedGridViewData({
@@ -4554,7 +4601,7 @@ const UnifiedMapView = () => {
     selectedMetric,
     colorBy: effectiveGridColorBy,
     gridSizeMeters,
-    aggregationMethod: lteGridAggregationMethod,
+    aggregationMethod: normalizedLteGridAggregationMethod,
   });
 
   const isUnifiedGridView = useMemo(
@@ -4573,6 +4620,9 @@ const UnifiedMapView = () => {
       : EMPTY_LIST;
 
     if (isDataPredictionMode) return finalDisplayLocations || EMPTY_LIST;
+    if (lteGridEnabled && sectorPoints.length > 0) {
+      return sectorPoints;
+    }
 
     if (isDeltaSiteGridMode) {
       // Delta grid compares baseline vs optimized from sector prediction points.
@@ -4620,6 +4670,7 @@ const UnifiedMapView = () => {
     isDataPredictionMode,
     isDeltaGridCompleteMode,
     isDeltaSiteGridMode,
+    lteGridEnabled,
     ltePredictionLocations,
     selectedSites,
     sectorPredictionGridPoints,
@@ -6725,12 +6776,6 @@ const UnifiedMapView = () => {
 
   const handleSidebarOpenChange = useCallback((isOpen) => {
     setIsSideOpen(isOpen);
-    if (!isOpen) {
-      // Reset all handover toggles when sidebar is closed to clear ghost lines.
-      setTechHandOver(false);
-      setBandHandover(false);
-      setPciHandover(false);
-    }
   }, []);
 
   const handleAddSiteClick = useCallback(() => {
@@ -7326,8 +7371,10 @@ const UnifiedMapView = () => {
         setShowNeighbors={setShowNeighbors}
         showSubSession={showSubSession}
         setShowSubSession={setShowSubSession}
+        subSessionTypeFilter={subSessionTypeFilter}
+        setSubSessionTypeFilter={setSubSessionTypeFilter}
         secondaryMetricAvailability={secondaryMetricAvailability}
-        subSessionMarkerCount={subSessionMarkers?.length || 0}
+        subSessionMarkerCount={visibleSubSessionMarkers?.length || 0}
         subSessionLoading={subSessionLoading}
         subSessionError={subSessionError}
         neighborStats={neighborStats}
@@ -7349,7 +7396,7 @@ const UnifiedMapView = () => {
         lteGridSizeMeters={lteGridSizeMeters}
         setLteGridSizeMeters={setLteGridSizeMeters}
         lteGridAggregationMethod={lteGridAggregationMethod}
-        setLteGridAggregationMethod={setLteGridAggregationMethod}
+        setLteGridAggregationMethod={handleLteGridAggregationMethodChange}
         loadedSectorGridOptions={loadedSectorGridOptions}
         sectorGridSettings={sectorGridSettings}
         onSectorGridSettingChange={handleSectorGridSettingChange}
@@ -7522,7 +7569,7 @@ const UnifiedMapView = () => {
               onProjectPolygonBoundaryChange={handleProjectPolygonPathChange}
               enableGrid={mapGridEnabled}
               gridSizeMeters={gridSizeMeters}
-              gridAggregationMethod={lteGridAggregationMethod || "mean"}
+              gridAggregationMethod={normalizedLteGridAggregationMethod}
               areaEnabled={areaEnabled}
               filterInsidePolygons={onlyInsidePolygons}
               opacity={opacity}
@@ -7576,7 +7623,7 @@ const UnifiedMapView = () => {
                     !(showPolygons || areaEnabled || buildingBorderEnabled)
                   }
                   gridSizeMeters={lteGridSizeMeters || 50}
-                  gridAggregationMethod={lteGridAggregationMethod || "mean"}
+                  gridAggregationMethod={normalizedLteGridAggregationMethod}
                   excludedSectorKeys={excludedGridSectorKeys}
                   sectorAggregationOverrides={sectorGridAggregationOverrides}
                   deltaComparisonMode={isDeltaSiteGridMode}
@@ -7727,7 +7774,7 @@ const UnifiedMapView = () => {
                
               <SubSessionMarkers
                 show={showSubSession}
-                markers={subSessionMarkers}
+                markers={visibleSubSessionMarkers}
                 thresholds={effectiveThresholds}
                 networkLogData={filteredLocations}
                 selectedMarkerId={selectedSubSessionTarget?.markerId ?? null}

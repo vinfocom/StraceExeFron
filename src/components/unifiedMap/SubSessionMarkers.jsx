@@ -1,5 +1,11 @@
 import React, { memo, useEffect, useMemo, useState } from "react";
-import { InfoWindowF, MarkerF, PolylineF } from "@react-google-maps/api";
+import {
+  FLOAT_PANE,
+  InfoWindowF,
+  MarkerF,
+  OverlayViewF,
+  PolylineF,
+} from "@react-google-maps/api";
 import { getColorForMetric } from "@/utils/metrics";
 
 const formatMetric = (value, suffix = "") => {
@@ -20,6 +26,11 @@ const formatText = (value) => {
   return text || "N/A";
 };
 
+const formatCoordinate = (value) => {
+  const coordinate = Number(value);
+  return Number.isFinite(coordinate) ? coordinate.toFixed(6) : "N/A";
+};
+
 const toMetric = (value) => {
   if (value == null || value === "") return null;
   const parsed = Number(value);
@@ -28,6 +39,17 @@ const toMetric = (value) => {
 
 const NETWORK_LOG_BUCKET_PRECISION = 4;
 const MAX_THPUT_MATCH_DISTANCE_METERS = 50;
+
+const getHoverCardOffset = (width, height) => ({
+  x: -(width / 2),
+  y: -(height + 18),
+});
+
+const disableOverlayPointerEvents = (overlay) => {
+  if (overlay?.container) {
+    overlay.container.style.pointerEvents = "none";
+  }
+};
 
 const toBucketKey = (lat, lng) =>
   `${Number(lat).toFixed(NETWORK_LOG_BUCKET_PRECISION)}|${Number(lng).toFixed(NETWORK_LOG_BUCKET_PRECISION)}`;
@@ -268,6 +290,7 @@ const SubSessionMarkers = ({
             strokeOpacity: 0.95,
             strokeWeight: 3,
             geodesic: true,
+            clickable: false,
             zIndex: 900,
             icons: [
               {
@@ -282,6 +305,30 @@ const SubSessionMarkers = ({
             ],
           }}
         />
+      )}
+
+      {activeHoveredMarker?.end && activeHoveredMarker.id !== activeMarkerId && (
+        <OverlayViewF
+          position={activeHoveredMarker.position}
+          mapPaneName={FLOAT_PANE}
+          getPixelPositionOffset={getHoverCardOffset}
+          onLoad={disableOverlayPointerEvents}
+          zIndex={1100}
+        >
+          <div className="pointer-events-none min-w-[190px] rounded-md border border-slate-200 bg-white px-3 py-2 text-xs text-slate-800 shadow-lg">
+            <div className="mb-1.5 font-semibold">Sub-Session End Location</div>
+            <div className="space-y-1">
+              <div className="flex justify-between gap-3">
+                <span className="text-slate-500">End Latitude</span>
+                <span className="font-medium">{formatCoordinate(activeHoveredMarker.end.lat)}</span>
+              </div>
+              <div className="flex justify-between gap-3">
+                <span className="text-slate-500">End Longitude</span>
+                <span className="font-medium">{formatCoordinate(activeHoveredMarker.end.lng)}</span>
+              </div>
+            </div>
+          </div>
+        </OverlayViewF>
       )}
 
       {enrichedMarkers.map((marker, index) => (
@@ -314,7 +361,7 @@ const SubSessionMarkers = ({
                 }
               }}
               onMouseOver={() => {
-                if (marker.start && marker.end) {
+                if (marker.end) {
                   setHoveredMarkerId(marker.id);
                 }
               }}
@@ -362,6 +409,18 @@ const SubSessionMarkers = ({
                   )}
                 </span>
               </div>
+              {activeHoveredMarker?.id === activeSelectedMarker.id && activeSelectedMarker.end && (
+                <>
+                  <div className="flex justify-between gap-3">
+                    <span className="text-slate-500">End Latitude</span>
+                    <span className="font-medium">{formatCoordinate(activeSelectedMarker.end.lat)}</span>
+                  </div>
+                  <div className="flex justify-between gap-3">
+                    <span className="text-slate-500">End Longitude</span>
+                    <span className="font-medium">{formatCoordinate(activeSelectedMarker.end.lng)}</span>
+                  </div>
+                </>
+              )}
               {formatSubSessionType(activeSelectedMarker.subSessionType) === "CS" && (
                 <>
                   <div className="flex justify-between gap-3">

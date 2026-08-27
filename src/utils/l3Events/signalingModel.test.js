@@ -35,3 +35,15 @@ test("Excel signaling rows expose an unconfirmed mobility sequence as candidate"
   assert.equal(completion.message, "HANDOVER CANDIDATE");
   assert.equal(completion.severity, "warning");
 });
+
+test("Excel signaling rows extract and normalize cause from raw messages", () => {
+  const rows = buildUnifiedSignalingRows([
+    item("failure", 0, "Disconnect", "CALL_DISCONNECTED | cause handoverfailure | dropped"),
+    item("typo", 1, "Disconnect", "CALL_DISCONNECTED | cause handoverfailuire | dropped"),
+    item("none", 1, "Info", "RRC Reconfiguration Complete"),
+  ]);
+
+  assert.equal(rows[0].cause, "Handover Failure");
+  assert.equal(rows[1].cause, "Handover Failure");
+  assert.equal(rows[2].cause, "-");
+});

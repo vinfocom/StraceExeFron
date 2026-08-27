@@ -1361,6 +1361,7 @@ function UnifiedHeader({
                   onChange={(nextValue) => setSiteLabelField?.(nextValue)}
                   options={[
                     { value: "none", label: "Label" },
+                    { value: "site", label: "Site Name" },
                     { value: "site_id", label: "Site ID" },
                     { value: "cell_id", label: "Cell ID" },
                     { value: "technology", label: "Technology" },

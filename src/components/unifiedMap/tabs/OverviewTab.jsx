@@ -396,7 +396,7 @@ export const OverviewTab = ({
       return null;
     }
 
-    const rows = [];
+    const aggregateMap = new Map();
 
     Object.entries(providerVolume).forEach(([sessionId, providers]) => {
       if (typeof providers !== "object" || providers === null) return;
@@ -411,51 +411,125 @@ export const OverviewTab = ({
           const normalizedTech = normalizeTechName(tech);
           if (!normalizedTech || normalizedTech === "Unknown") return;
 
-          if (volumeData && typeof volumeData === "object") {
-            const durationSec = volumeData?.duration_sec || 0;
-            const sampleCount = volumeData?.sample_count || 0;
-            const dlGb = volumeData?.dl_gb || 0;
-            const ulGb = volumeData?.ul_gb || 0;
+          if (!volumeData || typeof volumeData !== "object") return;
 
-            rows.push({
-              sessionId,
+          const key = `${normalizedProvider}::${normalizedTech}`;
+          let agg = aggregateMap.get(key);
+          if (!agg) {
+            agg = {
               provider: normalizedProvider,
               technology: normalizedTech,
-              downloadGb: formatBytes(dlGb, "GB"),
-              uploadGb: formatBytes(ulGb, "GB"),
-              totalGb: formatBytes(dlGb + ulGb, "GB"),
-              dl_gb: dlGb,
-              ul_gb: ulGb,
-              durationSec,
-              durationFormatted: formatDuration(durationSec),
-              avgDlSpeedMbps: volumeData?.avg_dl_mbps || 0,
-              avgUlSpeedMbps: volumeData?.avg_ul_mbps || 0,
-              avgDlSpeedFormatted: formatSpeed(volumeData?.avg_dl_mbps || 0),
-              avgUlSpeedFormatted: formatSpeed(volumeData?.avg_ul_mbps || 0),
-              minDlSpeedFormatted: formatSpeed(volumeData?.min_dl_mbps || 0),
-              maxDlSpeedFormatted: formatSpeed(volumeData?.max_dl_mbps || 0),
-              medianDlSpeedFormatted: formatSpeed(volumeData?.median_dl_mbps || 0),
-              stddevDlSpeedFormatted: formatMetricNumber(volumeData?.stddev_dl_mbps),
-              minUlSpeedFormatted: formatSpeed(volumeData?.min_ul_mbps || 0),
-              maxUlSpeedFormatted: formatSpeed(volumeData?.max_ul_mbps || 0),
-              medianUlSpeedFormatted: formatSpeed(volumeData?.median_ul_mbps || 0),
-              stddevUlSpeedFormatted: formatMetricNumber(volumeData?.stddev_ul_mbps),
-              sampleCount,
-              constantThroughputSessions: volumeData?.is_constant_tpt ? 1 : 0,
-              isConstantTpt: Boolean(volumeData?.is_constant_tpt),
-              sessionCount: 1,
-              sessions: [sessionId],
+              dlGbTotal: 0,
+              ulGbTotal: 0,
+              durationSec: 0,
+              sampleCount: 0,
+              constantThroughputSessions: 0,
+              sessions: new Set(),
+              weightSum: 0,
+              weightedAvgDlSum: 0,
+              weightedAvgUlSum: 0,
+              weightedMedianDlSum: 0,
+              weightedMedianUlSum: 0,
+              weightedStddevDlSum: 0,
+              weightedStddevUlSum: 0,
+              minDlSpeedMbps: Infinity,
+              maxDlSpeedMbps: -Infinity,
+              minUlSpeedMbps: Infinity,
+              maxUlSpeedMbps: -Infinity,
               providerColor: getLogColor("provider", normalizedProvider),
               techColor: getLogColor("technology", normalizedTech),
-            });
+            };
+            aggregateMap.set(key, agg);
           }
+
+          const durationSec = Number(volumeData?.duration_sec) || 0;
+          const sampleCount = Number(volumeData?.sample_count) || 0;
+          const dlGb = Number(volumeData?.dl_gb) || 0;
+          const ulGb = Number(volumeData?.ul_gb) || 0;
+          const weight = sampleCount > 0 ? sampleCount : durationSec > 0 ? durationSec : 1;
+
+          agg.dlGbTotal += dlGb;
+          agg.ulGbTotal += ulGb;
+          agg.durationSec += durationSec;
+          agg.sampleCount += sampleCount;
+          agg.sessions.add(sessionId);
+          if (volumeData?.is_constant_tpt) agg.constantThroughputSessions += 1;
+
+          const avgDl = Number(volumeData?.avg_dl_mbps) || 0;
+          const avgUl = Number(volumeData?.avg_ul_mbps) || 0;
+          const medianDl = Number(volumeData?.median_dl_mbps) || 0;
+          const medianUl = Number(volumeData?.median_ul_mbps) || 0;
+          const stddevDl = Number(volumeData?.stddev_dl_mbps) || 0;
+          const stddevUl = Number(volumeData?.stddev_ul_mbps) || 0;
+
+          agg.weightSum += weight;
+          agg.weightedAvgDlSum += avgDl * weight;
+          agg.weightedAvgUlSum += avgUl * weight;
+          agg.weightedMedianDlSum += medianDl * weight;
+          agg.weightedMedianUlSum += medianUl * weight;
+          agg.weightedStddevDlSum += stddevDl * weight;
+          agg.weightedStddevUlSum += stddevUl * weight;
+
+          const minDl = Number(volumeData?.min_dl_mbps);
+          const maxDl = Number(volumeData?.max_dl_mbps);
+          const minUl = Number(volumeData?.min_ul_mbps);
+          const maxUl = Number(volumeData?.max_ul_mbps);
+
+          if (Number.isFinite(minDl) && minDl > 0) agg.minDlSpeedMbps = Math.min(agg.minDlSpeedMbps, minDl);
+          if (Number.isFinite(maxDl)) agg.maxDlSpeedMbps = Math.max(agg.maxDlSpeedMbps, maxDl);
+          if (Number.isFinite(minUl) && minUl > 0) agg.minUlSpeedMbps = Math.min(agg.minUlSpeedMbps, minUl);
+          if (Number.isFinite(maxUl)) agg.maxUlSpeedMbps = Math.max(agg.maxUlSpeedMbps, maxUl);
         });
       });
     });
 
+    const rows = Array.from(aggregateMap.values()).map((agg) => {
+      const weightSum = agg.weightSum || 0;
+      const avgDlSpeedMbps = weightSum > 0 ? agg.weightedAvgDlSum / weightSum : 0;
+      const avgUlSpeedMbps = weightSum > 0 ? agg.weightedAvgUlSum / weightSum : 0;
+      const medianDlSpeedMbps = weightSum > 0 ? agg.weightedMedianDlSum / weightSum : 0;
+      const medianUlSpeedMbps = weightSum > 0 ? agg.weightedMedianUlSum / weightSum : 0;
+      const stddevDlSpeedMbps = weightSum > 0 ? agg.weightedStddevDlSum / weightSum : 0;
+      const stddevUlSpeedMbps = weightSum > 0 ? agg.weightedStddevUlSum / weightSum : 0;
+      const minDlSpeedMbps = Number.isFinite(agg.minDlSpeedMbps) ? agg.minDlSpeedMbps : 0;
+      const maxDlSpeedMbps = Number.isFinite(agg.maxDlSpeedMbps) ? agg.maxDlSpeedMbps : 0;
+      const minUlSpeedMbps = Number.isFinite(agg.minUlSpeedMbps) ? agg.minUlSpeedMbps : 0;
+      const maxUlSpeedMbps = Number.isFinite(agg.maxUlSpeedMbps) ? agg.maxUlSpeedMbps : 0;
+      const sessionCount = agg.sessions.size;
+
+      return {
+        provider: agg.provider,
+        technology: agg.technology,
+        downloadGb: formatBytes(agg.dlGbTotal, "GB"),
+        uploadGb: formatBytes(agg.ulGbTotal, "GB"),
+        totalGb: formatBytes(agg.dlGbTotal + agg.ulGbTotal, "GB"),
+        dl_gb: agg.dlGbTotal,
+        ul_gb: agg.ulGbTotal,
+        durationSec: agg.durationSec,
+        durationFormatted: formatDuration(agg.durationSec),
+        avgDlSpeedMbps,
+        avgUlSpeedMbps,
+        avgDlSpeedFormatted: formatSpeed(avgDlSpeedMbps),
+        avgUlSpeedFormatted: formatSpeed(avgUlSpeedMbps),
+        minDlSpeedFormatted: formatSpeed(minDlSpeedMbps),
+        maxDlSpeedFormatted: formatSpeed(maxDlSpeedMbps),
+        medianDlSpeedFormatted: formatSpeed(medianDlSpeedMbps),
+        stddevDlSpeedFormatted: formatMetricNumber(stddevDlSpeedMbps),
+        minUlSpeedFormatted: formatSpeed(minUlSpeedMbps),
+        maxUlSpeedFormatted: formatSpeed(maxUlSpeedMbps),
+        medianUlSpeedFormatted: formatSpeed(medianUlSpeedMbps),
+        stddevUlSpeedFormatted: formatMetricNumber(stddevUlSpeedMbps),
+        sampleCount: agg.sampleCount,
+        constantThroughputSessions: agg.constantThroughputSessions,
+        isConstantTpt: sessionCount > 0 && agg.constantThroughputSessions === sessionCount,
+        sessionCount,
+        sessions: Array.from(agg.sessions),
+        providerColor: agg.providerColor,
+        techColor: agg.techColor,
+      };
+    });
+
     rows.sort((a, b) => {
-      const sessionCompare = String(a.sessionId).localeCompare(String(b.sessionId));
-      if (sessionCompare !== 0) return sessionCompare;
       const providerCompare = a.provider.localeCompare(b.provider);
       if (providerCompare !== 0) return providerCompare;
       return a.technology.localeCompare(b.technology);
@@ -463,110 +537,6 @@ export const OverviewTab = ({
 
     return rows.length > 0 ? rows : null;
   }, [providerVolume]);
-
-  const volumeSummaryStats = useMemo(() => {
-    if (!processedProviderVolume || processedProviderVolume.length === 0)
-      return null;
-
-    const totalDownloadGb = processedProviderVolume.reduce(
-      (sum, item) => sum + (item.dl_gb || 0),
-      0
-    );
-    const totalUploadGb = processedProviderVolume.reduce(
-      (sum, item) => sum + (item.ul_gb || 0),
-      0
-    );
-    const totalDurationSec = processedProviderVolume.reduce(
-      (sum, item) => sum + (item.durationSec || 0),
-      0
-    );
-    const totalSampleCount = processedProviderVolume.reduce(
-      (sum, item) => sum + (item.sampleCount || 0),
-      0
-    );
-
-    const avgDlSpeed =
-      totalSampleCount > 0
-        ? processedProviderVolume.reduce(
-            (sum, item) =>
-              sum + (item.avgDlSpeedMbps || 0) * (item.sampleCount || 0),
-            0
-          ) / totalSampleCount
-        : totalDurationSec > 0
-        ? processedProviderVolume.reduce(
-            (sum, item) =>
-              sum + (item.avgDlSpeedMbps || 0) * (item.durationSec || 0),
-            0
-          ) / totalDurationSec
-        : 0;
-    const avgUlSpeed =
-      totalSampleCount > 0
-        ? processedProviderVolume.reduce(
-            (sum, item) =>
-              sum + (item.avgUlSpeedMbps || 0) * (item.sampleCount || 0),
-            0
-          ) / totalSampleCount
-        : totalDurationSec > 0
-        ? processedProviderVolume.reduce(
-            (sum, item) =>
-              sum + (item.avgUlSpeedMbps || 0) * (item.durationSec || 0),
-            0
-          ) / totalDurationSec
-        : 0;
-
-    const byProvider = {};
-    processedProviderVolume.forEach((item) => {
-      if (isUnknownOrEmpty(item.provider)) return;
-
-      const providerKey = item.provider.toLowerCase();
-      if (!byProvider[providerKey]) {
-        byProvider[providerKey] = {
-          name: item.provider,
-          dl_gb: 0,
-          ul_gb: 0,
-          durationSec: 0,
-          technologies: [],
-          color: item.providerColor,
-        };
-      }
-      byProvider[providerKey].dl_gb += item.dl_gb || 0;
-      byProvider[providerKey].ul_gb += item.ul_gb || 0;
-      byProvider[providerKey].durationSec += item.durationSec || 0;
-      if (!byProvider[providerKey].technologies.includes(item.technology)) {
-        byProvider[providerKey].technologies.push(item.technology);
-      }
-    });
-
-    const byTech = {};
-    processedProviderVolume.forEach((item) => {
-      if (isUnknownOrEmpty(item.technology)) return;
-
-      const techKey = item.technology.toUpperCase();
-      if (!byTech[techKey]) {
-        byTech[techKey] = {
-          dl_gb: 0,
-          ul_gb: 0,
-          durationSec: 0,
-          color: item.techColor,
-        };
-      }
-      byTech[techKey].dl_gb += item.dl_gb || 0;
-      byTech[techKey].ul_gb += item.ul_gb || 0;
-      byTech[techKey].durationSec += item.durationSec || 0;
-    });
-
-    return {
-      totalDownload: formatBytes(totalDownloadGb, "GB"),
-      totalUpload: formatBytes(totalUploadGb, "GB"),
-      totalData: formatBytes(totalDownloadGb + totalUploadGb, "GB"),
-      totalDuration: formatDuration(totalDurationSec),
-      avgDlSpeed: formatSpeed(avgDlSpeed),
-      avgUlSpeed: formatSpeed(avgUlSpeed),
-      byProvider,
-      byTech,
-      sessionsCount: sessionIds.length,
-    };
-  }, [processedProviderVolume, sessionIds, isUnknownOrEmpty]);
 
   const providerVolumeDurationRows = useMemo(() => {
     if (!processedProviderVolume || processedProviderVolume.length === 0) {
@@ -763,7 +733,6 @@ export const OverviewTab = ({
 
       <ProviderVolumeCard
         providerVolume={processedProviderVolume}
-        summaryStats={volumeSummaryStats}
         loading={loading}
         sessionIds={sessionIds}
         error={error}
@@ -860,7 +829,6 @@ const SessionDurationCard = ({ duration }) => (
 
 const ProviderVolumeCard = ({
   providerVolume,
-  summaryStats,
   loading,
   sessionIds,
   error,
@@ -888,28 +856,7 @@ const ProviderVolumeCard = ({
     });
   }, [providerVolume]);
 
-  const filteredTechSummary = useMemo(() => {
-    if (!summaryStats?.byTech) return {};
-
-    const filtered = {};
-
-    Object.entries(summaryStats.byTech).forEach(([tech, data]) => {
-      const normalizedTech = normalizeTechName(tech);
-      if (normalizedTech === "Unknown") return;
-
-      const dlValue = parseFloat(data.dl_gb) || 0;
-      const ulValue = parseFloat(data.ul_gb) || 0;
-
-      if (dlValue > 0 || ulValue > 0) {
-        filtered[tech] = data;
-      }
-    });
-
-    return filtered;
-  }, [summaryStats]);
-
   const hasValidData = filteredProviderVolume && filteredProviderVolume.length > 0;
-  const hasTechData = Object.keys(filteredTechSummary).length > 0;
   const visibleColumns = useMemo(
     () => PROVIDER_VOLUME_OPTIONAL_COLUMNS.filter((column) => visibleColumnKeys.has(column.key)),
     [visibleColumnKeys]
@@ -1086,28 +1033,6 @@ const ProviderVolumeCard = ({
             </table>
           </div>
 
-          {hasTechData && (
-            <div className="mt-4 pt-3 border-t border-slate-700">
-              <h5 className="text-xs font-semibold text-white mb-2">
-                By Technology
-              </h5>
-              <div className="flex flex-wrap text-white gap-2">
-                {Object.entries(filteredTechSummary).map(([tech, data]) => (
-                  <div
-                    key={tech}
-                    className="inline-flex items-center gap-2 text-white px-3 py-1.5 rounded-lg border"
-                    style={getTechBadgeStyle(tech)}
-                  >
-                    <span className="font-medium text-white/80">{tech}</span>
-                    <span className="text-xs text-white/80">
-                      {formatBytes(data.dl_gb, "GB")} GB /{" "}
-                      {formatBytes(data.ul_gb, "GB")} GB
-                    </span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
         </>
       )}
     </div>

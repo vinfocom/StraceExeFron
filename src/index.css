@@ -126,6 +126,26 @@ textarea {
   }
 }
 
+/* Scales text with the element's own resizable box (e.g. the draggable map
+   legend) instead of the viewport, via CSS container queries. Apply
+   `.cq-container` to the resizable box and the `.cq-text-*` classes to text
+   inside it. */
+.cq-container {
+  container-type: inline-size;
+}
+
+.cq-text-title {
+  font-size: clamp(0.8125rem, 4.6cqw, 1.125rem);
+}
+
+.cq-text-sm {
+  font-size: clamp(0.6875rem, 3.9cqw, 1rem);
+}
+
+.cq-text-xs {
+  font-size: clamp(0.625rem, 3.5cqw, 0.875rem);
+}
+
 .dark body {
   /* Dark mode is supported globally via the `.dark` class on root/body */
   @apply bg-slate-950 text-slate-100;

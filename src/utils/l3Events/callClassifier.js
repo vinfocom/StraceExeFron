@@ -2,7 +2,7 @@ import { getDisconnectCauseInfo } from "./disconnectCauseMapper.js";
 
 const IMS_FAILURE_RE = /\b(ims|sip)\b.{0,160}\b(fail|failure|error|timeout|unreachable|blocked|deregister|forbidden|cancel|403|404|408|480|486|500|503)\b|\bims registration (?:lost|failed)\b/i;
 const RADIO_FAILURE_RE = /\b(radio link failure|rlf|reestablishment reject|re[- ]?establishment failure|lost signal|out of service|power off|emergency only|access blocked|unexpected rrc release|scgfail|scg failure)\b/i;
-const HANDOVER_FAILURE_RE = /\b(hand(?: |-)?over|ho)\b.*\b(fail|failure|reject|drop|timeout)\b/i;
+const HANDOVER_FAILURE_RE = /\b(?:hand(?: |-)?over|ho)\b.*\b(fail|failure|failuire|reject|drop|timeout)\b|\bhandover\s*fail(?:ure|uire)?\b/i;
 const BEARER_FAILURE_RE = /\b(voice bearer|bearer|media|rtp|qos flow)\b.*\b(loss|lost|fail|failure|released unexpectedly)\b/i;
 const REJECTED_RE = /\b(reject|decline|answered elsewhere)\b/i;
 const BUSY_RE = /\bbusy\b/i;

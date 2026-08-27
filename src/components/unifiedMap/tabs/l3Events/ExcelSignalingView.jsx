@@ -226,6 +226,7 @@ const SignalingRow = memo(function SignalingRow({ row, selected, onSelect, inclu
         </>
       )}
       <td className={`max-w-40 truncate border-r border-slate-800 px-2 text-[10px] text-slate-300 ${severityClass}`} title={row.interface}>{row.interface}</td>
+      <td className={`max-w-44 truncate border-r border-slate-800 px-2 text-[10px] text-slate-200 ${severityClass}`} title={row.cause || "-"}>{row.cause || "-"}</td>
       <td className="h-8 max-h-8 max-w-72 overflow-hidden border-r border-slate-800 px-2 py-0 text-[12px] font-medium text-white" title={row.message}>
         <span className="block max-h-8 truncate leading-8">{row.message}</span>
       </td>
@@ -262,6 +263,7 @@ export function ExcelSignalingView({ rows = [], calls = [], selectedCall, onSele
   const [sources, setSources] = useState(new Set(SOURCE_OPTIONS));
   const [query, setQuery] = useState("");
   const [interfaceColumnFilter, setInterfaceColumnFilter] = useState("all");
+  const [causeColumnFilter, setCauseColumnFilter] = useState("all");
   const [messageColumnFilter, setMessageColumnFilter] = useState("");
   const [ueDirection, setUeDirection] = useState("all");
   const [radioDirection, setRadioDirection] = useState("all");
@@ -276,6 +278,7 @@ export function ExcelSignalingView({ rows = [], calls = [], selectedCall, onSele
 
   const technologies = useMemo(() => uniqueValues(rows, "technology"), [rows]);
   const interfaces = useMemo(() => uniqueValues(rows, "interface"), [rows]);
+  const causes = useMemo(() => uniqueValues(rows, "cause"), [rows]);
   const messages = useMemo(() => uniqueValues(rows, "message"), [rows]);
   const filtered = useMemo(() => {
     const needle = query.trim().toLowerCase();
@@ -288,12 +291,13 @@ export function ExcelSignalingView({ rows = [], calls = [], selectedCall, onSele
       if (radioDirection !== "all" && laneDirection(row, "radio") !== radioDirection) return false;
       if (coreDirection !== "all" && laneDirection(row, "core") !== coreDirection) return false;
       if (interfaceColumnFilter !== "all" && row.interface !== interfaceColumnFilter) return false;
+      if (causeColumnFilter !== "all" && row.cause !== causeColumnFilter) return false;
       if (messageNeedle && !String(row.message || "").toLowerCase().includes(messageNeedle)) return false;
       if (failureOnly && row.severity !== "failure") return false;
       if (!needle) return true;
-      return [row.timestampLabel, row.sourceFile, row.message, row.procedure, row.protocol, row.interface, row.rawMessage, row.callId].filter(Boolean).join(" ").toLowerCase().includes(needle);
+      return [row.timestampLabel, row.sourceFile, row.message, row.cause, row.procedure, row.protocol, row.interface, row.rawMessage, row.callId].filter(Boolean).join(" ").toLowerCase().includes(needle);
     }).sort((a, b) => compareRows(a, b, sort));
-  }, [rows, callFilter, technology, sources, ueDirection, radioDirection, coreDirection, interfaceColumnFilter, messageColumnFilter, failureOnly, query, sort]);
+  }, [rows, callFilter, technology, sources, ueDirection, radioDirection, coreDirection, interfaceColumnFilter, causeColumnFilter, messageColumnFilter, failureOnly, query, sort]);
 
   const exportCalls = useMemo(() => {
     if (callFilter !== "all") {
@@ -319,6 +323,7 @@ export function ExcelSignalingView({ rows = [], calls = [], selectedCall, onSele
     setSources(new Set(SOURCE_OPTIONS));
     setQuery("");
     setInterfaceColumnFilter("all");
+    setCauseColumnFilter("all");
     setMessageColumnFilter("");
     setUeDirection("all");
     setRadioDirection("all");
@@ -350,7 +355,7 @@ export function ExcelSignalingView({ rows = [], calls = [], selectedCall, onSele
     }
   };
 
-  const columnCount = includeLocation ? 8 : 6;
+  const columnCount = includeLocation ? 9 : 7;
 
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-slate-900/80">
@@ -376,7 +381,7 @@ export function ExcelSignalingView({ rows = [], calls = [], selectedCall, onSele
         <span>Showing {filtered.length.toLocaleString()} matching rows ({rows.length.toLocaleString()} total)</span>
       </div>
       <div className="min-h-0 flex-1 overflow-auto">
-        <table className={`w-full border-collapse ${includeLocation ? "min-w-[1180px]" : "min-w-[980px]"}`}>
+        <table className={`w-full border-collapse ${includeLocation ? "min-w-[1260px]" : "min-w-[1060px]"}`}>
           <thead>
             <tr>
               <Header label="Timestamp" sortKey="timestamp" sort={sort} onSort={changeSort} />
@@ -390,6 +395,7 @@ export function ExcelSignalingView({ rows = [], calls = [], selectedCall, onSele
                 </>
               )}
               <Header label="Interface" sortKey="interface" sort={sort} onSort={changeSort} />
+              <Header label="Cause" sortKey="cause" sort={sort} onSort={changeSort} />
               <Header label="Message" sortKey="message" sort={sort} onSort={changeSort} />
             </tr>
             <tr>
@@ -404,6 +410,7 @@ export function ExcelSignalingView({ rows = [], calls = [], selectedCall, onSele
                 </>
               )}
               <th className="sticky top-[33px] z-10 border-b border-r border-slate-700 bg-slate-800 px-2 py-1"><ColumnSelectFilter value={interfaceColumnFilter} onChange={setInterfaceColumnFilter} options={interfaces} allLabel="All Interfaces" /></th>
+              <th className="sticky top-[33px] z-10 border-b border-r border-slate-700 bg-slate-800 px-2 py-1"><ColumnSelectFilter value={causeColumnFilter} onChange={setCauseColumnFilter} options={causes} allLabel="All Causes" /></th>
               <th className="sticky top-[33px] z-10 border-b border-slate-700 bg-slate-800 px-2 py-1">
                 <MessageColumnFilter
                   value={messageColumnFilter}

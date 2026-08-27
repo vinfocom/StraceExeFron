@@ -98,6 +98,18 @@ test("classifies dropped calls from abnormal connected disconnects", () => {
   assert.equal(summary.calls[0].failedHandovers.length, 1);
 });
 
+test("classifies compact handoverfailure cause as handover failure", () => {
+  const summary = buildCallSummary([
+    event({ seconds: 0, eventKey: "CALL_DIAL_INITIATED", rawMessage: "Outgoing" }),
+    event({ seconds: 2, eventKey: "CALL_ACTIVE", rawMessage: "active" }),
+    event({ seconds: 20, eventKey: "CALL_DISCONNECTED", rawMessage: "CALL_DISCONNECTED | cause handoverfailuire | dropped" }),
+  ]);
+
+  assert.equal(summary.dropped, 1);
+  assert.equal(summary.calls[0].detailedStatus, "Handover Failure");
+  assert.equal(summary.calls[0].failedHandovers.length, 1);
+});
+
 test("classifies incoming answered call", () => {
   const summary = buildCallSummary([
     event({ seconds: 0, eventKey: "CallState", rawMessage: "Ringing incoming" }),
