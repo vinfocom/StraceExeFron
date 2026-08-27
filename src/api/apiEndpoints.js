@@ -1695,6 +1695,22 @@ export const mapViewApi = {
     });
   },
 
+  get2GCiAnalysis: ({ signal, ...params } = {}) => {
+    const sessionIds = toSessionIdCsv(
+      params.SessionIds,
+      params.sessionIds,
+      params.session_ids,
+      params.session_Ids,
+      params.sessionId,
+    );
+
+    return api.get("/api/MapView/Get2GCiAnalysis", {
+      params: { sessionIds },
+      signal,
+      dedupe: false,
+    });
+  },
+
   // ==================== Polygon Management ====================
   getProjectPolygons: (projectId) =>
     resolveProjectApiCall({

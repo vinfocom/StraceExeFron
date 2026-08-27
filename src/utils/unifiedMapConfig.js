@@ -32,6 +32,7 @@ export const GRID_VIEW_SUPPORTED_METRICS = Object.freeze([
   "rsrp",
   "rsrq",
   "sinr",
+  "ci_db",
   "dl_thpt",
   "ul_thpt",
   "mos",
@@ -71,6 +72,7 @@ export const METRIC_CONFIG = {
   },
   rsrq: { higherIsBetter: true, unit: "dB", label: "RSRQ", min: -20, max: -3 },
   sinr: { higherIsBetter: true, unit: "dB", label: "SINR", min: -10, max: 30 },
+  ci_db: { higherIsBetter: true, unit: "dB", label: "C/I", min: -99, max: 99 },
   dl_thpt: {
     higherIsBetter: true,
     unit: "Mbps",
@@ -245,6 +247,7 @@ export const normalizeMetric = (metric) => {
   const lower = metric.toLowerCase();
   if (["dl_thpt", "dl_tpt", "dl_rpt", "dl_throughput", "tpt_dl", "throughput_dl"].includes(lower)) return "dl_thpt";
   if (["ul_thpt", "ul_tpt", "ul_rpt", "ul_throughput", "tpt_ul", "throughput_ul"].includes(lower)) return "ul_thpt";
+  if (["c/i", "c_i", "ci", "ci_db", "cidb"].includes(lower)) return "ci_db";
   return lower;
 };
 

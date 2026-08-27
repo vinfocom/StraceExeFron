@@ -696,12 +696,13 @@ const getPolygonRectOverlapArea = (polygon, bounds) => {
 };
 
 const getWeightedGridAverageForPolygon = (polygon, points = [], metric, useGridWeights) => {
+  const normalizedMetric = normalizeMetric(metric);
   let weightedSum = 0;
   let totalWeight = 0;
   let contributingCells = 0;
 
   points.forEach((point) => {
-    const direct = parseFloat(point?.[metric]);
+    const direct = parseFloat(point?.[normalizedMetric] ?? point?.[metric]);
     const value = !Number.isNaN(direct)
       ? direct
       : parseFloat(point?.metric_value ?? point?.value);
@@ -727,7 +728,8 @@ const getWeightedGridAverageForPolygon = (polygon, points = [], metric, useGridW
 };
 
 const getGridCellCssColor = (cell, metric, thresholds) => {
-  const direct = parseFloat(cell?.[metric]);
+  const normalizedMetric = normalizeMetric(metric);
+  const direct = parseFloat(cell?.[normalizedMetric] ?? cell?.[metric]);
   const value = !Number.isNaN(direct)
     ? direct
     : parseFloat(cell?.metric_value ?? cell?.value);
@@ -1299,7 +1301,7 @@ const ZoneTooltip = React.memo(
       categoryStats,
     } = polygon;
 
-    const config = METRIC_CONFIG[selectedMetric] || {
+    const config = METRIC_CONFIG[normalizeMetric(selectedMetric)] || {
       unit: "",
       higherIsBetter: true,
     };
@@ -5123,7 +5125,7 @@ const UnifiedMapView = () => {
       const pointsInside = polygonColorSource.filter((pt) => isPointInPolygon(pt, poly));
       const values = pointsInside
         .map((p) => {
-          const direct = parseFloat(p?.[selectedMetric]);
+          const direct = getMetricValueFromLog(p, selectedMetric);
           if (!Number.isNaN(direct)) return direct;
           const metricValue = parseFloat(p?.metric_value ?? p?.value);
           return Number.isNaN(metricValue) ? NaN : metricValue;
@@ -5188,7 +5190,7 @@ const UnifiedMapView = () => {
     const currentThresholds = baseThresholds[thresholdKey] || [];
     const useCategorical =
       colorBy && ["provider", "band", "technology"].includes(colorBy);
-    const metricConfig = METRIC_CONFIG[selectedMetric] || {
+    const metricConfig = METRIC_CONFIG[normalizeMetric(selectedMetric)] || {
       higherIsBetter: true,
     };
     return areaData.map((poly) => {
@@ -5255,7 +5257,7 @@ const UnifiedMapView = () => {
       );
       const values = pointsInside
         .map((p) => {
-          const direct = parseFloat(p?.[selectedMetric]);
+          const direct = getMetricValueFromLog(p, selectedMetric);
           if (!Number.isNaN(direct)) return direct;
           const metricValue = parseFloat(p?.metric_value ?? p?.value);
           return Number.isNaN(metricValue) ? NaN : metricValue;

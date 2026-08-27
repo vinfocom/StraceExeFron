@@ -230,6 +230,12 @@ export const METRIC_CONFIG = {
     unit: 'dB',
     fields: ['sinr', 'SINR', 'Sinr', 'lte_sinr', 'LTE_SINR', 'nr_sinr'],
   },
+  ci_db: {
+    thresholdKey: 'ci_db',
+    label: 'C/I',
+    unit: 'dB',
+    fields: ['ci_db', 'ciDb', 'CI_DB', 'ci', 'CI', 'c_i', 'C_I'],
+  },
   dl_thpt: {
     thresholdKey: 'dl_thpt',
     label: 'DL Throughput',
@@ -427,6 +433,9 @@ const METRIC_ALIASES = {
   'bler': 'lte_bler',
   'lte-bler': 'lte_bler',
   'mos_score': 'mos',
+  'c/i': 'ci_db',
+  'c_i': 'ci_db',
+  'ci': 'ci_db',
 };
 
 export const getMetricConfig = (metric) => {
@@ -550,7 +559,16 @@ export const getColorForMetric = (metric, value, thresholds) => {
     return getPciColor(value);
   }
 
-  const metricThresholds = thresholds?.[config.thresholdKey] || [];
+  const fallbackThresholds =
+    config.thresholdKey === "ci_db"
+      ? [
+          { min: 18, max: 99, color: "#00c853" },
+          { min: 12, max: 18, color: "#ffd600" },
+          { min: 9, max: 12, color: "#ff9100" },
+          { min: -99, max: 9, color: "#d50000" },
+        ]
+      : [];
+  const metricThresholds = thresholds?.[config.thresholdKey] || fallbackThresholds;
   const numValue = parseFloat(value);
 
   if (!Number.isFinite(numValue) || metricThresholds.length === 0) {

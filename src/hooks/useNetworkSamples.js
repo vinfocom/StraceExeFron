@@ -92,6 +92,71 @@ const isWifiLog = (log) => {
   return primaryInfo.includes("SSID:") || primaryInfo.includes("BSSID:");
 };
 
+const firstFiniteNumber = (...values) => {
+  for (const value of values) {
+    if (value === undefined || value === null || value === "") continue;
+    const parsed = Number.parseFloat(value);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return null;
+};
+
+const normalizeLogId = (value) => {
+  const raw = String(value ?? "").trim();
+  return raw || null;
+};
+
+const getLogId = (log) =>
+  normalizeLogId(log?.id ?? log?.Id ?? log?.log_id ?? log?.LogId);
+
+const merge2GCiAnalysis = (logs = [], ciRows = []) => {
+  if (!Array.isArray(logs) || logs.length === 0 || !Array.isArray(ciRows) || ciRows.length === 0) {
+    return logs;
+  }
+
+  const ciByLogId = new Map();
+  ciRows.forEach((row) => {
+    const id = getLogId(row);
+    if (id) ciByLogId.set(id, row);
+  });
+
+  if (ciByLogId.size === 0) return logs;
+
+  let changed = false;
+  const mergedLogs = logs.map((log) => {
+    const row = ciByLogId.get(getLogId(log));
+    if (!row) return log;
+
+    const ciDb = firstFiniteNumber(row.ci_db, row.ciDb, row.CI_DB, row.ci, row.CI);
+    const nextCiDb = ciDb ?? firstFiniteNumber(log.ci_db, log.ci);
+    if (nextCiDb === null && row.quality == null && row.Quality == null) return log;
+
+    changed = true;
+    return {
+      ...log,
+      ci_db: nextCiDb,
+      ci: nextCiDb,
+      ci_quality: row.quality ?? row.Quality ?? log.ci_quality ?? null,
+      serving_cell_id: row.serving_cell_id ?? row.servingCellId ?? log.serving_cell_id ?? log.cell_id,
+      serving_pci: row.serving_pci ?? row.servingPci ?? log.serving_pci ?? log.pci,
+      serving_rssi_dbm: firstFiniteNumber(row.serving_rssi_dbm, row.servingRssiDbm, log.serving_rssi_dbm),
+      neighbour_count: firstFiniteNumber(row.neighbour_count, row.neighbor_count, log.neighbour_count),
+      strongest_neighbour_rssi_dbm: firstFiniteNumber(
+        row.strongest_neighbour_rssi_dbm,
+        row.strongest_neighbor_rssi_dbm,
+        log.strongest_neighbour_rssi_dbm,
+      ),
+      total_interference_dbm: firstFiniteNumber(
+        row.total_interference_dbm,
+        row.totalInterferenceDbm,
+        log.total_interference_dbm,
+      ),
+    };
+  });
+
+  return changed ? mergedLogs : logs;
+};
+
 const getNormalizedTechnology = (log, band = null) => {
   const candidates = [
     log?.network,
@@ -274,6 +339,8 @@ const parseLogEntry = (log, sessionId) => {
     signal_label: wifiLog ? "RSSI" : "RSRP",
     rsrq: parseNumFromKeys(["rsrq", "RSRQ", "Rsrq", "lte_rsrq", "nr_rsrq"]),
     sinr: parseNumFromKeys(["sinr", "SINR", "Sinr", "snr", "SNR", "lte_sinr", "nr_sinr"]),
+    ci_db: parseNumFromKeys(["ci_db", "ciDb", "CI_DB", "ci", "CI", "c_i", "C_I"]),
+    ci: parseNumFromKeys(["ci_db", "ciDb", "CI_DB", "ci", "CI", "c_i", "C_I"]),
     dl_tpt: dlThroughput,
     dl_thpt: dlThroughput,
     dl_rpt: dlThroughput,
@@ -371,7 +438,7 @@ export const useNetworkSamples = (
     const cacheKey = makeProjectCacheKey({
       resource: 'unified-network-samples',
       sessionIds: sessionIds || [],
-      variant: `typed-network-wifi-v12:${safeMaxRows ? `max-${safeMaxRows}` : 'all'}:project-${projectId || 'none'}`,
+      variant: `typed-network-wifi-v13-ci:${safeMaxRows ? `max-${safeMaxRows}` : 'all'}:project-${projectId || 'none'}`,
     });
 
 
@@ -536,6 +603,28 @@ export const useNetworkSamples = (
       if (safeMaxRows && finalLogs.length > safeMaxRows) {
         const step = Math.ceil(finalLogs.length / safeMaxRows);
         finalLogs = finalLogs.filter((_, index) => index % step === 0).slice(0, safeMaxRows);
+      }
+
+      if (finalLogs.some((log) => String(log?.network ?? log?.technology ?? "").toUpperCase().includes("2G"))) {
+        try {
+          const ciResponse = await withTimeout(
+            mapViewApi.get2GCiAnalysis({
+              sessionIds,
+              signal: abortControllerRef.current.signal,
+            }),
+          );
+          const ciRows =
+            ciResponse?.data ||
+            ciResponse?.Data ||
+            ciResponse?.result ||
+            ciResponse?.Result ||
+            [];
+          finalLogs = merge2GCiAnalysis(finalLogs, Array.isArray(ciRows) ? ciRows : []);
+        } catch (ciErr) {
+          if (!isCancelledError(ciErr)) {
+            console.warn("2G C/I analysis unavailable:", ciErr);
+          }
+        }
       }
 
       const fetchTime = ((performance.now() - startTime) / 1000).toFixed(2);

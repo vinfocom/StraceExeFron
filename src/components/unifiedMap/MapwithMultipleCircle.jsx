@@ -1290,6 +1290,7 @@ const PrimaryLogInfoWindow = React.memo(({ log, onClose, resolveColor, selectedM
     );
   const signalLabel = isWifiLog ? "RSSI" : "RSRP";
   const signalValue = isWifiLog ? (log.rssi ?? log.signal_value ?? log.rsrp) : log.rsrp;
+  const ciValue = getMetricValueFromLog(log, "ci_db");
   const logTypeLabel = isWifiLog ? "Wi-Fi Log" : "Network Log";
   const overlapLogs = Array.isArray(log.__overlapLogs) ? log.__overlapLogs : [];
   const hiddenOverlapCount = Math.max(0, overlapLogs.length - 1);
@@ -1325,6 +1326,7 @@ const PrimaryLogInfoWindow = React.memo(({ log, onClose, resolveColor, selectedM
               {signalValue !== null && signalValue !== undefined && <div className="flex justify-between text-xs items-center"><span className="text-gray-500">RSRP</span><span className="font-semibold" style={{ color: resolveColor(signalValue, 'rsrp') }}>{signalValue?.toFixed?.(1)} dBm</span></div>}
               {log.rsrq !== null && log.rsrq !== undefined && <div className="flex justify-between text-xs items-center"><span className="text-gray-500">RSRQ</span><span className="font-medium" style={{ color: resolveColor(log.rsrq, 'rsrq') }}>{log.rsrq?.toFixed?.(1)} dB</span></div>}
               {log.sinr !== null && log.sinr !== undefined && <div className="flex justify-between text-xs items-center"><span className="text-gray-500">SINR</span><span className="font-medium" style={{ color: resolveColor(log.sinr, 'sinr') }}>{log.sinr?.toFixed?.(1)} dB</span></div>}
+              {Number.isFinite(ciValue) && <div className="flex justify-between text-xs items-center"><span className="text-gray-500">C/I</span><span className="font-medium" style={{ color: resolveColor(ciValue, 'ci_db') }}>{ciValue?.toFixed?.(1)} dB</span></div>}
               {log.pci && <div className="flex justify-between text-xs"><span className="text-gray-500">PCI/BCCH</span><span className="font-medium">{log.pci}</span></div>}
               {log.cell_id && <div className="flex justify-between text-xs"><span className="text-gray-500">Cell ID</span><span className="font-medium">{log.cell_id}</span></div>}
               {log.nodeb_id && <div className="flex justify-between text-xs"><span className="text-gray-500">NodeB</span><span className="font-medium">{log.nodeb_id}</span></div>}

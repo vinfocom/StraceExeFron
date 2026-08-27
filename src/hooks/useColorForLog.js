@@ -12,6 +12,13 @@ import {
     resolveSelectedTechnologyBucket,
 } from "@/utils/thresholdBuckets";
 
+const DEFAULT_CI_THRESHOLDS = Object.freeze([
+    { min: 18, max: 99, color: "#00c853", label: "Good" },
+    { min: 12, max: 18, color: "#ffd600", label: "Fair" },
+    { min: 9, max: 12, color: "#ff9100", label: "Poor" },
+    { min: -99, max: 9, color: "#d50000", label: "Bad" },
+]);
+
 const EMPTY_THRESHOLD_STATE = {
     id: null,
     userId: null,
@@ -20,6 +27,7 @@ const EMPTY_THRESHOLD_STATE = {
     rsrp: [],
     rsrq: [],
     sinr: [],
+    ci_db: [],
     dl_thpt: [],
     ul_thpt: [],
     delta: [],
@@ -60,6 +68,7 @@ const EMPTY_BUCKETED_THRESHOLDS = {
     rsrp: createEmptyThresholdBuckets(),
     rsrq: createEmptyThresholdBuckets(),
     sinr: createEmptyThresholdBuckets(),
+    ci_db: createEmptyThresholdBuckets(),
     dl_thpt: createEmptyThresholdBuckets(),
     ul_thpt: createEmptyThresholdBuckets(),
     delta: createEmptyThresholdBuckets(),
@@ -100,6 +109,7 @@ const buildEffectiveThresholdState = (source, selectedTechnologies) => {
         rsrp: pickThresholdBucketValue(bucketed.rsrp, selectedBucket, []),
         rsrq: pickThresholdBucketValue(bucketed.rsrq, selectedBucket, []),
         sinr: pickThresholdBucketValue(bucketed.sinr, selectedBucket, []),
+        ci_db: pickThresholdBucketValue(bucketed.ci_db, selectedBucket, DEFAULT_CI_THRESHOLDS),
         dl_thpt: pickThresholdBucketValue(bucketed.dl_thpt, selectedBucket, []),
         ul_thpt: pickThresholdBucketValue(bucketed.ul_thpt, selectedBucket, []),
         delta: pickThresholdBucketValue(bucketed.delta, selectedBucket, []),
@@ -188,6 +198,7 @@ function useColorForLog() {
                 const rsrpBuckets = parseBucketedRangeValue(data.rsrp_json);
                 const rsrqBuckets = parseBucketedRangeValue(data.rsrq_json);
                 const sinrBuckets = parseBucketedRangeValue(data.sinr_json);
+                const ciBuckets = parseBucketedRangeValue(data.c_i_json ?? data.ci_db_json ?? data.ci_db);
                 const dlBuckets = parseBucketedRangeValue(data.dl_thpt_json);
                 const ulBuckets = parseBucketedRangeValue(data.ul_thpt_json);
                 const deltaBuckets = parseBucketedRangeValue(data.delta_json ?? data.delta);
@@ -221,6 +232,7 @@ function useColorForLog() {
                     rsrp: rsrpBuckets,
                     rsrq: rsrqBuckets,
                     sinr: sinrBuckets,
+                    ci_db: ciBuckets,
                     dl_thpt: dlBuckets,
                     ul_thpt: ulBuckets,
                     delta: deltaBuckets,
@@ -339,6 +351,10 @@ function useColorForLog() {
             'rsrp': 'rsrp',
             'rsrq': 'rsrq',
             'sinr': 'sinr',
+            'ci_db': 'ci_db',
+            'ci': 'ci_db',
+            'c/i': 'ci_db',
+            'c_i': 'ci_db',
             'dl_thpt': 'dl_thpt',
             'dl_tpt': 'dl_thpt',
             'dl_rpt': 'dl_thpt',

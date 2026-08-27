@@ -12,6 +12,7 @@ const PARAMETERS = {
     rsrp: "RSRP",
     rsrq: "RSRQ",
     sinr: "SINR",
+    ci_db: "C/I",
     dl_thpt: "DL Throughput",
     ul_thpt: "UL Throughput",
     delta: "Delta",
@@ -39,6 +40,13 @@ const PARAMETERS = {
     mac_tx_power: "MAC Tx Power",
     mac_modulation_pct: "MAC Modulation %"
 };
+
+const DEFAULT_CI_THRESHOLDS = [
+    { label: "Good", min: 18, max: 99, color: "#00c853" },
+    { label: "Fair", min: 12, max: 18, color: "#ffd600" },
+    { label: "Poor", min: 9, max: 12, color: "#ff9100" },
+    { label: "Bad", min: -99, max: 9, color: "#d50000" },
+];
 
 const SPECIAL_FIELDS = {
     volte_call: "VoLTE Call"
@@ -767,6 +775,20 @@ const parseThresholdData = (data) => {
             const scalarBuckets = parseBucketedScalarValue(data.coveragehole_json || data.coveragehole, DEFAULT_COVERAGE_HOLE);
             parsedData._bucketPayloads[key] = scalarBuckets;
             parsedData[key] = scalarBuckets;
+        } else if (key === "ci_db") {
+            const bucketedRanges = parseBucketedRangeValue(data.c_i_json ?? data.ci_db_json ?? data.ci_db);
+            parsedData._bucketPayloads[key] = bucketedRanges;
+            parsedData[key] = THRESHOLD_BUCKET_KEYS.reduce((acc, bucketKey) => {
+                const rows = Array.isArray(bucketedRanges[bucketKey]) && bucketedRanges[bucketKey].length > 0
+                    ? bucketedRanges[bucketKey]
+                    : bucketKey === "default"
+                        ? DEFAULT_CI_THRESHOLDS
+                        : [];
+                acc[bucketKey] = rows
+                    .map(normalizeRow)
+                    .filter(row => row.min !== undefined && row.max !== undefined && row.min !== null && row.max !== null);
+                return acc;
+            }, createEmptyThresholdBuckets());
         } else if (key === "num_cells" || key === "level" || key === "jitter" || key === "latency" || key === "packet_loss" || key === "tac" || key === "dominance" || key === "coverage_violation" ) {
             const bucketedRanges = parseBucketedRangeValue(data[key]);
             parsedData._bucketPayloads[key] = bucketedRanges;
@@ -829,6 +851,29 @@ const buildSavePayload = (thresholds, userId) => {
         return JSON.stringify(nextBuckets);
     };
 
+    const normalizeCiRanges = (sourceBuckets, fallbackRows = DEFAULT_CI_THRESHOLDS) => {
+        const existingBuckets = thresholds?._bucketPayloads?.ci_db || createEmptyThresholdBuckets();
+        const nextBuckets = { ...createEmptyThresholdBuckets(), ...existingBuckets };
+        const defaultRows = Array.isArray(sourceBuckets?.default) && sourceBuckets.default.length > 0
+            ? sourceBuckets.default
+            : fallbackRows;
+        const twoGRows = Array.isArray(sourceBuckets?.["2g"]) && sourceBuckets["2g"].length > 0
+            ? sourceBuckets["2g"]
+            : defaultRows;
+
+        THRESHOLD_BUCKET_KEYS.forEach((bucketKey) => {
+            const rows =
+                bucketKey === "default"
+                    ? defaultRows
+                    : bucketKey === "2g"
+                        ? twoGRows
+                        : sourceBuckets?.[bucketKey] || [];
+            nextBuckets[bucketKey] = normalizeArray(rows);
+        });
+
+        return JSON.stringify(nextBuckets);
+    };
+
     const payload = { 
         id: thresholds.id || 0,
         user_id: userId || 0,
@@ -836,6 +881,7 @@ const buildSavePayload = (thresholds, userId) => {
         rsrp_json: normalizeBucketedRanges("rsrp", thresholds.rsrp),
         rsrq_json: normalizeBucketedRanges("rsrq", thresholds.rsrq),
         sinr_json: normalizeBucketedRanges("sinr", thresholds.sinr),
+        c_i_json: normalizeCiRanges(thresholds.ci_db, DEFAULT_CI_THRESHOLDS),
         dl_thpt_json: normalizeBucketedRanges("dl_thpt", thresholds.dl_thpt),
         ul_thpt_json: normalizeBucketedRanges("ul_thpt", thresholds.ul_thpt),
         delta_json: normalizeBucketedRanges("delta", thresholds.delta),

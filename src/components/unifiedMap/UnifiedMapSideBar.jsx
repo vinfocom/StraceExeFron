@@ -481,6 +481,7 @@ const GRID_VIEW_ALLOWED_METRICS = Object.freeze([
   "rsrp",
   "rsrq",
   "sinr",
+  "ci_db",
   "dl_thpt",
   "ul_thpt",
   "mos",
@@ -817,6 +818,7 @@ const UnifiedMapSidebar = ({
         { value: "rsrp", label: "RSRP/RSSI/RXLevel" },
         { value: "rsrq", label: "RSRQ" },
         { value: "sinr", label: "SINR/RXQual" },
+        { value: "ci_db", label: "C/I" },
         { value: "dl_thpt", label: "DL Throughput" },
         { value: "ul_thpt", label: "UL Throughput" },
         { value: "mos", label: "MOS" },
@@ -842,7 +844,7 @@ const UnifiedMapSidebar = ({
 
       if (!isSecondaryOnlyMode) return baseOptions;
 
-      const secondaryOnlyMetrics = new Set(["rsrp", "rsrq", "sinr", "pci"]);
+      const secondaryOnlyMetrics = new Set(["rsrp", "rsrq", "sinr", "ci_db", "pci"]);
       return baseOptions
         .filter((option) => secondaryOnlyMetrics.has(option.value))
         .map((option) => ({
