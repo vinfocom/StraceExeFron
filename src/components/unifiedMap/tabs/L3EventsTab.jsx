@@ -63,6 +63,7 @@ const MAP_INTERFACE_COLOR_PALETTE = [
   "#64748b",
 ];
 const MAP_UNKNOWN_RSRP_COLOR = "#64748b";
+const HANDOVER_FAILURE_TEXT_RE = /\b(?:hand(?:\s|-)?over|ho)\b.{0,120}\b(?:fail(?:ed|ure|uire)?|reject(?:ed)?|drop|timeout|abort(?:ed)?)\b|\bhandover\s*fail(?:ure|uire)?\b/i;
 
 const normalizeMapLabel = (value = "") => String(value)
   .replace(/^\(new\)\s*/i, "")
@@ -519,6 +520,7 @@ function getMapEventMarker(item = {}) {
   const milestone = String(item.milestone || "").trim().toUpperCase();
   const eventKey = String(item.eventKey || "").trim().toUpperCase();
   const handoverClassification = String(item.handoverClassification || "").trim().toLowerCase();
+  const text = [item.cause, item.message, item.title, item.summary, item.rawMessage, item.category].filter(Boolean).join(" ");
 
   if (handoverClassification === "confirmed_handover" || milestone === "HANDOVER COMPLETE") {
     return {
@@ -529,7 +531,7 @@ function getMapEventMarker(item = {}) {
     };
   }
 
-  if (handoverClassification === "failed_handover" || milestone === "HANDOVER FAILURE") {
+  if (handoverClassification === "failed_handover" || milestone === "HANDOVER FAILURE" || HANDOVER_FAILURE_TEXT_RE.test(text)) {
     return {
       markerType: "handover-failure",
       markerSymbol: "✋",
@@ -611,6 +613,7 @@ export function buildMapPoints(timeline, rsrpByRowId = new Map()) {
         title: item?.message || item?.title || item?.summary || "Message",
         summary: item?.summary || "",
         rawMessage: item?.rawMessage || "",
+        cause: item?.cause || "",
         severity: item?.severity || "",
         milestone: item?.milestone || "",
         callId: item?.callId || "",
@@ -658,8 +661,8 @@ function formatMapRawMessage(point) {
 }
 
 function isFailurePoint(point) {
-  const text = [point?.severity, point?.title, point?.summary, point?.rawMessage, point?.category].filter(Boolean).join(" ");
-  return /\b(fail(?:ed|ure)?|reject(?:ed)?|timeout|error|rlf|radio link failure|dropped|forbidden|unavailable)\b|\b[45]\d{2}\b/i.test(text);
+  const text = [point?.severity, point?.title, point?.summary, point?.rawMessage, point?.cause, point?.category].filter(Boolean).join(" ");
+  return HANDOVER_FAILURE_TEXT_RE.test(text) || /\b(fail(?:ed|ure|uire)?|reject(?:ed)?|timeout|error|rlf|radio link failure|dropped|forbidden|unavailable)\b|\b[45]\d{2}\b/i.test(text);
 }
 
 export function L3EventsMapView({ points }) {
@@ -808,6 +811,7 @@ export function L3EventsMapView({ points }) {
       .map((point, index) => ({ point, index }))
       .filter(({ point }) => [
         point.title,
+        point.cause,
         point.rawMessage,
         point.summary,
         point.timestampLabel,

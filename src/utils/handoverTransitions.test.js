@@ -209,6 +209,14 @@ test("marks an explicit successful event as confirmed", () => {
   assert.equal(result.pciTransitions[0].confidence, "high");
 });
 
+test("marks compact typo handover failure text as failed", () => {
+  const result = evaluateL3HandoverTimeline([
+    { id: "failure", timestamp: new Date(baseTime).toISOString(), rawMessage: "CALL_DISCONNECTED | cause handoverfailuire | dropped" },
+  ]);
+
+  assert.equal(result.byId.get("failure")?.classification, "failed_handover");
+});
+
 test("keeps sessions isolated", () => {
   const result = buildHandoverTransitions([
     row(1, 101, 0, { session_id: 7 }),

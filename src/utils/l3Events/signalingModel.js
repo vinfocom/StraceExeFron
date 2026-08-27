@@ -6,7 +6,7 @@ const WARNING_RE = /\b(warn(?:ing)?|retry|degraded|weak|congestion)\b/i;
 const REQUEST_RE = /\b(request|command|setup|invite|paging|dial(?:ing)?|alerting|attempt|start)\b/i;
 
 const MILESTONE_RULES = [
-  { label: "HANDOVER FAILURE", test: /\b(hand(?: |-)?over|ho)\b.*\b(fail|failure|reject|timeout)\b/i, severity: "failure" },
+  { label: "HANDOVER FAILURE", test: /\b(?:hand(?: |-)?over|ho)\b.*\b(fail|failure|failuire|reject|timeout)\b|\bhandover\s*fail(?:ure|uire)?\b/i, severity: "failure" },
   { label: "RADIO LINK FAILURE", test: /\b(radio link failure|rlf)\b/i, severity: "failure" },
   { label: "HANDOVER COMPLETE", test: /\b(?:handover|hand\s*over)\b.*\b(complete|success)\b/i, severity: "success" },
   { label: "HANDOVER START", test: /\b(hand(?: |-)?over|ho)\b.*\b(command|start|attempt|request)\b/i, severity: "request" },
@@ -26,6 +26,26 @@ function textOf(item = {}) {
 
 function detailValue(item, label) {
   return item?.details?.find((detail) => detail.label === label)?.value || "";
+}
+
+function formatCauseValue(value = "") {
+  const compact = String(value || "").trim();
+  if (!compact) return "-";
+  if (/^handover(?:[\s_-]*fail(?:ure|uire))?$/i.test(compact.replace(/\s+/g, ""))) return "Handover Failure";
+  return compact
+    .replace(/[_-]+/g, " ")
+    .replace(/([a-z])([A-Z])/g, "$1 $2")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/\b\w/g, (char) => char.toUpperCase()) || "-";
+}
+
+function extractCause(item = {}) {
+  const existing = detailValue(item, "Cause") || detailValue(item, "Reject Cause");
+  const raw = [existing, item.rawMessage, item.summary, item.title].filter(Boolean).join(" | ");
+  const match = raw.match(/\bc(?:au|ou)se\b\s*(?:[:=]\s*|\s+)(?:is\s+)?\(?\s*([^|;,\]\)\r\n]+)/i);
+  if (!match) return "-";
+  return formatCauseValue(match[1].replace(/^["']|["']$/g, ""));
 }
 
 function inferSim(item) {
@@ -112,6 +132,7 @@ export function buildUnifiedSignalingRows(timeline = [], calls = [], analysis = 
       message: milestone?.label || item.officialName || base.title || base.eventKey || "Log row",
       procedure: item.procedureName || procedure?.name || base.category || "Observed row",
       protocol,
+      cause: extractCause(item),
       result: severity === "failure" ? "Failure" : severity === "success" ? "Success" : procedure?.result || "Observed",
       severity,
       callId: item.callId || membership.get(base.id) || null,

@@ -361,7 +361,7 @@ function UploadHistoryLanding({ projectId, projectName, onOpenAnalysis, onBack }
   };
 
   return (
-    <div className="min-h-full overflow-auto bg-slate-950 p-4 text-white">
+    <div className="h-full min-h-0 overflow-auto bg-slate-950 p-4 text-white">
       <div className="mx-auto max-w-6xl space-y-4">
         <div className="flex items-center gap-3">
           <button type="button" onClick={onBack} className="inline-flex h-9 items-center gap-1 rounded border border-slate-700 px-3 text-xs hover:bg-slate-800"><ArrowLeft className="h-3.5 w-3.5" />Projects</button>
@@ -394,7 +394,7 @@ function UploadHistoryLanding({ projectId, projectName, onOpenAnalysis, onBack }
             <div className="flex items-center gap-2 text-sm font-semibold"><History className="h-4 w-4 text-blue-300" />L3 Session</div>
             <span className="text-xs text-slate-500">Select Analysis to reopen saved results without uploading again.</span>
           </div>
-          <div className="overflow-x-auto rounded border border-slate-800">
+          <div className="max-h-[calc(100vh-360px)] min-h-0 overflow-auto rounded border border-slate-800">
             <table className="w-full min-w-[800px] text-xs">
               <thead className="bg-slate-800 text-left text-slate-400"><tr><th className="px-3 py-2">ID</th><th className="px-3 py-2">Project ID</th><th className="px-3 py-2">Session ID</th><th className="px-3 py-2">File Name</th><th className="px-3 py-2">Uploaded On</th><th className="px-3 py-2">Action</th></tr></thead>
               <tbody>

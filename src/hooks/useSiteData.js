@@ -143,7 +143,7 @@ const getSitePredictionMergeKey = (row = {}) => {
   if (backendKey) return `identity:${backendKey}`;
 
   const site = String(
-    row?.site ??
+    row?.siteName ?? row?.site ??
       row?.site_id ??
       row?.siteId ??
       row?.site_key_inferred ??
