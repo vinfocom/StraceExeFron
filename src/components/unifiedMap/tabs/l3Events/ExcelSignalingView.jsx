@@ -1,5 +1,5 @@
-import React, { memo, useEffect, useMemo, useState } from "react";
-import { ChevronDown, Download, Loader2, Search, X } from "lucide-react";
+import React, { memo, useEffect, useMemo, useRef, useState } from "react";
+import { ChevronDown, ChevronUp, Download, Loader2, Search, X } from "lucide-react";
 import toast from "react-hot-toast";
 import { downloadExcelSignalingSummaryPdf } from "@/utils/l3Events/pdfReport";
 
@@ -75,18 +75,6 @@ function formatCoordinate(value) {
   return Number.isFinite(numeric) ? numeric.toFixed(6) : "—";
 }
 
-function ColumnTextFilter({ value, onChange, placeholder }) {
-  return (
-    <input
-      value={value}
-      onChange={(event) => onChange(event.target.value)}
-      onClick={(event) => event.stopPropagation()}
-      placeholder={placeholder}
-      className="h-7 w-full rounded border border-slate-700 bg-slate-950 px-2 text-[11px] font-normal normal-case text-white placeholder:text-slate-500 focus:border-blue-500 focus:outline-none"
-    />
-  );
-}
-
 function ColumnSelectFilter({ value, onChange, options, allLabel = "All" }) {
   return (
     <select
@@ -101,91 +89,107 @@ function ColumnSelectFilter({ value, onChange, options, allLabel = "All" }) {
   );
 }
 
-function MessageColumnFilter({ value, onChange, options }) {
+function MessageColumnFilter({ value, onChange, matches, activeMatchNumber, onNext, onPrevious, onClear, onSelectMatch }) {
   const [isOpen, setIsOpen] = useState(false);
-  const [showAll, setShowAll] = useState(false);
-  const needle = value.trim().toLowerCase();
-  const visibleOptions = (showAll || !needle
-    ? options
-    : options.filter((option) => String(option).toLowerCase().includes(needle))
-  ).slice(0, 100);
-
-  const selectMessage = (message) => {
-    onChange(message);
-    setIsOpen(false);
-    setShowAll(false);
-  };
+  const hasSearch = Boolean(value.trim());
+  const matchCount = matches.length;
+  const hasMatches = matchCount > 0;
 
   return (
-    <div className="relative min-w-0">
-      <input
-        value={value}
-        onChange={(event) => {
-          onChange(event.target.value);
-          setIsOpen(true);
-          setShowAll(false);
-        }}
-        onClick={(event) => {
-          event.stopPropagation();
-          setIsOpen(true);
-          setShowAll(false);
-        }}
-        onFocus={() => {
-          setIsOpen(true);
-          setShowAll(false);
-        }}
-        onBlur={() => window.setTimeout(() => setIsOpen(false), 120)}
-        placeholder="Search message"
-        className="h-7 w-full rounded border border-slate-700 bg-slate-950 py-0 pl-2 pr-8 text-[11px] font-normal normal-case text-white placeholder:text-slate-500 focus:border-blue-500 focus:outline-none"
-      />
-      <button
-        type="button"
-        onMouseDown={(event) => event.preventDefault()}
-        onClick={(event) => {
-          event.stopPropagation();
-          setShowAll(true);
-          setIsOpen((current) => !current || !showAll);
-        }}
-        className="absolute right-1 top-1 flex h-5 w-5 items-center justify-center rounded text-slate-400 hover:bg-slate-800 hover:text-white"
-        aria-label="Show message options"
-      >
-        <ChevronDown className="h-3.5 w-3.5" />
-      </button>
-      {isOpen && (
-        <div className="absolute left-0 right-0 top-8 z-30 max-h-56 overflow-auto rounded border border-slate-700 bg-slate-950 py-1 text-left shadow-xl shadow-black/30">
-          {value && (
+    <div className="relative flex min-w-0 items-center gap-1">
+      <div className="relative min-w-0 flex-1">
+        <Search className="pointer-events-none absolute left-2 top-2 h-3.5 w-3.5 text-slate-500" />
+        <input
+          value={value}
+          onChange={(event) => {
+            onChange(event.target.value);
+            setIsOpen(true);
+          }}
+          onClick={(event) => {
+            event.stopPropagation();
+            setIsOpen(true);
+          }}
+          onFocus={() => setIsOpen(true)}
+          onBlur={() => window.setTimeout(() => setIsOpen(false), 120)}
+          onKeyDown={(event) => {
+            if (event.key !== "Enter") return;
+            event.preventDefault();
+            event.stopPropagation();
+            setIsOpen(false);
+            if (event.shiftKey) onPrevious();
+            else onNext();
+          }}
+          placeholder="Find message"
+          className="h-7 w-full rounded border border-slate-700 bg-slate-950 py-0 pl-7 pr-2 text-[11px] font-normal normal-case text-white placeholder:text-slate-500 focus:border-blue-500 focus:outline-none"
+        />
+      </div>
+      {isOpen && hasSearch && (
+        <div className="absolute left-0 right-0 top-8 z-40 max-h-48 overflow-auto rounded border border-slate-700 bg-slate-950 py-1 text-left shadow-xl shadow-black/30">
+          {hasMatches ? matches.map((row, index) => (
             <button
+              key={row.id}
               type="button"
+              title={row.message}
               onMouseDown={(event) => event.preventDefault()}
               onClick={(event) => {
                 event.stopPropagation();
-                onChange("");
+                onSelectMatch(index);
                 setIsOpen(false);
-                setShowAll(false);
               }}
-              className="block w-full px-2 py-1.5 text-left text-[11px] text-slate-300 hover:bg-slate-800 hover:text-white"
+              className={`flex w-full min-w-0 items-center gap-2 px-2 py-1.5 text-left text-[11px] hover:bg-blue-500/20 hover:text-white ${index === activeMatchNumber - 1 ? "bg-amber-500/20 text-amber-50" : "text-slate-200"}`}
             >
-              All Messages
-            </button>
-          )}
-          {visibleOptions.length ? visibleOptions.map((option) => (
-            <button
-              key={option}
-              type="button"
-              title={option}
-              onMouseDown={(event) => event.preventDefault()}
-              onClick={(event) => {
-                event.stopPropagation();
-                selectMessage(option);
-              }}
-              className="block w-full truncate px-2 py-1.5 text-left text-[11px] text-slate-200 hover:bg-blue-500/20 hover:text-white"
-            >
-              {option}
+              <span className="shrink-0 font-mono text-[10px] text-slate-500">{index + 1}</span>
+              <span className="min-w-0 truncate">{row.message || "Log row"}</span>
             </button>
           )) : (
             <div className="px-2 py-2 text-[11px] text-slate-500">No messages found</div>
           )}
         </div>
+      )}
+      {hasSearch && (
+        <span className="w-14 shrink-0 text-center text-[10px] font-normal normal-case text-slate-400">
+          {hasMatches ? `${activeMatchNumber}/${matchCount}` : "0/0"}
+        </span>
+      )}
+      <button
+        type="button"
+          onClick={(event) => {
+            event.stopPropagation();
+            setIsOpen(false);
+            onPrevious();
+          }}
+        disabled={!hasMatches}
+        title="Previous match"
+        className="flex h-7 w-7 shrink-0 items-center justify-center rounded border border-slate-700 bg-slate-950 text-slate-300 hover:bg-slate-800 hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
+      >
+        <ChevronUp className="h-3.5 w-3.5" />
+      </button>
+      <button
+        type="button"
+          onClick={(event) => {
+            event.stopPropagation();
+            setIsOpen(false);
+            onNext();
+          }}
+        disabled={!hasMatches}
+        title="Next match"
+        className="flex h-7 w-7 shrink-0 items-center justify-center rounded border border-slate-700 bg-slate-950 text-slate-300 hover:bg-slate-800 hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
+      >
+        <ChevronDown className="h-3.5 w-3.5" />
+      </button>
+      {hasSearch && (
+        <button
+          type="button"
+          onClick={(event) => {
+            event.stopPropagation();
+            setIsOpen(false);
+            onClear();
+          }}
+          title="Clear message search"
+          className="flex h-7 w-7 shrink-0 items-center justify-center rounded border border-slate-700 bg-slate-950 text-slate-300 hover:bg-slate-800 hover:text-white"
+        >
+          <X className="h-3.5 w-3.5" />
+        </button>
       )}
     </div>
   );
@@ -207,12 +211,13 @@ function DirectionFilter({ value, onChange }) {
   );
 }
 
-const SignalingRow = memo(function SignalingRow({ row, selected, onSelect, includeLocation }) {
+const SignalingRow = memo(React.forwardRef(function SignalingRow({ row, selected, searchMatch, activeSearchMatch, onSelect, includeLocation }, ref) {
   const severityClass = SEVERITY_CLASS[row.severity] || SEVERITY_CLASS.neutral;
   return (
     <tr
+      ref={ref}
       onClick={() => onSelect(row)}
-      className={`h-8 cursor-pointer border-b border-slate-800/90 transition-colors hover:bg-blue-500/10 ${selected ? "outline outline-1 -outline-offset-1 outline-blue-400 bg-blue-500/15" : ""}`}
+      className={`h-8 cursor-pointer border-b border-slate-800/90 transition-colors hover:bg-blue-500/10 ${searchMatch ? "bg-amber-500/10" : ""} ${activeSearchMatch ? "outline outline-1 -outline-offset-1 outline-amber-300 bg-amber-500/20" : ""} ${selected ? "outline outline-1 -outline-offset-1 outline-blue-400 bg-blue-500/15" : ""}`}
       style={{ height: "32px" }}
     >
       <td className={`border-r border-slate-800 px-2 font-mono text-[11px] whitespace-nowrap ${severityClass}`}>{row.timestampLabel}</td>
@@ -232,7 +237,7 @@ const SignalingRow = memo(function SignalingRow({ row, selected, onSelect, inclu
       </td>
     </tr>
   );
-});
+}));
 
 function SelectFilter({ label, value, onChange, options, allLabel = "All" }) {
   return (
@@ -272,17 +277,17 @@ export function ExcelSignalingView({ rows = [], calls = [], selectedCall, onSele
   const [includeLocation, setIncludeLocation] = useState(false);
   const [sort, setSort] = useState({ key: "timestamp", direction: "asc" });
   const [selectedRow, setSelectedRow] = useState(null);
+  const [activeMessageMatchIndex, setActiveMessageMatchIndex] = useState(0);
   const [isDownloadingSummary, setIsDownloadingSummary] = useState(false);
+  const rowRefs = useRef(new Map());
 
   useEffect(() => setCallFilter(selectedCall?.id || "all"), [selectedCall]);
 
   const technologies = useMemo(() => uniqueValues(rows, "technology"), [rows]);
   const interfaces = useMemo(() => uniqueValues(rows, "interface"), [rows]);
   const causes = useMemo(() => uniqueValues(rows, "cause"), [rows]);
-  const messages = useMemo(() => uniqueValues(rows, "message"), [rows]);
-  const filtered = useMemo(() => {
+  const filteredInSequence = useMemo(() => {
     const needle = query.trim().toLowerCase();
-    const messageNeedle = messageColumnFilter.trim().toLowerCase();
     return rows.filter((row) => {
       if (callFilter !== "all" && row.callId !== callFilter) return false;
       if (technology !== "all" && row.technology !== technology) return false;
@@ -292,12 +297,44 @@ export function ExcelSignalingView({ rows = [], calls = [], selectedCall, onSele
       if (coreDirection !== "all" && laneDirection(row, "core") !== coreDirection) return false;
       if (interfaceColumnFilter !== "all" && row.interface !== interfaceColumnFilter) return false;
       if (causeColumnFilter !== "all" && row.cause !== causeColumnFilter) return false;
-      if (messageNeedle && !String(row.message || "").toLowerCase().includes(messageNeedle)) return false;
       if (failureOnly && row.severity !== "failure") return false;
       if (!needle) return true;
       return [row.timestampLabel, row.sourceFile, row.message, row.cause, row.procedure, row.protocol, row.interface, row.rawMessage, row.callId].filter(Boolean).join(" ").toLowerCase().includes(needle);
-    }).sort((a, b) => compareRows(a, b, sort));
-  }, [rows, callFilter, technology, sources, ueDirection, radioDirection, coreDirection, interfaceColumnFilter, causeColumnFilter, messageColumnFilter, failureOnly, query, sort]);
+    });
+  }, [rows, callFilter, technology, sources, ueDirection, radioDirection, coreDirection, interfaceColumnFilter, causeColumnFilter, failureOnly, query]);
+
+  const filtered = useMemo(() => [...filteredInSequence].sort((a, b) => compareRows(a, b, sort)), [filteredInSequence, sort]);
+  const messageNeedle = messageColumnFilter.trim().toLowerCase();
+  const messageMatches = useMemo(() => {
+    if (!messageNeedle) return [];
+    return filtered.filter((row) => String(row.message || "").toLowerCase().includes(messageNeedle));
+  }, [filtered, messageNeedle]);
+  const activeMessageMatch = messageMatches[activeMessageMatchIndex] || null;
+  const messageMatchIds = useMemo(() => new Set(messageMatches.map((row) => row.id)), [messageMatches]);
+
+  useEffect(() => {
+    if (selectedRow && !filtered.some((row) => row.id === selectedRow.id)) {
+      setSelectedRow(null);
+    }
+  }, [filtered, selectedRow]);
+
+  useEffect(() => {
+    setActiveMessageMatchIndex(0);
+  }, [messageNeedle, sort]);
+
+  useEffect(() => {
+    if (!messageNeedle) return;
+    if (!messageMatches.length) {
+      setSelectedRow(null);
+      return;
+    }
+    if (activeMessageMatchIndex >= messageMatches.length) {
+      setActiveMessageMatchIndex(0);
+      return;
+    }
+    setSelectedRow(activeMessageMatch);
+    rowRefs.current.get(activeMessageMatch.id)?.scrollIntoView({ block: "center", inline: "nearest" });
+  }, [activeMessageMatch, activeMessageMatchIndex, messageMatches, messageNeedle]);
 
   const exportCalls = useMemo(() => {
     if (callFilter !== "all") {
@@ -330,7 +367,26 @@ export function ExcelSignalingView({ rows = [], calls = [], selectedCall, onSele
     setCoreDirection("all");
     setFailureOnly(false);
     setIncludeLocation(false);
+    setSelectedRow(null);
     onSelectCall?.(null);
+  };
+  const changeMessageColumnFilter = (value) => {
+    setMessageColumnFilter(value);
+    setSelectedRow(null);
+    setActiveMessageMatchIndex(0);
+  };
+  const clearMessageColumnFilter = () => {
+    setMessageColumnFilter("");
+    setSelectedRow(null);
+    setActiveMessageMatchIndex(0);
+  };
+  const moveMessageMatch = (step) => {
+    if (!messageMatches.length) return;
+    setActiveMessageMatchIndex((current) => (current + step + messageMatches.length) % messageMatches.length);
+  };
+  const selectMessageMatch = (index) => {
+    if (index < 0 || index >= messageMatches.length) return;
+    setActiveMessageMatchIndex(index);
   };
   const changeSort = (key) => setSort((current) => ({ key, direction: current.key === key && current.direction === "asc" ? "desc" : "asc" }));
   const downloadSummary = async () => {
@@ -414,16 +470,37 @@ export function ExcelSignalingView({ rows = [], calls = [], selectedCall, onSele
               <th className="sticky top-[33px] z-10 border-b border-slate-700 bg-slate-800 px-2 py-1">
                 <MessageColumnFilter
                   value={messageColumnFilter}
-                  onChange={setMessageColumnFilter}
-                  options={messages}
+                  onChange={changeMessageColumnFilter}
+                  matches={messageMatches}
+                  activeMatchNumber={messageMatches.length ? activeMessageMatchIndex + 1 : 0}
+                  onNext={() => moveMessageMatch(1)}
+                  onPrevious={() => moveMessageMatch(-1)}
+                  onClear={clearMessageColumnFilter}
+                  onSelectMatch={selectMessageMatch}
                 />
               </th>
             </tr>
           </thead>
-          <tbody>{filtered.length ? filtered.map((row) => <SignalingRow key={row.id} row={row} selected={selectedRow?.id === row.id} onSelect={setSelectedRow} includeLocation={includeLocation} />) : <tr><td colSpan={columnCount} className="py-16 text-center text-xs text-slate-500">No signaling rows match the current filters.</td></tr>}</tbody>
+          <tbody>{filtered.length ? filtered.map((row) => (
+            <SignalingRow
+              key={row.id}
+              ref={(node) => {
+                if (node) rowRefs.current.set(row.id, node);
+                else rowRefs.current.delete(row.id);
+              }}
+              row={row}
+              selected={selectedRow?.id === row.id}
+              searchMatch={messageMatchIds.has(row.id)}
+              activeSearchMatch={activeMessageMatch?.id === row.id}
+              onSelect={setSelectedRow}
+              includeLocation={includeLocation}
+            />
+          )) : <tr><td colSpan={columnCount} className="py-16 text-center text-xs text-slate-500">No signaling rows match the current filters.</td></tr>}</tbody>
         </table>
       </div>
-      <div className="basis-[22%] shrink-0 border-t border-slate-700 shadow-2xl shadow-black/30"><DetailPanel row={selectedRow} /></div>
+      <div className="basis-[22%] shrink-0 border-t border-slate-700 shadow-2xl shadow-black/30">
+        <DetailPanel row={selectedRow} />
+      </div>
     </div>
   );
 }
