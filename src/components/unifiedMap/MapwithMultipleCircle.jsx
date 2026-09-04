@@ -211,7 +211,7 @@ const matchesPrimaryLegendFilter = (log, legendFilter) => {
       key = Number.isFinite(pci) ? String(pci) : "Unknown";
     }
 
-    return key === legendFilter.value;
+    return String(key) === String(legendFilter.value);
   }
 
   return true;
@@ -249,7 +249,7 @@ const matchesNeighborLegendFilter = (neighbor, legendFilter) => {
       key = Number.isFinite(pci) ? String(pci) : "Unknown";
     }
 
-    return key === legendFilter.value;
+    return String(key) === String(legendFilter.value);
   }
 
   return true;
@@ -1760,9 +1760,12 @@ const MapWithMultipleCircles = ({
 
     const activeLegendFilters = getLegendFilterItems(legendFilter);
     if (activeLegendFilters.length && !enableGrid) {
-      filtered = filtered.filter(log =>
-        activeLegendFilters.some((filter) => matchesPrimaryLegendFilter(log, filter)),
-      );
+      filtered = filtered.map((log) => ({
+        ...log,
+        _legendDimmed: !activeLegendFilters.some((filter) =>
+          matchesPrimaryLegendFilter(log, filter),
+        ),
+      }));
     }
 
     return filtered;
@@ -1895,9 +1898,12 @@ const MapWithMultipleCircles = ({
 
     const activeLegendFilters = getLegendFilterItems(legendFilter);
     if (activeLegendFilters.length) {
-      parsed = parsed.filter(n =>
-        activeLegendFilters.some((filter) => matchesNeighborLegendFilter(n, filter)),
-      );
+      parsed = parsed.map((n) => ({
+        ...n,
+        _legendDimmed: !activeLegendFilters.some((filter) =>
+          matchesNeighborLegendFilter(n, filter),
+        ),
+      }));
     }
 
     return parsed;
@@ -1955,9 +1961,12 @@ const MapWithMultipleCircles = ({
     const activeLegendFilters = getLegendFilterItems(legendFilter);
     if (!activeLegendFilters.length) return gridCells;
 
-    return gridCells.filter((cell) =>
-      activeLegendFilters.some((filter) => matchesGridCellLegendFilter(cell, filter)),
-    );
+    return gridCells.map((cell) => ({
+      ...cell,
+      _legendDimmed: !activeLegendFilters.some((filter) =>
+        matchesGridCellLegendFilter(cell, filter),
+      ),
+    }));
   }, [gridCells, legendFilter]);
 
   const polygonGridAverages = useMemo(() => {

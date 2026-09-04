@@ -8,6 +8,11 @@ import { X, Plus, Save, RefreshCw, ArrowUpDown, Download, Upload } from 'lucide-
 import { settingApi } from '../api/apiEndpoints';
 import { useAuth } from '@/context/AuthContext';
 
+const loadExcelJS = async () => {
+    const module = await import("exceljs");
+    return module.default || module;
+};
+
 const PARAMETERS = {
     rsrp: "RSRP",
     rsrq: "RSRQ",
@@ -918,6 +923,7 @@ const SETTING_EXPORT_KEYS = [
     "rsrp",
     "rsrq",
     "sinr",
+    "ci_db",
     "dl_thpt",
     "ul_thpt",
     "delta",
@@ -955,57 +961,178 @@ const escapeCsvValue = (value) => {
     return stringValue;
 };
 
-const createSettingsCsv = (thresholds) => {
-    if (!thresholds) return "";
+const SETTINGS_EXPORT_HEADERS = [
+    "parameter",
+    "bucket",
+    "type",
+    "min",
+    "max",
+    "color",
+    "label_optional",
+    "value_only_for_scalar",
+    "notes",
+];
 
-    const rows = [[
-        "parameter",
-        "bucket",
-        "type",
-        "min",
-        "max",
-        "color",
-        "label_optional",
-        "value_only_for_scalar",
-        "notes",
-    ]];
+const SETTINGS_RANGE_WORKSHEET_HEADERS = ["bucket", "min", "max", "color", "label"];
+const SETTINGS_SCALAR_WORKSHEET_HEADERS = ["bucket", "value"];
+const SETTING_EXPORT_LABELS = { ...PARAMETERS, ...SPECIAL_FIELDS };
 
-    SETTING_EXPORT_KEYS.forEach((key) => {
-        if (key === "coveragehole") {
-            THRESHOLD_BUCKET_KEYS.forEach((bucketKey) => {
-                rows.push([
-                    key,
-                    bucketKey,
-                    "scalar",
-                    "",
-                    "",
-                    "",
-                    "",
-                    thresholds.coveragehole?.[bucketKey] ?? DEFAULT_COVERAGE_HOLE,
-                    "Only value_only_for_scalar is used for scalar rows",
-                ]);
-            });
+const sanitizeWorksheetName = (name) => {
+    const clean = String(name || "Settings")
+        .replace(/[\\/*?:[\]]/g, "-")
+        .trim() || "Settings";
+    return clean.slice(0, 31);
+};
+
+const getUniqueWorksheetName = (workbook, preferredName) => {
+    const baseName = sanitizeWorksheetName(preferredName);
+    if (!workbook.getWorksheet(baseName)) return baseName;
+
+    for (let index = 2; index < 100; index += 1) {
+        const suffix = ` ${index}`;
+        const nextName = `${baseName.slice(0, 31 - suffix.length)}${suffix}`;
+        if (!workbook.getWorksheet(nextName)) return nextName;
+    }
+
+    return `${baseName.slice(0, 27)} ${Date.now().toString().slice(-3)}`;
+};
+
+const getSheetParameterKey = (worksheet, headers) => {
+    const firstDataRow = worksheet.getRow(2);
+    const parameterIndex = headers.indexOf("parameter") + 1;
+    const explicitKey = parameterIndex > 0
+        ? String(firstDataRow.getCell(parameterIndex).value ?? "").trim()
+        : "";
+
+    if (SETTING_EXPORT_KEYS.includes(explicitKey)) return explicitKey;
+
+    const normalizedSheetName = sanitizeWorksheetName(worksheet.name).toLowerCase();
+    return SETTING_EXPORT_KEYS.find((key) => {
+        const label = SETTING_EXPORT_LABELS[key] || key;
+        return (
+            sanitizeWorksheetName(label).toLowerCase() === normalizedSheetName ||
+            sanitizeWorksheetName(key).toLowerCase() === normalizedSheetName
+        );
+    }) || null;
+};
+
+const appendSettingsRows = (rows, thresholds, key) => {
+    if (key === "coveragehole") {
+        THRESHOLD_BUCKET_KEYS.forEach((bucketKey) => {
+            rows.push([
+                key,
+                bucketKey,
+                "scalar",
+                "",
+                "",
+                "",
+                "",
+                thresholds.coveragehole?.[bucketKey] ?? DEFAULT_COVERAGE_HOLE,
+                "Only value_only_for_scalar is used for scalar rows",
+            ]);
+        });
+        return;
+    }
+
+    THRESHOLD_BUCKET_KEYS.forEach((bucketKey) => {
+        (thresholds?.[key]?.[bucketKey] || []).forEach((row) => {
+            rows.push([
+                key,
+                bucketKey,
+                "range",
+                parseNumber(row.min),
+                parseNumber(row.max),
+                row.color || "#00ff00",
+                row.label || "",
+                "",
+                "Use min,max,color. Leave value_only_for_scalar blank for range rows",
+            ]);
+        });
+    });
+};
+
+const getWorkbookHeadersForParameter = (key) =>
+    key === "coveragehole" ? SETTINGS_SCALAR_WORKSHEET_HEADERS : SETTINGS_RANGE_WORKSHEET_HEADERS;
+
+const appendSettingsWorksheetRows = (rows, thresholds, key) => {
+    if (key === "coveragehole") {
+        THRESHOLD_BUCKET_KEYS.forEach((bucketKey) => {
+            rows.push([
+                bucketKey,
+                thresholds.coveragehole?.[bucketKey] ?? DEFAULT_COVERAGE_HOLE,
+            ]);
+        });
+        return;
+    }
+
+    THRESHOLD_BUCKET_KEYS.forEach((bucketKey) => {
+        const bucketRows = thresholds?.[key]?.[bucketKey] || [];
+
+        if (!bucketRows.length) {
+            rows.push([bucketKey, "", "", "", ""]);
             return;
         }
 
-        THRESHOLD_BUCKET_KEYS.forEach((bucketKey) => {
-            (thresholds?.[key]?.[bucketKey] || []).forEach((row) => {
-                rows.push([
-                    key,
-                    bucketKey,
-                    "range",
-                    parseNumber(row.min),
-                    parseNumber(row.max),
-                    row.color || "#00ff00",
-                    row.label || "",
-                    "",
-                    "Use min,max,color. Leave value_only_for_scalar blank for range rows",
-                ]);
-            });
+        bucketRows.forEach((row) => {
+            rows.push([
+                bucketKey,
+                parseNumber(row.min),
+                parseNumber(row.max),
+                row.color || "#00ff00",
+                row.label || "",
+            ]);
         });
+    });
+};
+
+const createSettingsCsv = (thresholds) => {
+    if (!thresholds) return "";
+
+    const rows = [SETTINGS_EXPORT_HEADERS];
+
+    SETTING_EXPORT_KEYS.forEach((key) => {
+        appendSettingsRows(rows, thresholds, key);
     });
 
     return rows.map((row) => row.map(escapeCsvValue).join(",")).join("\n");
+};
+
+const createSettingsWorkbook = async (thresholds) => {
+    const ExcelJS = await loadExcelJS();
+    const workbook = new ExcelJS.Workbook();
+    workbook.creator = "Stracer";
+    workbook.created = new Date();
+
+    SETTING_EXPORT_KEYS.forEach((key) => {
+        const worksheetName = getUniqueWorksheetName(workbook, SETTING_EXPORT_LABELS[key] || key);
+        const worksheet = workbook.addWorksheet(worksheetName);
+        const headers = getWorkbookHeadersForParameter(key);
+        const rows = [headers];
+        appendSettingsWorksheetRows(rows, thresholds, key);
+        worksheet.addRows(rows);
+
+        worksheet.getRow(1).font = { bold: true };
+        worksheet.getRow(1).fill = {
+            type: "pattern",
+            pattern: "solid",
+            fgColor: { argb: "FFE2E8F0" },
+        };
+        worksheet.views = [{ state: "frozen", ySplit: 1 }];
+        worksheet.autoFilter = {
+            from: { row: 1, column: 1 },
+            to: { row: 1, column: headers.length },
+        };
+        worksheet.columns = headers.map((header) => ({
+            key: header,
+            width: Math.max(14, header.length + 2),
+        }));
+        if (key !== "coveragehole") {
+            worksheet.getColumn("label").width = 20;
+            worksheet.getColumn("color").width = 14;
+        }
+    });
+
+    return workbook;
 };
 
 const parseCsvLine = (line) => {
@@ -1095,9 +1222,99 @@ const buildThresholdsFromCsv = (csvText, currentThresholds) => {
             min: getColumn(values, "min"),
             max: getColumn(values, "max"),
             color: getColumn(values, "color") || "#00ff00",
-            label: getColumn(values, "label") || "",
+            label: getColumn(values, "label_optional") || getColumn(values, "label") || "",
         }));
     });
+
+    return nextThresholds;
+};
+
+const createEmptyImportedThresholds = (currentThresholds) => {
+    const nextThresholds = {
+        ...currentThresholds,
+        _bucketPayloads: {},
+    };
+
+    SETTING_EXPORT_KEYS.forEach((key) => {
+        nextThresholds[key] = key === "coveragehole"
+            ? createEmptyScalarBuckets(DEFAULT_COVERAGE_HOLE)
+            : createEmptyThresholdBuckets();
+    });
+
+    return nextThresholds;
+};
+
+const readWorksheetHeaders = (worksheet) =>
+    worksheet.getRow(1).values
+        .slice(1)
+        .map((header) => String(header ?? "").trim());
+
+const getWorksheetCell = (row, headers, name) => {
+    const index = headers.indexOf(name);
+    if (index < 0) return "";
+    const value = row.getCell(index + 1).value;
+    if (value && typeof value === "object" && "text" in value) return value.text ?? "";
+    if (value && typeof value === "object" && "result" in value) return value.result ?? "";
+    return value ?? "";
+};
+
+const hasWorksheetCellValue = (row, headers, name) => {
+    const value = getWorksheetCell(row, headers, name);
+    return value !== null && value !== undefined && String(value).trim() !== "";
+};
+
+const buildThresholdsFromWorkbook = async (arrayBuffer, currentThresholds) => {
+    const ExcelJS = await loadExcelJS();
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.load(arrayBuffer);
+
+    const nextThresholds = createEmptyImportedThresholds(currentThresholds);
+    let importedSheetCount = 0;
+
+    workbook.worksheets.forEach((worksheet) => {
+        const headers = readWorksheetHeaders(worksheet);
+        const parameter = getSheetParameterKey(worksheet, headers);
+        if (!parameter) return;
+        importedSheetCount += 1;
+
+        worksheet.eachRow((row, rowNumber) => {
+            if (rowNumber === 1) return;
+
+            const explicitParameter = String(getWorksheetCell(row, headers, "parameter") ?? "").trim();
+            const rowParameter = SETTING_EXPORT_KEYS.includes(explicitParameter)
+                ? explicitParameter
+                : parameter;
+            const bucket = String(getWorksheetCell(row, headers, "bucket") ?? "").trim();
+            const type = String(getWorksheetCell(row, headers, "type") ?? "").trim();
+
+            if (!SETTING_EXPORT_KEYS.includes(rowParameter)) return;
+            if (!THRESHOLD_BUCKET_KEYS.includes(bucket)) return;
+
+            if (rowParameter === "coveragehole" || type === "scalar") {
+                const rawValue = getWorksheetCell(row, headers, "value") || getWorksheetCell(row, headers, "value_only_for_scalar");
+                nextThresholds.coveragehole[bucket] = rawValue === "" || rawValue === null
+                    ? DEFAULT_COVERAGE_HOLE
+                    : parseNumber(rawValue);
+                return;
+            }
+
+            const hasRangeValue = ["min", "max", "color", "label", "label_optional"].some((name) =>
+                hasWorksheetCellValue(row, headers, name),
+            );
+            if (!hasRangeValue) return;
+
+            nextThresholds[rowParameter][bucket].push(normalizeRow({
+                min: getWorksheetCell(row, headers, "min"),
+                max: getWorksheetCell(row, headers, "max"),
+                color: getWorksheetCell(row, headers, "color") || "#00ff00",
+                label: getWorksheetCell(row, headers, "label_optional") || getWorksheetCell(row, headers, "label") || "",
+            }));
+        });
+    });
+
+    if (importedSheetCount === 0) {
+        throw new Error("Excel file has no recognized parameter sheets");
+    }
 
     return nextThresholds;
 };
@@ -1200,23 +1417,30 @@ const SettingsPage = ({ onSaveSuccess }) => {
         await persistThresholds(thresholds, "Settings saved successfully!");
     }, [persistThresholds, thresholds]);
 
-    const handleDownloadSettings = useCallback(() => {
+    const handleDownloadSettings = useCallback(async () => {
         if (!thresholds) {
             toast.error("No settings available to download");
             return;
         }
 
-        const csvContent = createSettingsCsv(thresholds);
-        const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-        const url = URL.createObjectURL(blob);
-        const anchor = document.createElement('a');
-        const datePart = new Date().toISOString().slice(0, 10);
-        anchor.href = url;
-        anchor.download = `settings-backup-${datePart}.csv`;
-        document.body.appendChild(anchor);
-        anchor.click();
-        document.body.removeChild(anchor);
-        URL.revokeObjectURL(url);
+        try {
+            const workbook = await createSettingsWorkbook(thresholds);
+            const buffer = await workbook.xlsx.writeBuffer();
+            const blob = new Blob([buffer], {
+                type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            });
+            const url = URL.createObjectURL(blob);
+            const anchor = document.createElement('a');
+            const datePart = new Date().toISOString().slice(0, 10);
+            anchor.href = url;
+            anchor.download = `settings-backup-${datePart}.xlsx`;
+            document.body.appendChild(anchor);
+            anchor.click();
+            document.body.removeChild(anchor);
+            URL.revokeObjectURL(url);
+        } catch (error) {
+            toast.error(`Export failed: ${error.message}`);
+        }
     }, [thresholds]);
 
     const handleUploadButtonClick = useCallback(() => {
@@ -1228,8 +1452,10 @@ const SettingsPage = ({ onSaveSuccess }) => {
         if (!file) return;
 
         try {
-            const rawText = await file.text();
-            const nextThresholds = buildThresholdsFromCsv(rawText, thresholds);
+            const fileName = String(file.name || "").toLowerCase();
+            const nextThresholds = fileName.endsWith(".xlsx")
+                ? await buildThresholdsFromWorkbook(await file.arrayBuffer(), thresholds)
+                : buildThresholdsFromCsv(await file.text(), thresholds);
             setThresholds(nextThresholds);
             setActiveParam(null);
             await persistThresholds(nextThresholds, "Settings imported and updated successfully!");
@@ -1284,7 +1510,7 @@ const SettingsPage = ({ onSaveSuccess }) => {
                                 <input
                                     ref={fileInputRef}
                                     type="file"
-                                    accept=".csv,text/csv"
+                                    accept=".xlsx,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv"
                                     onChange={handleUploadSettings}
                                     className="hidden"
                                 />
@@ -1296,7 +1522,7 @@ const SettingsPage = ({ onSaveSuccess }) => {
                                     className="border-slate-500 bg-slate-800 hover:bg-slate-700 text-slate-100 rounded-lg"
                                 >
                                     <Download className="h-4 w-4 mr-2" />
-                                    Download CSV
+                                    Download Excel
                                 </Button>
                                 <Button
                                     type="button"
@@ -1306,7 +1532,7 @@ const SettingsPage = ({ onSaveSuccess }) => {
                                     className="border-slate-500 bg-slate-800 hover:bg-slate-700 text-slate-100 rounded-lg"
                                 >
                                     <Upload className="h-4 w-4 mr-2" />
-                                    Upload CSV
+                                    Upload Excel
                                 </Button>
                             </div>
                         </div>
@@ -1431,7 +1657,7 @@ const SettingsPage = ({ onSaveSuccess }) => {
                                 {thresholds?.isDefault === 1 ? ' (Default)' : ' (Custom)'}
                             </div>
                             <div>
-                                In CSV, `value_only_for_scalar` is only for scalar rows like Coverage Hole. For range rows, keep that column blank.
+                                In Excel, each parameter has its own sheet. `value_only_for_scalar` is only for scalar rows like Coverage Hole.
                             </div>
                         </div>
                         <div className="flex flex-wrap items-center gap-2">

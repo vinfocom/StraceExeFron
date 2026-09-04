@@ -836,7 +836,7 @@ function getMaxRenderedSiteSectors(totalCount) {
   return 30000;
 }
 const MAX_RENDERED_SITE_LABELS = 450;
-const MIN_SITE_LABEL_ZOOM = 14;
+const MIN_SITE_LABEL_ZOOM = 12;
 const MAX_SITE_LABEL_CHARS = 14;
 const SITE_LABEL_COLOR_FIELDS = new Set(["pci", "band", "technology"]);
 const SITE_MARKER_LABEL_FIELDS = new Set(["site", "site_id"]);
@@ -1599,6 +1599,7 @@ const NetworkPlannerMap = ({
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
   const [sectorEditFormData, setSectorEditFormData] = useState({});
   const [sectorEditOriginalData, setSectorEditOriginalData] = useState({});
+  const [sectorEditDraftsByRenderKey, setSectorEditDraftsByRenderKey] = useState({});
   const [selectedEditScenarioId, setSelectedEditScenarioId] = useState("");
   const [selectedEditSectorRenderKey, setSelectedEditSectorRenderKey] = useState("");
   const [dragMode, setDragMode] = useState(null); // "sector" | "site" | null
@@ -1616,6 +1617,12 @@ const NetworkPlannerMap = ({
     setLoadingSectorDetailsKey(null);
     setSectorOverridesByRenderKey({});
     setSectorPredictionRowsByRenderKey({});
+    setIsEditDialogOpen(false);
+    setSectorEditFormData({});
+    setSectorEditOriginalData({});
+    setSectorEditDraftsByRenderKey({});
+    setSelectedEditScenarioId("");
+    setSelectedEditSectorRenderKey("");
     setSelectedSiteIds([]);
     setSelectedSiteDataById({});
     siteFetchTokenRef.current = {};
@@ -1874,6 +1881,7 @@ const NetworkPlannerMap = ({
       setIsEditDialogOpen(false);
       setSectorEditFormData({});
       setSectorEditOriginalData({});
+      setSectorEditDraftsByRenderKey({});
       siteFetchTokenRef.current = {};
       setLoadingSitesQueue(new Set());
     }
@@ -1889,6 +1897,9 @@ const NetworkPlannerMap = ({
     setDragMode(null);
     setPendingMovePosition(null);
     setIsEditDialogOpen(false);
+    setSectorEditFormData({});
+    setSectorEditOriginalData({});
+    setSectorEditDraftsByRenderKey({});
   }, [showSiteSectors, clearSectorOverlays]);
 
   useEffect(() => {
@@ -3179,9 +3190,25 @@ const NetworkPlannerMap = ({
     setIsEditDialogOpen(false);
     setSectorEditFormData({});
     setSectorEditOriginalData({});
+    setSectorEditDraftsByRenderKey({});
     setSelectedEditScenarioId("");
     setSelectedEditSectorRenderKey("");
   }, [selectedSectorInfo?.renderKey]);
+
+  const clearAllSectorPredictionGridData = useCallback(() => {
+    setSelectedSectorInfo(null);
+    setLoadingSectorDetailsKey(null);
+    setSectorOverridesByRenderKey({});
+    setSectorPredictionRowsByRenderKey({});
+    setDragMode(null);
+    setPendingMovePosition(null);
+    setIsEditDialogOpen(false);
+    setSectorEditFormData({});
+    setSectorEditOriginalData({});
+    setSectorEditDraftsByRenderKey({});
+    setSelectedEditScenarioId("");
+    setSelectedEditSectorRenderKey("");
+  }, []);
 
   const closeSectorTooltipOnly = useCallback(() => {
     setSelectedSectorInfo(null);
@@ -3191,6 +3218,7 @@ const NetworkPlannerMap = ({
     setIsEditDialogOpen(false);
     setSectorEditFormData({});
     setSectorEditOriginalData({});
+    setSectorEditDraftsByRenderKey({});
     setSelectedEditScenarioId("");
     setSelectedEditSectorRenderKey("");
   }, []);
@@ -3515,17 +3543,22 @@ const NetworkPlannerMap = ({
     const onClearSelectedSites = () => {
       handleClearSelectedSites();
     };
+    const onClearSectorPredictionGridData = () => {
+      clearAllSectorPredictionGridData();
+    };
 
     window.addEventListener("map:selectAllSites", onSelectAllSites);
     window.addEventListener("map:selectAllSectors", onSelectAllSectors);
     window.addEventListener("map:clearSelectedSites", onClearSelectedSites);
+    window.addEventListener("map:clearSectorPredictionGridData", onClearSectorPredictionGridData);
 
     return () => {
       window.removeEventListener("map:selectAllSites", onSelectAllSites);
       window.removeEventListener("map:selectAllSectors", onSelectAllSectors);
       window.removeEventListener("map:clearSelectedSites", onClearSelectedSites);
+      window.removeEventListener("map:clearSectorPredictionGridData", onClearSectorPredictionGridData);
     };
-  }, [handleClearSelectedSites, handleSelectAllSectors, handleSelectAllSites]);
+  }, [clearAllSectorPredictionGridData, handleClearSelectedSites, handleSelectAllSectors, handleSelectAllSites]);
 
   const handleSectorLeftClick = useCallback(
     async (sector, infoPos) => {
@@ -3733,7 +3766,7 @@ const NetworkPlannerMap = ({
     projectId,
   ]);
 
-  function openSiteEditDialog(sector) {
+  function openSiteEditDialog(sector, options = {}) {
     if (!sector) return;
     if (String(siteToggle || "").toLowerCase() !== "cell") {
       toast.info("Editing is available only for Cell toggle (site_prediction).");
@@ -3783,10 +3816,12 @@ const NetworkPlannerMap = ({
         value === null || value === undefined ? "" : String(value),
       ]),
     );
+    const sectorRenderKey = String(sector.renderKey || "");
+    const draft = (options.draftsByRenderKey || sectorEditDraftsByRenderKey)?.[sectorRenderKey] || null;
 
-    setSectorEditOriginalData(seed);
-    setSectorEditFormData(formState);
-    setSelectedEditSectorRenderKey(String(sector.renderKey || ""));
+    setSectorEditOriginalData(draft?.originalData || seed);
+    setSectorEditFormData(draft?.formData || formState);
+    setSelectedEditSectorRenderKey(sectorRenderKey);
     setSelectedEditScenarioId(
       String(sitePredictionVersion || "").trim().toLowerCase() === "updated" &&
         Number.isFinite(Number(activeSitePredictionScenarioId)) &&
@@ -3798,10 +3833,22 @@ const NetworkPlannerMap = ({
   }
 
   const handleSelectedEditSectorChange = (renderKey) => {
-    setSelectedEditSectorRenderKey(String(renderKey || ""));
-    const nextSector = editableSectorOptions.find((item) => item.value === renderKey)?.sector;
+    const nextRenderKey = String(renderKey || "");
+    setSelectedEditSectorRenderKey(nextRenderKey);
+    const nextSector = editableSectorOptions.find((item) => item.value === nextRenderKey)?.sector;
     if (!nextSector) return;
-    openSiteEditDialog(nextSector);
+    const currentRenderKey = String(selectedEditSectorRenderKey || selectedSectorInfo?.renderKey || "");
+    const nextDrafts = currentRenderKey
+      ? {
+          ...sectorEditDraftsByRenderKey,
+          [currentRenderKey]: {
+            formData: sectorEditFormData,
+            originalData: sectorEditOriginalData,
+          },
+        }
+      : sectorEditDraftsByRenderKey;
+    setSectorEditDraftsByRenderKey(nextDrafts);
+    openSiteEditDialog(nextSector, { draftsByRenderKey: nextDrafts });
   };
 
   const handleSectorEditFieldChange = useCallback((field, value) => {
@@ -3901,6 +3948,10 @@ const NetworkPlannerMap = ({
     if (!hasAnyChangedField) {
       toast.info("No changes to save.");
       setIsEditDialogOpen(false);
+      setSectorEditFormData({});
+      setSectorEditOriginalData({});
+      setSectorEditDraftsByRenderKey({});
+      setSelectedEditSectorRenderKey("");
       return;
     }
 
@@ -4794,7 +4845,6 @@ const NetworkPlannerMap = ({
                   {selectedSectorPredictionRows.length > 0 && (() => {
                     const gridSetting = sectorGridSettings?.[sectorRenderKey] || {};
                     const includeInGrid = gridSetting.includeInGrid !== false;
-                    const aggregationOverride = gridSetting.aggregationMethod || "";
                     return (
                       <div className="mt-2 border-t border-slate-200 pt-2">
                         <label className="flex items-center gap-1.5 text-[11px] text-slate-700">
@@ -4808,25 +4858,6 @@ const NetworkPlannerMap = ({
                             }
                           />
                           Show this sector in grid
-                        </label>
-                        <label className="mt-1 flex items-center gap-1.5 text-[11px] text-slate-700">
-                          Aggregation:
-                          <select
-                            value={aggregationOverride}
-                            disabled={!includeInGrid}
-                            onChange={(e) =>
-                              onSectorGridSettingChange?.(sectorRenderKey, {
-                                aggregationMethod: e.target.value || null,
-                              })
-                            }
-                            className="rounded border border-slate-300 bg-white px-1 py-0.5 text-[11px] disabled:opacity-50"
-                          >
-                            <option value="">Default (global)</option>
-                            <option value="median">Median</option>
-                            <option value="mean">Mean</option>
-                            <option value="min">Min</option>
-                            <option value="max">Max</option>
-                          </select>
                         </label>
                       </div>
                     );

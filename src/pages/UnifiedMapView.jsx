@@ -427,7 +427,7 @@ const matchesUnifiedLegendFilter = (log, legendFilter) => {
       key = Number.isFinite(pci) ? String(pci) : "Unknown";
     }
 
-    return key === legendFilter.value;
+    return String(key) === String(legendFilter.value);
   }
 
   return true;
@@ -1816,9 +1816,11 @@ const UnifiedMapView = () => {
   const [sectorGridSettings, setSectorGridSettings] = useState({});
   const handleSectorGridSettingChange = useCallback((renderKey, patch) => {
     if (!renderKey) return;
+    const nextPatch = { ...(patch || {}) };
+    delete nextPatch.aggregationMethod;
     setSectorGridSettings((prev) => ({
       ...prev,
-      [renderKey]: { ...prev[renderKey], ...patch },
+      [renderKey]: { ...prev[renderKey], ...nextPatch },
     }));
   }, []);
   const excludedGridSectorKeys = useMemo(() => {
@@ -1827,13 +1829,7 @@ const UnifiedMapView = () => {
       .map(([key]) => key);
     return keys.length > 0 ? new Set(keys) : null;
   }, [sectorGridSettings]);
-  const sectorGridAggregationOverrides = useMemo(() => {
-    const overrides = {};
-    Object.entries(sectorGridSettings).forEach(([key, setting]) => {
-      if (setting?.aggregationMethod) overrides[key] = setting.aggregationMethod;
-    });
-    return Object.keys(overrides).length > 0 ? overrides : null;
-  }, [sectorGridSettings]);
+  const sectorGridAggregationOverrides = null;
   const loadedSectorGridOptions = useMemo(() => {
     const byKey = new Map();
     (Array.isArray(sectorPredictionGridPoints) ? sectorPredictionGridPoints : []).forEach(
@@ -1928,7 +1924,14 @@ const UnifiedMapView = () => {
       : "mean";
   }, [lteGridAggregationMethod]);
   const handleLteGridAggregationMethodChange = useCallback((nextMethod) => {
-    setLteGridAggregationMethod(nextMethod);
+    const normalizedMethod = String(nextMethod || "mean").trim().toLowerCase();
+    setLteGridAggregationMethod(
+      normalizedMethod === "avg"
+        ? "mean"
+        : normalizedMethod === "median" || normalizedMethod === "min" || normalizedMethod === "max"
+          ? normalizedMethod
+          : "mean",
+    );
 
     // A selection in the sidebar is the global grid aggregate. Remove only
     // per-sector aggregate overrides so every included sector responds to it;
@@ -1993,6 +1996,57 @@ const UnifiedMapView = () => {
   const [manualSiteData, setManualSiteData] = useState([]);
   const [manualSiteLoading, setManualSiteLoading] = useState(false);
   const [manualSiteDataReady, setManualSiteDataReady] = useState(false);
+
+  const setUnifiedSitePredictionVersion = useCallback((nextVersion) => {
+    const normalizedVersion = String(nextVersion || "original").trim().toLowerCase();
+    const resolvedVersion =
+      normalizedVersion === "updated" || normalizedVersion === "optimized" || normalizedVersion === "optimised"
+        ? "updated"
+        : normalizedVersion === "delta"
+          ? "delta"
+          : "original";
+    setSitePredictionVersion(resolvedVersion);
+    setStoredGridVersion(resolvedVersion);
+  }, []);
+
+  const clearStoredGridOverlay = useCallback((showToast = false) => {
+    setDeltaGridApiState((prev) => {
+      if (
+        !prev?.gridVisible &&
+        (!Array.isArray(prev?.grids) || prev.grids.length === 0) &&
+        Number(prev?.gridsCount || 0) === 0
+      ) {
+        return prev;
+      }
+      return {
+        ...prev,
+        gridVisible: false,
+        lastStatus: "idle",
+        lastMessage: "",
+        lastError: "",
+        grids: [],
+        gridsCount: 0,
+        lastUpdatedAt: new Date().toISOString(),
+      };
+    });
+    if (showToast) toast.info("Stored grid hidden.");
+  }, []);
+
+  const clearSectorWiseGridData = useCallback(() => {
+    setSectorPredictionGridPoints([]);
+    setSectorGridSettings({});
+    if (typeof window !== "undefined") {
+      window.dispatchEvent(new CustomEvent("map:clearSectorPredictionGridData"));
+    }
+  }, []);
+
+  const handleSectorPredictionPointsChange = useCallback((points = []) => {
+    const nextPoints = Array.isArray(points) ? points : [];
+    if (nextPoints.length > 0) {
+      clearStoredGridOverlay(false);
+    }
+    setSectorPredictionGridPoints(nextPoints);
+  }, [clearStoredGridOverlay]);
 
   useEffect(() => {
     if (isSideOpen) {
@@ -2074,7 +2128,7 @@ const UnifiedMapView = () => {
     const scenarioId = Number(scenario);
     if (!Number.isFinite(scenarioId) || scenarioId <= 0) return;
 
-    setSitePredictionVersion("updated");
+    setUnifiedSitePredictionVersion("updated");
     setSitePredictionScenarioId(scenarioId);
     setSitePredictionScenarioOptions((prev) => {
       const current = Array.isArray(prev) ? prev : [];
@@ -2101,7 +2155,7 @@ const UnifiedMapView = () => {
 
       return next.sort((a, b) => Number(a?.scenario_id) - Number(b?.scenario_id));
     });
-  }, []);
+  }, [setUnifiedSitePredictionVersion]);
 
   useEffect(() => {
     const numericProjectId = Number(projectId);
@@ -2880,6 +2934,7 @@ const UnifiedMapView = () => {
         Number(data?.grid_size_meters ?? data?.gridSizeMeters) || requestedGridSize;
       const message = String(root?.Message ?? root?.message ?? "Grid analytics fetched.").trim();
 
+      clearSectorWiseGridData();
       setDeltaGridApiState((prev) => ({
         ...prev,
         fetching: false,
@@ -2922,7 +2977,7 @@ const UnifiedMapView = () => {
       toast.error(message);
       return false;
     }
-  }, [projectId, lteGridSizeMeters, setLteGridSizeMeters, storedGridVersion, storedGridScenarioId, storedGridTechnology]);
+  }, [projectId, lteGridSizeMeters, setLteGridSizeMeters, storedGridVersion, storedGridScenarioId, storedGridTechnology, clearSectorWiseGridData]);
 
   useEffect(() => {
     const normalizedVersion = String(storedGridVersion || "original").trim().toLowerCase();
@@ -3285,21 +3340,12 @@ const UnifiedMapView = () => {
       typeof visible === "boolean" ? Boolean(visible) : null;
 
     if (desiredVisible === false) {
-      setDeltaGridApiState((prev) => ({
-        ...prev,
-        gridVisible: false,
-        lastStatus: "idle",
-        lastMessage: "",
-        lastError: "",
-        grids: [],
-        gridsCount: 0,
-        lastUpdatedAt: new Date().toISOString(),
-      }));
-      toast.info("Stored grid hidden.");
+      clearStoredGridOverlay(true);
       return true;
     }
 
     if (desiredVisible === true) {
+      clearSectorWiseGridData();
       return handleDeltaGridFetchStored({
         version: requestedVersion || currentVersion,
         scenarioId,
@@ -3322,19 +3368,10 @@ const UnifiedMapView = () => {
     }
 
     if (Boolean(deltaGridApiState?.gridVisible)) {
-      setDeltaGridApiState((prev) => ({
-        ...prev,
-        gridVisible: false,
-        lastStatus: "idle",
-        lastMessage: "",
-        lastError: "",
-        grids: [],
-        gridsCount: 0,
-        lastUpdatedAt: new Date().toISOString(),
-      }));
-      toast.info("Stored grid hidden.");
+      clearStoredGridOverlay(true);
       return true;
     }
+    clearSectorWiseGridData();
     return handleDeltaGridFetchStored({
       version,
       scenarioId,
@@ -3349,6 +3386,8 @@ const UnifiedMapView = () => {
     storedGridVersion,
     storedGridTechnology,
     handleDeltaGridFetchStored,
+    clearSectorWiseGridData,
+    clearStoredGridOverlay,
   ]);
 
   const storedDeltaGridCells = useMemo(() => {
@@ -7167,7 +7206,7 @@ const UnifiedMapView = () => {
         siteToggle={siteToggle}
         setSiteToggle={setSiteToggle}
         sitePredictionVersion={sitePredictionVersion}
-        setSitePredictionVersion={setSitePredictionVersion}
+        setSitePredictionVersion={setUnifiedSitePredictionVersion}
         sitePredictionScenarioId={sitePredictionScenarioId}
         setSitePredictionScenarioId={setSitePredictionScenarioId}
         sitePredictionScenarioOptions={sitePredictionScenarioOptions}
@@ -7302,7 +7341,7 @@ const UnifiedMapView = () => {
         siteToggle={siteToggle}
         siteRowCount={siteData?.length || 0}
         sitePredictionVersion={sitePredictionVersion}
-        setSitePredictionVersion={setSitePredictionVersion}
+        setSitePredictionVersion={setUnifiedSitePredictionVersion}
         sitePredictionScenarioId={sitePredictionScenarioId}
         setSitePredictionScenarioId={setSitePredictionScenarioId}
         sitePredictionScenarioOptions={sitePredictionScenarioOptions}
@@ -7726,7 +7765,7 @@ const UnifiedMapView = () => {
                   thresholds={effectiveThresholds}
                   getMetricColor={effectiveGetMetricColorForLog}
                   onSiteSelect={setSelectedSites}
-                  onSectorPredictionPointsChange={setSectorPredictionGridPoints}
+                  onSectorPredictionPointsChange={handleSectorPredictionPointsChange}
                   sectorGridSettings={sectorGridSettings}
                   onSectorGridSettingChange={handleSectorGridSettingChange}
                   triangleScaleMultiplier={triangleScaleMultiplier}

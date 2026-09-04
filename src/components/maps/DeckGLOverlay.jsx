@@ -75,6 +75,14 @@ const parseColorToRGB = (colorStr) => {
   return [128, 128, 128, 200]; // Fallback Gray
 };
 
+const withAlpha = (color, alpha) => {
+  if (!Array.isArray(color)) return [128, 128, 128, alpha];
+  return [color[0] ?? 128, color[1] ?? 128, color[2] ?? 128, alpha];
+};
+
+const getLegendAlpha = (source, activeAlpha, dimmedAlpha = 55) =>
+  source?._legendDimmed ? dimmedAlpha : activeAlpha;
+
 
 const metersToLatDeg = 1 / 111320;
 
@@ -379,7 +387,10 @@ const DeckGLOverlay = ({
         index: idx,
         source: loc,
         position,
-        computedColor: getColor ? parseColorToRGB(getColor(loc)) : [16, 185, 129, 200],
+        computedColor: withAlpha(
+          getColor ? parseColorToRGB(getColor(loc)) : [16, 185, 129, 200],
+          getLegendAlpha(loc, 220),
+        ),
       };
     })
       .filter(Boolean);
@@ -396,7 +407,7 @@ const DeckGLOverlay = ({
       const b = cell.bounds || {};
       const rgb = parseColorToRGB(cell.fillColor);
       // Populated cells solid, empty cells faint (mirrors previous RectangleF opacity).
-      const alpha = cell.count > 0 ? 255 : 60;
+      const alpha = cell.count > 0 ? getLegendAlpha(cell, 255, 55) : 60;
 
       const centerLat = (b.north + b.south) / 2;
       const centerLng = (b.east + b.west) / 2;
@@ -439,7 +450,10 @@ const DeckGLOverlay = ({
       source: n,
       polygon: getSquarePolygon(n.lat, n.lng, neighborSquareSize),
       // ✅ Use new robust parser
-      computedColor: getNeighborColor ? parseColorToRGB(getNeighborColor(n)) : [139, 92, 246, 180],
+      computedColor: withAlpha(
+        getNeighborColor ? parseColorToRGB(getNeighborColor(n)) : [139, 92, 246, 180],
+        getLegendAlpha(n, 190, 45),
+      ),
     }));
   }, [neighbors, showNeighbors, neighborSquareSize, getNeighborColor]);
 

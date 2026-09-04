@@ -508,7 +508,6 @@ function UnifiedHeader({
   siteToggle,
   setSiteToggle,
   sitePredictionVersion = "original",
-  setSitePredictionVersion,
   sitePredictionScenarioId = null,
   setSitePredictionScenarioId,
   sitePredictionScenarioOptions = [],
@@ -1342,19 +1341,6 @@ function UnifiedHeader({
                     { value: "NoML", label: "ML" },
                   ]}
                 />
-                {siteToggle === "Cell" && (
-                  <SelectRow
-                    value={sitePredictionVersion}
-                    onChange={(nextValue) => setSitePredictionVersion?.(nextValue)}
-                    options={[
-                      { value: "original", label: "Baseline" },
-                      { value: "updated", label: "Optimized" },
-                      { value: "delta", label: "Delta" },
-                    ]}
-                    placeholder="Select cell version"
-                    className="pt-0"
-                  />
-                )}
                 <SelectRow
                   className="pt-0"
                   value={siteLabelField || "none"}

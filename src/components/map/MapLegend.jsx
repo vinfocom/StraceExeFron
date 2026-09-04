@@ -180,8 +180,8 @@ const getLegendFilterSignature = (filter) => {
 
 const canCombineLegendFilters = (a, b) => {
   if (!a || !b || a.type !== b.type) return false;
-  if (a.type === "category") return a.key === b.key;
-  if (a.type === "metric") return a.metric === b.metric;
+  if (a.type === "category") return String(a.key ?? "") === String(b.key ?? "");
+  if (a.type === "metric") return String(a.metric ?? "") === String(b.metric ?? "");
   return true;
 };
 

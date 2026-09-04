@@ -353,7 +353,7 @@ const matchesHighPerfLegendFilter = (log, legendFilter) => {
       key = Number.isFinite(pci) ? String(pci) : "Unknown";
     }
 
-    return key === legendFilter.value;
+    return String(key) === String(legendFilter.value);
   }
 
   return true;
@@ -1088,14 +1088,14 @@ const rectCoords = [
         <MapWithMultipleCircles
           isLoaded={isLoaded}
           loadError={loadError}
-          locations={mapVisibleLogs}
+          locations={combinedDisplayedLogs}
           thresholds={thresholds}
           selectedMetric={selectedMetric}
           colorBy={colorBy}
           options={mapOptions}
           center={DEFAULT_CENTER}
           defaultZoom={13}
-          fitToLocations={activeFilters && mapVisibleLogs.length > 0}
+          fitToLocations={activeFilters && combinedDisplayedLogs.length > 0}
           onLoad={onMapLoad}
           onUnmount={onMapUnmount}
           pointRadius={ui.logRadius || 10}
@@ -1107,7 +1107,7 @@ const rectCoords = [
           showStats={false}
           enablePolygonFilter={false}
           showPolygonBoundary={false}
-          legendFilter={null}
+          legendFilter={legendFilter}
         >
           {isSearchOpen && <MapSearchBox />}
 

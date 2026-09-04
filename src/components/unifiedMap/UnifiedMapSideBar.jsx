@@ -1001,6 +1001,10 @@ const UnifiedMapSidebar = ({
       }
       setEnableSiteToggle?.(checked);
       if (!checked) return;
+      if (!showSiteMarkers && !showSiteSectors) {
+        setShowSiteMarkers?.(true);
+        setShowSiteSectors?.(true);
+      }
 
       const count = Number(siteRowCount) || 0;
       if (count > 0) {
@@ -1009,7 +1013,15 @@ const UnifiedMapSidebar = ({
         toast.info("Fetching site data...");
       }
     },
-    [hasValidProjectId, setEnableSiteToggle, siteRowCount],
+    [
+      hasValidProjectId,
+      setEnableSiteToggle,
+      setShowSiteMarkers,
+      setShowSiteSectors,
+      showSiteMarkers,
+      showSiteSectors,
+      siteRowCount,
+    ],
   );
 
   useEffect(() => {
@@ -1579,18 +1591,34 @@ const UnifiedMapSidebar = ({
       storedGridTechnology,
     ],
   );
-  const handleStoredGridVersionChange = useCallback(
+  const handleSitePredictionVersionChange = useCallback(
     (nextVersion) => {
-      setStoredGridVersion?.(nextVersion);
+      const normalizedVersion = String(nextVersion || "original").trim().toLowerCase();
+      const resolvedVersion =
+        normalizedVersion === "updated" ||
+        normalizedVersion === "optimized" ||
+        normalizedVersion === "optimised"
+          ? "updated"
+          : normalizedVersion === "delta"
+            ? "delta"
+            : "original";
+      setSitePredictionVersion?.(resolvedVersion);
+      setStoredGridVersion?.(resolvedVersion);
       if (Boolean(deltaGridApiState?.gridVisible)) {
         onDeltaGridFetchStored?.({
-          version: nextVersion,
+          version: resolvedVersion,
           technology: storedGridTechnology,
           forceFetch: true,
         });
       }
     },
-    [setStoredGridVersion, deltaGridApiState?.gridVisible, onDeltaGridFetchStored, storedGridTechnology],
+    [
+      setSitePredictionVersion,
+      setStoredGridVersion,
+      deltaGridApiState?.gridVisible,
+      onDeltaGridFetchStored,
+      storedGridTechnology,
+    ],
   );
   const handleStoredGridTechnologyChange = useCallback(
     (nextTechnology) => {
@@ -3314,6 +3342,27 @@ const UnifiedMapSidebar = ({
                   useSwitch={true}
                 />
 
+                {enableSiteToggle && (
+                  <div className="rounded-lg border border-slate-700 bg-slate-900/40 p-2">
+                    <div className="grid grid-cols-2 gap-2">
+                      <ToggleRow
+                        label="Site"
+                        checked={Boolean(showSiteMarkers)}
+                        onChange={setShowSiteMarkers}
+                        disabled={!hasValidProjectId}
+                        useSwitch={true}
+                      />
+                      <ToggleRow
+                        label="Sector"
+                        checked={Boolean(showSiteSectors)}
+                        onChange={setShowSiteSectors}
+                        disabled={!hasValidProjectId}
+                        useSwitch={true}
+                      />
+                    </div>
+                  </div>
+                )}
+
                 
 
                 <ToggleRow
@@ -3777,6 +3826,17 @@ const UnifiedMapSidebar = ({
               <>
                 
                 <div className="mt-3 pt-3 border-t border-slate-700/50 space-y-2">
+                  {isCellMode && (
+                    <SegmentedControl
+                      value={String(sitePredictionVersion || "original").trim().toLowerCase()}
+                      onChange={handleSitePredictionVersionChange}
+                      options={[
+                        { value: "original", label: "Baseline" },
+                        { value: "updated", label: "Optimized" },
+                        { value: "delta", label: "Delta" },
+                      ]}
+                    />
+                  )}
                   
 
                   {lteGridAvailable ? (
@@ -3812,7 +3872,7 @@ const UnifiedMapSidebar = ({
                         placeholder="Select aggregation"
                       />
                       <p className="text-[10px] text-slate-500">
-                        Also sets the aggregate used by "Show Stored Baseline Grid" (KPI) below.
+                        Controls all selected sectors and the stored grid aggregate.
                       </p>
                     </>
                   ) : (
@@ -3833,7 +3893,6 @@ const UnifiedMapSidebar = ({
                           {loadedSectorGridOptions.map((option) => {
                             const setting = sectorGridSettings?.[option.renderKey] || {};
                             const includeInGrid = setting.includeInGrid !== false;
-                            const aggregationOverride = setting.aggregationMethod || "";
                             return (
                               <div
                                 key={option.renderKey}
@@ -3863,22 +3922,9 @@ const UnifiedMapSidebar = ({
                                     />
                                     In grid
                                   </label>
-                                  <select
-                                    value={aggregationOverride}
-                                    disabled={!includeInGrid}
-                                    onChange={(e) =>
-                                      onSectorGridSettingChange?.(option.renderKey, {
-                                        aggregationMethod: e.target.value || null,
-                                      })
-                                    }
-                                    className="h-6 rounded border border-slate-600 bg-slate-800 px-1 text-[10px] text-white disabled:opacity-50"
-                                  >
-                                    <option value="">Default</option>
-                                    <option value="median">Median</option>
-                                    <option value="mean">Mean</option>
-                                    <option value="min">Min</option>
-                                    <option value="max">Max</option>
-                                  </select>
+                                  <span className="text-[10px] text-slate-400">
+                                    {String(normalizedLteGridAggregationMethod || "mean").toUpperCase()}
+                                  </span>
                                 </div>
                               </div>
                             );
@@ -4123,23 +4169,6 @@ const UnifiedMapSidebar = ({
               />
               {Boolean(deltaGridApiState?.gridVisible) && (
                 <div className="pt-1 bg-slate-900/40 rounded-lg p-2 space-y-2">
-                  <Label className="text-xs font-semibold text-blue-400 flex items-center gap-1">
-                    <Grid3X3 className="w-3 h-3" /> Stored Grid Version
-                  </Label>
-                  <SegmentedControl
-                    value={normalizedStoredGridVersion}
-                    onChange={handleStoredGridVersionChange}
-                    options={[
-                      { value: "original", label: "Baseline" },
-                      { value: "updated", label: "Optimized" },
-                      { value: "delta", label: "Delta" },
-                    ]}
-                    disabled={
-                      deltaGridButtonsDisabled ||
-                      Boolean(deltaGridApiState?.computing) ||
-                      Boolean(deltaGridApiState?.fetching)
-                    }
-                  />
                   <SelectRow
                     label="Technology"
                     value={String(storedGridTechnology || "ALL").trim().toUpperCase()}
@@ -4294,19 +4323,6 @@ const UnifiedMapSidebar = ({
                     placeholder="Select layer"
                   />
 
-                  <SelectRow
-                    label="Aggregate"
-                    value={storedGridAggregateMode}
-                    onChange={handleStoredGridAggregateModeChange}
-                    options={[
-                      { value: "avg", label: "Average" },
-                      { value: "min", label: "Minimum" },
-                      { value: "max", label: "Maximum" },
-                    ]}
-                    placeholder="Select aggregate"
-                  />
-
-                  
                 </>
               )}
             </div>
