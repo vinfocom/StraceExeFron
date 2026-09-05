@@ -89,7 +89,20 @@ function ColumnSelectFilter({ value, onChange, options, allLabel = "All" }) {
   );
 }
 
-function MessageColumnFilter({ value, onChange, matches, activeMatchNumber, onNext, onPrevious, onClear, onSelectMatch }) {
+function TextColumnSearchFilter({
+  value,
+  onChange,
+  matches,
+  activeMatchNumber,
+  onNext,
+  onPrevious,
+  onClear,
+  onSelectMatch,
+  placeholder,
+  getMatchLabel,
+  noMatchesLabel,
+  clearTitle,
+}) {
   const [isOpen, setIsOpen] = useState(false);
   const hasSearch = Boolean(value.trim());
   const matchCount = matches.length;
@@ -119,7 +132,7 @@ function MessageColumnFilter({ value, onChange, matches, activeMatchNumber, onNe
             if (event.shiftKey) onPrevious();
             else onNext();
           }}
-          placeholder="Find message"
+          placeholder={placeholder}
           className="h-7 w-full rounded border border-slate-700 bg-slate-950 py-0 pl-7 pr-2 text-[11px] font-normal normal-case text-white placeholder:text-slate-500 focus:border-blue-500 focus:outline-none"
         />
       </div>
@@ -129,7 +142,7 @@ function MessageColumnFilter({ value, onChange, matches, activeMatchNumber, onNe
             <button
               key={row.id}
               type="button"
-              title={row.message}
+              title={getMatchLabel(row)}
               onMouseDown={(event) => event.preventDefault()}
               onClick={(event) => {
                 event.stopPropagation();
@@ -139,10 +152,10 @@ function MessageColumnFilter({ value, onChange, matches, activeMatchNumber, onNe
               className={`flex w-full min-w-0 items-center gap-2 px-2 py-1.5 text-left text-[11px] hover:bg-blue-500/20 hover:text-white ${index === activeMatchNumber - 1 ? "bg-amber-500/20 text-amber-50" : "text-slate-200"}`}
             >
               <span className="shrink-0 font-mono text-[10px] text-slate-500">{index + 1}</span>
-              <span className="min-w-0 truncate">{row.message || "Log row"}</span>
+              <span className="min-w-0 truncate">{getMatchLabel(row) || "Log row"}</span>
             </button>
           )) : (
-            <div className="px-2 py-2 text-[11px] text-slate-500">No messages found</div>
+            <div className="px-2 py-2 text-[11px] text-slate-500">{noMatchesLabel}</div>
           )}
         </div>
       )}
@@ -185,7 +198,7 @@ function MessageColumnFilter({ value, onChange, matches, activeMatchNumber, onNe
             setIsOpen(false);
             onClear();
           }}
-          title="Clear message search"
+          title={clearTitle}
           className="flex h-7 w-7 shrink-0 items-center justify-center rounded border border-slate-700 bg-slate-950 text-slate-300 hover:bg-slate-800 hover:text-white"
         >
           <X className="h-3.5 w-3.5" />
@@ -268,7 +281,7 @@ export function ExcelSignalingView({ rows = [], calls = [], selectedCall, onSele
   const [sources, setSources] = useState(new Set(SOURCE_OPTIONS));
   const [query, setQuery] = useState("");
   const [interfaceColumnFilter, setInterfaceColumnFilter] = useState("all");
-  const [causeColumnFilter, setCauseColumnFilter] = useState("all");
+  const [causeColumnFilter, setCauseColumnFilter] = useState("");
   const [messageColumnFilter, setMessageColumnFilter] = useState("");
   const [ueDirection, setUeDirection] = useState("all");
   const [radioDirection, setRadioDirection] = useState("all");
@@ -277,6 +290,7 @@ export function ExcelSignalingView({ rows = [], calls = [], selectedCall, onSele
   const [includeLocation, setIncludeLocation] = useState(false);
   const [sort, setSort] = useState({ key: "timestamp", direction: "asc" });
   const [selectedRow, setSelectedRow] = useState(null);
+  const [activeCauseMatchIndex, setActiveCauseMatchIndex] = useState(0);
   const [activeMessageMatchIndex, setActiveMessageMatchIndex] = useState(0);
   const [isDownloadingSummary, setIsDownloadingSummary] = useState(false);
   const rowRefs = useRef(new Map());
@@ -285,7 +299,6 @@ export function ExcelSignalingView({ rows = [], calls = [], selectedCall, onSele
 
   const technologies = useMemo(() => uniqueValues(rows, "technology"), [rows]);
   const interfaces = useMemo(() => uniqueValues(rows, "interface"), [rows]);
-  const causes = useMemo(() => uniqueValues(rows, "cause"), [rows]);
   const filteredInSequence = useMemo(() => {
     const needle = query.trim().toLowerCase();
     return rows.filter((row) => {
@@ -296,20 +309,26 @@ export function ExcelSignalingView({ rows = [], calls = [], selectedCall, onSele
       if (radioDirection !== "all" && laneDirection(row, "radio") !== radioDirection) return false;
       if (coreDirection !== "all" && laneDirection(row, "core") !== coreDirection) return false;
       if (interfaceColumnFilter !== "all" && row.interface !== interfaceColumnFilter) return false;
-      if (causeColumnFilter !== "all" && row.cause !== causeColumnFilter) return false;
       if (failureOnly && row.severity !== "failure") return false;
       if (!needle) return true;
       return [row.timestampLabel, row.sourceFile, row.message, row.cause, row.procedure, row.protocol, row.interface, row.rawMessage, row.callId].filter(Boolean).join(" ").toLowerCase().includes(needle);
     });
-  }, [rows, callFilter, technology, sources, ueDirection, radioDirection, coreDirection, interfaceColumnFilter, causeColumnFilter, failureOnly, query]);
+  }, [rows, callFilter, technology, sources, ueDirection, radioDirection, coreDirection, interfaceColumnFilter, failureOnly, query]);
 
   const filtered = useMemo(() => [...filteredInSequence].sort((a, b) => compareRows(a, b, sort)), [filteredInSequence, sort]);
+  const causeNeedle = causeColumnFilter.trim().toLowerCase();
+  const causeMatches = useMemo(() => {
+    if (!causeNeedle) return [];
+    return filtered.filter((row) => String(row.cause || "").toLowerCase().includes(causeNeedle));
+  }, [filtered, causeNeedle]);
   const messageNeedle = messageColumnFilter.trim().toLowerCase();
   const messageMatches = useMemo(() => {
     if (!messageNeedle) return [];
     return filtered.filter((row) => String(row.message || "").toLowerCase().includes(messageNeedle));
   }, [filtered, messageNeedle]);
+  const activeCauseMatch = causeMatches[activeCauseMatchIndex] || null;
   const activeMessageMatch = messageMatches[activeMessageMatchIndex] || null;
+  const causeMatchIds = useMemo(() => new Set(causeMatches.map((row) => row.id)), [causeMatches]);
   const messageMatchIds = useMemo(() => new Set(messageMatches.map((row) => row.id)), [messageMatches]);
 
   useEffect(() => {
@@ -319,8 +338,23 @@ export function ExcelSignalingView({ rows = [], calls = [], selectedCall, onSele
   }, [filtered, selectedRow]);
 
   useEffect(() => {
+    setActiveCauseMatchIndex(0);
     setActiveMessageMatchIndex(0);
-  }, [messageNeedle, sort]);
+  }, [causeNeedle, messageNeedle, sort]);
+
+  useEffect(() => {
+    if (!causeNeedle) return;
+    if (!causeMatches.length) {
+      setSelectedRow(null);
+      return;
+    }
+    if (activeCauseMatchIndex >= causeMatches.length) {
+      setActiveCauseMatchIndex(0);
+      return;
+    }
+    setSelectedRow(activeCauseMatch);
+    rowRefs.current.get(activeCauseMatch.id)?.scrollIntoView({ block: "center", inline: "nearest" });
+  }, [activeCauseMatch, activeCauseMatchIndex, causeMatches, causeNeedle]);
 
   useEffect(() => {
     if (!messageNeedle) return;
@@ -360,7 +394,7 @@ export function ExcelSignalingView({ rows = [], calls = [], selectedCall, onSele
     setSources(new Set(SOURCE_OPTIONS));
     setQuery("");
     setInterfaceColumnFilter("all");
-    setCauseColumnFilter("all");
+    setCauseColumnFilter("");
     setMessageColumnFilter("");
     setUeDirection("all");
     setRadioDirection("all");
@@ -368,7 +402,19 @@ export function ExcelSignalingView({ rows = [], calls = [], selectedCall, onSele
     setFailureOnly(false);
     setIncludeLocation(false);
     setSelectedRow(null);
+    setActiveCauseMatchIndex(0);
+    setActiveMessageMatchIndex(0);
     onSelectCall?.(null);
+  };
+  const changeCauseColumnFilter = (value) => {
+    setCauseColumnFilter(value);
+    setSelectedRow(null);
+    setActiveCauseMatchIndex(0);
+  };
+  const clearCauseColumnFilter = () => {
+    setCauseColumnFilter("");
+    setSelectedRow(null);
+    setActiveCauseMatchIndex(0);
   };
   const changeMessageColumnFilter = (value) => {
     setMessageColumnFilter(value);
@@ -380,9 +426,17 @@ export function ExcelSignalingView({ rows = [], calls = [], selectedCall, onSele
     setSelectedRow(null);
     setActiveMessageMatchIndex(0);
   };
+  const moveCauseMatch = (step) => {
+    if (!causeMatches.length) return;
+    setActiveCauseMatchIndex((current) => (current + step + causeMatches.length) % causeMatches.length);
+  };
   const moveMessageMatch = (step) => {
     if (!messageMatches.length) return;
     setActiveMessageMatchIndex((current) => (current + step + messageMatches.length) % messageMatches.length);
+  };
+  const selectCauseMatch = (index) => {
+    if (index < 0 || index >= causeMatches.length) return;
+    setActiveCauseMatchIndex(index);
   };
   const selectMessageMatch = (index) => {
     if (index < 0 || index >= messageMatches.length) return;
@@ -466,9 +520,24 @@ export function ExcelSignalingView({ rows = [], calls = [], selectedCall, onSele
                 </>
               )}
               <th className="sticky top-[33px] z-10 border-b border-r border-slate-700 bg-slate-800 px-2 py-1"><ColumnSelectFilter value={interfaceColumnFilter} onChange={setInterfaceColumnFilter} options={interfaces} allLabel="All Interfaces" /></th>
-              <th className="sticky top-[33px] z-10 border-b border-r border-slate-700 bg-slate-800 px-2 py-1"><ColumnSelectFilter value={causeColumnFilter} onChange={setCauseColumnFilter} options={causes} allLabel="All Causes" /></th>
+              <th className="sticky top-[33px] z-10 border-b border-r border-slate-700 bg-slate-800 px-2 py-1">
+                <TextColumnSearchFilter
+                  value={causeColumnFilter}
+                  onChange={changeCauseColumnFilter}
+                  matches={causeMatches}
+                  activeMatchNumber={causeMatches.length ? activeCauseMatchIndex + 1 : 0}
+                  onNext={() => moveCauseMatch(1)}
+                  onPrevious={() => moveCauseMatch(-1)}
+                  onClear={clearCauseColumnFilter}
+                  onSelectMatch={selectCauseMatch}
+                  placeholder="Find cause"
+                  getMatchLabel={(row) => row.cause || ""}
+                  noMatchesLabel="No causes found"
+                  clearTitle="Clear cause search"
+                />
+              </th>
               <th className="sticky top-[33px] z-10 border-b border-slate-700 bg-slate-800 px-2 py-1">
-                <MessageColumnFilter
+                <TextColumnSearchFilter
                   value={messageColumnFilter}
                   onChange={changeMessageColumnFilter}
                   matches={messageMatches}
@@ -477,6 +546,10 @@ export function ExcelSignalingView({ rows = [], calls = [], selectedCall, onSele
                   onPrevious={() => moveMessageMatch(-1)}
                   onClear={clearMessageColumnFilter}
                   onSelectMatch={selectMessageMatch}
+                  placeholder="Find message"
+                  getMatchLabel={(row) => row.message || ""}
+                  noMatchesLabel="No messages found"
+                  clearTitle="Clear message search"
                 />
               </th>
             </tr>
@@ -490,8 +563,8 @@ export function ExcelSignalingView({ rows = [], calls = [], selectedCall, onSele
               }}
               row={row}
               selected={selectedRow?.id === row.id}
-              searchMatch={messageMatchIds.has(row.id)}
-              activeSearchMatch={activeMessageMatch?.id === row.id}
+              searchMatch={causeMatchIds.has(row.id) || messageMatchIds.has(row.id)}
+              activeSearchMatch={activeCauseMatch?.id === row.id || activeMessageMatch?.id === row.id}
               onSelect={setSelectedRow}
               includeLocation={includeLocation}
             />
