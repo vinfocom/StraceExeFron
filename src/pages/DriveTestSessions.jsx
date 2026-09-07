@@ -1,5 +1,10 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
-import { adminApi, mapViewApi, offlineApi } from "../api/apiEndpoints";
+import {
+  adminApi,
+  mapViewApi,
+  offlineApi,
+  sessionDownloadApi,
+} from "../api/apiEndpoints";
 import { toast } from "react-toastify";
 import Spinner from "../components/common/Spinner";
 import { Button } from "@/components/ui/button";
@@ -24,7 +29,14 @@ import {
   DropdownMenuSeparator,
   DropdownMenuItem,
 } from "@/components/ui/dropdown-menu";
-import { Trash2, Map as MapIcon, ChevronLeft, ChevronRight, MapPin } from "lucide-react";
+import {
+  Trash2,
+  Map as MapIcon,
+  ChevronLeft,
+  ChevronRight,
+  MapPin,
+  Download,
+} from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { upsertProjectInProjectsCache } from "@/utils/projectsCache";
@@ -265,6 +277,7 @@ const DriveTestSessionsPage = () => {
   const [sessionsPerPage, setSessionsPerPage] = useState(10);
   const [totalCount, setTotalCount] = useState(0);
   const [totalPages, setTotalPages] = useState(0);
+  const [downloadingSessionId, setDownloadingSessionId] = useState(null);
 
   const [projectName, setProjectName] = useState("");
   const [isDialogOpen, setIsDialogOpen] = useState(false);
@@ -772,6 +785,33 @@ const DriveTestSessionsPage = () => {
     }
     const sessionIdsParam = selectedSessions.join(",");
     navigate(`/unified-map?sessionId=${encodeURIComponent(sessionIdsParam)}&showSecondary=1`);
+  };
+
+  const handleDownloadLogs = async (event, sessionId) => {
+    event.preventDefault();
+    if (downloadingSessionId !== null) return;
+
+    const downloadUrl = sessionDownloadApi.getUploadedLogsUrl(sessionId);
+    if (!downloadUrl) {
+      toast.error("No file found");
+      return;
+    }
+
+    setDownloadingSessionId(sessionId);
+    try {
+      const fileExists = await sessionDownloadApi.checkUploadedLogs(sessionId);
+      if (!fileExists) {
+        toast.error("No file found");
+        return;
+      }
+
+      window.location.assign(downloadUrl);
+    } catch (error) {
+      console.error("Session log download check failed:", error);
+      toast.error("No file found");
+    } finally {
+      setDownloadingSessionId(null);
+    }
   };
 
   const hasActiveColumnFilters = Object.values(columnFilters).some(
@@ -1434,6 +1474,22 @@ const DriveTestSessionsPage = () => {
                           onClick={() => handleViewOnMap(session.id)}
                         >
                           <MapIcon className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          asChild
+                          variant="outline"
+                          size="sm"
+                          title={`Download logs for session ${session.id}`}
+                        >
+                          <a
+                            href={sessionDownloadApi.getUploadedLogsUrl(session.id)}
+                            download={`logs_${session.id}.zip`}
+                            aria-label={`Download logs for session ${session.id}`}
+                            onClick={(event) => handleDownloadLogs(event, session.id)}
+                            aria-busy={downloadingSessionId === session.id}
+                          >
+                            <Download className="h-4 w-4" />
+                          </a>
                         </Button>
                         <Button
                           variant="outline"

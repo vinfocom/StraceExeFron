@@ -153,6 +153,25 @@ const TEMPLATE_DOWNLOAD_FILENAMES = {
   4: "python-runtime-v5-win-x64.zip",
 };
 
+const UPLOADED_ZIPPED_LOGS_BASE_URL =
+  "https://apistracer.vinfocom.co.in/uploaded_zippedlogs";
+
+export const sessionDownloadApi = {
+  getUploadedLogsUrl: (sessionId) => {
+    const normalizedSessionId = String(sessionId ?? "").trim();
+    if (!normalizedSessionId) return "";
+
+    return `${UPLOADED_ZIPPED_LOGS_BASE_URL}/logs_${encodeURIComponent(normalizedSessionId)}.zip`;
+  },
+  checkUploadedLogs: async (sessionId) => {
+    const url = sessionDownloadApi.getUploadedLogsUrl(sessionId);
+    if (!url) return false;
+
+    const response = await fetch(url, { method: "HEAD" });
+    return response.ok;
+  },
+};
+
 const downloadTemplateFromCsharpApi = async (fileType) => {
   const normalizedFileType = Number(fileType);
   const filename =

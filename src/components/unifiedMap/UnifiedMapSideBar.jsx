@@ -202,28 +202,156 @@ const SelectRow = memo(
     placeholder,
     disabled = false,
     className = "",
-  }) => (
-    <div className={`min-w-0 flex-1 space-y-1.5 ${className}`}>
-      {label && <Label className="text-sm font-semibold text-white">{label}</Label>}
-      <Select value={value} onValueChange={onChange} disabled={disabled}>
-        <SelectTrigger className="h-8 w-full min-w-0 bg-slate-800 border-slate-600 text-xs text-white [&>span]:truncate">
-          <SelectValue placeholder={placeholder} />
-        </SelectTrigger>
-        <SelectContent className="max-w-[340px] min-w-[240px] max-h-60 overflow-y-auto bg-slate-900 border-slate-700 text-white">
-          {options.map((opt) => (
-            <SelectItem
-              key={opt.value}
-              value={opt.value}
-              disabled={Boolean(opt.disabled)}
-              className="pr-8 text-xs text-white focus:text-white data-[disabled]:pointer-events-none data-[disabled]:opacity-40"
+    searchable = false,
+  }) => {
+    const [isOpen, setIsOpen] = useState(false);
+    const [searchTerm, setSearchTerm] = useState("");
+    const containerRef = useRef(null);
+    const panelRef = useRef(null);
+    const [position, setPosition] = useState({ top: 0, left: 0, width: 0 });
+    const normalizedSearchTerm = searchTerm.trim().toLowerCase();
+    const filteredOptions = searchable
+      ? options.filter((opt) =>
+          `${opt.label ?? ""} ${opt.value ?? ""}`
+            .toLowerCase()
+            .includes(normalizedSearchTerm),
+        )
+      : options;
+    const selectedOption = options.find((opt) => opt.value === value);
+
+    const updatePosition = useCallback(() => {
+      const trigger = containerRef.current;
+      if (!trigger) return;
+      const rect = trigger.getBoundingClientRect();
+      setPosition({ top: rect.bottom + 4, left: rect.left, width: rect.width });
+    }, []);
+
+    useEffect(() => {
+      if (!searchable || !isOpen) return undefined;
+      updatePosition();
+      window.addEventListener("scroll", updatePosition, true);
+      window.addEventListener("resize", updatePosition);
+      return () => {
+        window.removeEventListener("scroll", updatePosition, true);
+        window.removeEventListener("resize", updatePosition);
+      };
+    }, [isOpen, searchable, updatePosition]);
+
+    useEffect(() => {
+      if (!searchable || !isOpen) return undefined;
+      const handleClickOutside = (event) => {
+        if (
+          !containerRef.current?.contains(event.target) &&
+          !panelRef.current?.contains(event.target)
+        ) {
+          setIsOpen(false);
+          setSearchTerm("");
+        }
+      };
+      document.addEventListener("mousedown", handleClickOutside);
+      return () => document.removeEventListener("mousedown", handleClickOutside);
+    }, [isOpen, searchable]);
+
+    if (searchable) {
+      return (
+        <div className={`min-w-0 flex-1 space-y-1.5 ${className}`} ref={containerRef}>
+          {label && <Label className="text-sm font-semibold text-white">{label}</Label>}
+          {isOpen ? (
+            <Input
+              autoFocus
+              value={searchTerm}
+              onChange={(event) => setSearchTerm(event.target.value)}
+              onKeyDown={(event) => {
+                event.stopPropagation();
+                if (event.key === "Escape") {
+                  setIsOpen(false);
+                  setSearchTerm("");
+                }
+              }}
+              placeholder="Search KPI..."
+              className="h-8 border-slate-600 bg-slate-800 text-xs text-white placeholder:text-slate-500"
+            />
+          ) : (
+            <button
+              type="button"
+              onClick={() => {
+                if (disabled) return;
+                setIsOpen(true);
+                setSearchTerm("");
+              }}
+              disabled={disabled}
+              className="flex h-8 w-full min-w-0 items-center justify-between rounded-md border border-slate-600 bg-slate-800 px-3 text-left text-xs text-white disabled:opacity-50"
             >
-              {opt.label}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
-    </div>
-  ),
+              <span className="truncate">{selectedOption?.label || placeholder}</span>
+              <ChevronDown className="h-4 w-4 shrink-0 ml-2 opacity-50" />
+            </button>
+          )}
+          {isOpen && typeof document !== "undefined" && createPortal(
+            <div
+              ref={panelRef}
+              style={{
+                position: "fixed",
+                top: `${position.top}px`,
+                left: `${position.left}px`,
+                width: `${position.width}px`,
+                zIndex: 1000,
+              }}
+              className="max-h-60 overflow-y-auto rounded-md border border-slate-700 bg-slate-900 py-1 text-white shadow-lg overscroll-contain"
+            >
+              {filteredOptions.length > 0 ? (
+                filteredOptions.map((opt) => (
+                  <button
+                    key={opt.value}
+                    type="button"
+                    disabled={Boolean(opt.disabled)}
+                    onClick={() => {
+                      if (opt.disabled) return;
+                      onChange(opt.value);
+                      setIsOpen(false);
+                      setSearchTerm("");
+                    }}
+                    className="flex w-full items-center px-2 py-1.5 text-left text-xs text-white hover:bg-slate-800 disabled:pointer-events-none disabled:opacity-40"
+                  >
+                    <span className="truncate">{opt.label}</span>
+                  </button>
+                ))
+              ) : (
+                <div className="px-2 py-2 text-xs text-slate-400">No KPI found</div>
+              )}
+            </div>,
+            document.body,
+          )}
+        </div>
+      );
+    }
+
+    return (
+      <div className={`min-w-0 flex-1 space-y-1.5 ${className}`}>
+        {label && <Label className="text-sm font-semibold text-white">{label}</Label>}
+        <Select
+          value={value}
+          onValueChange={onChange}
+          disabled={disabled}
+        >
+          <SelectTrigger className="h-8 w-full min-w-0 bg-slate-800 border-slate-600 text-xs text-white [&>span]:truncate">
+            <SelectValue placeholder={placeholder} />
+          </SelectTrigger>
+          <SelectContent className="max-w-[340px] min-w-[240px] max-h-60 overflow-y-auto bg-slate-900 border-slate-700 text-white">
+            {options.map((opt) => (
+                <SelectItem
+                  key={opt.value}
+                  value={opt.value}
+                  disabled={Boolean(opt.disabled)}
+                  className="pr-8 text-xs text-white focus:text-white data-[disabled]:pointer-events-none data-[disabled]:opacity-40"
+                >
+                  {opt.label}
+                </SelectItem>
+              ))}
+          </SelectContent>
+        </Select>
+      </div>
+    );
+  },
 );
 SelectRow.displayName = "SelectRow";
 
@@ -3404,6 +3532,7 @@ const UnifiedMapSidebar = ({
                   value={metric}
                   onChange={setMetric}
                   options={colorBy === "mac_detail" ? macDetailMetricOptions : metricOptions}
+                  searchable={true}
                   placeholder={
                     colorBy === "mac_detail" ? "Select MAC detail field" : "Select metric"
                   }
