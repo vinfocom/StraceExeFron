@@ -7169,7 +7169,7 @@ const UnifiedMapView = () => {
     );
 
   return (
-    <div className="h-screen flex flex-col bg-gray-800">
+    <div className="h-full min-h-0 w-full overflow-hidden flex flex-col bg-gray-800">
       <UnifiedHeader
         onSettingsSaved={refetchColors}
         onBack={handleBack}

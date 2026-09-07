@@ -56,9 +56,10 @@ const AppLayout = ({ children }) => {
   const shouldShowSidebar = !pathsWithoutSidebar.some((path) =>
     location.pathname.startsWith(path)
   );
+  const isUnifiedMapPage = location.pathname.startsWith("/unified-map");
 
   return (
-    <div className="flex min-h-screen bg-transparent">
+    <div className={`flex ${isUnifiedMapPage ? "h-screen min-h-0" : "min-h-screen"} bg-transparent`}>
       {shouldShowSidebar && (
         <>
           {isCompactViewport && isSidebarOpen && (
@@ -100,7 +101,11 @@ const AppLayout = ({ children }) => {
           />
         )}
 
-        <main className="h-full flex-1 overflow-x-hidden overflow-y-auto p-0 m-0 min-w-0">
+        <main
+          className={`h-full min-h-0 flex-1 p-0 m-0 min-w-0 ${
+            isUnifiedMapPage ? "overflow-hidden" : "overflow-x-hidden overflow-y-auto"
+          }`}
+        >
           {children || <Outlet />}
         </main>
       </div>
