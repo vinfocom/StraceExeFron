@@ -3027,7 +3027,7 @@ const UnifiedMapView = () => {
           if (Number.isFinite(Number(prev)) && options.some((o) => o.scenario_id === Number(prev))) {
             return Number(prev);
           }
-          return options.length > 0 ? options[0].scenario_id : null;
+          return options.length > 0 ? Math.max(...options.map((option) => option.scenario_id)) : null;
         });
       } catch {
         if (cancelled) return;
@@ -3096,7 +3096,7 @@ const UnifiedMapView = () => {
         options.some((option) => option.scenario_id === currentScenarioId)
           ? currentScenarioId
           : options.length > 0
-            ? options[0].scenario_id
+            ? Math.max(...options.map((option) => option.scenario_id))
             : null;
 
       setStoredGridScenarioOptions(options);
@@ -3180,7 +3180,7 @@ const UnifiedMapView = () => {
             if (Number.isFinite(parsed) && parsed > 0 && options.some((o) => o.scenario_id === parsed)) {
               return parsed;
             }
-            return options[0].scenario_id;
+            return options[options.length - 1].scenario_id;
           });
           return;
         }
@@ -3885,7 +3885,7 @@ const UnifiedMapView = () => {
         options.some((option) => option.scenario_id === currentScenarioId)
           ? currentScenarioId
           : options.length > 0
-            ? options[0].scenario_id
+            ? options[options.length - 1].scenario_id
             : null;
 
       setSitePredictionScenarioOptions(options);

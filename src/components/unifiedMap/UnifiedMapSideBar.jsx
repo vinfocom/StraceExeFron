@@ -35,7 +35,7 @@ import {
 import { Input } from "@/components/ui/input";
 
 const LTE_RECOMMENDATION_OPTIMIZED_DEFAULTS = Object.freeze({
-  operator: "Airtel",
+  operator: "all",
   radiusMeters: 500,
   gridResolutionMeters: 25,
   workers: 3,
@@ -49,7 +49,7 @@ const LTE_RECOMMENDATION_OPTIMIZED_DEFAULTS = Object.freeze({
 
 const PCI_OPTIMIZATION_DEFAULTS = Object.freeze({
   region: "india",
-  operator: "Airtel",
+  operator: "all",
   primaryOnly: true,
   filterSitesToPolygon: true,
   filterLogsToPolygon: false,
@@ -817,6 +817,12 @@ const UnifiedMapSidebar = ({
     [lteCountryCode],
   );
   const [storedGridScenarioMenuOpen, setStoredGridScenarioMenuOpen] = useState(false);
+  const unifiedScenarioTriggerRef = useRef(null);
+  const [unifiedScenarioMenuPosition, setUnifiedScenarioMenuPosition] = useState({
+    top: 0,
+    left: 0,
+    width: 0,
+  });
   const [showCurrentViewInfo, setShowCurrentViewInfo] = useState(false);
   const [sidebarWidth, setSidebarWidth] = useState(340);
   const [activeSidebarTab, setActiveSidebarTab] = useState("filter");
@@ -1584,6 +1590,26 @@ const UnifiedMapSidebar = ({
     }));
   }, [accumulatedFilterOptions?.providers, siteOperatorOptions]);
 
+  const optimizationProviderOptions = useMemo(() => {
+    const preferredProviders = Array.isArray(siteOperatorOptions) && siteOperatorOptions.length > 0
+      ? siteOperatorOptions
+      : Array.isArray(accumulatedFilterOptions?.providers)
+        ? accumulatedFilterOptions.providers
+        : [];
+    const normalized = preferredProviders
+      .map((value) => String(value || "").trim())
+      .filter((name) => name && name.toLowerCase() !== "all");
+    const unique = Array.from(new Set(normalized));
+
+    return [
+      { value: "all", label: "All" },
+      ...unique.map((name) => ({
+        value: name.toLowerCase(),
+        label: name,
+      })),
+    ];
+  }, [accumulatedFilterOptions?.providers, siteOperatorOptions]);
+
   const ltePredictionOperatorOptions = useMemo(
     () => [
       { value: "auto", label: "Select Provider" },
@@ -1718,6 +1744,22 @@ const UnifiedMapSidebar = ({
       storedGridScenarioId,
       storedGridTechnology,
     ],
+  );
+  const allSectorGridsEnabled = useMemo(
+    () =>
+      loadedSectorGridOptions.length > 0 &&
+      loadedSectorGridOptions.every(
+        (option) => sectorGridSettings?.[option.renderKey]?.includeInGrid !== false,
+      ),
+    [loadedSectorGridOptions, sectorGridSettings],
+  );
+  const handleAllSectorGridsToggle = useCallback(
+    (enabled) => {
+      loadedSectorGridOptions.forEach((option) => {
+        onSectorGridSettingChange?.(option.renderKey, { includeInGrid: enabled });
+      });
+    },
+    [loadedSectorGridOptions, onSectorGridSettingChange],
   );
   const handleSitePredictionVersionChange = useCallback(
     (nextVersion) => {
@@ -2169,7 +2211,7 @@ const UnifiedMapSidebar = ({
       currentScenarioId <= 0 ||
       !validScenarioIds.includes(currentScenarioId)
     ) {
-      setStoredGridScenarioId?.(validScenarioIds[0]);
+      setStoredGridScenarioId?.(Math.max(...validScenarioIds));
     }
   }, [
     getStoredGridPublicScenarioId,
@@ -2178,6 +2220,165 @@ const UnifiedMapSidebar = ({
     storedGridScenarioId,
     storedGridScenarioOptions,
   ]);
+
+  const siteScenarioControlVisible =
+    Boolean(enableSiteToggle) &&
+    isCellMode &&
+    ["updated", "delta"].includes(
+      String(sitePredictionVersion || "").trim().toLowerCase(),
+    );
+  const storedScenarioControlVisible =
+    Boolean(deltaGridApiState?.gridVisible) &&
+    ["updated", "delta"].includes(normalizedStoredGridVersion);
+  const unifiedScenarioControlVisible =
+    siteScenarioControlVisible || storedScenarioControlVisible;
+
+  const unifiedScenarioOptions = useMemo(() => {
+    const optionsById = new Map();
+    const addOption = (item, scenarioId) => {
+      const parsedScenarioId = Number(scenarioId);
+      if (!Number.isFinite(parsedScenarioId) || parsedScenarioId <= 0) return;
+      const current = optionsById.get(parsedScenarioId) || {
+        scenario_id: parsedScenarioId,
+        status: "",
+      };
+      if (!current.status && item?.status) {
+        current.status = String(item.status).trim();
+      }
+      optionsById.set(parsedScenarioId, current);
+    };
+
+    if (siteScenarioControlVisible) {
+      (Array.isArray(sitePredictionScenarioOptions)
+        ? sitePredictionScenarioOptions
+        : []
+      ).forEach((item) => addOption(item, item?.scenario_id));
+    }
+    if (storedScenarioControlVisible) {
+      (Array.isArray(storedGridScenarioOptions)
+        ? storedGridScenarioOptions
+        : []
+      ).forEach((item) => addOption(item, getStoredGridPublicScenarioId(item)));
+    }
+
+    return Array.from(optionsById.values()).sort(
+      (a, b) => a.scenario_id - b.scenario_id,
+    );
+  }, [
+    getStoredGridPublicScenarioId,
+    sitePredictionScenarioOptions,
+    siteScenarioControlVisible,
+    storedGridScenarioOptions,
+    storedScenarioControlVisible,
+  ]);
+
+  const unifiedScenarioId =
+    siteScenarioControlVisible && Number(sitePredictionScenarioId) > 0
+      ? Number(sitePredictionScenarioId)
+      : storedScenarioControlVisible && Number(storedGridScenarioId) > 0
+        ? Number(storedGridScenarioId)
+        : null;
+
+  const updateUnifiedScenarioMenuPosition = useCallback(() => {
+    const trigger = unifiedScenarioTriggerRef.current;
+    if (!trigger || typeof window === "undefined") return;
+
+    const rect = trigger.getBoundingClientRect();
+    const menuWidth = Math.max(rect.width, 220);
+    const menuHeight = Math.min(Math.max(unifiedScenarioOptions.length * 38, 40), 224);
+    const opensAbove =
+      rect.bottom + menuHeight + 4 > window.innerHeight && rect.top - menuHeight - 4 >= 8;
+    const top = opensAbove ? rect.top - menuHeight - 4 : rect.bottom + 4;
+    const left = Math.min(
+      Math.max(8, rect.left),
+      Math.max(8, window.innerWidth - menuWidth - 8),
+    );
+
+    setUnifiedScenarioMenuPosition({ top, left, width: menuWidth });
+  }, [unifiedScenarioOptions.length]);
+
+  useEffect(() => {
+    if (!storedGridScenarioMenuOpen || !unifiedScenarioControlVisible) return undefined;
+
+    updateUnifiedScenarioMenuPosition();
+    window.addEventListener("resize", updateUnifiedScenarioMenuPosition);
+    window.addEventListener("scroll", updateUnifiedScenarioMenuPosition, true);
+    return () => {
+      window.removeEventListener("resize", updateUnifiedScenarioMenuPosition);
+      window.removeEventListener("scroll", updateUnifiedScenarioMenuPosition, true);
+    };
+  }, [
+    storedGridScenarioMenuOpen,
+    unifiedScenarioControlVisible,
+    updateUnifiedScenarioMenuPosition,
+  ]);
+
+  const handleUnifiedScenarioChange = useCallback(
+    (nextScenarioId) => {
+      const parsedScenarioId = Number(nextScenarioId);
+      if (!Number.isFinite(parsedScenarioId) || parsedScenarioId <= 0) return;
+
+      if (
+        siteScenarioControlVisible &&
+        sitePredictionScenarioOptions.some(
+          (item) => Number(item?.scenario_id) === parsedScenarioId,
+        )
+      ) {
+        setSitePredictionScenarioId?.(parsedScenarioId);
+      }
+
+      if (
+        storedScenarioControlVisible &&
+        storedGridScenarioOptions.some(
+          (item) => getStoredGridPublicScenarioId(item) === parsedScenarioId,
+        )
+      ) {
+        handleStoredGridScenarioChange(parsedScenarioId);
+      }
+    },
+    [
+      getStoredGridPublicScenarioId,
+      handleStoredGridScenarioChange,
+      setSitePredictionScenarioId,
+      sitePredictionScenarioOptions,
+      siteScenarioControlVisible,
+      storedGridScenarioOptions,
+      storedScenarioControlVisible,
+    ],
+  );
+
+  const handleUnifiedScenarioDelete = useCallback(
+    (scenarioId) => {
+      const parsedScenarioId = Number(scenarioId);
+      if (!Number.isFinite(parsedScenarioId) || parsedScenarioId <= 0) return;
+
+      if (
+        siteScenarioControlVisible &&
+        sitePredictionScenarioOptions.some(
+          (item) => Number(item?.scenario_id) === parsedScenarioId,
+        )
+      ) {
+        onDeleteSitePredictionScenario?.(parsedScenarioId);
+      }
+      if (
+        storedScenarioControlVisible &&
+        storedGridScenarioOptions.some(
+          (item) => getStoredGridPublicScenarioId(item) === parsedScenarioId,
+        )
+      ) {
+        onDeleteStoredGridScenario?.(parsedScenarioId);
+      }
+    },
+    [
+      getStoredGridPublicScenarioId,
+      onDeleteSitePredictionScenario,
+      onDeleteStoredGridScenario,
+      sitePredictionScenarioOptions,
+      siteScenarioControlVisible,
+      storedGridScenarioOptions,
+      storedScenarioControlVisible,
+    ],
+  );
 
   const pollLteTiltRecommendationStatus = useCallback(async () => {
     const jobId = lteTiltRecommendationJobIdRef.current;
@@ -4018,47 +4219,17 @@ const UnifiedMapSidebar = ({
                           Click a sector triangle on the map to manage its grid settings.
                         </p>
                       ) : (
-                        <div className="max-h-64 overflow-y-auto space-y-2 pr-1">
-                          {loadedSectorGridOptions.map((option) => {
-                            const setting = sectorGridSettings?.[option.renderKey] || {};
-                            const includeInGrid = setting.includeInGrid !== false;
-                            return (
-                              <div
-                                key={option.renderKey}
-                                className="rounded border border-slate-600 bg-slate-900/60 px-2 py-1.5"
-                              >
-                                <div className="flex items-center justify-between gap-2">
-                                  <span
-                                    className="truncate text-[11px] text-white"
-                                    title={`${option.siteId} / ${option.sector}`}
-                                  >
-                                    {option.siteId || "Site"} / {option.sector || "Sector"}
-                                  </span>
-                                  <span className="shrink-0 text-[10px] text-slate-400">
-                                    {option.pointCount} pts
-                                  </span>
-                                </div>
-                                <div className="mt-1 flex items-center justify-between gap-2">
-                                  <label className="flex items-center gap-1 text-[11px] text-slate-200">
-                                    <input
-                                      type="checkbox"
-                                      checked={includeInGrid}
-                                      onChange={(e) =>
-                                        onSectorGridSettingChange?.(option.renderKey, {
-                                          includeInGrid: e.target.checked,
-                                        })
-                                      }
-                                    />
-                                    In grid
-                                  </label>
-                                  <span className="text-[10px] text-slate-400">
-                                    {String(normalizedLteGridAggregationMethod || "mean").toUpperCase()}
-                                  </span>
-                                </div>
-                              </div>
-                            );
-                          })}
-                        </div>
+                        <ToggleRow
+                          label="All Sector Grids"
+                          description={
+                            allSectorGridsEnabled
+                              ? "All loaded sectors are included"
+                              : "All loaded sectors are excluded"
+                          }
+                          checked={allSectorGridsEnabled}
+                          onChange={handleAllSectorGridsToggle}
+                          useSwitch={true}
+                        />
                       )}
                     </div>
                   )}
@@ -4263,6 +4434,85 @@ const UnifiedMapSidebar = ({
             )}
 
 
+          {unifiedScenarioControlVisible && (
+            <div className="pt-2 border-t border-slate-700/50 space-y-1.5">
+              <div className="min-w-0 flex-1 space-y-1.5 relative">
+                <Label className="text-sm font-semibold text-white">Scenario</Label>
+                <button
+                  type="button"
+                  ref={unifiedScenarioTriggerRef}
+                  onClick={() => {
+                    if (unifiedScenarioOptions.length === 0) return;
+                    setStoredGridScenarioMenuOpen((prev) => !prev);
+                  }}
+                  className="h-8 w-full min-w-0 rounded border border-slate-600 bg-slate-800 px-2 text-xs text-white flex items-center justify-between disabled:opacity-50"
+                  disabled={
+                    unifiedScenarioOptions.length === 0 ||
+                    Boolean(deltaGridApiState?.computing) ||
+                    Boolean(deltaGridApiState?.fetching)
+                  }
+                >
+                  <span className="truncate">
+                    {Number.isFinite(Number(unifiedScenarioId)) && Number(unifiedScenarioId) > 0
+                      ? `Scenario ${unifiedScenarioId}`
+                      : "No scenarios"}
+                  </span>
+                  <ChevronDown className="h-3.5 w-3.5 text-slate-300 shrink-0" />
+                </button>
+                {storedGridScenarioMenuOpen && typeof document !== "undefined" && createPortal(
+                  <div
+                    style={{
+                      position: "fixed",
+                      top: `${unifiedScenarioMenuPosition.top}px`,
+                      left: `${unifiedScenarioMenuPosition.left}px`,
+                      width: `${unifiedScenarioMenuPosition.width}px`,
+                      zIndex: 3000,
+                    }}
+                    className="max-h-56 overflow-y-auto rounded border border-slate-600 bg-slate-900 shadow-lg"
+                  >
+                    {unifiedScenarioOptions.length > 0 ? (
+                      unifiedScenarioOptions.map((item) => {
+                        const scenarioId = Number(item.scenario_id);
+                        const isSelected = Number(unifiedScenarioId) === scenarioId;
+                        return (
+                          <div
+                            key={`unified-scenario-${scenarioId}`}
+                            className="flex items-center gap-1 border-b border-slate-800 px-2 py-1.5 last:border-b-0"
+                          >
+                            <button
+                              type="button"
+                              onClick={() => {
+                                handleUnifiedScenarioChange(scenarioId);
+                                setStoredGridScenarioMenuOpen(false);
+                              }}
+                              className={`flex-1 truncate text-left text-xs ${isSelected ? "text-cyan-300" : "text-white"}`}
+                            >
+                              {`Scenario ${scenarioId}${item.status ? ` (${item.status})` : ""}`}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleUnifiedScenarioDelete(scenarioId)}
+                              className="inline-flex h-6 w-6 items-center justify-center rounded bg-red-600/90 text-white hover:bg-red-500"
+                              title={`Delete Scenario ${scenarioId}`}
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </button>
+                          </div>
+                        );
+                      })
+                    ) : (
+                      <div className="px-2 py-2 text-xs text-slate-400">No scenarios</div>
+                    )}
+                  </div>,
+                  document.body,
+                )}
+              </div>
+              <p className="text-[10px] text-slate-500">
+                Used by the active optimized site or stored grid.
+              </p>
+            </div>
+          )}
+
           {canUseGridApi && (
             <div className="pt-2 border-t border-slate-700/50 space-y-2">
               <ToggleRow
@@ -4309,87 +4559,6 @@ const UnifiedMapSidebar = ({
                     ]}
                     placeholder="Select technology"
                   />
-                  {(normalizedStoredGridVersion === "updated" ||
-                    normalizedStoredGridVersion === "delta") && (
-                    <div className="min-w-0 flex-1 space-y-1.5 relative">
-                      <Label className="text-sm font-semibold text-white">Scenario</Label>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          if (
-                            deltaGridButtonsDisabled ||
-                            Boolean(deltaGridApiState?.computing) ||
-                            Boolean(deltaGridApiState?.fetching) ||
-                            !Array.isArray(storedGridScenarioOptions) ||
-                            storedGridScenarioOptions.length === 0
-                          ) return;
-                          setStoredGridScenarioMenuOpen((prev) => !prev);
-                        }}
-                        className="h-8 w-full min-w-0 bg-slate-800 border border-slate-600 rounded px-2 text-xs text-white flex items-center justify-between disabled:opacity-50"
-                        disabled={
-                          deltaGridButtonsDisabled ||
-                          Boolean(deltaGridApiState?.computing) ||
-                          Boolean(deltaGridApiState?.fetching) ||
-                          !Array.isArray(storedGridScenarioOptions) ||
-                          storedGridScenarioOptions.length === 0
-                        }
-                      >
-                        <span className="truncate">
-                          {Number.isFinite(Number(storedGridScenarioId)) && Number(storedGridScenarioId) > 0
-                            ? `Scenario ${storedGridScenarioId}`
-                            : "No scenarios"}
-                        </span>
-                        <ChevronDown className="h-3.5 w-3.5 text-slate-300 shrink-0" />
-                      </button>
-                      {storedGridScenarioMenuOpen && (
-                        <div className="absolute left-0 right-0 z-[2300] mt-1 rounded border border-slate-600 bg-slate-900 shadow-lg max-h-56 overflow-y-auto">
-                          {Array.isArray(storedGridScenarioOptions) &&
-                          storedGridScenarioOptions.length > 0 ? (
-                            storedGridScenarioOptions.map((item) => {
-                              const scenarioId = getStoredGridPublicScenarioId(item);
-                              const internalScenarioId = Number(
-                                item?.internal_scenario_id ?? item?.internalScenarioId,
-                              );
-                              const isSelected =
-                                Number.isFinite(scenarioId) &&
-                                Number(storedGridScenarioId) === scenarioId;
-                              return (
-                                <div
-                                  key={`stored-grid-scenario-${scenarioId}`}
-                                  className="flex items-center gap-1 px-2 py-1.5 border-b border-slate-800 last:border-b-0"
-                                >
-                                  <button
-                                    type="button"
-                                    onClick={() => {
-                                      handleStoredGridScenarioChange(String(scenarioId));
-                                      setStoredGridScenarioMenuOpen(false);
-                                    }}
-                                    className={`flex-1 text-left text-xs truncate ${isSelected ? "text-cyan-300" : "textwhite"}`}
-                                  >
-                                    {`Scenario ${scenarioId}${item?.status ? ` (${item.status})` : ""}`}
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={() => onDeleteStoredGridScenario?.(scenarioId)}
-                                    className="h-6 w-6 rounded bg-red-600/90 hover:bg-red-500 text-white inline-flex items-center justify-center"
-                                    title={
-                                      Number.isFinite(internalScenarioId) && internalScenarioId > 0
-                                        ? `Delete Scenario ${scenarioId}`
-                                        : `Delete Scenario ${scenarioId}`
-                                    }
-                                  >
-                                    <Trash2 className="h-3.5 w-3.5" />
-                                  </button>
-                                </div>
-                              );
-                            })
-                          ) : (
-                            <div className="px-2 py-2 text-xs text-slate-400">No scenarios</div>
-                          )}
-                        </div>
-                      )}
-                    </div>
-                  )}
                 </div>
               )}
               {(deltaGridApiState?.computing || deltaGridApiState?.fetching) && (
@@ -4555,14 +4724,12 @@ const UnifiedMapSidebar = ({
                       </Label>
                       
                       <div className="rounded-lg bg-slate-800/60 p-2">
-                        <Label className="mb-1 block text-[11px] text-slate-400">
-                          Operator
-                        </Label>
-                        <Input
-                          value={lteTiltRecommendationOperator}
-                          onChange={(e) => setLteTiltRecommendationOperator(e.target.value)}
-                          placeholder="all / Airtel / Jio / Vi"
-                          className="h-8 bg-slate-800 border-slate-600 text-white text-sm"
+                        <SelectRow
+                          label="Provider"
+                          value={lteTiltRecommendationOperator || "all"}
+                          onChange={setLteTiltRecommendationOperator}
+                          options={optimizationProviderOptions}
+                          placeholder="All"
                         />
                       </div>
                       <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
@@ -4816,14 +4983,12 @@ const UnifiedMapSidebar = ({
                           </div>
                         </div>
                         <div className="rounded-lg bg-slate-800/60 p-2">
-                          <Label className="mb-1 block text-[11px] text-slate-400">
-                            Operator
-                          </Label>
-                          <Input
-                            value={pciOptimizationOperator}
-                            onChange={(e) => setPciOptimizationOperator(e.target.value)}
-                            placeholder="Airtel / all"
-                            className="h-8 bg-slate-800 border-slate-600 text-white text-sm"
+                          <SelectRow
+                            label="Provider"
+                            value={pciOptimizationOperator || "all"}
+                            onChange={setPciOptimizationOperator}
+                            options={optimizationProviderOptions}
+                            placeholder="All"
                           />
                         </div>
                         <div className="rounded-lg bg-slate-800/60 p-2">

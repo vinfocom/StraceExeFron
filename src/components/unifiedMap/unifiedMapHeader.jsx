@@ -543,7 +543,6 @@ function UnifiedHeader({
   const [selectedFile, setSelectedFile] = useState(null);
   const [activeQuickControl, setActiveQuickControl] = useState(null);
   const [openImportDialog, setOpenImportDialog] = useState(false);
-  const [siteScenarioMenuOpen, setSiteScenarioMenuOpen] = useState(false);
   const [mapZoomLocked, setMapZoomLockedState] = useState(
     readInitialMapZoomLock,
   );
@@ -949,23 +948,6 @@ function UnifiedHeader({
     toggleQuickControl,
   ]);
 
-  // Scenario selection applies to the optimized side: both "Optimized" (updated)
-  // and "Delta" (baseline vs. optimized comparison) need a scenario to fetch.
-  const normalizedSiteVersion = String(sitePredictionVersion || "")
-    .trim()
-    .toLowerCase();
-  const scenarioSelectableVersion =
-    normalizedSiteVersion === "updated" || normalizedSiteVersion === "delta";
-
-  useEffect(() => {
-    if (
-      String(siteToggle || "").trim().toLowerCase() !== "cell" ||
-      !scenarioSelectableVersion
-    ) {
-      setSiteScenarioMenuOpen(false);
-    }
-  }, [scenarioSelectableVersion, siteToggle]);
-
   return (
     <header className="min-h-14 bg-gray-800 text-white shadow-sm flex flex-wrap xl:flex-nowrap items-center justify-between gap-2 px-3 sm:px-4 xl:px-6 py-2 xl:py-0 flex-shrink-0 relative overflow-visible z-10">
       {isRestoringFromStorage && (
@@ -1357,72 +1339,6 @@ function UnifiedHeader({
                   ]}
                   placeholder="Site label"
                 />
-                {siteToggle === "Cell" &&
-                  scenarioSelectableVersion && (
-                    <div className="min-w-0 flex-1 space-y-1.5 relative xl:col-span-1">
-                      <button
-                        type="button"
-                        onClick={() => setSiteScenarioMenuOpen((prev) => !prev)}
-                        className="h-8 w-full min-w-0 bg-slate-800 border border-slate-600 rounded px-2 text-xs text-white flex items-center justify-between"
-                      >
-                        <span className="truncate">
-                          {Number.isFinite(Number(sitePredictionScenarioId)) &&
-                          Number(sitePredictionScenarioId) > 0
-                            ? `Scenario ${sitePredictionScenarioId}`
-                            : "No scenarios"}
-                        </span>
-                        <ChevronDown className="h-3.5 w-3.5 text-slate-300 shrink-0" />
-                      </button>
-                      {siteScenarioMenuOpen && (
-                        <div className="absolute left-0 right-0 z-[2300] mt-1 rounded border border-slate-600 bg-slate-900 shadow-lg max-h-56 overflow-y-auto">
-                          {Array.isArray(sitePredictionScenarioOptions) &&
-                          sitePredictionScenarioOptions.length > 0 ? (
-                            sitePredictionScenarioOptions.map((item) => {
-                              const scenarioId = Number(item?.scenario_id);
-                              const isSelected =
-                                Number.isFinite(scenarioId) &&
-                                Number(sitePredictionScenarioId) === scenarioId;
-                              return (
-                                <div
-                                  key={`site-scenario-${scenarioId}`}
-                                  className="flex items-center gap-1 px-2 py-1.5 border-b border-slate-800 last:border-b-0"
-                                >
-                                  <button
-                                    type="button"
-                                    onClick={() => {
-                                      setSitePredictionScenarioId?.(
-                                        Number.isFinite(scenarioId) && scenarioId > 0
-                                          ? scenarioId
-                                          : null,
-                                      );
-                                      setSiteScenarioMenuOpen(false);
-                                    }}
-                                    className={`flex-1 text-left text-xs truncate ${isSelected ? "text-cyan-300" : "text-white"}`}
-                                  >
-                                    {`Scenario ${scenarioId}`}
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={() =>
-                                      onDeleteSitePredictionScenario?.(scenarioId)
-                                    }
-                                    className="h-6 w-6 rounded bg-red-600/90 hover:bg-red-500 text-white inline-flex items-center justify-center"
-                                    title={`Delete Scenario ${scenarioId}`}
-                                  >
-                                    <Trash2 className="h-3.5 w-3.5" />
-                                  </button>
-                                </div>
-                              );
-                            })
-                          ) : (
-                            <div className="px-2 py-2 text-xs text-slate-400">
-                              No scenarios
-                            </div>
-                          )}
-                        </div>
-                      )}
-                    </div>
-                  )}
               </div>
             )}
           </>
