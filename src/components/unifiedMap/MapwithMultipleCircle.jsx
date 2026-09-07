@@ -76,6 +76,26 @@ const getOverridableEarfcnColor = (value) =>
 const getOverridableTacColor = (value) =>
   getRegisteredColor("tac", value) || generateColorFromHash(String(value));
 
+const getPrimaryPciValue = (log) => {
+  const candidates = [
+    log?.pci,
+    log?.PCI,
+    log?.Pci,
+    log?.physical_cell_id,
+    log?.physicalCellId,
+    log?.pci_or_psi,
+    log?.primaryPci,
+    log?.primary_pci,
+    log?.best_pci,
+  ];
+
+  return candidates.find((value) => Number.isFinite(Number.parseInt(value, 10))) ?? null;
+};
+
+const getFirstNonEmptyValue = (...values) =>
+  values.find((value) => value !== null && value !== undefined && String(value).trim() !== "") ??
+  "";
+
 const getLegendCategoryKeyFromLog = (log, colorBy, macDetailField) => {
   const key = String(colorBy || "").trim().toLowerCase();
 
@@ -129,16 +149,7 @@ const getLegendCategoryKeyFromLog = (log, colorBy, macDetailField) => {
   }
 
   if (key === "pci") {
-    const pci = Number.parseInt(
-      log?.neighbourPci ??
-        log?.neighborPci ??
-        log?.neighbour_pci ??
-        log?.neighbor_pci ??
-        log?.pci ??
-        log?.PCI ??
-        log?.best_pci,
-      10,
-    );
+    const pci = Number.parseInt(getPrimaryPciValue(log), 10);
     return Number.isFinite(pci) ? String(pci) : "Unknown";
   }
 
@@ -818,16 +829,31 @@ const generateGridCellsOptimized = (
       log?.band ?? log?.primaryBand,
     ) || "Unknown";
   const resolvePciValue = (log) => {
-    const pciValue = getMetricValueFromLog(log, "pci");
+    const pciValue = Number.parseFloat(getPrimaryPciValue(log));
     return Number.isFinite(pciValue) ? Math.round(pciValue) : null;
   };
   const resolveNodebId = (log) => {
-    const raw = log?.nodebid ?? log?.nodeb_id ?? log?.nodebId ?? "";
+    const raw = getFirstNonEmptyValue(
+      log?.nodebid,
+      log?.nodeb_id,
+      log?.nodebId,
+      log?.node_b_id,
+      log?.best_nodebid,
+      log?.best_nodeb_id,
+    );
     const value = String(raw ?? "").trim();
     return value || "Unknown";
   };
   const resolveCellId = (log) => {
-    const raw = log?.cell_id ?? log?.cellId ?? log?.CellId ?? log?.CELL_ID ?? "";
+    const raw = getFirstNonEmptyValue(
+      log?.cell_id,
+      log?.cellId,
+      log?.CellId,
+      log?.CELL_ID,
+      log?.cell_id_representative,
+      log?.cellIdRepresentative,
+      log?.best_cell_id,
+    );
     const value = String(raw ?? "").trim();
     return value || "Unknown";
   };

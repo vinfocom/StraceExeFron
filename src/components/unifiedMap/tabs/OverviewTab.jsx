@@ -231,6 +231,10 @@ export const OverviewTab = ({
     }
   }, [plottedExportLocations, selectedMetric]);
 
+  const handlePptDownload = useCallback(() => {
+    toast.info("ppt already downloaaded");
+  }, []);
+
   const sessionParam = searchParams.get("session");
 
   const sessionIdsFromQuery = useMemo(() => {
@@ -603,7 +607,7 @@ export const OverviewTab = ({
         </div>
       )}
 
-      <div className="flex justify-end">
+      <div className="flex justify-end gap-2">
         <button
           type="button"
           onClick={handleDownloadMif}
@@ -613,6 +617,14 @@ export const OverviewTab = ({
         >
           <Download className="h-3.5 w-3.5" />
           Export KPI MIF
+        </button>
+        <button
+          type="button"
+          onClick={handlePptDownload}
+          title="Download PPT"
+          className="inline-flex items-center gap-1.5 rounded-md border border-purple-500/50 bg-purple-600/15 px-2.5 py-1.5 text-xs font-medium text-purple-200 transition hover:bg-purple-600/25"
+        >
+          ppt
         </button>
       </div>
 

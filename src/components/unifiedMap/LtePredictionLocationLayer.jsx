@@ -62,8 +62,9 @@ const getThresholdKey = (metric) => {
   return metric;
 };
 
-const getColorFromThresholds = (value, selectedMetric, thresholds) => {
-  const ranges = thresholds?.[getThresholdKey(selectedMetric)];
+const getColorFromThresholds = (value, selectedMetric, thresholds, colorOverrides = {}) => {
+  const thresholdKey = getThresholdKey(selectedMetric);
+  const ranges = thresholds?.[thresholdKey];
   if (!Array.isArray(ranges) || ranges.length === 0 || value == null || Number.isNaN(value)) {
     return null;
   }
@@ -73,8 +74,28 @@ const getColorFromThresholds = (value, selectedMetric, thresholds) => {
     const min = Number(range.min);
     const max = Number(range.max);
     if (Number.isFinite(min) && Number.isFinite(max) && value >= min && value <= max) {
-      return range.color || null;
+      return (
+        colorOverrides[`${thresholdKey}|metric-${range.min}-${range.max}`] ||
+        range.color ||
+        null
+      );
     }
+  }
+  if (value < Number(sorted[0]?.min)) {
+    return (
+      colorOverrides[`${thresholdKey}|metric-below-${Number(sorted[0]?.min)}`] ||
+      sorted[0]?.color ||
+      null
+    );
+  }
+  if (value >= Number(sorted[sorted.length - 1]?.max)) {
+    return (
+      colorOverrides[
+        `${thresholdKey}|metric-above-${Number(sorted[sorted.length - 1]?.max)}`
+      ] ||
+      sorted[sorted.length - 1]?.color ||
+      null
+    );
   }
   return null;
 };
@@ -332,6 +353,7 @@ const LtePredictionLocationLayer = ({
   const overlayRef = useRef(null);
   const [zoomLevel, setZoomLevel] = useState(13);
   const [hovered, setHovered] = useState(null);
+  const [metricColorOverrides, setMetricColorOverrides] = useState({});
   const normalizedStoredGridOpacity = useMemo(() => {
     const nextOpacity = Number(storedGridOpacity);
     if (!Number.isFinite(nextOpacity)) return 0.55;
@@ -343,6 +365,29 @@ const LtePredictionLocationLayer = ({
       ? normalized
       : "mean";
   }, [gridAggregationMethod]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return undefined;
+
+    const handleThresholdColorChange = (event) => {
+      const metric = String(event?.detail?.metric || "").trim().toLowerCase();
+      const key = String(event?.detail?.key || "").trim();
+      const color = String(event?.detail?.color || "").trim();
+      if (!metric || !key || !/^#[0-9a-f]{6}$/i.test(color)) return;
+
+      setMetricColorOverrides((current) => ({
+        ...current,
+        [`${metric}|${key}`]: color,
+      }));
+    };
+
+    window.addEventListener("stracer:map-threshold-color-change", handleThresholdColorChange);
+    return () =>
+      window.removeEventListener(
+        "stracer:map-threshold-color-change",
+        handleThresholdColorChange,
+      );
+  }, []);
 
   const polygonPaths = useMemo(() => {
     if (!Array.isArray(filterPolygons) || filterPolygons.length === 0) return [];
@@ -526,7 +571,12 @@ const LtePredictionLocationLayer = ({
 
   const resolveMetricColor = useCallback(
     (value) => {
-      const thresholdColor = getColorFromThresholds(value, selectedMetric, thresholds);
+      const thresholdColor = getColorFromThresholds(
+        value,
+        selectedMetric,
+        thresholds,
+        metricColorOverrides,
+      );
       if (thresholdColor) return thresholdColor;
 
       const hookColor =
@@ -536,7 +586,7 @@ const LtePredictionLocationLayer = ({
       if (hookColor && hookColor !== "#808080") return hookColor;
       return getFallbackColor(value, selectedMetric);
     },
-    [getMetricColor, selectedMetric, thresholds],
+    [getMetricColor, metricColorOverrides, selectedMetric, thresholds],
   );
 
   const pointLayerData = useMemo(() => {
@@ -594,17 +644,32 @@ const LtePredictionLocationLayer = ({
           technology: cell?.technology ?? cell?.Technology ?? null,
           pci: cell?.pci ?? cell?.PCI ?? null,
           selectedMetric,
-          color: Array.isArray(cell?.color)
-            ? [
-                Number(cell.color[0]) || 0,
-                Number(cell.color[1]) || 0,
-                Number(cell.color[2]) || 0,
-                Math.round(
-                  Math.min(255, Math.max(0, Number(cell.color[3]) || 255)) *
-                    normalizedStoredGridOpacity,
-                ),
-              ]
-            : [107, 114, 128, Math.round(190 * normalizedStoredGridOpacity)],
+          color: (() => {
+            const metric = cell?.deltaCompare ? "delta" : selectedMetric;
+            const thresholdColor = getColorFromThresholds(
+              Number(cell?.value),
+              metric,
+              thresholds,
+              metricColorOverrides,
+            );
+            if (thresholdColor) {
+              return toRgbaArray(
+                thresholdColor,
+                Math.round(190 * normalizedStoredGridOpacity),
+              );
+            }
+            return Array.isArray(cell?.color)
+              ? [
+                  Number(cell.color[0]) || 0,
+                  Number(cell.color[1]) || 0,
+                  Number(cell.color[2]) || 0,
+                  Math.round(
+                    Math.min(255, Math.max(0, Number(cell.color[3]) || 255)) *
+                      normalizedStoredGridOpacity,
+                  ),
+                ]
+              : [107, 114, 128, Math.round(190 * normalizedStoredGridOpacity)];
+          })(),
         }))
         .filter((cell) => Array.isArray(cell.polygon) && cell.polygon.length >= 3)
         .filter((cell) => matchesLegendFilter(cell, legendFilter, selectedMetric))
@@ -745,7 +810,14 @@ const LtePredictionLocationLayer = ({
         if (hasBaseline && hasOptimized) {
           difference = optimizedAvg - baselineAvg;
           aggregatedValue = difference;
-          if (difference > 0) colorHex = "#16a34a";
+          const deltaThresholdColor = getColorFromThresholds(
+            difference,
+            "delta",
+            thresholds,
+            metricColorOverrides,
+          );
+          if (deltaThresholdColor) colorHex = deltaThresholdColor;
+          else if (difference > 0) colorHex = "#16a34a";
           else if (difference < 0) colorHex = "#dc2626";
           else colorHex = "#6b7280";
         } else if (hasOptimized) {
@@ -798,6 +870,7 @@ const LtePredictionLocationLayer = ({
     sectorAggregationOverrides,
     polygonPaths,
     selectedMetric,
+    metricColorOverrides,
     thresholds,
     getMetricColor,
     resolveMetricColor,

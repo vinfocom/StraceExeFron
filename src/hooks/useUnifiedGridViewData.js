@@ -61,6 +61,49 @@ const resolveProviderName = (loc) => {
   );
 };
 
+const resolvePciValue = (loc) => {
+  const candidates = [
+    loc?.pci,
+    loc?.PCI,
+    loc?.Pci,
+    loc?.physical_cell_id,
+    loc?.physicalCellId,
+    loc?.pci_or_psi,
+    loc?.primaryPci,
+    loc?.primary_pci,
+    loc?.best_pci,
+  ];
+
+  return candidates.find((value) => value !== null && value !== undefined && String(value).trim() !== "") ?? null;
+};
+
+const resolveCellIdValue = (loc) => {
+  const candidates = [
+    loc?.cell_id,
+    loc?.cellId,
+    loc?.CellId,
+    loc?.CELL_ID,
+    loc?.cell_id_representative,
+    loc?.cellIdRepresentative,
+    loc?.best_cell_id,
+  ];
+
+  return candidates.find((value) => value !== null && value !== undefined && String(value).trim() !== "") ?? "Unknown";
+};
+
+const resolveNodebValue = (loc) => {
+  const candidates = [
+    loc?.nodebid,
+    loc?.nodeb_id,
+    loc?.nodebId,
+    loc?.node_b_id,
+    loc?.best_nodebid,
+    loc?.best_nodeb_id,
+  ];
+
+  return candidates.find((value) => value !== null && value !== undefined && String(value).trim() !== "") ?? "Unknown";
+};
+
 const toFiniteNumber = (value) => {
   const parsed = Number.parseFloat(value);
   return Number.isFinite(parsed) ? parsed : null;
@@ -319,17 +362,17 @@ export const useUnifiedGridViewData = ({
       );
       incrementCounter(
         bucket.nodebids,
-        loc?.nodebid ?? loc?.nodeb_id ?? loc?.nodebId,
+        resolveNodebValue(loc),
         (value) => String(value ?? "").trim() || "Unknown",
       );
       incrementCounter(
         bucket.cellIds,
-        loc?.cell_id ?? loc?.cellId ?? loc?.CellId ?? loc?.CELL_ID,
+        resolveCellIdValue(loc),
         (value) => String(value ?? "").trim() || "Unknown",
       );
       incrementCounter(
         bucket.pcis,
-        loc?.pci,
+        resolvePciValue(loc),
         (value) => {
           const parsed = Number.parseInt(value, 10);
           return Number.isFinite(parsed) ? String(parsed) : "Unknown";
@@ -348,12 +391,10 @@ export const useUnifiedGridViewData = ({
           ) || "Unknown";
         const bandName = normalizeBandName(loc?.band ?? loc?.primaryBand);
         const nodebidName = String(
-          loc?.nodebid ?? loc?.nodeb_id ?? loc?.nodebId ?? "",
+          resolveNodebValue(loc),
         ).trim() || "Unknown";
-        const cellIdName = String(
-          loc?.cell_id ?? loc?.cellId ?? loc?.CellId ?? loc?.CELL_ID ?? "",
-        ).trim() || "Unknown";
-        const pciValue = Number.parseInt(loc?.pci, 10);
+        const cellIdName = String(resolveCellIdValue(loc)).trim() || "Unknown";
+        const pciValue = Number.parseInt(resolvePciValue(loc), 10);
 
         pushCategoryMetricValue(bucket.providerMetrics, providerName, selectedMetricValue);
         pushCategoryMetricValue(bucket.bandMetrics, bandName, selectedMetricValue);

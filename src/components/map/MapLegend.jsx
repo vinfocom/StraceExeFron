@@ -251,22 +251,47 @@ const getNormalizedKey = (log, colorBy, scheme, macDetailField) => {
         : normalizedBand;
     }
     case "pci": {
-      const pci = Number.parseInt(log.pci ?? log.PCI ?? log.best_pci, 10);
+      const pci = Number.parseInt(
+        [
+          log.pci,
+          log.PCI,
+          log.Pci,
+          log.physical_cell_id,
+          log.physicalCellId,
+          log.pci_or_psi,
+          log.primaryPci,
+          log.primary_pci,
+          log.best_pci,
+        ].find((value) => Number.isFinite(Number.parseInt(value, 10))),
+        10,
+      );
       return Number.isFinite(pci) ? String(pci) : "Unknown";
     }
     case "nodebid": {
-      const raw =
-        log.nodebid ??
-        log.nodeb_id ??
-        log.nodebId ??
-        log.NodeBID ??
-        log.NodeBId ??
-        log.NodebId;
+      const raw = [
+        log.nodebid,
+        log.nodeb_id,
+        log.nodebId,
+        log.node_b_id,
+        log.best_nodebid,
+        log.best_nodeb_id,
+        log.NodeBID,
+        log.NodeBId,
+        log.NodebId,
+      ].find((value) => value !== null && value !== undefined && String(value).trim() !== "");
       const nodeb = String(raw ?? "").trim();
       return nodeb || "Unknown";
     }
     case "cell_id": {
-      const raw = log.cell_id ?? log.cellId ?? log.CellId ?? log.CELL_ID;
+      const raw = [
+        log.cell_id,
+        log.cellId,
+        log.CellId,
+        log.CELL_ID,
+        log.cell_id_representative,
+        log.cellIdRepresentative,
+        log.best_cell_id,
+      ].find((value) => value !== null && value !== undefined && String(value).trim() !== "");
       const cellId = String(raw ?? "").trim();
       return cellId || "Unknown";
     }
