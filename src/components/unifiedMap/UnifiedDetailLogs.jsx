@@ -1274,34 +1274,78 @@ function UnifiedDetailLogs({
     return { width, height };
   }, []);
 
-  const getDockedLayout = useCallback(() => {
+  // The panel is absolutely positioned, so it has to be sized against the app
+  // shell it sits in, not against the raw viewport. Guessing a fixed header
+  // height is what pushed the panel past the bottom edge (the Electron title
+  // bar and a wrapped header both shift it down) and made the page scroll, so
+  // measure the container and the header instead.
+  const getPanelFrame = useCallback(() => {
     const { width: viewportWidth, height: viewportHeight } = getViewportSize();
-    const maxWidth = Math.max(240, viewportWidth - EDGE_GAP * 2);
-    const availableHeight = Math.max(
-      MIN_PANEL_HEIGHT,
-      viewportHeight - HEADER_OFFSET - EDGE_GAP,
-    );
+    const fallbackTop = HEADER_OFFSET;
+    const fallback = {
+      left: 0,
+      top: fallbackTop,
+      width: viewportWidth,
+      height: Math.max(MIN_PANEL_HEIGHT, viewportHeight - fallbackTop),
+    };
+
+    const element = rndRef.current?.getSelfElement?.();
+    const container = element?.parentElement;
+    if (!container?.getBoundingClientRect) return fallback;
+
+    const containerRect = container.getBoundingClientRect();
+    if (!containerRect.width || !containerRect.height) return fallback;
+
+    const headerRect = container
+      .querySelector("header")
+      ?.getBoundingClientRect();
+    const top =
+      headerRect && headerRect.bottom > containerRect.top
+        ? Math.min(headerRect.bottom, containerRect.bottom)
+        : containerRect.top;
+
+    // Offsets are resolved against the offset parent, which is the viewport
+    // unless an ancestor becomes positioned.
+    const offsetParent = element.offsetParent;
+    const originRect =
+      offsetParent &&
+      offsetParent !== document.body &&
+      offsetParent !== document.documentElement
+        ? offsetParent.getBoundingClientRect()
+        : null;
+
+    return {
+      left: containerRect.left - (originRect?.left || 0),
+      top: top - (originRect?.top || 0),
+      width: Math.max(240, containerRect.width),
+      height: Math.max(MIN_PANEL_HEIGHT, containerRect.bottom - top),
+    };
+  }, [getViewportSize]);
+
+  const getDockedLayout = useCallback(() => {
+    const frame = getPanelFrame();
+    const maxWidth = Math.max(240, frame.width - EDGE_GAP * 2);
     const width = Math.max(
       Math.min(MIN_PANEL_WIDTH, maxWidth),
-      Math.min(MAX_DOCKED_WIDTH, Math.floor(viewportWidth * 0.34), maxWidth),
+      Math.min(MAX_DOCKED_WIDTH, Math.floor(frame.width * 0.34), maxWidth),
     );
-    const height = Math.min(availableHeight, viewportHeight - EDGE_GAP * 2);
+    const height = Math.max(MIN_PANEL_HEIGHT, frame.height - EDGE_GAP * 2);
 
     return {
       width,
       height,
-      x: Math.max(EDGE_GAP, viewportWidth - width - EDGE_GAP),
-      y: Math.max(
-        EDGE_GAP,
-        Math.min(HEADER_OFFSET, viewportHeight - height - EDGE_GAP),
+      x: Math.max(
+        frame.left + EDGE_GAP,
+        frame.left + frame.width - width - EDGE_GAP,
       ),
+      y: frame.top + Math.max(0, Math.min(EDGE_GAP, frame.height - height)),
     };
-  }, [getViewportSize]);
+  }, [getPanelFrame]);
 
   const getExpandedLayout = useCallback(() => {
-    const { width: viewportWidth, height: viewportHeight } = getViewportSize();
-    const maxWidth = Math.max(240, viewportWidth - EDGE_GAP * 2);
-    const preferredWidth = Math.floor(viewportWidth * 0.78);
+    const frame = getPanelFrame();
+    const maxWidth = Math.max(240, frame.width - EDGE_GAP * 2);
+    const preferredWidth = Math.floor(frame.width * 0.78);
     const minExpandedWidth = Math.min(maxWidth, MIN_PANEL_WIDTH + 220);
     const width = Math.max(
       minExpandedWidth,
@@ -1310,26 +1354,61 @@ function UnifiedDetailLogs({
 
     const availableHeight = Math.max(
       MIN_PANEL_HEIGHT,
-      viewportHeight - HEADER_OFFSET - EDGE_GAP,
+      frame.height - EDGE_GAP * 2,
     );
-    const height = Math.min(
-      Math.max(MIN_PANEL_HEIGHT, Math.floor(availableHeight * 0.9)),
-      viewportHeight - EDGE_GAP * 2,
+    const height = Math.max(
+      MIN_PANEL_HEIGHT,
+      Math.floor(availableHeight * 0.9),
     );
 
     return {
       width,
       height,
-      x: Math.max(EDGE_GAP, Math.floor((viewportWidth - width) / 2)),
-      y: Math.max(
-        EDGE_GAP,
-        Math.min(
-          HEADER_OFFSET,
-          Math.floor(HEADER_OFFSET + (availableHeight - height) / 2),
-        ),
-      ),
+      x:
+        frame.left +
+        Math.max(EDGE_GAP, Math.floor((frame.width - width) / 2)),
+      y:
+        frame.top +
+        Math.max(0, Math.min(EDGE_GAP, Math.floor((frame.height - height) / 2))),
     };
-  }, [getViewportSize]);
+  }, [getPanelFrame]);
+
+  // Keeps a manually dragged/resized panel inside the app area without
+  // resetting the size the user picked.
+  const clampPanelToFrame = useCallback(() => {
+    const rnd = rndRef.current;
+    const element = rnd?.getSelfElement?.();
+    if (!rnd || !element) return;
+
+    const frame = getPanelFrame();
+    const width = Math.min(
+      element.offsetWidth,
+      Math.max(240, frame.width - EDGE_GAP * 2),
+    );
+    const height = Math.min(
+      element.offsetHeight,
+      Math.max(MIN_PANEL_HEIGHT, frame.height - EDGE_GAP * 2),
+    );
+    const position = rnd.getDraggablePosition?.() || {
+      x: frame.left + EDGE_GAP,
+      y: frame.top + EDGE_GAP,
+    };
+    const x = Math.max(
+      frame.left + EDGE_GAP,
+      Math.min(position.x, frame.left + frame.width - width - EDGE_GAP),
+    );
+    const y = Math.max(
+      frame.top + EDGE_GAP,
+      Math.min(position.y, frame.top + frame.height - height - EDGE_GAP),
+    );
+
+    if (width !== element.offsetWidth || height !== element.offsetHeight) {
+      rnd.updateSize({ width, height });
+    }
+    if (x !== position.x || y !== position.y) {
+      rnd.updatePosition({ x, y });
+    }
+  }, [getPanelFrame]);
 
   const initialPanelLayout = useMemo(() => getDockedLayout(), [getDockedLayout]);
   const distributionChartRef = useRef(null);
@@ -1457,7 +1536,7 @@ function UnifiedDetailLogs({
   }, [filteredLocations, onFilteredDataChange]);
 
   useEffect(() => {
-    const handleViewportResize = () => {
+    const syncPanelLayout = () => {
       if (!rndRef.current) return;
       const nextLayout = expanded ? getExpandedLayout() : getDockedLayout();
       rndRef.current.updateSize({
@@ -1470,9 +1549,29 @@ function UnifiedDetailLogs({
       });
     };
 
-    window.addEventListener("resize", handleViewportResize);
-    return () => window.removeEventListener("resize", handleViewportResize);
-  }, [expanded, getDockedLayout, getExpandedLayout]);
+    // The first layout is computed before the panel is in the DOM, so it can
+    // only fall back to viewport math - re-run it once the frame is measurable.
+    syncPanelLayout();
+
+    window.addEventListener("resize", syncPanelLayout);
+    return () => window.removeEventListener("resize", syncPanelLayout);
+  }, [collapsed, expanded, getDockedLayout, getExpandedLayout]);
+
+  // The header wraps to a second row on narrow widths, which moves the top of
+  // the available area without firing a window resize.
+  useEffect(() => {
+    if (collapsed || typeof ResizeObserver === "undefined") return;
+
+    const container = rndRef.current?.getSelfElement?.()?.parentElement;
+    if (!container) return;
+
+    const observer = new ResizeObserver(() => clampPanelToFrame());
+    observer.observe(container);
+    const headerElement = container.querySelector("header");
+    if (headerElement) observer.observe(headerElement);
+
+    return () => observer.disconnect();
+  }, [collapsed, clampPanelToFrame]);
 
   const conditionTabLocations = useMemo(() => {
     if (Array.isArray(conditionLogsLocations) && conditionLogsLocations.length > 0) {
