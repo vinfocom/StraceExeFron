@@ -1264,9 +1264,9 @@ function UnifiedDetailLogs({
 
   const HEADER_OFFSET = 70;
   const EDGE_GAP = 12;
-  const MIN_PANEL_WIDTH = 420;
+  const MIN_PANEL_WIDTH = 280;
   const MAX_DOCKED_WIDTH = 560;
-  const MIN_PANEL_HEIGHT = 320;
+  const MIN_PANEL_HEIGHT = 240;
 
   const getViewportSize = useCallback(() => {
     const width = window?.innerWidth || 1280;
@@ -1276,26 +1276,31 @@ function UnifiedDetailLogs({
 
   const getDockedLayout = useCallback(() => {
     const { width: viewportWidth, height: viewportHeight } = getViewportSize();
-    const width = Math.max(
-      MIN_PANEL_WIDTH,
-      Math.min(MAX_DOCKED_WIDTH, Math.floor(viewportWidth * 0.34)),
-    );
-    const height = Math.max(
+    const maxWidth = Math.max(240, viewportWidth - EDGE_GAP * 2);
+    const availableHeight = Math.max(
       MIN_PANEL_HEIGHT,
       viewportHeight - HEADER_OFFSET - EDGE_GAP,
     );
+    const width = Math.max(
+      Math.min(MIN_PANEL_WIDTH, maxWidth),
+      Math.min(MAX_DOCKED_WIDTH, Math.floor(viewportWidth * 0.34), maxWidth),
+    );
+    const height = Math.min(availableHeight, viewportHeight - EDGE_GAP * 2);
 
     return {
       width,
       height,
       x: Math.max(EDGE_GAP, viewportWidth - width - EDGE_GAP),
-      y: HEADER_OFFSET,
+      y: Math.max(
+        EDGE_GAP,
+        Math.min(HEADER_OFFSET, viewportHeight - height - EDGE_GAP),
+      ),
     };
   }, [getViewportSize]);
 
   const getExpandedLayout = useCallback(() => {
     const { width: viewportWidth, height: viewportHeight } = getViewportSize();
-    const maxWidth = Math.max(MIN_PANEL_WIDTH, viewportWidth - EDGE_GAP * 2);
+    const maxWidth = Math.max(240, viewportWidth - EDGE_GAP * 2);
     const preferredWidth = Math.floor(viewportWidth * 0.78);
     const minExpandedWidth = Math.min(maxWidth, MIN_PANEL_WIDTH + 220);
     const width = Math.max(
@@ -1307,9 +1312,9 @@ function UnifiedDetailLogs({
       MIN_PANEL_HEIGHT,
       viewportHeight - HEADER_OFFSET - EDGE_GAP,
     );
-    const height = Math.max(
-      MIN_PANEL_HEIGHT,
-      Math.min(Math.floor(availableHeight * 0.9), availableHeight),
+    const height = Math.min(
+      Math.max(MIN_PANEL_HEIGHT, Math.floor(availableHeight * 0.9)),
+      viewportHeight - EDGE_GAP * 2,
     );
 
     return {
@@ -1317,8 +1322,11 @@ function UnifiedDetailLogs({
       height,
       x: Math.max(EDGE_GAP, Math.floor((viewportWidth - width) / 2)),
       y: Math.max(
-        HEADER_OFFSET,
-        Math.floor(HEADER_OFFSET + (availableHeight - height) / 2),
+        EDGE_GAP,
+        Math.min(
+          HEADER_OFFSET,
+          Math.floor(HEADER_OFFSET + (availableHeight - height) / 2),
+        ),
       ),
     };
   }, [getViewportSize]);
@@ -1447,6 +1455,24 @@ function UnifiedDetailLogs({
   useEffect(() => {
     onFilteredDataChange?.(filteredLocations);
   }, [filteredLocations, onFilteredDataChange]);
+
+  useEffect(() => {
+    const handleViewportResize = () => {
+      if (!rndRef.current) return;
+      const nextLayout = expanded ? getExpandedLayout() : getDockedLayout();
+      rndRef.current.updateSize({
+        width: nextLayout.width,
+        height: nextLayout.height,
+      });
+      rndRef.current.updatePosition({
+        x: nextLayout.x,
+        y: nextLayout.y,
+      });
+    };
+
+    window.addEventListener("resize", handleViewportResize);
+    return () => window.removeEventListener("resize", handleViewportResize);
+  }, [expanded, getDockedLayout, getExpandedLayout]);
 
   const conditionTabLocations = useMemo(() => {
     if (Array.isArray(conditionLogsLocations) && conditionLogsLocations.length > 0) {
@@ -1817,8 +1843,8 @@ function UnifiedDetailLogs({
         width: initialPanelLayout.width,
         height: initialPanelLayout.height,
       }}
-      minWidth={320}
-      minHeight={300}
+      minWidth={240}
+      minHeight={220}
       bounds="window"
       dragHandleClassName="drag-handle"
       className="z-[1000] shadow-2xl border border-gray-700 bg-gray-900 rounded-lg overflow-hidden flex flex-col min-h-0"
