@@ -13,12 +13,15 @@ import {
   Gauge,
   Square,
   SlidersHorizontal,
+  Loader2,
 } from "lucide-react";
 import { StatCard } from "../common/StatCard";
 import { PCI_COLOR_PALETTE } from "@/components/map/layers/MultiColorCirclesLayer";
 import { useSearchParams } from "react-router-dom";
 import { toast } from "react-toastify";
-import { mapViewApi } from "@/api/apiEndpoints";
+import { mapViewApi, pptReportApi } from "@/api/apiEndpoints";
+import { useAuth } from "@/hooks/useAuth";
+import { resolveUserRegion } from "@/utils/authSession";
 import {
   normalizeProviderName,
   normalizeTechName,
@@ -211,6 +214,8 @@ export const OverviewTab = ({
   const [providerVolume, setProviderVolume] = useState({});
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+  const [isGeneratingPpt, setIsGeneratingPpt] = useState(false);
+  const { user } = useAuth();
 
   const plottedExportLocations = useMemo(() => {
     if (Array.isArray(mapPlotLocations) && mapPlotLocations.length > 0) {
@@ -231,10 +236,6 @@ export const OverviewTab = ({
     }
   }, [plottedExportLocations, selectedMetric]);
 
-  const handlePptDownload = useCallback(() => {
-    toast.info("Report is Preparing");
-  }, []);
-
   const sessionParam = searchParams.get("session");
 
   const sessionIdsFromQuery = useMemo(() => {
@@ -254,6 +255,73 @@ export const OverviewTab = ({
 
     return sessionIdsFromQuery;
   }, [sessionIdsProp, sessionIdsFromQuery]);
+
+  const handlePptDownload = useCallback(async () => {
+    const numericProjectId = Number(projectId);
+    if (!Number.isFinite(numericProjectId) || numericProjectId <= 0) {
+      toast.error("Select a project before generating the PPT report.");
+      return;
+    }
+
+    if (isGeneratingPpt) return;
+
+    const region = resolveUserRegion(user) || "india";
+    const numericUserId = Number(
+      user?.id ?? user?.user_id ?? user?.userId ?? user?.UserId ?? 0,
+    );
+    const selectedSessionIds = sessionIds
+      .map((id) => Number(id))
+      .filter((id) => Number.isFinite(id) && id > 0);
+    const payload = {
+      project_id: numericProjectId,
+      country_code: region,
+      region,
+      user_id: Number.isFinite(numericUserId) ? numericUserId : 0,
+      ...(selectedSessionIds.length > 0 ? { session_ids: selectedSessionIds } : {}),
+    };
+
+    setIsGeneratingPpt(true);
+    const toastId = toast.loading("Preparing PowerPoint report...");
+
+    try {
+      const response = await pptReportApi.generate(payload);
+      const status = String(response?.status || "").toLowerCase();
+      const downloadUrl = pptReportApi.getDownloadUrl(
+        response?.download_url,
+        numericProjectId,
+      );
+
+      if (status && status !== "success") {
+        throw new Error(response?.message || "The PPT report could not be generated.");
+      }
+
+      const link = document.createElement("a");
+      link.href = downloadUrl;
+      link.download = response?.output_file || `Mobility_DT_Project_${numericProjectId}.pptx`;
+      link.target = "_blank";
+      link.rel = "noopener noreferrer";
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+
+      toast.update(toastId, {
+        render: "PowerPoint report is ready and downloading.",
+        type: "success",
+        isLoading: false,
+        autoClose: 3000,
+      });
+    } catch (pptError) {
+      console.error("PPT report generation failed:", pptError);
+      toast.update(toastId, {
+        render: pptError?.message || "Failed to generate PowerPoint report.",
+        type: "error",
+        isLoading: false,
+        autoClose: 5000,
+      });
+    } finally {
+      setIsGeneratingPpt(false);
+    }
+  }, [isGeneratingPpt, projectId, sessionIds, user]);
 
   const isUnknownOrEmpty = useCallback((value) => {
     if (!value) return true;
@@ -621,10 +689,12 @@ export const OverviewTab = ({
         <button
           type="button"
           onClick={handlePptDownload}
-          title="Download PPT"
-          className="inline-flex items-center gap-1.5 rounded-md border border-purple-500/50 bg-purple-600/15 px-2.5 py-1.5 text-xs font-medium text-purple-200 transition hover:bg-purple-600/25"
+          disabled={isGeneratingPpt}
+          title={isGeneratingPpt ? "Preparing PPT" : "Download PPT"}
+          className="inline-flex items-center gap-1.5 rounded-md border border-purple-500/50 bg-purple-600/15 px-2.5 py-1.5 text-xs font-medium text-purple-200 transition hover:bg-purple-600/25 disabled:cursor-wait disabled:opacity-60"
         >
-          ppt
+          {isGeneratingPpt && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+          {isGeneratingPpt ? "Preparing PPT…" : "PPT"}
         </button>
       </div>
 

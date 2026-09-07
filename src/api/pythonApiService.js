@@ -331,4 +331,5 @@ export const pythonApi = {
 };
 
 export const PYTHON_BASE_URL_EXPORT = PYTHON_BASE_URL;
+export const getPythonApiBaseUrl = () => activePythonBaseUrl;
 export const pythonAxiosInstance = pythonAxios;

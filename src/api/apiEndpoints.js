@@ -1,7 +1,7 @@
 // src/api/apiEndpoints.js
 import { CleaningServices } from "@mui/icons-material";
 import { api } from "./apiService"; // C# Backend
-import { pythonApi, PYTHON_BASE_URL_EXPORT } from "./pythonApiService"; // Python Backend
+import { pythonApi, PYTHON_BASE_URL_EXPORT, getPythonApiBaseUrl } from "./pythonApiService"; // Python Backend
 import axios from "axios";
 import { isCancelledError } from './apiService'; // Import the utility
 
@@ -939,7 +939,7 @@ export const predictionApi = {
         const debugPayload = {
           project_id: params.project_id,
           operator: operator || undefined,
-          session_ids: validSessionIds,
+          session_ids: parsedSessionIds,
           rsrp: params.rsrp,
           rsrq: params.rsrq,
           sinr: params.sinr,
@@ -1265,6 +1265,24 @@ export const reportApi = {
       timeout: 600000,
       dedupe: false,
     }),
+};
+
+export const pptReportApi = {
+  generate: (payload) =>
+    pythonApi.post("/api/ppt-report/generate", payload, { timeout: 30 * 60 * 1000 }),
+  healthCheck: () =>
+    pythonApi.get("/api/ppt-report/health", { timeout: 120000 }),
+  getDownloadUrl: (downloadUrl, projectId) => {
+    const fallbackPath = `/api/ppt-report/download/${encodeURIComponent(projectId)}`;
+    const path = String(downloadUrl || fallbackPath).trim();
+    const baseUrl = getPythonApiBaseUrl() || PYTHON_BASE_URL_EXPORT;
+
+    try {
+      return new URL(path, `${baseUrl}/`).toString();
+    } catch {
+      return path;
+    }
+  },
 };
 
 export const authApi = {

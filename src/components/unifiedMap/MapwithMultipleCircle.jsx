@@ -1096,6 +1096,26 @@ const generateGridCellsOptimized = (
             fillColor = resolveCategoryColor(rankedCategories[0].name);
           }
         }
+
+        // "Best Server" is the PCI category color mode. A grid cell without
+        // any PCI cannot be assigned a server color, so do not let its
+        // selected metric color make it look like a valid PCI cell.
+        if (normalizedColorBy === "pci") {
+          if (pciCountBuckets.size === 0) {
+            fillColor = "#9CA3AF";
+            bestByColor = null;
+          } else if (!bestByColor?.name) {
+            const rankedPcis = Array.from(pciCountBuckets.entries()).sort(
+              (a, b) => b[1] - a[1],
+            );
+            bestByColor = {
+              label: "PCI/BCCH",
+              name: rankedPcis[0][0],
+              count: rankedPcis[0][1],
+            };
+            fillColor = getOverridablePciColor(rankedPcis[0][0]);
+          }
+        }
       }
 
       cells.push({
@@ -2078,6 +2098,13 @@ const MapWithMultipleCircles = ({
     const categoryKey = String(colorBy || "").trim().toLowerCase();
     const rows = visibleGridCells
       .filter((cell) => cell.count > 0)
+      .filter((cell) => {
+        if (categoryKey !== "pci") return true;
+
+        // PCI-less cells are intentionally grey on the map and must not
+        // create an "Unknown"/empty PCI entry in the legend.
+        return Number.isFinite(Number.parseInt(cell.bestByColor?.name, 10));
+      })
       .map((cell) => {
         const centerLat = (cell.bounds.north + cell.bounds.south) / 2;
         const centerLng = (cell.bounds.east + cell.bounds.west) / 2;
