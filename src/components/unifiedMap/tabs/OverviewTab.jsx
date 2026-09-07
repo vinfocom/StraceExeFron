@@ -232,7 +232,7 @@ export const OverviewTab = ({
   }, [plottedExportLocations, selectedMetric]);
 
   const handlePptDownload = useCallback(() => {
-    toast.info("ppt already downloaaded");
+    toast.info("Report is Preparing");
   }, []);
 
   const sessionParam = searchParams.get("session");
