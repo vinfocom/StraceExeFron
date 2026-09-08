@@ -1483,7 +1483,7 @@ const DriveTestSessionsPage = () => {
                         >
                           <a
                             href={sessionDownloadApi.getUploadedLogsUrl(session.id)}
-                            download={`logs_${session.id}.zip`}
+                            download={`log_${session.id}.zip`}
                             aria-label={`Download logs for session ${session.id}`}
                             onClick={(event) => handleDownloadLogs(event, session.id)}
                             aria-busy={downloadingSessionId === session.id}

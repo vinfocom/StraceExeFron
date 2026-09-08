@@ -71,9 +71,7 @@ const LTE_RECOMMENDATION_OPTIMIZED_DEFAULTS = Object.freeze({
   max_interference_sites: 10,
 });
 
-// The only Mod values the backend can actually evaluate (Mod0 is a
-// ZeroDivisionError server-side, not a real rule) -- kept in sync with
-// ML/tools/pci_optimization/engine.py's MOD_RULE_VALUES.
+
 const PCI_MOD_RULE_ALLOWED_VALUES = new Set([1, 3, 6, 7, 8, 9]);
 
 const PCI_OPTIMIZATION_DEFAULTS = Object.freeze({
@@ -161,11 +159,11 @@ export const sessionDownloadApi = {
     const normalizedSessionId = String(sessionId ?? "").trim();
     if (!normalizedSessionId) return "";
 
-    const remoteUrl = `${UPLOADED_ZIPPED_LOGS_BASE_URL}/logs_${encodeURIComponent(normalizedSessionId)}.zip`;
+    const remoteUrl = `${UPLOADED_ZIPPED_LOGS_BASE_URL}/log_${encodeURIComponent(normalizedSessionId)}.zip`;
     const proxyBaseUrl = String(CSHARP_BASE_URL || "").replace(/\/+$/, "");
     const query = new URLSearchParams({
       url: remoteUrl,
-      fileName: `logs_${normalizedSessionId}.zip`,
+      fileName: `log_${normalizedSessionId}.zip`,
     });
     return `${proxyBaseUrl}/api/LogDownload/download?${query.toString()}`;
   },
@@ -2748,4 +2746,3 @@ export default {
   validateProjectExists,
   companyApi,
 };
-
