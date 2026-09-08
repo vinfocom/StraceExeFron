@@ -657,30 +657,60 @@ function DetailSection({ title, rows }) {
   );
 }
 
-export function ProtocolAnalyzerView({ analysis, callScoped = false }) {
+export function ProtocolAnalyzerView({ analysis, callScoped = false, calls = [] }) {
   const [selectedProcedureId, setSelectedProcedureId] = useState(
     () => (callScoped ? ALL_PROCEDURES_ID : firstProcedure(analysis.procedures)?.id || ""),
   );
+  const [selectedCallId, setSelectedCallId] = useState("all");
   const [selectedMessage, setSelectedMessage] = useState(null);
   const [query, setQuery] = useState("");
   const [messageTypeFilter, setMessageTypeFilter] = useState("all");
 
+  const callOptions = useMemo(() => {
+    const callLabels = new Map();
+    calls.forEach((call) => {
+      const id = call?.id ?? call?.callId;
+      if (id === null || id === undefined || String(id).trim() === "") return;
+      callLabels.set(String(id), call?.name || call?.label || call?.call || String(id));
+    });
+    analysis.procedures.forEach((procedure) => {
+      if (procedure.callId === null || procedure.callId === undefined || String(procedure.callId).trim() === "") return;
+      const id = String(procedure.callId);
+      if (!callLabels.has(id)) callLabels.set(id, id);
+    });
+    return Array.from(callLabels, ([id, label]) => ({ id, label }));
+  }, [analysis.procedures, calls]);
+
+  const filteredProcedures = useMemo(() => {
+    if (selectedCallId === "all") return analysis.procedures;
+    return analysis.procedures.filter((procedure) => String(procedure.callId || "") === selectedCallId);
+  }, [analysis.procedures, selectedCallId]);
+  const showCombinedProcedure = callScoped || selectedCallId !== "all";
+
   useEffect(() => {
-    if (!analysis.procedures.length) {
+    if (selectedCallId !== "all" && !callOptions.some((call) => call.id === selectedCallId)) {
+      setSelectedCallId("all");
+    }
+  }, [callOptions, selectedCallId]);
+
+  useEffect(() => {
+    if (!filteredProcedures.length) {
       setSelectedProcedureId("");
       return;
     }
-    if (callScoped) {
+    if (showCombinedProcedure) {
       setSelectedProcedureId(ALL_PROCEDURES_ID);
-    } else {
-      setSelectedProcedureId(firstProcedure(analysis.procedures).id);
+      return;
     }
-  }, [analysis.procedures, callScoped]);
+    if (!filteredProcedures.some((procedure) => procedure.id === selectedProcedureId)) {
+      setSelectedProcedureId(firstProcedure(filteredProcedures).id);
+    }
+  }, [filteredProcedures, selectedProcedureId, showCombinedProcedure]);
 
   const isAllSelected = selectedProcedureId === ALL_PROCEDURES_ID;
   const selectedProcedure = isAllSelected
-    ? buildCombinedProcedure(analysis.procedures)
-    : analysis.procedures.find((procedure) => procedure.id === selectedProcedureId) || firstProcedure(analysis.procedures);
+    ? buildCombinedProcedure(filteredProcedures)
+    : filteredProcedures.find((procedure) => procedure.id === selectedProcedureId) || firstProcedure(filteredProcedures);
   const selectedProcedureVisibleItems = useMemo(() => {
     if (!selectedProcedure) return [];
     return messageTypeFilter && messageTypeFilter !== "all"
@@ -707,17 +737,34 @@ export function ProtocolAnalyzerView({ analysis, callScoped = false }) {
 
   return (
     <div className="l3-glass flex h-full min-h-0 w-full max-w-full min-w-0 flex-col overflow-hidden">
+      <div className="l3-glass-subtle flex shrink-0 flex-wrap items-center gap-3 border-x-0 border-t-0 px-3 py-2">
+        <label className="flex items-center gap-2 text-xs font-medium text-white">
+          <span>Call:</span>
+          <select
+            value={selectedCallId}
+            onChange={(event) => setSelectedCallId(event.target.value)}
+            className="h-8 min-w-44 rounded border border-slate-700 bg-slate-950 px-2 text-xs text-white outline-none focus:border-blue-500"
+          >
+            <option value="all">All Calls</option>
+            {callOptions.map((call) => <option key={call.id} value={call.id}>{call.label}</option>)}
+          </select>
+        </label>
+        <span className="text-xs text-slate-300">
+          Showing {filteredProcedures.length} procedure{filteredProcedures.length === 1 ? "" : "s"}
+          {selectedCallId !== "all" ? ` for call ${selectedCallId}` : ""}
+        </span>
+      </div>
       <div className="grid min-h-0 flex-1 grid-cols-1 gap-2 overflow-hidden xl:grid-cols-[290px_minmax(0,1fr)_330px]">
         <ProcedureTree
-          procedures={analysis.procedures}
+          procedures={filteredProcedures}
           selectedProcedureId={selectedProcedureId}
-          callScoped={callScoped}
+          callScoped={showCombinedProcedure}
           onSelect={(id) => {
             setSelectedProcedureId(id);
             if (id === ALL_PROCEDURES_ID) {
-              setSelectedMessage(buildCombinedProcedure(analysis.procedures).items[0] || null);
+              setSelectedMessage(buildCombinedProcedure(filteredProcedures).items[0] || null);
             } else {
-              const next = analysis.procedures.find((procedure) => procedure.id === id);
+              const next = filteredProcedures.find((procedure) => procedure.id === id);
               setSelectedMessage(next?.items[0] || null);
             }
           }}

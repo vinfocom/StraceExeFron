@@ -543,6 +543,26 @@ function inferRowFlow(item, protocol) {
     : { from: "UE", to: node, known: false };
 }
 
+function normalizeBackendDirection(value) {
+  const normalized = String(value || "").trim().toUpperCase();
+  if (/^(UL|UPLINK|UPLOAD)$/.test(normalized)) return "UL";
+  if (/^(DL|DOWNLINK|DOWNLOAD)$/.test(normalized)) return "DL";
+  return "";
+}
+
+function resolveRowFlow(item, definition, protocol) {
+  const backendDirection = normalizeBackendDirection(item.direction);
+  if (!backendDirection) return inferRowFlow(item, protocol);
+
+  const definitionNode = [definition?.from, definition?.to]
+    .find((node) => node && !/^(UE|EVENT|TIMELINE)$/i.test(String(node).trim()));
+  const networkNode = definitionNode || inferNetworkNode(item, protocol);
+
+  return backendDirection === "UL"
+    ? { from: "UE", to: networkNode, known: true }
+    : { from: networkNode, to: "UE", known: true };
+}
+
 function createRowAnalysisDefinition(item) {
   const protocol = inferProtocol(item, null);
   const flow = inferRowFlow(item, protocol);
@@ -640,7 +660,9 @@ function createProcedure(definition, item, idNumber, callId) {
 function enrichItem(item, definition, procedure, startMs, callId) {
   const itemMs = timeMs(item);
   const protocol = inferProtocol(item, definition);
-  const direction = definition?.from && definition?.to ? `${definition.from} -> ${definition.to}` : "Correlated event";
+  const backendDirection = normalizeBackendDirection(item.direction);
+  const flow = resolveRowFlow(item, definition, protocol);
+  const direction = backendDirection || (flow.from && flow.to ? `${flow.from} -> ${flow.to}` : "Correlated event");
   const messageName = definition?.messageName || item.title || "CorrelatedEvent";
 
   return {
@@ -654,9 +676,9 @@ function enrichItem(item, definition, procedure, startMs, callId) {
     relativeMs: itemMs !== null && startMs !== null ? Math.max(0, itemMs - startMs) : null,
     protocol,
     direction,
-    directionKnown: definition?.directionKnown ?? !definition?.rowFallback,
-    from: definition?.from || "Event",
-    to: definition?.to || "Timeline",
+    directionKnown: flow.known,
+    from: flow.from || "Event",
+    to: flow.to || "Timeline",
     spec: definition?.spec || procedure.spec,
     section: definition?.section || procedure.section,
     color: COLOR_BY_PROTOCOL[protocol] || "gray",

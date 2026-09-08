@@ -28,7 +28,7 @@ import {
   COLOR_SCHEMES,
   getLogColor,
 } from "@/utils/colorUtils";
-import { downloadMifMidForLogs } from "@/utils/mifExport";
+import { downloadKmlForLogs } from "@/utils/kmlExport";
 
 const PROVIDER_VOLUME_CACHE = new Map();
 const PROVIDER_VOLUME_PENDING = new Map();
@@ -224,15 +224,15 @@ export const OverviewTab = ({
     return Array.isArray(locations) ? locations : [];
   }, [locations, mapPlotLocations]);
 
-  const handleDownloadMif = useCallback(() => {
+  const handleDownloadKml = useCallback(() => {
     try {
-      const result = downloadMifMidForLogs({
+      const result = downloadKmlForLogs({
         locations: plottedExportLocations,
         selectedMetric,
       });
-      toast.success(`Downloaded ${result.exportedCount.toLocaleString()} plotted logs as MIF/MID`);
+      toast.success(`Downloaded ${result.exportedCount.toLocaleString()} plotted logs as KML`);
     } catch (exportError) {
-      toast.error(exportError?.message || "Failed to export plotted logs as MIF.");
+      toast.error(exportError?.message || "Failed to export plotted logs as KML.");
     }
   }, [plottedExportLocations, selectedMetric]);
 
@@ -678,13 +678,13 @@ export const OverviewTab = ({
       <div className="flex justify-end gap-2">
         <button
           type="button"
-          onClick={handleDownloadMif}
+          onClick={handleDownloadKml}
           disabled={plottedExportLocations.length === 0}
-          title="Export plotted Unified Map logs as MapInfo MIF/MID"
+          title="Export plotted Unified Map logs as KML"
           className="inline-flex items-center gap-1.5 rounded-md border border-blue-500/50 bg-blue-600/15 px-2.5 py-1.5 text-xs font-medium text-blue-200 transition hover:bg-blue-600/25 disabled:cursor-not-allowed disabled:border-slate-700 disabled:bg-slate-800 disabled:text-slate-500"
         >
           <Download className="h-3.5 w-3.5" />
-          Export KPI MIF
+          Export KML
         </button>
         <button
           type="button"
