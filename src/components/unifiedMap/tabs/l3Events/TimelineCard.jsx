@@ -1,6 +1,5 @@
 import React, { memo, useState } from "react";
-import { ArrowDownLeft, ArrowUpRight, ChevronDown, ChevronUp, MoveHorizontal } from "lucide-react";
-import { getDirectionInfo } from "@/utils/l3Events/direction";
+import { ArrowDown, ArrowUp, ChevronDown, ChevronUp } from "lucide-react";
 
 const TYPE_BADGE_CLASS = {
   l3: "bg-indigo-500/15 text-indigo-300 border-indigo-500/30",
@@ -19,19 +18,29 @@ const isWarningSeverity = (severity) => WARNING_SEVERITIES.has(String(severity |
 const DIRECTION_BADGE_CLASS = {
   upload: "bg-blue-500/15 text-blue-300 border-blue-500/30",
   download: "bg-emerald-500/15 text-emerald-300 border-emerald-500/30",
-  event: "bg-slate-500/15 text-slate-300 border-slate-500/30",
+  none: "bg-slate-500/15 text-white border-slate-500/30",
 };
 
 const DIRECTION_ICON = {
-  upload: ArrowUpRight,
-  download: ArrowDownLeft,
-  event: MoveHorizontal,
+  upload: ArrowUp,
+  download: ArrowDown,
 };
+
+function getBackendDirection(value) {
+  const normalized = String(value || "").trim().toUpperCase();
+  if (/^(UL|UPLINK|UPLOAD)$/.test(normalized)) {
+    return { key: "upload", shortLabel: "UL", ariaLabel: "Uplink", iconLabel: "↑" };
+  }
+  if (/^(DL|DOWNLINK|DOWNLOAD)$/.test(normalized)) {
+    return { key: "download", shortLabel: "DL", ariaLabel: "Downlink", iconLabel: "↓" };
+  }
+  return { key: "none", shortLabel: "/", ariaLabel: "No direction", iconLabel: "/" };
+}
 
 function TimelineCardComponent({ item }) {
   const [expanded, setExpanded] = useState(false);
-  const direction = getDirectionInfo(item);
-  const DirectionIcon = DIRECTION_ICON[direction.key] || MoveHorizontal;
+  const direction = getBackendDirection(item.direction);
+  const DirectionIcon = DIRECTION_ICON[direction.key];
 
   return (
     <div className="rounded-lg border border-slate-700 bg-slate-800/60 hover:bg-slate-800 transition-colors">
@@ -40,21 +49,19 @@ function TimelineCardComponent({ item }) {
         onClick={() => setExpanded((prev) => !prev)}
         className="w-full flex items-start gap-3 p-3 text-left"
       >
-        <span className="text-xl leading-none mt-0.5">{item.icon}</span>
+        <span
+          className={`mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full border ${DIRECTION_BADGE_CLASS[direction.key]}`}
+          title={direction.ariaLabel}
+          aria-label={direction.ariaLabel}
+        >
+          {DirectionIcon ? <DirectionIcon className="h-5 w-5" /> : <span className="text-xl leading-none">{direction.iconLabel}</span>}
+        </span>
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
             {isWarningSeverity(item.severity) && (
               <span className="h-1.5 w-1.5 rounded-full bg-red-500 shrink-0" title={`Severity: ${item.severity}`} />
             )}
             <span className="font-medium text-white text-sm">{item.title}</span>
-            <span
-              className={`inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded-full border ${
-                DIRECTION_BADGE_CLASS[direction.key] || DIRECTION_BADGE_CLASS.event
-              }`}
-              title={direction.ariaLabel}
-            >
-              <DirectionIcon className="h-3 w-3" />
-            </span>
             <span
               className={`text-[10px] px-1.5 py-0.5 rounded-full border ${
                 TYPE_BADGE_CLASS[item.type] || "bg-slate-700 text-white border-slate-600"

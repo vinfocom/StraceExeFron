@@ -6,11 +6,11 @@ import { downloadExcelSignalingSummaryPdf } from "@/utils/l3Events/pdfReport";
 const SOURCE_OPTIONS = ["l3", "event"];
 
 const SEVERITY_CLASS = {
-  failure: "bg-red-500/10 text-red-100",
-  success: "bg-emerald-500/[0.07] text-slate-100",
-  warning: "bg-amber-500/[0.08] text-amber-50",
-  request: "bg-cyan-500/[0.06] text-slate-100",
-  neutral: "text-slate-200",
+  failure: "bg-red-500/10 text-white",
+  success: "bg-emerald-500/[0.07] text-white",
+  warning: "bg-amber-500/[0.08] text-white",
+  request: "bg-cyan-500/[0.06] text-white",
+  neutral: "text-white",
 };
 
 function uniqueValues(rows, key) {
@@ -59,11 +59,11 @@ function compareRows(left, right, sort) {
 
 const Header = ({ label, sortKey, sort, onSort, className = "" }) => (
   <th
-    className={`sticky top-0 z-10 border-b border-r border-slate-700 bg-slate-800 px-2 py-2 text-left text-[10px] font-semibold uppercase tracking-wide text-slate-300 ${className}`}
+    className={`sticky top-0 z-10 border-b border-r border-slate-700 bg-slate-800 px-2 py-2 text-left text-[12px] font-semibold uppercase tracking-wide text-white ${className}`}
   >
     {sortKey ? (
       <button type="button" onClick={() => onSort(sortKey)} className="flex w-full items-center gap-1 whitespace-nowrap hover:text-white">
-        {label}<span className="text-slate-500">{sort.key === sortKey ? (sort.direction === "asc" ? "▲" : "▼") : "↕"}</span>
+        {label}<span className="text-white">{sort.key === sortKey ? (sort.direction === "asc" ? "▲" : "▼") : "↕"}</span>
       </button>
     ) : label}
   </th>
@@ -81,7 +81,7 @@ function ColumnSelectFilter({ value, onChange, options, allLabel = "All" }) {
       value={value}
       onChange={(event) => onChange(event.target.value)}
       onClick={(event) => event.stopPropagation()}
-      className="h-7 w-full rounded border border-slate-700 bg-slate-950 px-1.5 text-[11px] font-normal normal-case text-white focus:border-blue-500 focus:outline-none"
+      className="h-7 w-full rounded border border-slate-700 bg-slate-950 px-1.5 text-[12px] font-normal normal-case text-white focus:border-blue-500 focus:outline-none"
     >
       <option value="all">{allLabel}</option>
       {options.map((option) => <option key={option} value={option}>{option}</option>)}
@@ -133,7 +133,7 @@ function TextColumnSearchFilter({
             else onNext();
           }}
           placeholder={placeholder}
-          className="h-7 w-full rounded border border-slate-700 bg-slate-950 py-0 pl-7 pr-2 text-[11px] font-normal normal-case text-white placeholder:text-slate-500 focus:border-blue-500 focus:outline-none"
+          className="h-7 w-full rounded border border-slate-700 bg-slate-950 py-0 pl-7 pr-2 text-[12px] font-normal normal-case text-white placeholder:text-slate-500 focus:border-blue-500 focus:outline-none"
         />
       </div>
       {isOpen && hasSearch && (
@@ -149,18 +149,18 @@ function TextColumnSearchFilter({
                 onSelectMatch(index);
                 setIsOpen(false);
               }}
-              className={`flex w-full min-w-0 items-center gap-2 px-2 py-1.5 text-left text-[11px] hover:bg-blue-500/20 hover:text-white ${index === activeMatchNumber - 1 ? "bg-amber-500/20 text-amber-50" : "text-slate-200"}`}
+              className={`flex w-full min-w-0 items-center gap-2 px-2 py-1.5 text-left text-[12px] hover:bg-blue-500/20 hover:text-white ${index === activeMatchNumber - 1 ? "bg-amber-500/20 text-amber-50" : "text-white"}`}
             >
               <span className="shrink-0 font-mono text-[10px] text-slate-500">{index + 1}</span>
               <span className="min-w-0 truncate">{getMatchLabel(row) || "Log row"}</span>
             </button>
           )) : (
-            <div className="px-2 py-2 text-[11px] text-slate-500">{noMatchesLabel}</div>
+            <div className="px-2 py-2 text-[12px] text-white">{noMatchesLabel}</div>
           )}
         </div>
       )}
       {hasSearch && (
-        <span className="w-14 shrink-0 text-center text-[10px] font-normal normal-case text-slate-400">
+        <span className="w-14 shrink-0 text-center text-[12px] font-normal normal-case text-white">
           {hasMatches ? `${activeMatchNumber}/${matchCount}` : "0/0"}
         </span>
       )}
@@ -208,7 +208,7 @@ function TextColumnSearchFilter({
   );
 }
 
-function DirectionFilter({ value, onChange }) {
+function DirectionFilter({ value, onChange, hideUnknown = false }) {
   return (
     <select
       value={value}
@@ -219,12 +219,12 @@ function DirectionFilter({ value, onChange }) {
       <option value="all">All</option>
       <option value="uplink">Uplink</option>
       <option value="downlink">Downlink</option>
-      <option value="unknown">Unknown</option>
+      {!hideUnknown && <option value="unknown">Unknown</option>}
     </select>
   );
 }
 
-const SignalingRow = memo(React.forwardRef(function SignalingRow({ row, selected, searchMatch, activeSearchMatch, onSelect, includeLocation }, ref) {
+const SignalingRow = memo(React.forwardRef(function SignalingRow({ row, selected, searchMatch, activeSearchMatch, onSelect, includeLocation, includeRadio, includeCore }, ref) {
   const severityClass = SEVERITY_CLASS[row.severity] || SEVERITY_CLASS.neutral;
   return (
     <tr
@@ -233,21 +233,21 @@ const SignalingRow = memo(React.forwardRef(function SignalingRow({ row, selected
       className={`h-8 cursor-pointer border-b border-slate-800/90 transition-colors hover:bg-blue-500/10 ${searchMatch ? "bg-amber-500/10" : ""} ${activeSearchMatch ? "outline outline-1 -outline-offset-1 outline-amber-300 bg-amber-500/20" : ""} ${selected ? "outline outline-1 -outline-offset-1 outline-blue-400 bg-blue-500/15" : ""}`}
       style={{ height: "32px" }}
     >
-      <td className={`border-r border-slate-800 px-2 font-mono text-[11px] whitespace-nowrap ${severityClass}`}>{row.timestampLabel}</td>
-      <td className={`max-w-32 truncate border-r border-slate-800 px-2 text-[10px] text-slate-200 ${severityClass}`} title={row.direction || "-"}>{row.direction || "-"}</td>
-      <td className={`max-w-24 truncate border-r border-slate-800 px-2 text-[10px] text-slate-200 ${severityClass}`} title={row.channel || "-"}>{row.channel || "-"}</td>
-      <td className={`border-r border-slate-800 px-2 text-center font-mono text-[10px] text-cyan-200 whitespace-nowrap ${severityClass}`}>{laneValue(row, "ue")}</td>
-      <td className={`border-r border-slate-800 px-2 text-center font-mono text-[10px] text-blue-200 whitespace-nowrap ${severityClass}`}>{laneValue(row, "radio")}</td>
-      <td className={`border-r border-slate-800 px-2 text-center font-mono text-[10px] text-violet-200 whitespace-nowrap ${severityClass}`}>{laneValue(row, "core")}</td>
+      <td className={`border-r border-slate-800 px-2 font-mono text-[12px] text-white whitespace-nowrap ${severityClass}`}>{row.timestampLabel}</td>
+      <td className={`max-w-32 truncate border-r border-slate-800 px-2 text-[12px] text-white ${severityClass}`} title={row.direction || "-"}>{row.direction || "-"}</td>
+      <td className={`max-w-24 truncate border-r border-slate-800 px-2 text-[12px] text-white ${severityClass}`} title={row.channel || "-"}>{row.channel || "-"}</td>
+      <td className={`border-r border-slate-800 px-2 text-center font-mono text-[12px] text-white whitespace-nowrap ${severityClass}`}>{laneValue(row, "ue")}</td>
+      {includeRadio && <td className={`border-r border-slate-800 px-2 text-center font-mono text-[12px] text-white whitespace-nowrap ${severityClass}`}>{laneValue(row, "radio")}</td>}
+      {includeCore && <td className={`border-r border-slate-800 px-2 text-center font-mono text-[12px] text-white whitespace-nowrap ${severityClass}`}>{laneValue(row, "core")}</td>}
       {includeLocation && (
         <>
-          <td className={`border-r border-slate-800 px-2 font-mono text-[10px] text-slate-200 whitespace-nowrap ${severityClass}`}>{formatCoordinate(row.latitude)}</td>
-          <td className={`border-r border-slate-800 px-2 font-mono text-[10px] text-slate-200 whitespace-nowrap ${severityClass}`}>{formatCoordinate(row.longitude)}</td>
+          <td className={`border-r border-slate-800 px-2 font-mono text-[12px] text-white whitespace-nowrap ${severityClass}`}>{formatCoordinate(row.latitude)}</td>
+          <td className={`border-r border-slate-800 px-2 font-mono text-[12px] text-white whitespace-nowrap ${severityClass}`}>{formatCoordinate(row.longitude)}</td>
         </>
       )}
-      <td className={`max-w-40 truncate border-r border-slate-800 px-2 text-[10px] text-slate-300 ${severityClass}`} title={row.interface}>{row.interface}</td>
-      <td className={`max-w-44 truncate border-r border-slate-800 px-2 text-[10px] text-slate-200 ${severityClass}`} title={row.cause || "-"}>{row.cause || "-"}</td>
-      <td className="h-8 max-h-8 max-w-72 overflow-hidden border-r border-slate-800 px-2 py-0 text-[12px] font-medium text-white" title={row.message}>
+      <td className={`max-w-40 truncate border-r border-slate-800 px-2 text-[12px] text-white ${severityClass}`} title={row.interface}>{row.interface}</td>
+      <td className={`max-w-44 truncate border-r border-slate-800 px-2 text-[12px] text-white ${severityClass}`} title={row.cause || "-"}>{row.cause || "-"}</td>
+      <td className="h-8 max-h-8 max-w-72 overflow-hidden border-r border-slate-800 px-2 py-0 text-[13px] font-medium text-white" title={row.message}>
         <span className="block max-h-8 truncate leading-8">{row.message}</span>
       </td>
     </tr>
@@ -271,8 +271,8 @@ function DetailPanel({ row }) {
 
   return (
     <div className="h-full overflow-auto bg-slate-950/95 px-2 py-1">
-      <p>Message</p>
-      <div className="whitespace-pre-wrap text-[12px] leading-relaxed text-white">{row.rawMessage || "—"}</div>
+      <p className="text-white">L3/Event</p>
+      <div className="whitespace-pre-wrap text-[13px] leading-relaxed text-white">{row.rawMessage || "—"}</div>
     </div>
   );
 }
@@ -282,6 +282,8 @@ export function ExcelSignalingView({ rows = [], calls = [], selectedCall, onSele
   const [technology, setTechnology] = useState("all");
   const [sources, setSources] = useState(new Set(SOURCE_OPTIONS));
   const [query, setQuery] = useState("");
+  const [directionColumnFilter, setDirectionColumnFilter] = useState("all");
+  const [channelColumnFilter, setChannelColumnFilter] = useState("all");
   const [interfaceColumnFilter, setInterfaceColumnFilter] = useState("all");
   const [causeColumnFilter, setCauseColumnFilter] = useState("");
   const [messageColumnFilter, setMessageColumnFilter] = useState("");
@@ -290,6 +292,8 @@ export function ExcelSignalingView({ rows = [], calls = [], selectedCall, onSele
   const [coreDirection, setCoreDirection] = useState("all");
   const [failureOnly, setFailureOnly] = useState(false);
   const [includeLocation, setIncludeLocation] = useState(false);
+  const [includeRadio, setIncludeRadio] = useState(false);
+  const [includeCore, setIncludeCore] = useState(false);
   const [sort, setSort] = useState({ key: "timestamp", direction: "asc" });
   const [selectedRow, setSelectedRow] = useState(null);
   const [activeCauseMatchIndex, setActiveCauseMatchIndex] = useState(0);
@@ -300,6 +304,8 @@ export function ExcelSignalingView({ rows = [], calls = [], selectedCall, onSele
   useEffect(() => setCallFilter(selectedCall?.id || "all"), [selectedCall]);
 
   const technologies = useMemo(() => uniqueValues(rows, "technology"), [rows]);
+  const directions = useMemo(() => uniqueValues(rows, "direction").filter((direction) => direction !== "-" && direction !== "—"), [rows]);
+  const channels = useMemo(() => uniqueValues(rows, "channel"), [rows]);
   const interfaces = useMemo(() => uniqueValues(rows, "interface"), [rows]);
   const filteredInSequence = useMemo(() => {
     const needle = query.trim().toLowerCase();
@@ -307,6 +313,8 @@ export function ExcelSignalingView({ rows = [], calls = [], selectedCall, onSele
       if (callFilter !== "all" && row.callId !== callFilter) return false;
       if (technology !== "all" && row.technology !== technology) return false;
       if (!sources.has(row.sourceType)) return false;
+      if (directionColumnFilter !== "all" && row.direction !== directionColumnFilter) return false;
+      if (channelColumnFilter !== "all" && row.channel !== channelColumnFilter) return false;
       if (ueDirection !== "all" && laneDirection(row, "ue") !== ueDirection) return false;
       if (radioDirection !== "all" && laneDirection(row, "radio") !== radioDirection) return false;
       if (coreDirection !== "all" && laneDirection(row, "core") !== coreDirection) return false;
@@ -315,7 +323,7 @@ export function ExcelSignalingView({ rows = [], calls = [], selectedCall, onSele
       if (!needle) return true;
       return [row.timestampLabel, row.sourceFile, row.direction, row.channel, row.message, row.cause, row.procedure, row.protocol, row.interface, row.rawMessage, row.callId].filter(Boolean).join(" ").toLowerCase().includes(needle);
     });
-  }, [rows, callFilter, technology, sources, ueDirection, radioDirection, coreDirection, interfaceColumnFilter, failureOnly, query]);
+  }, [rows, callFilter, technology, sources, directionColumnFilter, channelColumnFilter, ueDirection, radioDirection, coreDirection, interfaceColumnFilter, failureOnly, query]);
 
   const filtered = useMemo(() => [...filteredInSequence].sort((a, b) => compareRows(a, b, sort)), [filteredInSequence, sort]);
   const causeNeedle = causeColumnFilter.trim().toLowerCase();
@@ -395,6 +403,8 @@ export function ExcelSignalingView({ rows = [], calls = [], selectedCall, onSele
     setTechnology("all");
     setSources(new Set(SOURCE_OPTIONS));
     setQuery("");
+    setDirectionColumnFilter("all");
+    setChannelColumnFilter("all");
     setInterfaceColumnFilter("all");
     setCauseColumnFilter("");
     setMessageColumnFilter("");
@@ -403,6 +413,10 @@ export function ExcelSignalingView({ rows = [], calls = [], selectedCall, onSele
     setCoreDirection("all");
     setFailureOnly(false);
     setIncludeLocation(false);
+    setIncludeRadio(false);
+    setIncludeCore(false);
+    setRadioDirection("all");
+    setCoreDirection("all");
     setSelectedRow(null);
     setActiveCauseMatchIndex(0);
     setActiveMessageMatchIndex(0);
@@ -467,16 +481,18 @@ export function ExcelSignalingView({ rows = [], calls = [], selectedCall, onSele
     }
   };
 
-  const columnCount = includeLocation ? 11 : 9;
+  const columnCount = 7 + (includeRadio ? 1 : 0) + (includeCore ? 1 : 0) + (includeLocation ? 2 : 0);
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-slate-900/80">
+    <div className="l3-glass flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
       <div className="shrink-0 flex flex-wrap items-center gap-2 border-b border-slate-700 bg-slate-800/70 px-1 py-1">
         <SelectFilter label="Call" value={callFilter} onChange={changeCall} options={calls.map((call) => call.id)} allLabel="All Calls" />
         <SelectFilter label="Technology" value={technology} onChange={setTechnology} options={technologies} />
         <div className="flex items-center gap-2 text-[11px] text-slate-400">Source:{SOURCE_OPTIONS.map((source) => <label key={source} className="flex items-center gap-1 uppercase text-slate-300"><input type="checkbox" checked={sources.has(source)} onChange={() => toggleSource(source)} className="accent-blue-500" />{source}</label>)}</div>
         <label className="flex items-center gap-1 text-[11px] text-slate-300"><input type="checkbox" checked={includeLocation} onChange={(event) => setIncludeLocation(event.target.checked)} className="accent-blue-500" />Include Lat/Lon</label>
         <label className="flex items-center gap-1 text-[11px] text-slate-300"><input type="checkbox" checked={failureOnly} onChange={(event) => setFailureOnly(event.target.checked)} className="accent-red-500" />Failures only</label>
+        <label className="flex items-center gap-1 text-[11px] text-slate-300"><input type="checkbox" checked={includeRadio} onChange={(event) => { setIncludeRadio(event.target.checked); if (!event.target.checked) setRadioDirection("all"); }} className="accent-blue-500" />Include eNB/gNB</label>
+        <label className="flex items-center gap-1 text-[11px] text-slate-300"><input type="checkbox" checked={includeCore} onChange={(event) => { setIncludeCore(event.target.checked); if (!event.target.checked) setCoreDirection("all"); }} className="accent-blue-500" />Include MME/AMF/Core</label>
         <div className="relative min-w-52 flex-1"><Search className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-slate-500" /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search signaling..." className="h-8 w-full rounded border border-slate-700 bg-slate-950 pl-8 pr-2 text-xs text-white placeholder:text-slate-500 focus:border-blue-500 focus:outline-none" /></div>
         <button type="button" onClick={clearFilters} className="flex h-8 items-center gap-1 rounded border border-slate-700 bg-slate-900 px-2 text-[11px] text-slate-300 hover:bg-slate-700"><X className="h-3 w-3" />Clear Filters</button>
         <button
@@ -493,15 +509,15 @@ export function ExcelSignalingView({ rows = [], calls = [], selectedCall, onSele
         <span>Showing {filtered.length.toLocaleString()} matching rows ({rows.length.toLocaleString()} total)</span>
       </div>
       <div className="min-h-0 flex-1 overflow-auto">
-        <table className={`w-full border-collapse ${includeLocation ? "min-w-[1260px]" : "min-w-[1060px]"}`}>
+        <table className="l3-responsive-data-table border-collapse text-white">
           <thead>
             <tr>
               <Header label="Timestamp" sortKey="timestamp" sort={sort} onSort={changeSort} />
               <Header label="Direction" sortKey="direction" sort={sort} onSort={changeSort} />
               <Header label="Channel" sortKey="channel" sort={sort} onSort={changeSort} />
               <Header label="UE" />
-              <Header label="eNB/gNB" />
-              <Header label="MME/AMF/Core" />
+              {includeRadio && <Header label="eNB/gNB" />}
+              {includeCore && <Header label="MME/AMF/Core" />}
               {includeLocation && (
                 <>
                   <Header label="Lat" />
@@ -510,15 +526,15 @@ export function ExcelSignalingView({ rows = [], calls = [], selectedCall, onSele
               )}
               <Header label="Interface" sortKey="interface" sort={sort} onSort={changeSort} />
               <Header label="Cause" sortKey="cause" sort={sort} onSort={changeSort} />
-              <Header label="Message" sortKey="message" sort={sort} onSort={changeSort} />
+              <Header label="L3/Event" sortKey="message" sort={sort} onSort={changeSort} />
             </tr>
             <tr>
               <th className="sticky top-[33px] z-10 border-b border-r border-slate-700 bg-slate-800 px-2 py-1" />
-              <th className="sticky top-[33px] z-10 border-b border-r border-slate-700 bg-slate-800 px-2 py-1" />
-              <th className="sticky top-[33px] z-10 border-b border-r border-slate-700 bg-slate-800 px-2 py-1" />
-              <th className="sticky top-[33px] z-10 border-b border-r border-slate-700 bg-slate-800 px-2 py-1"><DirectionFilter value={ueDirection} onChange={setUeDirection} /></th>
-              <th className="sticky top-[33px] z-10 border-b border-r border-slate-700 bg-slate-800 px-2 py-1"><DirectionFilter value={radioDirection} onChange={setRadioDirection} /></th>
-              <th className="sticky top-[33px] z-10 border-b border-r border-slate-700 bg-slate-800 px-2 py-1"><DirectionFilter value={coreDirection} onChange={setCoreDirection} /></th>
+              <th className="sticky top-[33px] z-10 border-b border-r border-slate-700 bg-slate-800 px-2 py-1"><ColumnSelectFilter value={directionColumnFilter} onChange={setDirectionColumnFilter} options={directions} allLabel="All Directions" /></th>
+              <th className="sticky top-[33px] z-10 border-b border-r border-slate-700 bg-slate-800 px-2 py-1"><ColumnSelectFilter value={channelColumnFilter} onChange={setChannelColumnFilter} options={channels} allLabel="All Channels" /></th>
+              <th className="sticky top-[33px] z-10 border-b border-r border-slate-700 bg-slate-800 px-2 py-1"><DirectionFilter value={ueDirection} onChange={setUeDirection} hideUnknown /></th>
+              {includeRadio && <th className="sticky top-[33px] z-10 border-b border-r border-slate-700 bg-slate-800 px-2 py-1"><DirectionFilter value={radioDirection} onChange={setRadioDirection} /></th>}
+              {includeCore && <th className="sticky top-[33px] z-10 border-b border-r border-slate-700 bg-slate-800 px-2 py-1"><DirectionFilter value={coreDirection} onChange={setCoreDirection} /></th>}
               {includeLocation && (
                 <>
                   <th className="sticky top-[33px] z-10 border-b border-r border-slate-700 bg-slate-800 px-2 py-1" />
@@ -552,7 +568,7 @@ export function ExcelSignalingView({ rows = [], calls = [], selectedCall, onSele
                   onPrevious={() => moveMessageMatch(-1)}
                   onClear={clearMessageColumnFilter}
                   onSelectMatch={selectMessageMatch}
-                  placeholder="Find message"
+                  placeholder="Find L3/Event"
                   getMatchLabel={(row) => row.message || ""}
                   noMatchesLabel="No messages found"
                   clearTitle="Clear message search"
@@ -573,6 +589,8 @@ export function ExcelSignalingView({ rows = [], calls = [], selectedCall, onSele
               activeSearchMatch={activeCauseMatch?.id === row.id || activeMessageMatch?.id === row.id}
               onSelect={setSelectedRow}
               includeLocation={includeLocation}
+              includeRadio={includeRadio}
+              includeCore={includeCore}
             />
           )) : <tr><td colSpan={columnCount} className="py-16 text-center text-xs text-slate-500">No signaling rows match the current filters.</td></tr>}</tbody>
         </table>

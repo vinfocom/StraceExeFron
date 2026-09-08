@@ -113,7 +113,6 @@ export function buildUnifiedSignalingRows(timeline = [], calls = [], analysis = 
       milestone = { label: "NOT CONNECTED", severity: "warning" };
     }
     const directionKnown = Boolean(item.directionKnown && item.from && item.to && item.from !== "Event" && item.to !== "Timeline");
-    const inferredDirection = directionKnown ? `${item.from} → ${item.to}` : "—";
     const protocol = item.protocol || base.sourceCategory || base.category || "Unknown";
     const technology = normalizeTechnology(procedure?.technology || item.technology || protocol || text);
     const severity = milestone?.severity || inferSeverity(item, procedure?.result);
@@ -128,7 +127,7 @@ export function buildUnifiedSignalingRows(timeline = [], calls = [], analysis = 
       interface: detailValue(base, "Interface") || base.sourceCategory || protocol,
       sourceNode: directionKnown ? item.from : null,
       destinationNode: directionKnown ? item.to : null,
-      direction: base.direction || inferredDirection,
+      direction: base.direction || "—",
       directionKnown,
       message: milestone?.label || item.officialName || base.title || base.eventKey || "Log row",
       procedure: item.procedureName || procedure?.name || base.category || "Observed row",

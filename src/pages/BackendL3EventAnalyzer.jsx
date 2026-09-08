@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
-import { ArrowLeft, Download, Edit3, FileUp, History, Loader2, RefreshCw, Save, Search, Trash2, Upload, X } from "lucide-react";
+import { ArrowLeft, Download, Edit3, FileUp, FolderOpen, History, Loader2, RefreshCw, Save, Search, Trash2, Upload, X } from "lucide-react";
 import { toast } from "react-toastify";
 import { l3EventApi } from "@/api/apiEndpoints";
 import { parseTimestampValue } from "@/utils/l3Events/timelineBuilder";
@@ -196,7 +196,7 @@ function downloadBlob(blob, fileName) {
   URL.revokeObjectURL(url);
 }
 
-function UploadHistoryLanding({ projectId, projectName, onOpenAnalysis, onBack }) {
+function UploadHistoryLanding({ projectId, projectName, onOpenAnalysis, onOpenProject, onBack }) {
   const [uploading, setUploading] = useState(false);
   const [progress, setProgress] = useState(0);
   const [historyLoading, setHistoryLoading] = useState(true);
@@ -210,6 +210,7 @@ function UploadHistoryLanding({ projectId, projectName, onOpenAnalysis, onBack }
   const [selectedSyncSessionIds, setSelectedSyncSessionIds] = useState([]);
   const [manualProjectId, setManualProjectId] = useState(projectId ? String(projectId) : "");
   const [manualSessionId, setManualSessionId] = useState("");
+  const [manualRemarks, setManualRemarks] = useState("");
   const fileInputRef = useRef(null);
 
   const loadHistory = useCallback(async () => {
@@ -286,6 +287,7 @@ function UploadHistoryLanding({ projectId, projectName, onOpenAnalysis, onBack }
     const selectedSessionId = replaceRow
       ? replaceRow.sessionId || null
       : manualSessionId.trim() ? Number(manualSessionId) : null;
+    const selectedRemarks = String(replaceRow?.remarks || manualRemarks || "").trim();
     if (replaceRow && (!Number.isInteger(replaceHistoryId) || replaceHistoryId <= 0)) {
       toast.error("This L3 session row does not have a valid ID.");
       return;
@@ -298,11 +300,15 @@ function UploadHistoryLanding({ projectId, projectName, onOpenAnalysis, onBack }
       toast.warn("Session ID must be a positive number when provided.");
       return;
     }
+    if (!selectedRemarks) {
+      toast.warn("Remarks are required for the L3/Event ZIP upload.");
+      return;
+    }
     setUploading(true);
     setProgress(0);
     try {
       const response = await l3EventApi.addSessionUpload(
-        { projectId: selectedProjectId, sessionId: selectedSessionId, historyId: replaceHistoryId, zipFile: selectedFile, dataType: "L3Event" },
+        { projectId: selectedProjectId, sessionId: selectedSessionId, historyId: replaceHistoryId, remarks: selectedRemarks, zipFile: selectedFile, dataType: "L3Event" },
         (progressEvent) => {
           if (progressEvent.total) setProgress(Math.round((progressEvent.loaded * 100) / progressEvent.total));
         },
@@ -418,27 +424,32 @@ function UploadHistoryLanding({ projectId, projectName, onOpenAnalysis, onBack }
   };
 
   return (
-    <div className="h-full min-h-0 overflow-auto bg-slate-950 p-4 text-white">
-      <div className="mx-auto max-w-6xl space-y-4">
-        <div className="flex items-center gap-3">
-          <button type="button" onClick={onBack} className="inline-flex h-9 items-center gap-1 rounded border border-slate-700 px-3 text-xs hover:bg-slate-800"><ArrowLeft className="h-3.5 w-3.5" />Projects</button>
-          <div><h1 className="text-xl font-semibold">L3 / Event Sessions</h1><p className="text-sm text-slate-400">All previous authorized L3/Event uploads{projectId ? ` · Upload target: ${projectName} (${projectId})` : ""}</p></div>
+    <div className="l3-analyzer-shell h-full min-h-0 overflow-auto p-[clamp(0.75rem,2vw,1.5rem)] text-white">
+      <div className="l3-content-width mx-auto space-y-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex min-w-0 items-center gap-3">
+            <button type="button" onClick={onBack} className="inline-flex h-9 shrink-0 items-center gap-1 rounded border border-slate-700 px-3 text-xs hover:bg-slate-800"><ArrowLeft className="h-3.5 w-3.5" />Projects</button>
+            <div className="min-w-0"><h1 className="l3-page-title font-semibold">L3 / Event Sessions</h1><p className="l3-page-subtitle text-slate-400">All previous authorized L3/Event uploads{projectId ? ` · Upload target: ${projectName} (${projectId})` : ""}</p></div>
+          </div>
+          <button type="button" onClick={syncNewSessions} disabled={syncing || uploading || historyLoading || savingHistory} className="inline-flex h-10 shrink-0 items-center gap-2 rounded bg-emerald-600 px-4 text-sm font-semibold text-white shadow hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-50">
+            {syncing ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+            {syncing ? "Checking sessions..." : "Find New Sessions"}
+          </button>
         </div>
 
-        <button type="button" onClick={syncNewSessions} disabled={syncing || uploading || historyLoading || savingHistory} className="inline-flex h-10 items-center gap-2 rounded bg-emerald-600 px-4 text-sm font-semibold text-white shadow hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-50">
-          {syncing ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
-          {syncing ? "Checking sessions..." : "Find New Sessions"}
-        </button>
-
-        <section className="rounded-lg border border-slate-700 bg-slate-900 p-4">
+        <section className="l3-glass rounded-lg p-[clamp(0.8rem,1.7vw,1.25rem)]">
           <div className="mb-4 grid gap-3 sm:grid-cols-2">
             <label className="text-xs text-slate-300">
               <span className="mb-1 block">Project ID (optional)</span>
-              <input type="number" min="1" value={manualProjectId} onChange={(event) => setManualProjectId(event.target.value)} placeholder="Enter project ID" className="h-9 w-full rounded border border-slate-700 bg-slate-950 px-3 text-sm text-white outline-none focus:border-blue-500" />
+              <input type="number" min="1" value={manualProjectId} onChange={(event) => setManualProjectId(event.target.value)} placeholder="Enter project ID" className="l3-glass-control l3-ui-copy h-9 w-full rounded px-3 text-white outline-none" />
             </label>
             <label className="text-xs text-slate-300">
               <span className="mb-1 block">Session ID (optional)</span>
-              <input type="number" min="1" value={manualSessionId} onChange={(event) => setManualSessionId(event.target.value)} placeholder="Leave empty to create a new session" className="h-9 w-full rounded border border-slate-700 bg-slate-950 px-3 text-sm text-white outline-none focus:border-blue-500" />
+              <input type="number" min="1" value={manualSessionId} onChange={(event) => setManualSessionId(event.target.value)} placeholder="Leave empty to create a new session" className="l3-glass-control l3-ui-copy h-9 w-full rounded px-3 text-white outline-none" />
+            </label>
+            <label className="text-xs text-slate-300 sm:col-span-2">
+              <span className="mb-1 block">Remarks <span className="text-red-300">*</span></span>
+              <input value={manualRemarks} onChange={(event) => setManualRemarks(event.target.value)} placeholder="Enter a remark for this upload" className="l3-glass-control l3-ui-copy h-9 w-full rounded px-3 text-white outline-none" />
             </label>
           </div>
           <div className="flex flex-wrap items-center justify-between gap-3">
@@ -451,26 +462,39 @@ function UploadHistoryLanding({ projectId, projectName, onOpenAnalysis, onBack }
           {uploading && <div className="mt-3 h-2 overflow-hidden rounded bg-slate-800"><div className="h-full bg-blue-500" style={{ width: `${progress}%` }} /></div>}
         </section>
 
-        <section className="rounded-lg border border-slate-700 bg-slate-900 p-4">
+        <section className="l3-glass rounded-lg p-[clamp(0.8rem,1.7vw,1.25rem)]">
           <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
             <div className="flex items-center gap-2 text-sm font-semibold"><History className="h-4 w-4 text-blue-300" />L3 Session</div>
             <span className="text-xs text-slate-500">Select Analysis to reopen saved results without uploading again.</span>
           </div>
-          <div className="max-h-[calc(100vh-360px)] min-h-0 overflow-auto rounded border border-slate-800">
-            <table className="w-full min-w-[800px] text-xs">
+          <div className="l3-table-shell max-h-[calc(100vh-360px)] rounded border border-slate-800/70">
+            <table className="l3-history-table l3-ui-copy text-xs">
               <thead className="bg-slate-800 text-left text-slate-400"><tr><th className="px-3 py-2">ID</th><th className="px-3 py-2">Project ID</th><th className="px-3 py-2">Session ID</th><th className="px-3 py-2">File Name</th><th className="px-3 py-2">Uploaded On</th><th className="px-3 py-2">Remarks</th><th className="px-3 py-2">Action</th></tr></thead>
               <tbody>
-                {historyLoading ? <tr><td colSpan={6} className="p-8 text-center"><Loader2 className="mx-auto h-5 w-5 animate-spin" /></td></tr> : historyRows.length ? historyRows.map((row) => (
+                {historyLoading ? <tr><td colSpan={7} className="p-8 text-center"><Loader2 className="mx-auto h-5 w-5 animate-spin" /></td></tr> : historyRows.length ? historyRows.map((row) => (
                   <tr key={row.id || row.uploadHistoryId} className="border-t border-slate-800 text-slate-200">
                     <td className="px-3 py-2 font-mono">{row.id || "—"}</td>
-                    <td className="px-3 py-2 font-mono">{row.projectId || "—"}</td>
+                    <td className="px-3 py-2 font-mono">
+                      {row.projectId ? (
+                        <button
+                          type="button"
+                          onClick={() => onOpenProject(row)}
+                          className="inline-flex items-center gap-1.5 rounded border border-blue-400/50 bg-blue-400/10 px-2 py-1 text-blue-200 transition hover:border-blue-300 hover:bg-blue-400/20"
+                          title={`Open project ${row.projectId} in a new tab`}
+                          aria-label={`Open project ${row.projectId} in a new tab`}
+                        >
+                          <FolderOpen className="h-3.5 w-3.5" />
+                          <span>{row.projectId}</span>
+                        </button>
+                      ) : "—"}
+                    </td>
                     <td className="px-3 py-2 font-mono">{row.sessionId || "—"}</td>
                     <td className="max-w-80 px-3 py-2"><div className="break-all font-medium text-white">{row.originalFileName || "—"}</div></td>
                     <td className="px-3 py-2">{row.uploadedOn ? new Date(row.uploadedOn).toLocaleString() : "—"}</td>
                     <td className="max-w-80 px-3 py-2">{row.remarks || "-"}</td>
-                    <td className="px-3"><div className="flex items-center gap-2"><button type="button" onClick={() => onOpenAnalysis(row)} disabled={deletingHistoryId === Number(row.id) || uploading || savingHistory || !row.id} className="inline-flex items-center gap-1 rounded bg-blue-600 px-3 py-1.5 font-medium hover:bg-blue-500 disabled:opacity-50"><Search className="h-3.5 w-3.5" />Analysis</button><button type="button" onClick={() => openEditHistory(row)} disabled={deletingHistoryId !== null || uploading || savingHistory} className="inline-flex items-center gap-1 rounded border border-cyan-400/60 bg-cyan-400/10 px-3 py-1.5 font-medium text-cyan-200 hover:bg-cyan-400/20 disabled:opacity-50"><Edit3 className="h-3.5 w-3.5" />Edit</button><button type="button" onClick={() => deleteHistory(row)} disabled={deletingHistoryId !== null || uploading || savingHistory} className="inline-flex items-center gap-1 rounded border border-red-500/60 bg-red-500/10 px-3 py-1.5 font-medium text-red-300 hover:bg-red-500/20 disabled:opacity-50">{deletingHistoryId === Number(row.id) ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}Delete</button></div></td>
+                    <td className="px-3"><div className="flex items-center gap-2"><button type="button" onClick={() => onOpenAnalysis(row)} disabled={deletingHistoryId === Number(row.id) || uploading || savingHistory || !row.id} className="inline-flex items-center gap-1 rounded bg-blue-600 px-3 py-1.5 font-medium hover:bg-blue-500 disabled:opacity-50">Analysis</button><button type="button" onClick={() => openEditHistory(row)} disabled={deletingHistoryId !== null || uploading || savingHistory} className="inline-flex items-center gap-1 rounded border border-cyan-400/60 bg-cyan-400/10 px-3 py-1.5 font-medium text-cyan-200 hover:bg-cyan-400/20 disabled:opacity-50"><Edit3 className="h-3.5 w-3.5" /></button><button type="button" onClick={() => deleteHistory(row)} disabled={deletingHistoryId !== null || uploading || savingHistory} className="inline-flex items-center gap-1 rounded border border-red-500/60 bg-red-500/10 px-3 py-1.5 font-medium text-red-300 hover:bg-red-500/20 disabled:opacity-50">{deletingHistoryId === Number(row.id) ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}</button></div></td>
                   </tr>
-                )) : <tr><td colSpan={6} className="p-8 text-center text-slate-500">No L3 sessions were found.</td></tr>}
+                )) : <tr><td colSpan={7} className="p-8 text-center text-slate-500">No L3 sessions were found.</td></tr>}
               </tbody>
             </table>
           </div>
@@ -492,8 +516,8 @@ function UploadHistoryLanding({ projectId, projectName, onOpenAnalysis, onBack }
         </div>
       )}
       {editingRow && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
-          <div className="w-full max-w-2xl rounded-lg border border-slate-700 bg-slate-900 p-4 shadow-xl">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/65 p-[clamp(0.75rem,2vw,1.5rem)] backdrop-blur-sm">
+          <div className="l3-glass w-full max-w-2xl rounded-lg p-[clamp(0.8rem,1.7vw,1.25rem)] shadow-xl">
             <div className="mb-4 flex items-center justify-between gap-3">
               <div className="text-sm font-semibold">Edit L3 Session #{editingRow.id}</div>
               <button type="button" onClick={() => setEditingRow(null)} disabled={savingHistory} className="rounded border border-slate-700 p-1.5 hover:bg-slate-800 disabled:opacity-50"><X className="h-4 w-4" /></button>
@@ -609,19 +633,17 @@ function BackendAnalyzer({ sessionIds, analysisId, projectName, onBack }) {
     }
   };
 
-  if (loading) return <div className="flex h-full items-center justify-center bg-slate-950 text-blue-300"><Loader2 className="mr-2 h-5 w-5 animate-spin" />Loading backend L3/Event data…</div>;
-  if (error) return <div className="flex h-full items-center justify-center bg-slate-950 text-red-300">{error}</div>;
+  if (loading) return <div className="l3-analyzer-shell flex h-full items-center justify-center px-4 text-center text-blue-300"><Loader2 className="mr-2 h-5 w-5 shrink-0 animate-spin" />Loading backend L3/Event data…</div>;
+  if (error) return <div className="l3-analyzer-shell flex h-full items-center justify-center px-4 text-center text-red-300">{error}</div>;
 
   return (
-    <div className="flex h-full min-h-0 flex-col overflow-hidden bg-slate-950 text-white">
-      <header className="flex shrink-0 flex-wrap items-center gap-2 border-b border-slate-700 bg-slate-800/70 px-2 py-2">
+    <div className="l3-analyzer-shell flex h-full min-h-0 flex-col overflow-hidden text-white">
+      <header className="l3-glass flex shrink-0 flex-wrap items-center gap-2 border-x-0 border-t-0 px-[clamp(0.5rem,1.2vw,1rem)] py-[clamp(0.5rem,1vw,0.75rem)]">
         <button type="button" onClick={onBack} className="inline-flex items-center gap-1 rounded border border-slate-600 px-2 py-1.5 text-xs hover:bg-slate-700"><ArrowLeft className="h-3.5 w-3.5" />L3 Session</button>
-        <div className="mr-auto min-w-0"><div className="truncate text-sm font-semibold">{projectName}</div><div className="text-[10px] text-slate-400">{analysisId ? `L3 Session ID: ${analysisId}` : `Sessions: ${sessionIds.join(", ")}`}</div></div>
+        <div className="mr-auto min-w-0"><div className="l3-ui-copy max-w-[min(52vw,36rem)] truncate font-semibold">{projectName}</div><div className="l3-meta-copy text-slate-400">{analysisId ? `L3 Session ID: ${analysisId}` : `Sessions: ${sessionIds.join(", ")}`}</div></div>
         {VIEW_TABS.map((tab) => <button key={tab.id} type="button" onClick={() => setActiveView(tab.id)} className={`border px-2.5 py-1.5 text-xs ${activeView === tab.id ? "border-blue-500 bg-blue-600" : "border-slate-700 bg-slate-900 text-slate-300 hover:bg-slate-700"}`}>{tab.label} ({countForTab(tab.id).toLocaleString()})</button>)}
-        <button type="button" onClick={() => downloadPdf("analyzer")} className="inline-flex items-center gap-1 rounded border border-blue-500/50 px-2 py-1.5 text-xs"><Download className="h-3.5 w-3.5" />Analyzer PDF</button>
-        <button type="button" onClick={() => downloadPdf("summary")} className="inline-flex items-center gap-1 rounded border border-blue-500/50 px-2 py-1.5 text-xs"><Download className="h-3.5 w-3.5" />L3 PDF</button>
       </header>
-      <main className="flex min-h-0 flex-1 flex-col overflow-hidden">
+      <main className="l3-analysis-main flex min-h-0 flex-1 flex-col overflow-hidden">
         {activeView === "summary" && <div className="h-full overflow-auto p-3"><HomeCallSummary summary={enrichedSummary} /></div>}
         {activeView === "analyzer" && selectedCall && (
           <div className="shrink-0 flex items-center justify-between gap-2 border-b border-blue-500/30 bg-blue-500/10 px-2 py-1 text-xs">
@@ -636,7 +658,7 @@ function BackendAnalyzer({ sessionIds, analysisId, projectName, onBack }) {
         {activeView === "map" && <L3EventsMapView points={mapPoints} />}
         {activeView === "excel" && <ExcelSignalingView rows={signalingRows} calls={enrichedSummary.calls} selectedCall={selectedCall} onSelectCall={setSelectedCall} sourceFileName={analysisId ? `l3-session-${analysisId}` : `sessions-${sessionIds.join("-")}`} />}
         {activeView === "analyzer" && <div className="flex h-full min-h-0 flex-col"><div className="flex shrink-0 gap-3 border-b border-slate-800 px-3 py-1.5 text-[11px] text-slate-300"><span>RRC: {protocolAnalysis?.states?.rrc || "—"}</span><span>NAS: {protocolAnalysis?.states?.nas || "—"}</span><span>IMS: {protocolAnalysis?.states?.ims || "—"}</span><span>Failures: {protocolAnalysis?.stats?.failures ?? 0}</span></div><div className="min-h-0 flex-1"><ProtocolAnalyzerView analysis={protocolAnalysis} callScoped={Boolean(selectedCall)} /></div></div>}
-        {(activeView === "l3" || activeView === "events") && <div className="flex h-full min-h-0 flex-col bg-slate-900/70"><div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-slate-700 bg-slate-800/70 px-2 py-1"><div><h3 className="text-sm font-semibold text-white">{activeView === "l3" ? "All L3 Messages" : "All Event Rows"}</h3><p className="text-[11px] text-slate-400">Showing {visibleRawRows.length.toLocaleString()} of {rawRows.length.toLocaleString()} backend rows.</p></div><div className="relative w-full sm:w-80"><Search className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-slate-500" /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search timestamp, file, title, or raw text..." className="w-full rounded-md border border-slate-700 bg-slate-950 py-2 pl-8 pr-2 text-xs text-white placeholder:text-slate-500 focus:border-blue-500 focus:outline-none" /></div></div><div className="min-h-0 flex-1 space-y-2 overflow-auto">{visibleRawRows.length ? visibleRawRows.map((row) => <TimelineCard key={row.id} item={row} />) : <div className="py-10 text-center text-sm text-slate-400">No matching {activeView === "l3" ? "L3 messages" : "event rows"}.</div>}</div></div>}
+        {(activeView === "l3" || activeView === "events") && <div className="l3-glass flex h-full min-h-0 flex-col"><div className="l3-glass-subtle flex shrink-0 flex-wrap items-center justify-between gap-2 border-x-0 border-t-0 px-2 py-1"><div><h3 className="l3-ui-copy font-semibold text-white">{activeView === "l3" ? "All L3 Messages" : "All Event Rows"}</h3><p className="l3-meta-copy text-slate-400">Showing {visibleRawRows.length.toLocaleString()} of {rawRows.length.toLocaleString()} backend rows.</p></div><div className="relative w-full sm:w-80"><Search className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-slate-500" /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search timestamp, file, title, or raw text..." className="l3-glass-control l3-ui-copy w-full rounded-md py-2 pl-8 pr-2 text-white outline-none" /></div></div><div className="min-h-0 flex-1 space-y-2 overflow-auto">{visibleRawRows.length ? visibleRawRows.map((row) => <TimelineCard key={row.id} item={row} />) : <div className="py-10 text-center l3-ui-copy text-slate-400">No matching {activeView === "l3" ? "L3 messages" : "event rows"}.</div>}</div></div>}
       </main>
     </div>
   );
@@ -660,11 +682,20 @@ export default function BackendL3EventAnalyzer() {
     setSearchParams(nextParams);
   };
 
+  const openProjectInNewTab = (row) => {
+    const selectedProjectId = valueOf(row, "projectId", "project_id");
+    if (!selectedProjectId) return;
+
+    const projectUrl = new URL("/unified-map", window.location.origin);
+    projectUrl.searchParams.set("project_id", String(selectedProjectId));
+    window.open(projectUrl.toString(), "_blank", "noopener,noreferrer");
+  };
+
   return (
     <div className="h-screen min-h-0 w-full overflow-hidden bg-slate-950">
       {sessionIds.length || analysisId
         ? <BackendAnalyzer sessionIds={sessionIds} analysisId={analysisId} projectName={projectName} onBack={() => setSearchParams(projectId ? { projectId: String(projectId) } : {})} />
-        : <UploadHistoryLanding projectId={projectId} projectName={projectName} onOpenAnalysis={openAnalysis} onBack={() => navigate("/viewProject")} />}
+        : <UploadHistoryLanding projectId={projectId} projectName={projectName} onOpenAnalysis={openAnalysis} onOpenProject={openProjectInNewTab} onBack={() => navigate("/viewProject")} />}
     </div>
   );
 }

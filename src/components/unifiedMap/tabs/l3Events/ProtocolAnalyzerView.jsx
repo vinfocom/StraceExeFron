@@ -706,7 +706,7 @@ export function ProtocolAnalyzerView({ analysis, callScoped = false }) {
   }
 
   return (
-    <div className="flex h-full min-h-0 w-full max-w-full flex-col overflow-hidden">
+    <div className="l3-glass flex h-full min-h-0 w-full max-w-full min-w-0 flex-col overflow-hidden">
       <div className="grid min-h-0 flex-1 grid-cols-1 gap-2 overflow-hidden xl:grid-cols-[290px_minmax(0,1fr)_330px]">
         <ProcedureTree
           procedures={analysis.procedures}

@@ -2256,11 +2256,12 @@ const diagnosticScopeParams = ({ sessionId, sessionIds, uploadId, take } = {}) =
 });
 
 export const l3EventApi = {
-  addSessionUpload: ({ projectId, sessionId, historyId, zipFile, dataType, l3File, eventFile }, onUploadProgress) => {
+  addSessionUpload: ({ projectId, sessionId, historyId, remarks, zipFile, dataType, l3File, eventFile }, onUploadProgress) => {
     const formData = new FormData();
     if (Number(projectId) > 0) formData.append("projectId", projectId);
     if (Number(sessionId) > 0) formData.append("sessionId", sessionId);
     if (Number(historyId) > 0) formData.append("historyId", historyId);
+    if (remarks) formData.append("remarks", remarks);
     if (zipFile) formData.append("zipFile", zipFile);
     if (dataType) formData.append("dataType", dataType);
     if (l3File) formData.append("l3File", l3File);
