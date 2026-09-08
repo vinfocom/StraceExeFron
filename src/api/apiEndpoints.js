@@ -1,6 +1,6 @@
 ﻿// src/api/apiEndpoints.js
 import { CleaningServices } from "@mui/icons-material";
-import { api } from "./apiService"; // C# Backend
+import { api, CSHARP_BASE_URL } from "./apiService"; // C# Backend
 import { pythonApi, PYTHON_BASE_URL_EXPORT, getPythonApiBaseUrl } from "./pythonApiService"; // Python Backend
 import axios from "axios";
 import { isCancelledError } from './apiService'; // Import the utility
@@ -161,7 +161,13 @@ export const sessionDownloadApi = {
     const normalizedSessionId = String(sessionId ?? "").trim();
     if (!normalizedSessionId) return "";
 
-    return `${UPLOADED_ZIPPED_LOGS_BASE_URL}/logs_${encodeURIComponent(normalizedSessionId)}.zip`;
+    const remoteUrl = `${UPLOADED_ZIPPED_LOGS_BASE_URL}/logs_${encodeURIComponent(normalizedSessionId)}.zip`;
+    const proxyBaseUrl = String(CSHARP_BASE_URL || "").replace(/\/+$/, "");
+    const query = new URLSearchParams({
+      url: remoteUrl,
+      fileName: `logs_${normalizedSessionId}.zip`,
+    });
+    return `${proxyBaseUrl}/api/LogDownload/download?${query.toString()}`;
   },
   checkUploadedLogs: async (sessionId) => {
     const url = sessionDownloadApi.getUploadedLogsUrl(sessionId);
@@ -2742,5 +2748,4 @@ export default {
   validateProjectExists,
   companyApi,
 };
-
 
