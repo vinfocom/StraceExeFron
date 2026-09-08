@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
-import { ArrowLeft, Download, Edit3, FileUp, History, Loader2, Save, Search, Trash2, Upload, X } from "lucide-react";
+import { ArrowLeft, Download, Edit3, FileUp, History, Loader2, RefreshCw, Save, Search, Trash2, Upload, X } from "lucide-react";
 import { toast } from "react-toastify";
 import { l3EventApi } from "@/api/apiEndpoints";
 import { parseTimestampValue } from "@/utils/l3Events/timelineBuilder";
@@ -197,6 +197,7 @@ function UploadHistoryLanding({ projectId, projectName, onOpenAnalysis, onBack }
   const [replacingHistoryRow, setReplacingHistoryRow] = useState(null);
   const [editingRow, setEditingRow] = useState(null);
   const [savingHistory, setSavingHistory] = useState(false);
+  const [syncing, setSyncing] = useState(false);
   const [manualProjectId, setManualProjectId] = useState(projectId ? String(projectId) : "");
   const [manualSessionId, setManualSessionId] = useState("");
   const fileInputRef = useRef(null);
@@ -218,6 +219,23 @@ function UploadHistoryLanding({ projectId, projectName, onOpenAnalysis, onBack }
   useEffect(() => {
     loadHistory();
   }, [loadHistory]);
+
+  const syncNewSessions = async () => {
+    setSyncing(true);
+    try {
+      const selectedProjectId = numberOrNull(projectId) || numberOrNull(manualProjectId);
+      const response = await l3EventApi.syncNewSessionDiagnostics({ projectId: selectedProjectId });
+      if (response?.status !== 1) throw new Error(response?.message || "Session sync failed.");
+
+      const summary = response.summary || {};
+      await loadHistory();
+      toast.success(`Sync complete: ${summary.imported || 0} imported, ${summary.alreadyAvailable || 0} already available, ${summary.zipNotFound || 0} ZIPs not found.`);
+    } catch (error) {
+      toast.error(error?.message || "Failed to sync new L3/Event sessions.");
+    } finally {
+      setSyncing(false);
+    }
+  };
 
   const uploadZip = async (selectedFile, replaceRow = null) => {
     if (!selectedFile || !selectedFile.name.toLowerCase().endsWith(".zip")) {
@@ -369,6 +387,11 @@ function UploadHistoryLanding({ projectId, projectName, onOpenAnalysis, onBack }
           <button type="button" onClick={onBack} className="inline-flex h-9 items-center gap-1 rounded border border-slate-700 px-3 text-xs hover:bg-slate-800"><ArrowLeft className="h-3.5 w-3.5" />Projects</button>
           <div><h1 className="text-xl font-semibold">L3 / Event Sessions</h1><p className="text-sm text-slate-400">All previous authorized L3/Event uploads{projectId ? ` · Upload target: ${projectName} (${projectId})` : ""}</p></div>
         </div>
+
+        <button type="button" onClick={syncNewSessions} disabled={syncing || uploading || historyLoading || savingHistory} className="inline-flex h-10 items-center gap-2 rounded bg-emerald-600 px-4 text-sm font-semibold text-white shadow hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-50">
+          {syncing ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+          {syncing ? "Syncing L3/Event..." : "Sync New Sessions"}
+        </button>
 
         <section className="rounded-lg border border-slate-700 bg-slate-900 p-4">
           <div className="mb-4 grid gap-3 sm:grid-cols-2">

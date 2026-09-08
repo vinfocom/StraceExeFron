@@ -2267,6 +2267,22 @@ export const l3EventApi = {
     });
   },
   getHistory: (params = {}) => api.get("/api/L3Event/GetL3EventHistory", { params }),
+  syncNewSessionDiagnostics: ({ projectId, sessionIds, signal } = {}) => api.post(
+    "/api/L3Event/SyncNewSessionDiagnostics",
+    null,
+    {
+      params: {
+        ...(Number(projectId) > 0 ? { projectId: Number(projectId) } : {}),
+        ...(Array.isArray(sessionIds) && sessionIds.length
+          ? { sessionIds: sessionIds.join(",") }
+          : typeof sessionIds === "string" && sessionIds.trim()
+            ? { sessionIds: sessionIds.trim() }
+            : {}),
+      },
+      signal,
+      timeout: 7200000,
+    },
+  ),
   updateHistory: (historyId, payload) => api.put(`/api/L3Event/UpdateL3EventHistory/${encodeURIComponent(historyId)}`, payload),
   deleteHistory: (historyId) => api.delete(`/api/L3Event/DeleteL3EventHistory/${encodeURIComponent(historyId)}`),
   getTabCounts: (scope) => api.get("/api/L3Event/GetDiagnosticTabCounts", { params: diagnosticScopeParams(scope) }),
