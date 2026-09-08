@@ -1,4 +1,4 @@
-// src/pages/UnifiedMapView.jsx
+﻿// src/pages/UnifiedMapView.jsx
 
 import React, {
   Suspense,
@@ -1310,8 +1310,8 @@ const ZoneTooltip = React.memo(
     const areaLabel =
       Number.isFinite(parsedArea) && parsedArea > 0
         ? parsedArea >= 1_000_000
-          ? `${(parsedArea / 1_000_000).toFixed(3)} km²`
-          : `${parsedArea.toFixed(0)} m²`
+          ? `${(parsedArea / 1_000_000).toFixed(3)} kmÂ²`
+          : `${parsedArea.toFixed(0)} mÂ²`
         : null;
 
     if (!pointCount || pointCount === 0) {
@@ -2715,7 +2715,7 @@ const UnifiedMapView = () => {
     refetch: refetchPolygons,
   } = useProjectPolygons(projectId, shouldLoadProjectPolygons, polygonSource);
 
-  // ✅ 5. Use Area Polygons Hook
+  // âœ… 5. Use Area Polygons Hook
   const {
     areaData, // The hook now returns data from areaBreakdownApi
     loading: areaLoading,
@@ -3775,7 +3775,7 @@ const UnifiedMapView = () => {
     loading: subSessionLoading,
     error: subSessionError,
     refetch: refetchSubSessionAnalytics,
-  } = useSubSessionAnalytics(sessionIds, showSubSession);
+  } = useSubSessionAnalytics(sessionIds, showSubSession, projectId);
 
   const visibleSubSessionMarkers = useMemo(() => {
     if (subSessionTypeFilter === "all") return subSessionMarkers;
@@ -3913,7 +3913,7 @@ const UnifiedMapView = () => {
 
   const allNeighbors = rawAllNeighbors || [];
 
-  // Effect hooks for distance and IO — each with active guards to prevent stale state updates
+  // Effect hooks for distance and IO â€” each with active guards to prevent stale state updates
   useEffect(() => {
     if (!sessionIds?.length) return;
     let active = true;
@@ -5878,7 +5878,7 @@ const UnifiedMapView = () => {
       rootButton.style.background = isZoomMemoryArmed ? "#2563eb" : "#ffffff";
       rootButton.style.color = isZoomMemoryArmed ? "#ffffff" : "#1f2937";
       rootButton.style.borderColor = isZoomMemoryArmed ? "#1d4ed8" : "#cbd5e1";
-      rootButton.textContent = isZoomMemoryArmed ? "ON" : "🔒";
+      rootButton.textContent = isZoomMemoryArmed ? "ON" : "ðŸ”’";
     }
     if (storeButton) {
       storeButton.textContent = isZoomMemoryArmed ? "On" : "Set";
@@ -6071,7 +6071,7 @@ const UnifiedMapView = () => {
       lockButton.type = "button";
       lockButton.title = "Zoom Memory";
       lockButton.setAttribute("aria-label", "Zoom Memory");
-      lockButton.textContent = "🔒";
+      lockButton.textContent = "ðŸ”’";
       lockButton.style.width = "52px";
       lockButton.style.height = "52px";
       lockButton.style.borderRadius = "6px";
@@ -6254,7 +6254,7 @@ const UnifiedMapView = () => {
   }, []);
 
   const handleDrawingsChange = useCallback((drawings) => {
-    // If drawings array is empty/null → clear the filter (show all logs)
+    // If drawings array is empty/null â†’ clear the filter (show all logs)
     if (!drawings || drawings.length === 0) {
       setDrawnPoints(null);
       setDrawnShapeAnalytics([]);
@@ -6264,7 +6264,7 @@ const UnifiedMapView = () => {
 
     // Check whether any drawing has a computed `logs` array (even empty).
     // Geometry-only snapshots have `logs: undefined` (key absent).
-    // Skip updating if this is a geometry-only call — the log-enriched update arrives next.
+    // Skip updating if this is a geometry-only call â€” the log-enriched update arrives next.
     const hasLogsKey = drawings.some((drawing) => Object.prototype.hasOwnProperty.call(drawing, "logs"));
     if (!hasLogsKey) return;
 
@@ -6367,7 +6367,7 @@ const UnifiedMapView = () => {
       const lineLength = getPolylineLengthMeters(getPolylinePath(latestDrawing.geometry));
       if (lineLength > MAX_LINE_LENGTH_METERS) {
         toast.warn(
-          `Line is ${(lineLength / 1000).toFixed(2)} km — generating logs for the first 1 km only.`,
+          `Line is ${(lineLength / 1000).toFixed(2)} km â€” generating logs for the first 1 km only.`,
           { position: "bottom-right", autoClose: 3000 },
         );
       }
@@ -7647,7 +7647,7 @@ const UnifiedMapView = () => {
                 onDrawingsChange={handleDrawingsChange}
               />
 
-              {/* LTE Prediction Layer — renders for prediction mode, LTE grid, or selected sites */}
+              {/* LTE Prediction Layer â€” renders for prediction mode, LTE grid, or selected sites */}
               {shouldRenderLtePredictionLayer && (
                 <LtePredictionLocationLayer
                   enabled={true}
@@ -7867,3 +7867,5 @@ const UnifiedMapView = () => {
 };
 
 export default UnifiedMapView;
+
+

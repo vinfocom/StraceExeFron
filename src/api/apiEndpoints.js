@@ -1,4 +1,4 @@
-// src/api/apiEndpoints.js
+﻿// src/api/apiEndpoints.js
 import { CleaningServices } from "@mui/icons-material";
 import { api } from "./apiService"; // C# Backend
 import { pythonApi, PYTHON_BASE_URL_EXPORT, getPythonApiBaseUrl } from "./pythonApiService"; // Python Backend
@@ -2117,7 +2117,7 @@ export const mapViewApi = {
     return response?.data ?? response;
   },
 
-  getSubSessionAnalytics: async ({ sessionIds, signal } = {}) => {
+  getSubSessionAnalytics: async ({ sessionIds, projectId, signal } = {}) => {
     try {
       const idsParam = Array.isArray(sessionIds)
         ? sessionIds.map((id) => String(id ?? "").trim()).filter(Boolean).join(",")
@@ -2134,7 +2134,9 @@ export const mapViewApi = {
       const response = await api.get("/api/MapView/GetSubSessionAnalytics", {
         params: {
           sessionIds: idsParam,
-          session_ids: idsParam,
+          projectId: Number.isFinite(Number(projectId)) && Number(projectId) > 0
+            ? Number(projectId)
+            : undefined,
         },
         signal,
         dedupe: false,
@@ -2724,3 +2726,5 @@ export default {
   validateProjectExists,
   companyApi,
 };
+
+

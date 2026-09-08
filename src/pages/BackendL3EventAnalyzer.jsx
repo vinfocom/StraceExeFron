@@ -95,6 +95,8 @@ function normalizeTimelineRow(row = {}, forcedType = null) {
     procedure: valueOf(row, "procedure", "Procedure") || category,
     latitude: valueOf(row, "latitude", "Latitude"),
     longitude: valueOf(row, "longitude", "Longitude"),
+    direction: valueOf(row, "direction", "Direction") || null,
+    channel: valueOf(row, "channel", "Channel") || null,
     callId: valueOf(row, "callId", "CallId"),
     details: Array.isArray(row.details) && row.details.length ? row.details : decoded.details || [],
     metadata: raw,

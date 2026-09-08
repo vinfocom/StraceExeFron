@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+﻿import { useCallback, useEffect, useRef, useState } from "react";
 import { mapViewApi } from "@/api/apiEndpoints";
 import { isCancelledError } from "@/api/apiService";
 import {
@@ -15,7 +15,7 @@ const EMPTY_ANALYTICS = Object.freeze({
   rawResponse: null,
 });
 
-const SUB_SESSION_CACHE_RESOURCE = "unified-sub-session-analytics-v7";
+const SUB_SESSION_CACHE_RESOURCE = "unified-sub-session-analytics-v8";
 
 const toFiniteNumber = (value) => {
   const parsed = Number(value);
@@ -361,7 +361,7 @@ const normalizeResponse = (response) => {
   };
 };
 
-export const useSubSessionAnalytics = (sessionIds, enabled = false) => {
+export const useSubSessionAnalytics = (sessionIds, enabled = false, projectId = null) => {
   const [analytics, setAnalytics] = useState(EMPTY_ANALYTICS);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -376,6 +376,10 @@ export const useSubSessionAnalytics = (sessionIds, enabled = false) => {
       const fetchKey = Array.isArray(sessionIds)
         ? [...sessionIds].map((id) => String(id ?? "").trim()).filter(Boolean).sort().join(",")
         : "";
+      const projectKey = Number.isFinite(Number(projectId)) && Number(projectId) > 0
+        ? String(Number(projectId))
+        : "none";
+      const requestKey = `${projectKey}:${fetchKey}`;
 
       if (!enabled || !fetchKey) {
         if (abortControllerRef.current) {
@@ -390,12 +394,13 @@ export const useSubSessionAnalytics = (sessionIds, enabled = false) => {
       }
 
       if (!force && isFetchingRef.current) return;
-      if (!force && lastFetchKeyRef.current === fetchKey && analytics.sessions.length > 0) {
+      if (!force && lastFetchKeyRef.current === requestKey && analytics.sessions.length > 0) {
         return;
       }
 
       const cacheKey = makeProjectCacheKey({
         resource: SUB_SESSION_CACHE_RESOURCE,
+        projectId: projectId ?? 0,
         sessionIds: sessionIds || [],
       });
 
@@ -429,6 +434,7 @@ export const useSubSessionAnalytics = (sessionIds, enabled = false) => {
       try {
         const response = await mapViewApi.getSubSessionAnalytics({
           sessionIds,
+          projectId,
           signal: abortControllerRef.current.signal,
         });
 
@@ -437,15 +443,13 @@ export const useSubSessionAnalytics = (sessionIds, enabled = false) => {
         const normalized = normalizeResponse(response);
         setAnalytics(normalized);
         writeProjectSessionCache(cacheKey, normalized);
-        lastFetchKeyRef.current = fetchKey;
+        lastFetchKeyRef.current = requestKey;
       } catch (err) {
         if (isCancelledError(err)) return;
 
         if (mountedRef.current) {
           setError(err?.message || "Failed to fetch sub-session analytics");
-          if (!hasCachedData && !force) {
-            setAnalytics(EMPTY_ANALYTICS);
-          }
+          setAnalytics(EMPTY_ANALYTICS);
         }
       } finally {
         isFetchingRef.current = false;
@@ -454,7 +458,7 @@ export const useSubSessionAnalytics = (sessionIds, enabled = false) => {
         }
       }
     },
-    [enabled, sessionIds, analytics.sessions.length],
+    [enabled, sessionIds, projectId, analytics.sessions.length],
   );
 
   useEffect(() => {
@@ -482,3 +486,6 @@ export const useSubSessionAnalytics = (sessionIds, enabled = false) => {
     refetch: () => fetchData(true),
   };
 };
+
+
+
