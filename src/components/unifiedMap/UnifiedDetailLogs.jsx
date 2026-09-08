@@ -42,6 +42,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { Checkbox } from "@/components/ui/checkbox";
 
 import { TabButton } from "./common/TabButton";
 import { LoadingSpinner } from "./common/LoadingSpinner";
@@ -460,6 +461,9 @@ const ExportDropdown = ({
   const [isExporting, setIsExporting] = useState(false);
   const [exportType, setExportType] = useState(null);
   const [isExportDialogOpen, setIsExportDialogOpen] = useState(false);
+  const [isExcelConfigDialogOpen, setIsExcelConfigDialogOpen] = useState(false);
+  const [excelReportMode, setExcelReportMode] = useState("separate");
+  const [excelFilterByImageName, setExcelFilterByImageName] = useState(true);
   const dropdownRef = useRef(null);
 
   useEffect(() => {
@@ -977,6 +981,18 @@ Technologies: ${dataFilters.technologies?.join(", ") || "None"}
     }
 
     setIsExportDialogOpen(false);
+    setIsExcelConfigDialogOpen(true);
+  };
+
+  const handleGenerateExcelExport = async () => {
+    if (isExporting) return;
+
+    if (!projectId || !Array.isArray(sessionIds) || sessionIds.length === 0) {
+      toast.error("Project ID or session IDs are missing for Excel export.");
+      return;
+    }
+
+    setIsExcelConfigDialogOpen(false);
     setIsExporting(true);
     setExportType("excel");
 
@@ -985,6 +1001,8 @@ Technologies: ${dataFilters.technologies?.join(", ") || "None"}
       const excelBlob = await reportApi.generateUnifiedMapExcel({
         projectId: Number(projectId),
         sessionIds: sessionIds.map((id) => Number(id)).filter(Number.isFinite),
+        reportMode: excelReportMode,
+        filterByImageName: excelFilterByImageName,
       });
 
       downloadBlob(
@@ -1118,6 +1136,92 @@ Technologies: ${dataFilters.technologies?.join(", ") || "None"}
               className="rounded-lg border border-slate-600 px-3 py-1.5 text-sm text-slate-300 transition hover:bg-slate-800"
             >
               Cancel
+            </button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={isExcelConfigDialogOpen} onOpenChange={setIsExcelConfigDialogOpen}>
+        <DialogContent
+          title="Excel Report Options"
+          className="max-w-md border border-slate-700 bg-slate-900 text-slate-100"
+          style={{
+            background: "#0f172a",
+            color: "#e2e8f0",
+            border: "1px solid #334155",
+            width: "100%",
+            maxWidth: "28rem",
+          }}
+        >
+          <DialogHeader>
+            <DialogTitle>Excel Report Options</DialogTitle>
+            <DialogDescription style={{ color: "#94a3b8" }}>
+              Choose how the Excel report should be generated.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-5 py-2">
+            <div>
+              <p className="mb-2 text-sm font-medium text-slate-200">Report Mode</p>
+              <div className="grid grid-cols-2 gap-3">
+                {["separate", "combined"].map((mode) => {
+                  const isSelected = excelReportMode === mode;
+                  return (
+                    <button
+                      key={mode}
+                      type="button"
+                      aria-pressed={isSelected}
+                      onClick={() => setExcelReportMode(mode)}
+                      disabled={isExporting}
+                      className={`rounded-lg border px-3 py-3 text-sm font-medium capitalize transition disabled:cursor-not-allowed disabled:opacity-60 ${
+                        isSelected
+                          ? "border-sky-400 bg-sky-500/20 text-sky-200"
+                          : "border-slate-600 bg-slate-800 text-slate-300 hover:bg-slate-700"
+                      }`}
+                    >
+                      {mode}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            <label
+              htmlFor="excel-filter-by-image-name"
+              className="flex cursor-pointer items-center gap-3 rounded-lg border border-slate-700 bg-slate-800/70 px-3 py-3"
+            >
+              <Checkbox
+                id="excel-filter-by-image-name"
+                checked={excelFilterByImageName}
+                onCheckedChange={(checked) => setExcelFilterByImageName(checked === true)}
+                disabled={isExporting}
+                className="border-slate-400 data-[state=checked]:bg-sky-500"
+              />
+              <span>
+                <span className="block text-sm font-medium text-slate-200">Filter By Image</span>
+                <span className="block text-xs text-slate-400">
+                  Include rows that have report image data.
+                </span>
+              </span>
+            </label>
+          </div>
+
+          <DialogFooter className="flex justify-end gap-2">
+            <button
+              type="button"
+              onClick={() => setIsExcelConfigDialogOpen(false)}
+              disabled={isExporting}
+              className="rounded-lg border border-slate-600 px-3 py-1.5 text-sm text-slate-300 transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={handleGenerateExcelExport}
+              disabled={isExporting}
+              className="rounded-lg bg-sky-600 px-4 py-1.5 text-sm font-medium text-white transition hover:bg-sky-500 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {isExporting ? "Generating..." : "Generate"}
             </button>
           </DialogFooter>
         </DialogContent>

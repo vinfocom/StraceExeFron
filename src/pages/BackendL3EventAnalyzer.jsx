@@ -398,7 +398,7 @@ function UploadHistoryLanding({ projectId, projectName, onOpenAnalysis, onBack }
           </div>
           <div className="max-h-[calc(100vh-360px)] min-h-0 overflow-auto rounded border border-slate-800">
             <table className="w-full min-w-[800px] text-xs">
-              <thead className="bg-slate-800 text-left text-slate-400"><tr><th className="px-3 py-2">ID</th><th className="px-3 py-2">Project ID</th><th className="px-3 py-2">Session ID</th><th className="px-3 py-2">File Name</th><th className="px-3 py-2">Uploaded On</th><th className="px-3 py-2">Action</th></tr></thead>
+              <thead className="bg-slate-800 text-left text-slate-400"><tr><th className="px-3 py-2">ID</th><th className="px-3 py-2">Project ID</th><th className="px-3 py-2">Session ID</th><th className="px-3 py-2">File Name</th><th className="px-3 py-2">Uploaded On</th><th className="px-3 py-2">Remarks</th><th className="px-3 py-2">Action</th></tr></thead>
               <tbody>
                 {historyLoading ? <tr><td colSpan={6} className="p-8 text-center"><Loader2 className="mx-auto h-5 w-5 animate-spin" /></td></tr> : historyRows.length ? historyRows.map((row) => (
                   <tr key={row.id || row.uploadHistoryId} className="border-t border-slate-800 text-slate-200">
@@ -407,6 +407,7 @@ function UploadHistoryLanding({ projectId, projectName, onOpenAnalysis, onBack }
                     <td className="px-3 py-2 font-mono">{row.sessionId || "—"}</td>
                     <td className="max-w-80 px-3 py-2"><div className="break-all font-medium text-white">{row.originalFileName || "—"}</div></td>
                     <td className="px-3 py-2">{row.uploadedOn ? new Date(row.uploadedOn).toLocaleString() : "—"}</td>
+                    <td className="max-w-80 px-3 py-2">{row.remarks || "-"}</td>
                     <td className="px-3"><div className="flex items-center gap-2"><button type="button" onClick={() => onOpenAnalysis(row)} disabled={deletingHistoryId === Number(row.id) || uploading || savingHistory || !row.id} className="inline-flex items-center gap-1 rounded bg-blue-600 px-3 py-1.5 font-medium hover:bg-blue-500 disabled:opacity-50"><Search className="h-3.5 w-3.5" />Analysis</button><button type="button" onClick={() => openEditHistory(row)} disabled={deletingHistoryId !== null || uploading || savingHistory} className="inline-flex items-center gap-1 rounded border border-cyan-400/60 bg-cyan-400/10 px-3 py-1.5 font-medium text-cyan-200 hover:bg-cyan-400/20 disabled:opacity-50"><Edit3 className="h-3.5 w-3.5" />Edit</button><button type="button" onClick={() => deleteHistory(row)} disabled={deletingHistoryId !== null || uploading || savingHistory} className="inline-flex items-center gap-1 rounded border border-red-500/60 bg-red-500/10 px-3 py-1.5 font-medium text-red-300 hover:bg-red-500/20 disabled:opacity-50">{deletingHistoryId === Number(row.id) ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}Delete</button></div></td>
                   </tr>
                 )) : <tr><td colSpan={6} className="p-8 text-center text-slate-500">No L3 sessions were found.</td></tr>}
