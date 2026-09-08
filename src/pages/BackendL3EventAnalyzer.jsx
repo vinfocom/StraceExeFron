@@ -198,6 +198,8 @@ function UploadHistoryLanding({ projectId, projectName, onOpenAnalysis, onBack }
   const [editingRow, setEditingRow] = useState(null);
   const [savingHistory, setSavingHistory] = useState(false);
   const [syncing, setSyncing] = useState(false);
+  const [syncCandidates, setSyncCandidates] = useState(null);
+  const [selectedSyncSessionIds, setSelectedSyncSessionIds] = useState([]);
   const [manualProjectId, setManualProjectId] = useState(projectId ? String(projectId) : "");
   const [manualSessionId, setManualSessionId] = useState("");
   const fileInputRef = useRef(null);
@@ -226,12 +228,39 @@ function UploadHistoryLanding({ projectId, projectName, onOpenAnalysis, onBack }
       const selectedProjectId = numberOrNull(projectId) || numberOrNull(manualProjectId);
       const response = await l3EventApi.syncNewSessionDiagnostics({ projectId: selectedProjectId });
       if (response?.status !== 1) throw new Error(response?.message || "Session sync failed.");
+      const candidates = Array.isArray(response?.data) ? response.data : [];
+      setSyncCandidates(candidates);
+      setSelectedSyncSessionIds(candidates.map((session) => Number(session.sessionId)).filter((id) => id > 0));
+      if (!candidates.length) toast.info(response.message || "No new sessions found.");
+    } catch (error) {
+      toast.error(error?.message || "Failed to sync new L3/Event sessions.");
+    } finally {
+      setSyncing(false);
+    }
+  };
+
+  const importSelectedSessions = async () => {
+    if (!selectedSyncSessionIds.length) {
+      toast.warn("Select at least one session to synchronize.");
+      return;
+    }
+
+    setSyncing(true);
+    try {
+      const selectedProjectId = numberOrNull(projectId) || numberOrNull(manualProjectId);
+      const response = await l3EventApi.syncNewSessionDiagnostics({
+        projectId: selectedProjectId,
+        sessionIds: selectedSyncSessionIds,
+      });
+      if (response?.status !== 1) throw new Error(response?.message || "Session sync failed.");
 
       const summary = response.summary || {};
+      setSyncCandidates(null);
+      setSelectedSyncSessionIds([]);
       await loadHistory();
       toast.success(`Sync complete: ${summary.imported || 0} imported, ${summary.alreadyAvailable || 0} already available, ${summary.zipNotFound || 0} ZIPs not found.`);
     } catch (error) {
-      toast.error(error?.message || "Failed to sync new L3/Event sessions.");
+      toast.error(error?.message || "Failed to sync selected L3/Event sessions.");
     } finally {
       setSyncing(false);
     }
@@ -390,7 +419,7 @@ function UploadHistoryLanding({ projectId, projectName, onOpenAnalysis, onBack }
 
         <button type="button" onClick={syncNewSessions} disabled={syncing || uploading || historyLoading || savingHistory} className="inline-flex h-10 items-center gap-2 rounded bg-emerald-600 px-4 text-sm font-semibold text-white shadow hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-50">
           {syncing ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
-          {syncing ? "Syncing L3/Event..." : "Sync New Sessions"}
+          {syncing ? "Checking sessions..." : "Find New Sessions"}
         </button>
 
         <section className="rounded-lg border border-slate-700 bg-slate-900 p-4">
@@ -439,6 +468,21 @@ function UploadHistoryLanding({ projectId, projectName, onOpenAnalysis, onBack }
           </div>
         </section>
       </div>
+      {syncCandidates && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
+          <div className="w-full max-w-4xl rounded-lg border border-slate-700 bg-slate-900 p-4 text-white shadow-xl">
+            <div className="mb-4 flex items-center justify-between gap-3">
+              <div><div className="text-base font-semibold">New sessions available</div><p className="mt-1 text-xs text-slate-400">Select the sessions whose remote ZIP files should be downloaded and parsed.</p></div>
+              <button type="button" onClick={() => setSyncCandidates(null)} disabled={syncing} className="rounded border border-slate-700 p-1.5 hover:bg-slate-800 disabled:opacity-50"><X className="h-4 w-4" /></button>
+            </div>
+            {syncCandidates.length ? <div className="max-h-96 overflow-auto rounded border border-slate-800">
+              <table className="w-full text-xs"><thead className="bg-slate-800 text-left text-slate-400"><tr><th className="w-10 px-3 py-2"></th><th className="px-3 py-2">Session ID</th><th className="px-3 py-2">Start</th><th className="px-3 py-2">End</th><th className="px-3 py-2">Uploaded</th><th className="px-3 py-2">Location</th></tr></thead>
+                <tbody>{syncCandidates.map((session) => { const id = Number(session.sessionId); const checked = selectedSyncSessionIds.includes(id); return <tr key={id} className="border-t border-slate-800"><td className="px-3 py-2"><input type="checkbox" checked={checked} onChange={() => setSelectedSyncSessionIds((current) => checked ? current.filter((value) => value !== id) : [...current, id])} /></td><td className="px-3 py-2 font-mono">{id}</td><td className="px-3 py-2">{session.start_time ? new Date(session.start_time).toLocaleString() : "-"}</td><td className="px-3 py-2">{session.end_time ? new Date(session.end_time).toLocaleString() : "-"}</td><td className="px-3 py-2">{session.uploaded_on ? new Date(session.uploaded_on).toLocaleString() : "-"}</td><td className="px-3 py-2">{session.start_address || session.end_address || "-"}</td></tr>; })}</tbody></table>
+            </div> : <p className="rounded border border-slate-800 p-6 text-center text-sm text-slate-400">No sessions found after the latest imported session.</p>}
+            <div className="mt-4 flex justify-end gap-2"><button type="button" onClick={() => setSyncCandidates(null)} disabled={syncing} className="inline-flex h-9 items-center gap-2 rounded border border-slate-700 px-4 text-sm hover:bg-slate-800 disabled:opacity-50">Cancel</button><button type="button" onClick={importSelectedSessions} disabled={syncing || !selectedSyncSessionIds.length} className="inline-flex h-9 items-center gap-2 rounded bg-emerald-600 px-4 text-sm font-medium hover:bg-emerald-500 disabled:opacity-50">{syncing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}Sync Selected ({selectedSyncSessionIds.length})</button></div>
+          </div>
+        </div>
+      )}
       {editingRow && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
           <div className="w-full max-w-2xl rounded-lg border border-slate-700 bg-slate-900 p-4 shadow-xl">
