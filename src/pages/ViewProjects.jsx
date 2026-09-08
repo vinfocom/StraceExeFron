@@ -369,6 +369,7 @@ const ViewProjectsPage = () => {
     }
   };
 
+
   useEffect(() => {
     fetchProjects();
   }, []);
