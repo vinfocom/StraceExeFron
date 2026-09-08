@@ -129,15 +129,23 @@ function normalizeCall(call = {}) {
 function normalizeSummary(summary, fallbackCalls = []) {
   const backendCalls = valueOf(summary, "calls");
   const calls = (Array.isArray(backendCalls) ? backendCalls : fallbackCalls || []).map(normalizeCall);
+  const connectedCalls = calls.filter((call) => call.status === "Connected");
+  const average = (values) => values.length ? Math.round(values.reduce((total, value) => total + value, 0) / values.length) : 0;
+  const setupTimes = connectedCalls.map((call) => Number(call.callSetupTimeMs ?? call.setupTimeMs)).filter(Number.isFinite);
+  const talkTimes = connectedCalls.map((call) => Number(call.connectedDurationMs ?? call.talkTimeMs ?? call.durationMs)).filter(Number.isFinite);
+  const totalDurationMs = calls
+    .map((call) => Number(call.durationMs ?? call.connectedDurationMs ?? 0))
+    .filter(Number.isFinite)
+    .reduce((total, value) => total + value, 0);
   return {
     totalCalls: valueOf(summary, "totalCalls") ?? calls.length,
     connected: valueOf(summary, "connected") ?? calls.filter((call) => call.status === "Connected").length,
     dropped: valueOf(summary, "dropped") ?? calls.filter((call) => call.status === "Dropped").length,
     notConnected: valueOf(summary, "notConnected") ?? calls.filter((call) => call.status === "Not Connected").length,
-    averageSetupTime: valueOf(summary, "averageSetupTime") || 0,
-    averageTalkTime: valueOf(summary, "averageTalkTime") || 0,
-    totalDurationMs: valueOf(summary, "totalDurationMs") || 0,
-    totalConnectedDurationMs: valueOf(summary, "totalConnectedDurationMs") || 0,
+    averageSetupTime: valueOf(summary, "averageSetupTime") ?? average(setupTimes),
+    averageTalkTime: valueOf(summary, "averageTalkTime") ?? average(talkTimes),
+    totalDurationMs: valueOf(summary, "totalDurationMs") ?? totalDurationMs,
+    totalConnectedDurationMs: valueOf(summary, "totalConnectedDurationMs") ?? totalDurationMs,
     calls,
   };
 }
@@ -519,7 +527,6 @@ function BackendAnalyzer({ sessionIds, analysisId, projectName, onBack }) {
   const [timeline, setTimeline] = useState([]);
   const [mapTimeline, setMapTimeline] = useState([]);
   const [summary, setSummary] = useState(normalizeSummary(null));
-  const [backendAnalyzer, setBackendAnalyzer] = useState(null);
   const [l3Messages, setL3Messages] = useState([]);
   const [eventMessages, setEventMessages] = useState([]);
   const scope = useMemo(() => ({ sessionIds, uploadId: analysisId, take: TAKE }), [analysisId, sessionIds]);
@@ -528,25 +535,22 @@ function BackendAnalyzer({ sessionIds, analysisId, projectName, onBack }) {
     let cancelled = false;
     setLoading(true);
     setError("");
-    Promise.all([
-      l3EventApi.getTabCounts(scope),
-      l3EventApi.getMapRows(scope),
-      l3EventApi.getExcelRows(scope),
-      l3EventApi.getCallSummary(scope),
-      l3EventApi.getAnalyzerSummary(scope),
-      l3EventApi.getL3Messages(scope),
-      l3EventApi.getEvents(scope),
-    ]).then(([countResponse, mapResponse, rowResponse, callResponse, analyzerResponse, l3Response, eventResponse]) => {
+    l3EventApi.getExcelRows(scope).then((rowResponse) => {
       if (cancelled) return;
-      const normalizedMapTimeline = (mapResponse?.rows || rowResponse?.rows || []).map((row) => normalizeTimelineRow(row));
       const normalizedTimeline = (rowResponse?.rows || []).map((row) => normalizeTimelineRow(row));
-      setCounts(countResponse || {});
-      setMapTimeline(normalizedMapTimeline);
+      const normalizedL3Messages = normalizedTimeline.filter((row) => row.type === "l3");
+      const normalizedEventMessages = normalizedTimeline.filter((row) => row.type === "event");
+      setCounts({
+        map_view_count: normalizedTimeline.length,
+        excel_view_count: normalizedTimeline.length,
+        l3_count: normalizedL3Messages.length,
+        event_count: normalizedEventMessages.length,
+      });
+      setMapTimeline(normalizedTimeline);
       setTimeline(normalizedTimeline);
-      setSummary(normalizeSummary(callResponse?.summary, rowResponse?.calls));
-      setBackendAnalyzer(analyzerResponse?.analyzer || null);
-      setL3Messages((l3Response?.l3 || []).map((row) => normalizeTimelineRow(row, "l3")));
-      setEventMessages((eventResponse?.events || []).map((row) => normalizeTimelineRow(row, "event")));
+      setSummary(normalizeSummary(null, rowResponse?.calls));
+      setL3Messages(normalizedL3Messages);
+      setEventMessages(normalizedEventMessages);
     }).catch((requestError) => {
       if (!cancelled) setError(requestError?.message || "Failed to load diagnostic session data.");
     }).finally(() => {
@@ -631,7 +635,7 @@ function BackendAnalyzer({ sessionIds, analysisId, projectName, onBack }) {
         )}
         {activeView === "map" && <L3EventsMapView points={mapPoints} />}
         {activeView === "excel" && <ExcelSignalingView rows={signalingRows} calls={enrichedSummary.calls} selectedCall={selectedCall} onSelectCall={setSelectedCall} sourceFileName={analysisId ? `l3-session-${analysisId}` : `sessions-${sessionIds.join("-")}`} />}
-        {activeView === "analyzer" && <div className="flex h-full min-h-0 flex-col"><div className="flex shrink-0 gap-3 border-b border-slate-800 px-3 py-1.5 text-[11px] text-slate-300"><span>RRC: {backendAnalyzer?.states?.rrc || "—"}</span><span>NAS: {backendAnalyzer?.states?.nas || "—"}</span><span>IMS: {backendAnalyzer?.states?.ims || "—"}</span><span>Failures: {backendAnalyzer?.stats?.failures ?? 0}</span></div><div className="min-h-0 flex-1"><ProtocolAnalyzerView analysis={protocolAnalysis} callScoped={Boolean(selectedCall)} /></div></div>}
+        {activeView === "analyzer" && <div className="flex h-full min-h-0 flex-col"><div className="flex shrink-0 gap-3 border-b border-slate-800 px-3 py-1.5 text-[11px] text-slate-300"><span>RRC: {protocolAnalysis?.states?.rrc || "—"}</span><span>NAS: {protocolAnalysis?.states?.nas || "—"}</span><span>IMS: {protocolAnalysis?.states?.ims || "—"}</span><span>Failures: {protocolAnalysis?.stats?.failures ?? 0}</span></div><div className="min-h-0 flex-1"><ProtocolAnalyzerView analysis={protocolAnalysis} callScoped={Boolean(selectedCall)} /></div></div>}
         {(activeView === "l3" || activeView === "events") && <div className="flex h-full min-h-0 flex-col bg-slate-900/70"><div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-slate-700 bg-slate-800/70 px-2 py-1"><div><h3 className="text-sm font-semibold text-white">{activeView === "l3" ? "All L3 Messages" : "All Event Rows"}</h3><p className="text-[11px] text-slate-400">Showing {visibleRawRows.length.toLocaleString()} of {rawRows.length.toLocaleString()} backend rows.</p></div><div className="relative w-full sm:w-80"><Search className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-slate-500" /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search timestamp, file, title, or raw text..." className="w-full rounded-md border border-slate-700 bg-slate-950 py-2 pl-8 pr-2 text-xs text-white placeholder:text-slate-500 focus:border-blue-500 focus:outline-none" /></div></div><div className="min-h-0 flex-1 space-y-2 overflow-auto">{visibleRawRows.length ? visibleRawRows.map((row) => <TimelineCard key={row.id} item={row} />) : <div className="py-10 text-center text-sm text-slate-400">No matching {activeView === "l3" ? "L3 messages" : "event rows"}.</div>}</div></div>}
       </main>
     </div>

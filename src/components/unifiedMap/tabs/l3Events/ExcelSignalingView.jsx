@@ -234,6 +234,8 @@ const SignalingRow = memo(React.forwardRef(function SignalingRow({ row, selected
       style={{ height: "32px" }}
     >
       <td className={`border-r border-slate-800 px-2 font-mono text-[11px] whitespace-nowrap ${severityClass}`}>{row.timestampLabel}</td>
+      <td className={`max-w-32 truncate border-r border-slate-800 px-2 text-[10px] text-slate-200 ${severityClass}`} title={row.direction || "-"}>{row.direction || "-"}</td>
+      <td className={`max-w-24 truncate border-r border-slate-800 px-2 text-[10px] text-slate-200 ${severityClass}`} title={row.channel || "-"}>{row.channel || "-"}</td>
       <td className={`border-r border-slate-800 px-2 text-center font-mono text-[10px] text-cyan-200 whitespace-nowrap ${severityClass}`}>{laneValue(row, "ue")}</td>
       <td className={`border-r border-slate-800 px-2 text-center font-mono text-[10px] text-blue-200 whitespace-nowrap ${severityClass}`}>{laneValue(row, "radio")}</td>
       <td className={`border-r border-slate-800 px-2 text-center font-mono text-[10px] text-violet-200 whitespace-nowrap ${severityClass}`}>{laneValue(row, "core")}</td>
@@ -311,7 +313,7 @@ export function ExcelSignalingView({ rows = [], calls = [], selectedCall, onSele
       if (interfaceColumnFilter !== "all" && row.interface !== interfaceColumnFilter) return false;
       if (failureOnly && row.severity !== "failure") return false;
       if (!needle) return true;
-      return [row.timestampLabel, row.sourceFile, row.message, row.cause, row.procedure, row.protocol, row.interface, row.rawMessage, row.callId].filter(Boolean).join(" ").toLowerCase().includes(needle);
+      return [row.timestampLabel, row.sourceFile, row.direction, row.channel, row.message, row.cause, row.procedure, row.protocol, row.interface, row.rawMessage, row.callId].filter(Boolean).join(" ").toLowerCase().includes(needle);
     });
   }, [rows, callFilter, technology, sources, ueDirection, radioDirection, coreDirection, interfaceColumnFilter, failureOnly, query]);
 
@@ -465,7 +467,7 @@ export function ExcelSignalingView({ rows = [], calls = [], selectedCall, onSele
     }
   };
 
-  const columnCount = includeLocation ? 9 : 7;
+  const columnCount = includeLocation ? 11 : 9;
 
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-slate-900/80">
@@ -495,6 +497,8 @@ export function ExcelSignalingView({ rows = [], calls = [], selectedCall, onSele
           <thead>
             <tr>
               <Header label="Timestamp" sortKey="timestamp" sort={sort} onSort={changeSort} />
+              <Header label="Direction" sortKey="direction" sort={sort} onSort={changeSort} />
+              <Header label="Channel" sortKey="channel" sort={sort} onSort={changeSort} />
               <Header label="UE" />
               <Header label="eNB/gNB" />
               <Header label="MME/AMF/Core" />
@@ -509,6 +513,8 @@ export function ExcelSignalingView({ rows = [], calls = [], selectedCall, onSele
               <Header label="Message" sortKey="message" sort={sort} onSort={changeSort} />
             </tr>
             <tr>
+              <th className="sticky top-[33px] z-10 border-b border-r border-slate-700 bg-slate-800 px-2 py-1" />
+              <th className="sticky top-[33px] z-10 border-b border-r border-slate-700 bg-slate-800 px-2 py-1" />
               <th className="sticky top-[33px] z-10 border-b border-r border-slate-700 bg-slate-800 px-2 py-1" />
               <th className="sticky top-[33px] z-10 border-b border-r border-slate-700 bg-slate-800 px-2 py-1"><DirectionFilter value={ueDirection} onChange={setUeDirection} /></th>
               <th className="sticky top-[33px] z-10 border-b border-r border-slate-700 bg-slate-800 px-2 py-1"><DirectionFilter value={radioDirection} onChange={setRadioDirection} /></th>
