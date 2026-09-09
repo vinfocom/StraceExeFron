@@ -1434,6 +1434,7 @@ const UnifiedMapSidebar = ({
   );
   const [isRunningLtePrediction, setIsRunningLtePrediction] = useState(false);
   const [ltePredictionRadiusMeters, setLtePredictionRadiusMeters] = useState(500);
+  const [ltePredictionScope, setLtePredictionScope] = useState("radius");
   const [ltePredictionOperator, setLtePredictionOperator] = useState("auto");
   const ltePredictionPollingRef = useRef(null);
   const ltePredictionToastIdRef = useRef(null);
@@ -2660,7 +2661,10 @@ const UnifiedMapSidebar = ({
         country_code: lteCountryCode || undefined,
         session_ids: validSessionIds,
         grid_resolution_m: Number(lteGridSizeMeters) || 25,
-        radius_m: Number(ltePredictionRadiusMeters) || 500,
+        radius_m:
+          ltePredictionScope === "edge"
+            ? null
+            : Number(ltePredictionRadiusMeters) || 500,
         use_buildings: Boolean(ltePredictionUseBuildings),
         operator: ltePredictionOperator,
         polygon_ids: activePolygonIdsParam,
@@ -2722,6 +2726,7 @@ const UnifiedMapSidebar = ({
     sessionIds,
     lteGridSizeMeters,
     ltePredictionRadiusMeters,
+    ltePredictionScope,
     ltePredictionUseBuildings,
     ltePredictionOperator,
     lteRegion,
@@ -4284,18 +4289,33 @@ const UnifiedMapSidebar = ({
                           </div>
                           <div className="pt-1 bg-slate-800/60 rounded-lg p-2">
                             <div className="flex items-center justify-between text-xs mb-2">
-                              <span className="text-slate-400">Radius</span>
+                              <span className="text-slate-400">Prediction Scope</span>
                             </div>
-                            <ThresholdInput
-                              value={Number(ltePredictionRadiusMeters) || 500}
-                              onChange={(next) =>
-                                setLtePredictionRadiusMeters(Math.round(next))
-                              }
-                              min={100}
-                              max={20000}
-                              step={100}
-                              unit="m"
+                            <SegmentedControl
+                              value={ltePredictionScope}
+                              onChange={setLtePredictionScope}
+                              options={[
+                                { value: "radius", label: "Radius" },
+                                { value: "edge", label: "Edge" },
+                              ]}
                             />
+                            {ltePredictionScope === "radius" && (
+                              <div className="mt-2">
+                                <div className="flex items-center justify-between text-xs mb-2">
+                                  <span className="text-slate-400">Radius</span>
+                                </div>
+                                <ThresholdInput
+                                  value={Number(ltePredictionRadiusMeters) || 500}
+                                  onChange={(next) =>
+                                    setLtePredictionRadiusMeters(Math.round(next))
+                                  }
+                                  min={100}
+                                  max={20000}
+                                  step={100}
+                                  unit="m"
+                                />
+                              </div>
+                            )}
                           </div>
                           <ToggleRow
                             label="Buildings"

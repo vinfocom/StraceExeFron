@@ -694,9 +694,13 @@ export const predictionApi = {
           params.grid_resolution ??
           params.grid_resolution_m ??
           25.0,
-        radius_m: params.radius_m ?? 5000.0,
         building: params.building ?? params.use_buildings ?? true
       };
+      // A null radius explicitly selects edge-based prediction. Omit the
+      // field instead of sending null or a fallback value.
+      if (params.radius_m !== null) {
+        payload.radius_m = params.radius_m ?? 5000.0;
+      }
       addLteCountryContext(payload, params);
 
       const operatorValue = String(params.operator || "").trim();

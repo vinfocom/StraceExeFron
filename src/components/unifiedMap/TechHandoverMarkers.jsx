@@ -76,6 +76,21 @@ const createMarkerIcon = (color, label) => {
   };
 };
 
+// Keep technology labels compact on the map marker. Some sources append
+// details such as "LTE-ANCHOR NSA" or "NR SA", but the marker only needs the
+// generation label (for example, "4G" or "5G").
+const getTechnologyMarkerLabel = (value) => {
+  const raw = String(value ?? "").trim();
+  if (!raw) return "-";
+
+  const initialGeneration = raw.match(/^([2-5]G)/i);
+  if (initialGeneration) return initialGeneration[1].toUpperCase();
+
+  const normalized = normalizeTechName(raw);
+  const normalizedGeneration = String(normalized ?? "").match(/^([2-5]G)/i);
+  return normalizedGeneration?.[1]?.toUpperCase() || normalized || raw;
+};
+
 const downloadCSVFunc = (transitions, filename = "handover_data.csv") => {
     if (!transitions || transitions.length === 0) {
       alert("No data to download");
@@ -135,16 +150,16 @@ DownloadButton.displayName = "DownloadButton";
 
 const getHandoverType = (from, to, type) => {
   if (type !== 'technology') return "change";
-  const techOrder = { "5G": 5, "5G NR": 5, "NR": 5, "4G": 4, "LTE": 4, "4G LTE": 4, "3G": 3, "WCDMA": 3, "UMTS": 3, "2G": 2, "GSM": 2, "EDGE": 2 };
-  const fromOrder = techOrder[from?.toUpperCase()] || 0;
-  const toOrder = techOrder[to?.toUpperCase()] || 0;
+  const techOrder = { "5G": 5, "4G": 4, "3G": 3, "2G": 2 };
+  const fromOrder = techOrder[getTechnologyMarkerLabel(from)] || 0;
+  const toOrder = techOrder[getTechnologyMarkerLabel(to)] || 0;
   if (toOrder > fromOrder) return "upgrade";
   if (toOrder < fromOrder) return "downgrade";
   return "lateral";
 };
 
 const isLegacy2g3gTech = (value) => {
-  const normalized = String(value ?? "").trim().toUpperCase();
+  const normalized = getTechnologyMarkerLabel(value);
   return ["2G", "3G", "GSM", "EDGE", "GPRS", "UMTS", "WCDMA", "HSPA", "HSDPA", "HSUPA"].includes(normalized);
 };
 
@@ -304,6 +319,8 @@ const spreadOverlappingTransitions = (transitions = []) => {
 
 const HandoverMarker = memo(({ transition, onClick, isSelected, type }) => {
   const { from, to } = transition;
+  const displayFrom = type === "technology" ? getTechnologyMarkerLabel(from) : from;
+  const displayTo = type === "technology" ? getTechnologyMarkerLabel(to) : to;
   const lat = Number(transition?._renderLat ?? transition?.lat);
   const lng = Number(transition?._renderLng ?? transition?.lng);
   const handoverType = getHandoverType(from, to, type);
@@ -331,9 +348,9 @@ const HandoverMarker = memo(({ transition, onClick, isSelected, type }) => {
         onClick={() => onClick?.(transition)}
       >
         <div className={`flex items-center gap-1 px-2 py-1 rounded-full ${bgColor} border-2 ${borderColor} shadow-lg`}>
-          <span className="text-[10px] font-bold text-white px-1.5 py-0.5 rounded min-w-[20px] text-center" style={{ backgroundColor: fromColor }}>{from}</span>
+          <span className="text-[10px] font-bold text-white px-1.5 py-0.5 rounded min-w-[20px] text-center" style={{ backgroundColor: fromColor }}>{displayFrom}</span>
           <ArrowRightLeft className="h-3 w-3 text-white" />
-          <span className="text-[10px] font-bold text-white px-1.5 py-0.5 rounded min-w-[20px] text-center" style={{ backgroundColor: toColor }}>{to}</span>
+          <span className="text-[10px] font-bold text-white px-1.5 py-0.5 rounded min-w-[20px] text-center" style={{ backgroundColor: toColor }}>{displayTo}</span>
         </div>
         {type === 'technology' && (
             <div className={`absolute -top-1 -right-1 w-4 h-4 rounded-full flex items-center justify-center text-white text-[8px] font-bold shadow ${handoverType === "upgrade" ? "bg-green-600" : handoverType === "downgrade" ? "bg-red-600" : "bg-blue-600"}`}>
@@ -349,6 +366,8 @@ HandoverMarker.displayName = "HandoverMarker";
 
 const CompactHandoverMarker = memo(({ transition, onClick, isSelected, type }) => {
   const { from, to } = transition;
+  const displayFrom = type === "technology" ? getTechnologyMarkerLabel(from) : from;
+  const displayTo = type === "technology" ? getTechnologyMarkerLabel(to) : to;
   const lat = Number(transition?._renderLat ?? transition?.lat);
   const lng = Number(transition?._renderLng ?? transition?.lng);
   const handoverType = getHandoverType(from, to, type);
@@ -359,7 +378,7 @@ const CompactHandoverMarker = memo(({ transition, onClick, isSelected, type }) =
       <div
         className={`cursor-pointer transform -translate-x-1/2 -translate-y-1/2 transition-all duration-200 ${isSelected ? "scale-150 z-50" : "hover:scale-125 z-10"}`}
         onClick={() => onClick?.(transition)}
-        title={`${from} → ${to}`}
+        title={`${displayFrom} → ${displayTo}`}
       >
         <div className="w-4 h-4 rounded-full border-2 border-white shadow-lg flex items-center justify-center" style={{ backgroundColor: bgColor }}>
           <Hand className="h-2.5 w-2.5 text-white" />
@@ -423,6 +442,8 @@ HandoverClusterLayer.displayName = "HandoverClusterLayer";
 const HandoverPopup = memo(({ transition, onClose, type }) => {
   if (!transition) return null;
   const { from, to, lat, lng } = transition;
+  const displayFrom = type === "technology" ? getTechnologyMarkerLabel(from) : from;
+  const displayTo = type === "technology" ? getTechnologyMarkerLabel(to) : to;
   // Anchor above the marker's rendered (possibly spread) position, lifted so the
   // popup and its arrow leave the marker itself visible.
   const anchorLat = Number(transition?._renderLat ?? lat);
@@ -473,9 +494,9 @@ const HandoverPopup = memo(({ transition, onClose, type }) => {
           <div className="space-y-2">
             {type !== "pci" && (
               <div className="flex items-center justify-center gap-2">
-                <span className="px-2 py-1 rounded text-sm font-bold text-white min-w-[30px] text-center" style={{ backgroundColor: getColor(from, type) }}>{from}</span>
+                <span className="px-2 py-1 rounded text-sm font-bold text-white min-w-[30px] text-center" style={{ backgroundColor: getColor(from, type) }}>{displayFrom}</span>
                 <span className="text-lg">→</span>
-                <span className="px-2 py-1 rounded text-sm font-bold text-white min-w-[30px] text-center" style={{ backgroundColor: getColor(to, type) }}>{to}</span>
+                <span className="px-2 py-1 rounded text-sm font-bold text-white min-w-[30px] text-center" style={{ backgroundColor: getColor(to, type) }}>{displayTo}</span>
               </div>
             )}
             {type !== "pci" && (
