@@ -146,7 +146,7 @@ function TextColumnSearchFilter({
               onMouseDown={(event) => event.preventDefault()}
               onClick={(event) => {
                 event.stopPropagation();
-                onSelectMatch(index);
+                onSelectMatch(index, row);
                 setIsOpen(false);
               }}
               className={`flex w-full min-w-0 items-center gap-2 px-2 py-1.5 text-left text-[12px] hover:bg-blue-500/20 hover:text-white ${index === activeMatchNumber - 1 ? "bg-amber-500/20 text-amber-50" : "text-white"}`}
@@ -454,9 +454,11 @@ export function ExcelSignalingView({ rows = [], calls = [], selectedCall, onSele
     if (index < 0 || index >= causeMatches.length) return;
     setActiveCauseMatchIndex(index);
   };
-  const selectMessageMatch = (index) => {
-    if (index < 0 || index >= messageMatches.length) return;
-    setActiveMessageMatchIndex(index);
+  const selectMessageMatch = (index, row = messageMatches[index]) => {
+    if (index < 0 || index >= messageMatches.length || !row) return;
+    setMessageColumnFilter(row.message || "");
+    setActiveMessageMatchIndex(0);
+    setSelectedRow(row);
   };
   const changeSort = (key) => setSort((current) => ({ key, direction: current.key === key && current.direction === "asc" ? "desc" : "asc" }));
   const downloadSummary = async () => {
