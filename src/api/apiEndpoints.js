@@ -761,12 +761,16 @@ export const predictionApi = {
       const payload = {
         user_id: params.user_id,
         project_id: params.project_id,
-        radius: params.radius ?? 2000.0,
         grid_resolution: params.grid_resolution ?? 50.0,
         n_workers: params.n_workers ?? 2,
         operator: operatorValue,
         operators: operatorValue ? [operatorValue] : [],
       };
+      // A null radius explicitly selects edge-based optimisation. Keep the
+      // field out of the request instead of sending null or a fallback value.
+      if (params.radius !== null) {
+        payload.radius = params.radius ?? 2000.0;
+      }
       addLteCountryContext(payload, params);
       if (params.polygon_ids) {
         payload.polygon_ids = params.polygon_ids;

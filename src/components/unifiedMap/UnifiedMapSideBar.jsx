@@ -743,6 +743,9 @@ const UnifiedMapSidebar = ({
   setSubSessionTypeFilter,
   showSessionNeighbors,
   setShowSessionNeighbors,
+  showInsights = false,
+  setShowInsights,
+  insightsLoading = false,
   secondaryMetricAvailability = {},
   neighborLogsAvailable = false,
   sessionNeighborLoading = false,
@@ -1511,6 +1514,7 @@ const UnifiedMapSidebar = ({
   const pciOptimizationToastIdRef = useRef(null);
   const pciOptimizationJobIdRef = useRef(null);
   const [isRunningLteOptimisedPrediction, setIsRunningLteOptimisedPrediction] = useState(false);
+  const [lteOptimisedPredictionScope, setLteOptimisedPredictionScope] = useState("radius");
   const [lteOptimisedSelectedOperators, setLteOptimisedSelectedOperators] = useState([]);
   const lteOptimisedPredictionPollingRef = useRef(null);
   const lteOptimisedPredictionToastIdRef = useRef(null);
@@ -2769,7 +2773,10 @@ const UnifiedMapSidebar = ({
         region: lteRegion || undefined,
         country_code: lteCountryCode || undefined,
         grid_resolution: Number(lteGridSizeMeters) || 25,
-        radius: Number(ltePredictionRadiusMeters) || 5000,
+        radius:
+          lteOptimisedPredictionScope === "edge"
+            ? null
+            : Number(ltePredictionRadiusMeters) || 5000,
         operator: effectiveOperators.length > 0 ? effectiveOperators.join(",") : "all",
         operators: effectiveOperators,
         site_prediction_scenario_id:
@@ -2834,6 +2841,7 @@ const UnifiedMapSidebar = ({
     projectId,
     lteGridSizeMeters,
     ltePredictionRadiusMeters,
+    lteOptimisedPredictionScope,
     lteOptimisedSelectedOperators,
     lteOptimisedOperatorOptions,
     sitePredictionScenarioId,
@@ -3466,6 +3474,14 @@ const UnifiedMapSidebar = ({
               disabled={
                 colorBy === "mac_detail" || !neighborLogsAvailable || sessionNeighborLoading
               }
+              useSwitch={true}
+            />
+
+            <ToggleRow
+              label="Insights"
+              description={insightsLoading ? "Loading insights..." : "Show upload insights on the map"}
+              checked={Boolean(showInsights)}
+              onChange={setShowInsights}
               useSwitch={true}
             />
 
@@ -4332,18 +4348,33 @@ const UnifiedMapSidebar = ({
                           </div>
                           <div className="pt-1 bg-slate-800/60 rounded-lg p-2">
                             <div className="flex items-center justify-between text-xs mb-2">
-                              <span className="text-slate-400">Radius</span>
+                              <span className="text-slate-400">Prediction Scope</span>
                             </div>
-                            <ThresholdInput
-                              value={Number(ltePredictionRadiusMeters) || 500}
-                              onChange={(next) =>
-                                setLtePredictionRadiusMeters(Math.round(next))
-                              }
-                              min={100}
-                              max={20000}
-                              step={100}
-                              unit="m"
+                            <SegmentedControl
+                              value={lteOptimisedPredictionScope}
+                              onChange={setLteOptimisedPredictionScope}
+                              options={[
+                                { value: "radius", label: "Radius" },
+                                { value: "edge", label: "Edge" },
+                              ]}
                             />
+                            {lteOptimisedPredictionScope === "radius" && (
+                              <div className="mt-2">
+                                <div className="flex items-center justify-between text-xs mb-2">
+                                  <span className="text-slate-400">Radius</span>
+                                </div>
+                                <ThresholdInput
+                                  value={Number(ltePredictionRadiusMeters) || 500}
+                                  onChange={(next) =>
+                                    setLtePredictionRadiusMeters(Math.round(next))
+                                  }
+                                  min={100}
+                                  max={20000}
+                                  step={100}
+                                  unit="m"
+                                />
+                              </div>
+                            )}
                           </div>
                           <div className="pt-1 bg-slate-800/60 rounded-lg p-2 space-y-2">
                             <div className="flex items-center justify-between text-xs">

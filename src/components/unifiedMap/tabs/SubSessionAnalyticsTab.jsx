@@ -131,7 +131,7 @@ const normalizeSubSessionType = (typeRaw) => {
 
 const CALL_TYPE_TAB = "CS";
 const DETAIL_TYPE_TAB = "PS";
-const CS_TABLE_GRID_TEMPLATE = "0.88fr 1.1fr 0.8fr 0.86fr 1.35fr 0.42fr";
+const CS_TABLE_GRID_TEMPLATE = "0.78fr 1.05fr 0.7fr 0.76fr 0.58fr 0.58fr 0.58fr 1.05fr 0.38fr";
 const PS_TABLE_GRID_TEMPLATE = "1.35fr 0.8fr 0.84fr 0.72fr 0.58fr 0.58fr 0.58fr 0.38fr";
 
 const getSubSessionTypeForTab = (typeTab) => (typeTab === CALL_TYPE_TAB ? "2" : "1");
@@ -766,6 +766,9 @@ export default function SubSessionAnalyticsTab({
               <span>Number</span>
               <span>Direction</span>
               <span>Duration</span>
+              <span>RSRP</span>
+              <span>RSRQ</span>
+              <span>SINR</span>
               <span>Status</span>
               <span>Map</span>
             </>
@@ -825,6 +828,9 @@ export default function SubSessionAnalyticsTab({
                     <span className="truncate" title={formatText(row.number)}>{formatText(row.number)}</span>
                     <span className="truncate capitalize">{formatText(row.direction)}</span>
                     <span className="truncate">{formatDuration(row.duration)}</span>
+                    <span className="truncate">{formatSignalMetric(row.rsrp, "dBm")}</span>
+                    <span className="truncate">{formatSignalMetric(row.rsrq, "dB")}</span>
+                    <span className="truncate">{formatSignalMetric(row.sinr, "dB")}</span>
                     <span className="min-w-0">
                       <span
                         className={`inline-flex items-center rounded-md px-2 py-0.5 text-[11px] border ${

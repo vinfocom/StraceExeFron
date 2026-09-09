@@ -106,6 +106,7 @@ const L3EventsTab = lazy(() =>
     default: module.L3EventsTab || module.default,
   })),
 );
+const InsightsTab = lazy(() => import("./tabs/InsightsTab"));
 
 const DEFAULT_DATA_FILTERS = {
   providers: [],
@@ -1342,6 +1343,8 @@ function UnifiedDetailLogs({
   viewport = null,
   gridViewEnabled = false,
   gridViewSummary = null,
+  showInsights = false,
+  insights = [],
 }) {
   const [collapsed, setCollapsed] = useState(false);
   const [expanded, setExpanded] = useState(false);
@@ -1605,6 +1608,9 @@ function UnifiedDetailLogs({
     if (showSubSession) {
       tabs.push({ id: "subSession", label: "Sub Session" });
     }
+    if (showInsights) {
+      tabs.push({ id: "insights", label: "Insights" });
+    }
     return tabs;
   }, [
     enableSiteToggle,
@@ -1617,6 +1623,7 @@ function UnifiedDetailLogs({
     showN78Neighbors,
     n78NeighborData,
     showSubSession,
+    showInsights,
   ]);
 
   useEffect(() => {
@@ -2303,6 +2310,8 @@ function UnifiedDetailLogs({
           )}
 
           {activeTab === "l3Events" && <L3EventsTab />}
+
+          {activeTab === "insights" && <InsightsTab insights={insights} />}
 
           {activeTab === "n78" && (
             <N78AnalysisTab

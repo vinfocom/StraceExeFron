@@ -14,7 +14,7 @@ import { useSearchParams, useNavigate, useLocation } from "react-router-dom";
 import { useJsApiLoader, Polygon, Polyline } from "@react-google-maps/api";
 import { toast } from "react-toastify";
 
-import { mapViewApi, gridAnalyticsApi, sitePredictionApi } from "../api/apiEndpoints";
+import { l3EventApi, mapViewApi, gridAnalyticsApi, sitePredictionApi } from "../api/apiEndpoints";
 
 // Components
 import Spinner from "../components/common/Spinner";
@@ -34,6 +34,8 @@ import TechHandoverMarkers, {
   clearHandoverPolylines,
 } from "@/components/unifiedMap/TechHandoverMarkers";
 import SubSessionMarkers from "@/components/unifiedMap/SubSessionMarkers";
+import InsightMarkers from "@/components/unifiedMap/InsightMarkers";
+import { extractInsightRows } from "@/components/unifiedMap/insightUtils";
 import AddSiteFormDialog from "@/components/unifiedMap/AddSiteFormDialog";
 import LtePredictionLocationLayer from "@/components/unifiedMap/LtePredictionLocationLayer";
 import { normalizeBandName } from "@/utils/colorUtils";
@@ -1754,6 +1756,9 @@ const UnifiedMapView = () => {
   const [showAnalytics, setShowAnalytics] = useState(false);
   const mapSnapshotContainerRef = useRef(null);
   const [analyticsActiveTab, setAnalyticsActiveTab] = useState("overview");
+  const [showInsights, setShowInsights] = useState(false);
+  const [insights, setInsights] = useState([]);
+  const [insightsLoading, setInsightsLoading] = useState(false);
   const [selectedMetric, setSelectedMetricState] = useState("rsrp");
   const setSelectedMetric = useCallback((nextMetric) => {
     setSelectedMetricState((prevMetric) => {
@@ -2652,6 +2657,42 @@ const UnifiedMapView = () => {
     inferredSessionIdsFromPassedLogs,
   ]);
   const sessionKey = useMemo(() => sessionIds.join(","), [sessionIds]);
+
+  useEffect(() => {
+    if (!showInsights) return undefined;
+
+    const requestedSessionIds = sessionIds
+      .map((id) => Number(id))
+      .filter((id) => Number.isFinite(id) && id > 0);
+
+    if (requestedSessionIds.length === 0) {
+      setInsights([]);
+      return undefined;
+    }
+
+    let cancelled = false;
+    setInsightsLoading(true);
+
+    Promise.all(
+      requestedSessionIds.map((sessionId) => l3EventApi.getUploadInsights(sessionId)),
+    )
+      .then((responses) => {
+        if (cancelled) return;
+        setInsights(responses.flatMap((response) => extractInsightRows(response)));
+      })
+      .catch((requestError) => {
+        if (cancelled) return;
+        setInsights([]);
+        toast.error(`Failed to load insights: ${requestError?.message || "Request failed"}`);
+      })
+      .finally(() => {
+        if (!cancelled) setInsightsLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [sessionIds, sessionKey, showInsights]);
 
   const handleSessionIdsChange = useCallback(
     async (nextSessionIds) => {
@@ -7288,6 +7329,8 @@ const UnifiedMapView = () => {
             drawnShapeAnalytics={drawnShapeAnalytics}
             activeTabExternal={analyticsActiveTab}
             onActiveTabExternalChange={setAnalyticsActiveTab}
+            showInsights={showInsights}
+            insights={insights}
             sitePredictionVersion={sitePredictionVersion}
             enableGrid={enableGrid}
             gridCellStats={gridCellStats}
@@ -7348,6 +7391,9 @@ const UnifiedMapView = () => {
         onDeleteSitePredictionScenario={handleDeleteSitePredictionScenario}
         showSessionNeighbors={showSessionNeighbors}
         setShowSessionNeighbors={setShowSessionNeighbors}
+        showInsights={showInsights}
+        setShowInsights={setShowInsights}
+        insightsLoading={insightsLoading}
         neighborLogsAvailable={neighborLogsAvailable}
         sessionNeighborLoading={sessionNeighborLoading}
         gridCellStats={gridCellStats}
@@ -7823,6 +7869,11 @@ const UnifiedMapView = () => {
                 onMarkerSelect={handleSubSessionMarkerSelect}
               />
 
+              <InsightMarkers
+                show={showInsights}
+                insights={insights}
+              />
+
             </MapWithMultipleCircles>
           )}
         </div>
@@ -7867,5 +7918,3 @@ const UnifiedMapView = () => {
 };
 
 export default UnifiedMapView;
-
-

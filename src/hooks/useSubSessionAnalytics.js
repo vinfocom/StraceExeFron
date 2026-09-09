@@ -190,7 +190,10 @@ const normalizeSessionItem = (item = {}, index = 0) => {
 
     if (position) {
       const typeKey = sub.subSessionType ?? "u";
-      markerId = `sub-${sessionId}-${typeKey}-${sub.subSessionId ?? subIndex}`;
+      // sub_session_id is not unique within a session (for example, multiple
+      // CS rows can all use sub_session_id=1). Use the row index so every
+      // rendered marker keeps its own selection/highlight identity.
+      markerId = `sub-${sessionId}-${typeKey}-row-${subIndex}`;
 
       markers.push({
         id: markerId,
@@ -486,6 +489,5 @@ export const useSubSessionAnalytics = (sessionIds, enabled = false, projectId = 
     refetch: () => fetchData(true),
   };
 };
-
 
 
