@@ -968,7 +968,7 @@ function addExcelSignalingTable(layout, rows = [], { includeLocation = false } =
     const values = includeLocation
       ? [
           row.timestampLabel || formatClock(row.timestamp),
-          row.direction || "-",
+          row.direction && row.direction !== "—" ? row.direction : "-",
           row.channel || "",
           formatPdfCoordinate(row.latitude),
           formatPdfCoordinate(row.longitude),
@@ -978,7 +978,7 @@ function addExcelSignalingTable(layout, rows = [], { includeLocation = false } =
         ]
         : [
           row.timestampLabel || formatClock(row.timestamp),
-          row.direction || "-",
+          row.direction && row.direction !== "—" ? row.direction : "-",
           row.channel || "",
           row.interface || "Unknown",
           row.message || "-",
