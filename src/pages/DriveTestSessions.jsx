@@ -36,6 +36,7 @@ import {
   ChevronRight,
   MapPin,
   Download,
+  Lightbulb,
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
@@ -778,6 +779,10 @@ const DriveTestSessionsPage = () => {
     navigate(`/unified-map?sessionId=${encodeURIComponent(String(sessionId))}&showSecondary=1`);
   };
 
+  const handleViewInsights = (sessionId) => {
+    navigate(`/insights/${encodeURIComponent(String(sessionId))}`);
+  };
+
   const handleViewSelectedOnMap = () => {
     if (selectedSessions.length === 0) {
       toast.warning("Please select at least one session");
@@ -1468,6 +1473,15 @@ const DriveTestSessionsPage = () => {
                   {visibleColumns.actions && (
                     <TableCell className="text-right">
                       <div className="flex items-center justify-end gap-2">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => handleViewInsights(session.id)}
+                          title={`View insights for session ${session.id}`}
+                          aria-label={`View insights for session ${session.id}`}
+                        >
+                          <Lightbulb className="h-4 w-4" />
+                        </Button>
                         <Button
                           variant="outline"
                           size="sm"

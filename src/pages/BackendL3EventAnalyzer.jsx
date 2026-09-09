@@ -211,6 +211,7 @@ function UploadHistoryLanding({ projectId, projectName, onOpenAnalysis, onOpenPr
   const [manualProjectId, setManualProjectId] = useState(projectId ? String(projectId) : "");
   const [manualSessionId, setManualSessionId] = useState("");
   const [manualRemarks, setManualRemarks] = useState("");
+  const [historySearch, setHistorySearch] = useState("");
   const fileInputRef = useRef(null);
 
   const loadHistory = useCallback(async () => {
@@ -423,6 +424,20 @@ function UploadHistoryLanding({ projectId, projectName, onOpenAnalysis, onOpenPr
     }
   };
 
+  const filteredHistoryRows = useMemo(() => {
+    const needle = historySearch.trim().toLowerCase();
+    if (!needle) return historyRows;
+
+    return historyRows.filter((row) => [
+      row.id,
+      row.projectId,
+      row.sessionId,
+      row.originalFileName,
+      row.uploadedOn,
+      row.remarks,
+    ].filter((value) => value !== null && value !== undefined).join(" ").toLowerCase().includes(needle));
+  }, [historyRows, historySearch]);
+
   return (
     <div className="l3-analyzer-shell h-full min-h-0 overflow-auto p-[clamp(0.75rem,2vw,1.5rem)] text-white">
       <div className="l3-content-width mx-auto space-y-4">
@@ -465,13 +480,25 @@ function UploadHistoryLanding({ projectId, projectName, onOpenAnalysis, onOpenPr
         <section className="l3-glass rounded-lg p-[clamp(0.8rem,1.7vw,1.25rem)]">
           <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
             <div className="flex items-center gap-2 text-sm font-semibold"><History className="h-4 w-4 text-blue-300" />L3 Session</div>
-            <span className="text-xs text-slate-500">Select Analysis to reopen saved results without uploading again.</span>
+            <div className="flex w-full flex-wrap items-center justify-end gap-3 sm:w-auto">
+              <span className="text-xs text-slate-500">Showing {filteredHistoryRows.length.toLocaleString()} of {historyRows.length.toLocaleString()}</span>
+              <div className="relative w-full sm:w-72">
+                <Search className="pointer-events-none absolute left-2.5 top-2.5 h-3.5 w-3.5 text-slate-500" />
+                <input
+                  value={historySearch}
+                  onChange={(event) => setHistorySearch(event.target.value)}
+                  placeholder="Search sessions, files, or remarks..."
+                  aria-label="Search L3 session table"
+                  className="l3-glass-control l3-ui-copy w-full rounded-md py-2 pl-8 pr-2 text-white outline-none"
+                />
+              </div>
+            </div>
           </div>
           <div className="l3-table-shell max-h-[calc(100vh-360px)] rounded border border-slate-800/70">
             <table className="l3-history-table l3-ui-copy text-xs">
               <thead className="bg-slate-800 text-left text-slate-400"><tr><th className="px-3 py-2">ID</th><th className="px-3 py-2">Project ID</th><th className="px-3 py-2">Session ID</th><th className="px-3 py-2">File Name</th><th className="px-3 py-2">Uploaded On</th><th className="px-3 py-2">Remarks</th><th className="px-3 py-2">Action</th></tr></thead>
               <tbody>
-                {historyLoading ? <tr><td colSpan={7} className="p-8 text-center"><Loader2 className="mx-auto h-5 w-5 animate-spin" /></td></tr> : historyRows.length ? historyRows.map((row) => (
+                {historyLoading ? <tr><td colSpan={7} className="p-8 text-center"><Loader2 className="mx-auto h-5 w-5 animate-spin" /></td></tr> : filteredHistoryRows.length ? filteredHistoryRows.map((row) => (
                   <tr key={row.id || row.uploadHistoryId} className="border-t border-slate-800 text-slate-200">
                     <td className="px-3 py-2 font-mono">{row.id || "—"}</td>
                     <td className="px-3 py-2 font-mono">
@@ -494,7 +521,7 @@ function UploadHistoryLanding({ projectId, projectName, onOpenAnalysis, onOpenPr
                     <td className="max-w-80 px-3 py-2">{row.remarks || "-"}</td>
                     <td className="px-3"><div className="flex items-center gap-2"><button type="button" onClick={() => onOpenAnalysis(row)} disabled={deletingHistoryId === Number(row.id) || uploading || savingHistory || !row.id} className="inline-flex items-center gap-1 rounded bg-blue-600 px-3 py-1.5 font-medium hover:bg-blue-500 disabled:opacity-50">Analysis</button><button type="button" onClick={() => openEditHistory(row)} disabled={deletingHistoryId !== null || uploading || savingHistory} className="inline-flex items-center gap-1 rounded border border-cyan-400/60 bg-cyan-400/10 px-3 py-1.5 font-medium text-cyan-200 hover:bg-cyan-400/20 disabled:opacity-50"><Edit3 className="h-3.5 w-3.5" /></button><button type="button" onClick={() => deleteHistory(row)} disabled={deletingHistoryId !== null || uploading || savingHistory} className="inline-flex items-center gap-1 rounded border border-red-500/60 bg-red-500/10 px-3 py-1.5 font-medium text-red-300 hover:bg-red-500/20 disabled:opacity-50">{deletingHistoryId === Number(row.id) ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}</button></div></td>
                   </tr>
-                )) : <tr><td colSpan={7} className="p-8 text-center text-slate-500">No L3 sessions were found.</td></tr>}
+                )) : <tr><td colSpan={7} className="p-8 text-center text-slate-500">{historySearch.trim() ? "No L3 sessions match your search." : "No L3 sessions were found."}</td></tr>}
               </tbody>
             </table>
           </div>

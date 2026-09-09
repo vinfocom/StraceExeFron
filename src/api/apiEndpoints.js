@@ -2271,6 +2271,9 @@ export const l3EventApi = {
       onUploadProgress,
     });
   },
+  getUploadInsights: (sessionId) => api.get("/api/L3Event/GetUploadInsights", {
+    params: { sessionId },
+  }),
   getHistory: (params = {}) => api.get("/api/L3Event/GetL3EventHistory", { params }),
   syncNewSessionDiagnostics: ({ projectId, sessionIds, signal } = {}) => api.post(
     "/api/L3Event/SyncNewSessionDiagnostics",
