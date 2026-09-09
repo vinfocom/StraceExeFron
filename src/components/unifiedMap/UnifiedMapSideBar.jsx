@@ -4296,7 +4296,7 @@ const UnifiedMapSidebar = ({
                               onChange={setLtePredictionScope}
                               options={[
                                 { value: "radius", label: "Radius" },
-                                { value: "edge", label: "Edge" },
+                                { value: " ", label: "H Edge" },
                               ]}
                             />
                             {ltePredictionScope === "radius" && (
