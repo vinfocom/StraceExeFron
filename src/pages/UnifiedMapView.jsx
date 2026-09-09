@@ -7311,6 +7311,7 @@ const UnifiedMapView = () => {
             bandHandover={bandHandover}
             pciHandover={pciHandover}
             dataFilters={dataFilters}
+            availableBands={availableFilterOptions?.bands || []}
             bestNetworkEnabled={bestNetworkEnabled}
             bestNetworkStats={bestNetworkStats}
             onClose={handleCloseAnalytics}

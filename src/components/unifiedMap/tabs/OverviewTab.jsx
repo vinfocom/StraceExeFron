@@ -23,6 +23,14 @@ import { mapViewApi, pptReportApi } from "@/api/apiEndpoints";
 import { useAuth } from "@/hooks/useAuth";
 import { resolveUserRegion } from "@/utils/authSession";
 import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
   normalizeProviderName,
   normalizeTechName,
   COLOR_SCHEMES,
@@ -207,6 +215,7 @@ export const OverviewTab = ({
   drawnShapeAnalytics = [],
   sessionIds: sessionIdsProp = [],
   projectId = null,
+  availableBands = [],
   gridViewEnabled = false,
   gridViewSummary = null,
 }) => {
@@ -215,6 +224,8 @@ export const OverviewTab = ({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [isGeneratingPpt, setIsGeneratingPpt] = useState(false);
+  const [isPptBandDialogOpen, setIsPptBandDialogOpen] = useState(false);
+  const [lockedBand, setLockedBand] = useState("all");
   const { user } = useAuth();
 
   const plottedExportLocations = useMemo(() => {
@@ -223,6 +234,38 @@ export const OverviewTab = ({
     }
     return Array.isArray(locations) ? locations : [];
   }, [locations, mapPlotLocations]);
+
+  const pptBandOptions = useMemo(() => {
+    const candidates = [
+      ...(Array.isArray(availableBands) ? availableBands : []),
+      ...(Array.isArray(plottedExportLocations) ? plottedExportLocations : []).map(
+        (location) => location?.band ?? location?.primaryBand,
+      ),
+    ];
+    const bandsByKey = new Map();
+
+    candidates.forEach((candidate) => {
+      const band = String(candidate ?? "").trim();
+      if (!band || /^(all|unknown|null|undefined)$/i.test(band)) return;
+      const key = band.toLowerCase();
+      if (!bandsByKey.has(key)) bandsByKey.set(key, band);
+    });
+
+    return Array.from(bandsByKey.values()).sort((a, b) => {
+      const numberA = Number.parseInt(a.replace(/\D/g, ""), 10);
+      const numberB = Number.parseInt(b.replace(/\D/g, ""), 10);
+      if (Number.isFinite(numberA) && Number.isFinite(numberB) && numberA !== numberB) {
+        return numberA - numberB;
+      }
+      return a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" });
+    });
+  }, [availableBands, plottedExportLocations]);
+
+  useEffect(() => {
+    if (lockedBand !== "all" && !pptBandOptions.includes(lockedBand)) {
+      setLockedBand("all");
+    }
+  }, [lockedBand, pptBandOptions]);
 
   const handleDownloadKml = useCallback(() => {
     try {
@@ -277,9 +320,11 @@ export const OverviewTab = ({
       country_code: region,
       region,
       user_id: Number.isFinite(numericUserId) ? numericUserId : 0,
+      locked_bands: lockedBand === "all" ? [] : [lockedBand],
       ...(selectedSessionIds.length > 0 ? { session_ids: selectedSessionIds } : {}),
     };
 
+    setIsPptBandDialogOpen(false);
     setIsGeneratingPpt(true);
     const toastId = toast.loading("Preparing PowerPoint report...");
 
@@ -321,7 +366,13 @@ export const OverviewTab = ({
     } finally {
       setIsGeneratingPpt(false);
     }
-  }, [isGeneratingPpt, projectId, sessionIds, user]);
+  }, [isGeneratingPpt, lockedBand, projectId, sessionIds, user]);
+
+  const handlePptButtonClick = useCallback(() => {
+    if (isGeneratingPpt) return;
+    setLockedBand("all");
+    setIsPptBandDialogOpen(true);
+  }, [isGeneratingPpt]);
 
   const isUnknownOrEmpty = useCallback((value) => {
     if (!value) return true;
@@ -688,7 +739,7 @@ export const OverviewTab = ({
         </button>
         <button
           type="button"
-          onClick={handlePptDownload}
+          onClick={handlePptButtonClick}
           disabled={isGeneratingPpt}
           title={isGeneratingPpt ? "Preparing PPT" : "Download PPT"}
           className="inline-flex items-center gap-1.5 rounded-md border border-purple-500/50 bg-purple-600/15 px-2.5 py-1.5 text-xs font-medium text-purple-200 transition hover:bg-purple-600/25 disabled:cursor-wait disabled:opacity-60"
@@ -697,6 +748,66 @@ export const OverviewTab = ({
           {isGeneratingPpt ? "Preparing PPT…" : "PPT"}
         </button>
       </div>
+
+      <Dialog open={isPptBandDialogOpen} onOpenChange={setIsPptBandDialogOpen}>
+        <DialogContent
+          title="Select locked bands"
+          style={{
+            width: "min(28rem, calc(100vw - 2rem))",
+            background: "#0f172a",
+            color: "#e2e8f0",
+            border: "1px solid #334155",
+          }}
+        >
+          <DialogHeader>
+            <DialogTitle style={{ color: "#f8fafc" }}>Select locked bands</DialogTitle>
+            <DialogDescription style={{ color: "#94a3b8" }}>
+              Choose which band should be locked in the PowerPoint report.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-2">
+            <label htmlFor="ppt-locked-bands" className="text-sm font-medium text-slate-200">
+              locked_bands
+            </label>
+            <select
+              id="ppt-locked-bands"
+              aria-label="locked_bands"
+              value={lockedBand}
+              onChange={(event) => setLockedBand(event.target.value)}
+              className="h-10 w-full rounded-md border border-slate-600 bg-slate-800 px-3 text-sm text-slate-100 outline-none focus:border-purple-400 focus:ring-2 focus:ring-purple-500/30"
+            >
+              <option value="all">All bands</option>
+              {pptBandOptions.map((band) => (
+                <option key={band} value={band}>
+                  {band}
+                </option>
+              ))}
+            </select>
+            {pptBandOptions.length === 0 && (
+              <p className="text-xs text-slate-400">No individual bands were found; the report will use all bands.</p>
+            )}
+          </div>
+
+          <DialogFooter className="flex justify-end gap-2">
+            <button
+              type="button"
+              onClick={() => setIsPptBandDialogOpen(false)}
+              className="rounded-md border border-slate-600 px-3 py-2 text-sm text-slate-200 transition hover:bg-slate-800"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={handlePptDownload}
+              disabled={isGeneratingPpt}
+              className="rounded-md bg-purple-600 px-3 py-2 text-sm font-medium text-white transition hover:bg-purple-500 disabled:cursor-wait disabled:opacity-60"
+            >
+              Generate PPT
+            </button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <div
         className={`grid ${expanded ? "grid-cols-4" : "grid-cols-2"} gap-3`}

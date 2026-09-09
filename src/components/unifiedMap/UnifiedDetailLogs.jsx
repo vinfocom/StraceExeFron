@@ -1295,6 +1295,7 @@ function UnifiedDetailLogs({
   showPolygons,
   projectId,
   sessionIds = [],
+  availableBands = [],
   isLoading,
   thresholds,
   logArea,
@@ -2218,6 +2219,7 @@ function UnifiedDetailLogs({
               drawnShapeAnalytics={drawnShapeAnalytics}
               sessionIds={sessionIds}
               projectId={projectId}
+              availableBands={availableBands}
               gridViewEnabled={gridViewEnabled}
               gridViewSummary={gridViewSummary}
             />
