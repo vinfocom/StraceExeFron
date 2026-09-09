@@ -11,6 +11,8 @@ const INVALID_TEXT_VALUES = new Set(["", "n/a", "na", "null", "undefined", "-"])
 
 const EXPLICIT_HANDOVER_COMPLETE_RE = /\b(?:handover|hand\s*over)\b.{0,80}\b(?:complete(?:d|ion)?|success(?:ful(?:ly)?)?)\b/i;
 const EXPLICIT_HANDOVER_FAILURE_RE = /\b(?:handover|hand\s*over)\b.{0,80}\b(?:fail(?:ed|ure|uire)?|reject(?:ed)?|abort(?:ed)?)\b|\bhandover\s*fail(?:ure|uire)?\b/i;
+const HANDOVER_CONTEXT_RE = /\b(?:handover|hand\s*over)\b/i;
+const RRC_HANDOVER_CONTEXT_RE = /\b(?:rrc|reconfigurationWithSync|mobilityControlInfo|target\s*cell)\b/i;
 const MEASUREMENT_REPORT_RE = /\b(?:measurement|meas)\s*report\b/i;
 const RRC_RECONFIGURATION_COMPLETE_RE = /\b(?:nr\s+)?rrc\s+(?:connection\s+)?reconfiguration\s+complete\b/i;
 const RRC_RECONFIGURATION_RE = /\b(?:nr\s+)?rrc\s+(?:connection\s+)?reconfiguration\b/i;
@@ -230,11 +232,29 @@ const cellsMatch = (expected, observed) => {
 
 const getConfirmedHandoverType = (source, target) => {
   if (source?.rat && target?.rat && source.rat !== target.rat) return "Inter-RAT Handover";
-  if (!source.frequency || !target.frequency) return null;
+  if (!source?.frequency || !target?.frequency) return null;
   const frequencyType = String(source.frequency) === String(target.frequency) ? "Intra-Frequency" : "Inter-Frequency";
   if (source?.rat === "5G" && target?.rat === "5G") return `NR ${frequencyType} Handover`;
   if (source?.rat === "4G" && target?.rat === "4G") return `LTE ${frequencyType} Handover`;
   return null;
+};
+
+const isExplicitHandoverCompletion = (item, text) => {
+  if (!EXPLICIT_HANDOVER_COMPLETE_RE.test(text)) return false;
+
+  // A generic RACH diagnostic can mention that access was performed for a
+  // handover and succeeded. That is not itself proof that the handover
+  // completed. Require either an explicitly named handover event or an RRC
+  // mobility context before treating the text as a completion.
+  const identityText = [
+    item?.eventKey,
+    item?.title,
+    item?.officialName,
+    item?.category,
+    item?.sourceCategory,
+  ].filter(Boolean).join(" ");
+  return HANDOVER_CONTEXT_RE.test(identityText)
+    || (HANDOVER_CONTEXT_RE.test(text) && RRC_HANDOVER_CONTEXT_RE.test(text));
 };
 
 const getL3TimeMs = (item) => {
@@ -334,7 +354,7 @@ export function evaluateL3HandoverTimeline(items = [], {
       }
     }
 
-    if (EXPLICIT_HANDOVER_COMPLETE_RE.test(text)) {
+    if (isExplicitHandoverCompletion(entry.item, text)) {
       const outcome = {
         classification: "confirmed_handover",
         label: "HANDOVER COMPLETE",

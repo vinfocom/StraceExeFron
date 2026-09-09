@@ -217,6 +217,25 @@ test("marks compact typo handover failure text as failed", () => {
   assert.equal(result.byId.get("failure")?.classification, "failed_handover");
 });
 
+test("does not treat generic NR RACH success detail as handover completion", () => {
+  const evaluation = evaluateL3HandoverTimeline([
+    {
+      id: "rach-success",
+      timestamp: new Date(baseTime).toISOString(),
+      type: "event",
+      category: "Cell Measurement",
+      sourceCategory: "CELL_MEAS",
+      eventKey: "NR RACH OK",
+      title: "NR RACH OK",
+      officialName: "NR RACH OK",
+      rawMessage: "handover, 1 preamble(s), success, stages [0]",
+    },
+  ]);
+
+  assert.equal(evaluation.outcomes.length, 0);
+  assert.equal(evaluation.byId.get("rach-success"), undefined);
+});
+
 test("keeps sessions isolated", () => {
   const result = buildHandoverTransitions([
     row(1, 101, 0, { session_id: 7 }),
