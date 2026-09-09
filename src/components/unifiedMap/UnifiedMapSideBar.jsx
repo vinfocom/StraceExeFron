@@ -4375,7 +4375,7 @@ const UnifiedMapSidebar = ({
                               onChange={setLteOptimisedPredictionScope}
                               options={[
                                 { value: "radius", label: "Radius" },
-                                { value: "edge", label: "Edge" },
+                                { value: " ", label: "H Cell" },
                               ]}
                             />
                             {lteOptimisedPredictionScope === "radius" && (
