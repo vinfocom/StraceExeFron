@@ -157,16 +157,19 @@ const normalizePath = (poly) => {
 const getMetricValueFromPoint = (point, metric) => {
   const m = String(metric || "").toLowerCase();
   const aliases = {
+    delta: ["delta", "difference"],
     dl_thpt: ["dl_thpt", "dl_tpt", "dl_rpt", "dl_throughput", "throughput_dl", "download"],
     ul_thpt: ["ul_thpt", "ul_tpt", "ul_rpt", "ul_throughput", "throughput_ul", "upload"],
   };
   const keys = aliases[m] || [m];
   for (const key of keys) {
     const raw = point?.[key];
+    if (raw == null || raw === "") continue;
     const value = Number(raw);
     if (Number.isFinite(value)) return value;
   }
   if (m === String(point?.selectedMetric || "").toLowerCase()) {
+    if (point?.value == null || point.value === "") return null;
     const value = Number(point?.value);
     if (Number.isFinite(value)) return value;
   }
@@ -626,7 +629,7 @@ const LtePredictionLocationLayer = ({
           optimizedAvg: Number.isFinite(Number(cell?.optimizedAvg))
             ? Number(cell.optimizedAvg)
             : null,
-          difference: Number.isFinite(Number(cell?.difference))
+          difference: cell?.difference != null && Number.isFinite(Number(cell.difference))
             ? Number(cell.difference)
             : null,
           baselinePointCount: Number(cell?.baselinePointCount || 0),
