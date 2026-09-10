@@ -2679,6 +2679,8 @@ const UnifiedMapView = () => {
 
     if (requestedSessionIds.length === 0) {
       setInsights([]);
+      setInsightsLoading(false);
+      toast.info("No insights found", { toastId: "unified-map-no-insights" });
       return undefined;
     }
 
@@ -2690,7 +2692,11 @@ const UnifiedMapView = () => {
     )
       .then((responses) => {
         if (cancelled) return;
-        setInsights(responses.flatMap((response) => extractInsightRows(response)));
+        const insightRows = responses.flatMap((response) => extractInsightRows(response));
+        setInsights(insightRows);
+        if (insightRows.length === 0) {
+          toast.info("No insights found", { toastId: "unified-map-no-insights" });
+        }
       })
       .catch((requestError) => {
         if (cancelled) return;
@@ -7927,7 +7933,7 @@ const UnifiedMapView = () => {
         onOpenChange={setShowAddSiteDialog}
         projectId={projectId}
         pickedLatLng={pickedLatLng}
-        onSuccess={refetchSites}
+        onSuccess={() => refetchSites(true)}
         availableBands={combinedBands}
         availablePcis={combinedPcis}
         siteData={effectiveSiteData}

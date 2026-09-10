@@ -67,6 +67,13 @@ const UPLOAD_SITE_COLUMNS = [
   "m_tilt",
   "e_tilt",
   "height",
+  "site_name",
+  "tac",
+  "bw",
+  "maximum_transmission_power_of_resource",
+  "real_transmit_power_of_resource",
+  "reference_signal_power",
+  "frequency",
 ];
 
 const DEFAULT_SITE_COLUMN_VALUES = {
@@ -74,6 +81,13 @@ const DEFAULT_SITE_COLUMN_VALUES = {
   m_tilt: "0",
   e_tilt: "0",
   height: "30",
+  site_name: "",
+  tac: "",
+  bw: "",
+  maximum_transmission_power_of_resource: "",
+  real_transmit_power_of_resource: "",
+  reference_signal_power: "",
+  frequency: "",
 };
 
 const isTimeoutError = (error) => {
@@ -148,6 +162,30 @@ const SITE_COLUMN_ALIASES = {
   earfcn: ["earfcn", "dl_earfcn", "arfcn", "uarfcn", "nrarfcn"],
   cluster: ["cluster", "operator", "network", "provider", "circle"],
   technology: ["technology", "tech", "rat", "networktype", "network_type"],
+  site_name: ["site_name", "sitename"],
+  tac: ["tac", "trackingareacode", "tracking_area_code"],
+  bw: ["bw", "bandwidth", "channelbandwidth", "channel_bandwidth"],
+  maximum_transmission_power_of_resource: [
+    "maximum_transmission_power_of_resource",
+    "maximumTransmissionPowerOfResource",
+    "tx_power",
+    "txPower",
+    "transmit power",
+    "transmit_power",
+  ],
+  real_transmit_power_of_resource: [
+    "real_transmit_power_of_resource",
+    "realTransmitPowerOfResource",
+    "real transmit power",
+    "real_transmit_power",
+  ],
+  reference_signal_power: [
+    "reference_signal_power",
+    "referenceSignalPower",
+    "rs_power",
+    "rsPower",
+  ],
+  frequency: ["frequency", "freq", "carrierfrequency", "carrier_frequency"],
   m_tilt: ["m_tilt", "mtilt", "mechanicaltilt", "mechanical_tilt", "m-tilt"],
   e_tilt: ["e_tilt", "etilt", "electricaltilt", "electrical_tilt", "e-tilt"],
   height: ["height", "antennaheight", "antenna_height", "hgt"],
@@ -210,8 +248,13 @@ const getNormalizedAliasMap = () => {
 const normalizeBandValue = (value = "") => {
   const raw = String(value ?? "").trim();
   if (!raw) return "";
-  const match = raw.match(/(\d+)/);
-  return match ? match[1] : raw;
+  const match = raw.match(/^(?:band\s*)?([bBnN])?\s*[-_ ]*\s*(\d{1,3})$/);
+  if (!match) return raw;
+  const prefix = match[1];
+  const number = match[2];
+  if (prefix?.toLowerCase() === "n") return `n${number}`;
+  if (prefix?.toLowerCase() === "b") return `B${number}`;
+  return number;
 };
 
 const inferTechnology = (rawBand = "", rawEarfcn = "") => {

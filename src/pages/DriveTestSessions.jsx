@@ -4,6 +4,7 @@ import {
   mapViewApi,
   offlineApi,
   sessionDownloadApi,
+  l3EventApi,
 } from "../api/apiEndpoints";
 import { toast } from "react-toastify";
 import Spinner from "../components/common/Spinner";
@@ -286,6 +287,8 @@ const DriveTestSessionsPage = () => {
   const responseCacheRef = useRef(new Map());
   const latestRequestRef = useRef(0);
   const prefetchedKeysRef = useRef(new Set());
+  const sessionRecordsRef = useRef(new Map());
+  const diagnosticSyncInFlightRef = useRef(new Map());
 
   const [visibleColumns, setVisibleColumns] = useState(DEFAULT_VISIBLE_COLUMNS);
 
@@ -437,6 +440,9 @@ const DriveTestSessionsPage = () => {
 
   const applyServerPage = useCallback((data, fallbackPage) => {
     const cloudRows = extractSessionRows(data);
+    cloudRows.forEach((session) => {
+      if (session?.id != null) sessionRecordsRef.current.set(Number(session.id), session);
+    });
     setSessions(cloudRows);
     setTotalCount(Number(data?.TotalCount ?? cloudRows.length) || 0);
     setTotalPages(Number(data?.TotalPages ?? 0) || 0);
@@ -445,6 +451,44 @@ const DriveTestSessionsPage = () => {
     if (responsePage !== fallbackPage) {
       setCurrentPage(responsePage);
     }
+  }, []);
+
+  const syncCompletedSessionDiagnostics = useCallback((sessionIds) => {
+    const completedSessionIds = [...new Set(
+      (Array.isArray(sessionIds) ? sessionIds : [])
+        .map((id) => Number(id))
+        .filter((id) => {
+          const session = sessionRecordsRef.current.get(id);
+          return Number.isFinite(id) && id > 0 && String(session?.end_time ?? "").trim() !== "";
+        }),
+    )].sort((a, b) => a - b);
+
+    if (completedSessionIds.length === 0) return;
+
+    const syncKey = completedSessionIds.join(",");
+    if (diagnosticSyncInFlightRef.current.has(syncKey)) return;
+
+    const syncPromise = l3EventApi
+      .syncNewSessionDiagnostics({ sessionIds: completedSessionIds })
+      .then((response) => {
+        const summary = response?.summary || response?.data?.summary;
+        console.info("[DriveTestSessions] Background L3 sync completed", {
+          sessionIds: completedSessionIds,
+          summary,
+        });
+      })
+      .catch((error) => {
+        // Background sync must never block opening the map or surface a noisy toast.
+        console.warn("[DriveTestSessions] Background L3 sync failed", {
+          sessionIds: completedSessionIds,
+          message: error?.message || String(error),
+        });
+      })
+      .finally(() => {
+        diagnosticSyncInFlightRef.current.delete(syncKey);
+      });
+
+    diagnosticSyncInFlightRef.current.set(syncKey, syncPromise);
   }, []);
 
   const prefetchSessionsPage = useCallback(
@@ -550,6 +594,9 @@ const DriveTestSessionsPage = () => {
           return;
         }
 
+        pageRows.forEach((session) => {
+          if (session?.id != null) sessionRecordsRef.current.set(Number(session.id), session);
+        });
         setSessions(pageRows);
         setTotalCount(nextTotalCount);
         setTotalPages(nextTotalPages);
@@ -775,6 +822,7 @@ const DriveTestSessionsPage = () => {
   };
 
   const handleViewOnMap = (sessionId) => {
+    syncCompletedSessionDiagnostics([sessionId]);
     navigate(`/unified-map?sessionId=${encodeURIComponent(String(sessionId))}&showSecondary=1`);
   };
 
@@ -783,6 +831,7 @@ const DriveTestSessionsPage = () => {
       toast.warning("Please select at least one session");
       return;
     }
+    syncCompletedSessionDiagnostics(selectedSessions);
     const sessionIdsParam = selectedSessions.join(",");
     navigate(`/unified-map?sessionId=${encodeURIComponent(sessionIdsParam)}&showSecondary=1`);
   };
