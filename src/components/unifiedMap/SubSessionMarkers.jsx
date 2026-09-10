@@ -9,7 +9,7 @@ import {
 import { getColorForMetric } from "@/utils/metrics";
 
 const formatMetric = (value, suffix = "") => {
-  if (value == null || Number.isNaN(value)) return "N/A";
+  if (value == null || value === "" || !Number.isFinite(Number(value))) return "N/A";
   return `${Number(value).toLocaleString(undefined, { maximumFractionDigits: 2 })}${suffix}`;
 };
 
@@ -19,16 +19,6 @@ const formatDuration = (value) => {
   const minutes = Math.floor(totalSeconds / 60);
   const seconds = totalSeconds % 60;
   return minutes > 0 ? `${minutes}m ${seconds}s` : `${seconds}s`;
-};
-
-const formatText = (value) => {
-  const text = String(value ?? "").trim();
-  return text || "N/A";
-};
-
-const formatCoordinate = (value) => {
-  const coordinate = Number(value);
-  return Number.isFinite(coordinate) ? coordinate.toFixed(6) : "N/A";
 };
 
 const toMetric = (value) => {
@@ -70,7 +60,7 @@ const getDistanceMeters = (start, end) => {
   return earthRadius * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 };
 
-const findNearestThroughputSample = (position, bucketedLogs) => {
+const findNearestNetworkSample = (position, bucketedLogs, matchesSample) => {
   if (!position || !bucketedLogs) return null;
 
   const centerLat = Number(position.lat);
@@ -92,6 +82,7 @@ const findNearestThroughputSample = (position, bucketedLogs) => {
   let bestMatch = null;
   let bestDistance = Number.POSITIVE_INFINITY;
   candidates.forEach((sample) => {
+    if (!matchesSample(sample)) return;
     const samplePosition = {
       lat: sample.lat ?? sample.latitude,
       lng: sample.lng ?? sample.longitude ?? sample.lon,
@@ -150,19 +141,6 @@ const formatSubSessionType = (subSessionType) => {
   return value || "N/A";
 };
 
-const formatSubSessionStatus = (statusRaw, subSessionType) => {
-  const status = getNormalizedStatus(statusRaw);
-  const type = formatSubSessionType(subSessionType);
-
-  if (type === "CS" && status === "drop") return "Drop";
-
-  if (status === "success") {
-    return type === "CS" ? "Connected" : "Success";
-  }
-
-  return type === "CS" ? "Not Connected" : "Failed";
-};
-
 const getSubSessionMarkerPath = (subSessionType, statusRaw) => {
   if (getNormalizedStatus(statusRaw) === "failed") return CROSS_PATH;
 
@@ -172,6 +150,29 @@ const getSubSessionMarkerPath = (subSessionType, statusRaw) => {
 };
 
 
+
+const SubSessionTooltip = ({ marker }) => {
+  const isCs = formatSubSessionType(marker.subSessionType) === "CS";
+  const rows = [
+    isCs
+      ? ["Call Duration", formatDuration(marker.duration)]
+      : ["Avg Speed", formatMetric(marker.metrics?.avg_speed == null ? null : Number(marker.metrics.avg_speed) / 1000, " Mbps")],
+    ["RSRP", formatMetric(marker.rsrp, " dBm")],
+    ["RSRQ", formatMetric(marker.rsrq, " dB")],
+    ["SINR", formatMetric(marker.sinr, " dB")],
+  ];
+
+  return (
+    <div className="min-w-[190px] space-y-1 text-xs text-slate-800">
+      {rows.map(([label, value]) => (
+        <div key={label} className="flex justify-between gap-3">
+          <span className="text-slate-500">{label}</span>
+          <span className="font-medium">{value}</span>
+        </div>
+      ))}
+    </div>
+  );
+};
 
 const SubSessionMarkers = ({
   markers = [],
@@ -229,7 +230,6 @@ const SubSessionMarkers = ({
       const dlThroughput = toMetric(
         log?.dl_tpt ?? log?.dl_thpt ?? log?.dl_rpt ?? log?.dl_throughput ?? log?.throughput_dl,
       );
-      if (dlThroughput == null) return accumulator;
 
       const key = toBucketKey(lat, lng);
       const current = accumulator.get(key) || [];
@@ -242,7 +242,15 @@ const SubSessionMarkers = ({
   const enrichedMarkers = useMemo(
     () =>
       (Array.isArray(markers) ? markers : []).map((marker) => {
-        const matchedSample = findNearestThroughputSample(marker.start ?? marker.position, bucketedNetworkLogs);
+        const position = marker.start ?? marker.position;
+        const matchedSample = findNearestNetworkSample(
+          position, bucketedNetworkLogs, (sample) => sample.dlThroughput != null,
+        );
+        const signalSample = findNearestNetworkSample(
+          position, bucketedNetworkLogs,
+          (sample) => [sample.rsrp ?? sample.RSRP, sample.rsrq ?? sample.RSRQ, sample.sinr ?? sample.SINR]
+            .some((value) => toMetric(value) != null),
+        );
         const dlThroughput = toMetric(
           marker.dlThroughput ??
             marker.dl_tpt ??
@@ -260,6 +268,9 @@ const SubSessionMarkers = ({
         return {
           ...marker,
           dlThroughput,
+          rsrp: toMetric(marker.rsrp ?? signalSample?.rsrp ?? signalSample?.RSRP),
+          rsrq: toMetric(marker.rsrq ?? signalSample?.rsrq ?? signalSample?.RSRQ),
+          sinr: toMetric(marker.sinr ?? signalSample?.sinr ?? signalSample?.SINR),
           fillColor: thresholdColor || formatStatus(marker.resultStatus).color,
         };
       }),
@@ -307,7 +318,7 @@ const SubSessionMarkers = ({
         />
       )}
 
-      {activeHoveredMarker?.end && activeHoveredMarker.id !== activeMarkerId && (
+      {activeHoveredMarker && activeHoveredMarker.id !== activeMarkerId && (
         <OverlayViewF
           position={activeHoveredMarker.position}
           mapPaneName={FLOAT_PANE}
@@ -315,18 +326,8 @@ const SubSessionMarkers = ({
           onLoad={disableOverlayPointerEvents}
           zIndex={1100}
         >
-          <div className="pointer-events-none min-w-[190px] rounded-md border border-slate-200 bg-white px-3 py-2 text-xs text-slate-800 shadow-lg">
-            <div className="mb-1.5 font-semibold">Sub-Session End Location</div>
-            <div className="space-y-1">
-              <div className="flex justify-between gap-3">
-                <span className="text-slate-500">End Latitude</span>
-                <span className="font-medium">{formatCoordinate(activeHoveredMarker.end.lat)}</span>
-              </div>
-              <div className="flex justify-between gap-3">
-                <span className="text-slate-500">End Longitude</span>
-                <span className="font-medium">{formatCoordinate(activeHoveredMarker.end.lng)}</span>
-              </div>
-            </div>
+          <div className="pointer-events-none rounded-md border border-slate-200 bg-white px-3 py-2 shadow-lg">
+            <SubSessionTooltip marker={activeHoveredMarker} />
           </div>
         </OverlayViewF>
       )}
@@ -352,8 +353,6 @@ const SubSessionMarkers = ({
                 scale: isHighlighted ? 1.28 : 1,
               }}
               zIndex={isHighlighted ? 1000 : undefined}
-              title={`Session ${marker.sessionId}${marker.subSessionId != null ? ` / Sub ${marker.subSessionId}` : ""
-                } / ${formatSubSessionType(marker.subSessionType)}`}
               onClick={() => {
                 setInternalSelectedMarkerId(marker.id);
                 if (typeof onMarkerSelect === "function") {
@@ -361,9 +360,7 @@ const SubSessionMarkers = ({
                 }
               }}
               onMouseOver={() => {
-                if (marker.end) {
-                  setHoveredMarkerId(marker.id);
-                }
+                setHoveredMarkerId(marker.id);
               }}
               onMouseOut={() => {
                 setHoveredMarkerId((current) => (current === marker.id ? null : current));
@@ -385,87 +382,7 @@ const SubSessionMarkers = ({
             }
           }}
         >
-          <div className="min-w-[230px] text-xs text-slate-800">
-            <div className="font-semibold text-sm mb-2">Sub-Session Marker</div>
-            <div className="space-y-1">
-              <div className="flex justify-between gap-3">
-                <span className="text-slate-500">Session</span>
-                <span className="font-medium">{activeSelectedMarker.sessionId ?? "N/A"}</span>
-              </div>
-              <div className="flex justify-between gap-3">
-                <span className="text-slate-500">Sub Session</span>
-                <span className="font-medium">{activeSelectedMarker.subSessionId ?? "N/A"}</span>
-              </div>
-              <div className="flex justify-between gap-3">
-                <span className="text-slate-500">Type</span>
-                <span className="font-medium">{formatSubSessionType(activeSelectedMarker.subSessionType)}</span>
-              </div>
-              <div className="flex justify-between gap-3">
-                <span className="text-slate-500">Status</span>
-                <span className="font-medium">
-                  {formatSubSessionStatus(
-                    activeSelectedMarker.resultStatusRaw ?? activeSelectedMarker.resultStatus,
-                    activeSelectedMarker.subSessionType,
-                  )}
-                </span>
-              </div>
-              {activeHoveredMarker?.id === activeSelectedMarker.id && activeSelectedMarker.end && (
-                <>
-                  <div className="flex justify-between gap-3">
-                    <span className="text-slate-500">End Latitude</span>
-                    <span className="font-medium">{formatCoordinate(activeSelectedMarker.end.lat)}</span>
-                  </div>
-                  <div className="flex justify-between gap-3">
-                    <span className="text-slate-500">End Longitude</span>
-                    <span className="font-medium">{formatCoordinate(activeSelectedMarker.end.lng)}</span>
-                  </div>
-                </>
-              )}
-              {formatSubSessionType(activeSelectedMarker.subSessionType) === "CS" && (
-                <>
-                  <div className="flex justify-between gap-3">
-                    <span className="text-slate-500">Number</span>
-                    <span className="font-medium">{formatText(activeSelectedMarker.number)}</span>
-                  </div>
-                  <div className="flex justify-between gap-3">
-                    <span className="text-slate-500">Direction</span>
-                    <span className="font-medium capitalize">{formatText(activeSelectedMarker.direction)}</span>
-                  </div>
-                  <div className="flex justify-between gap-3">
-                    <span className="text-slate-500">Duration</span>
-                    <span className="font-medium">{formatDuration(activeSelectedMarker.duration)}</span>
-                  </div>
-                </>
-              )}
-              <div className="flex justify-between gap-3">
-                <span className="text-slate-500">DL Throughput</span>
-                <span className="font-medium">{formatMetric(activeSelectedMarker.dlThroughput, " Mbps")}</span>
-              </div>
-              <div className="flex justify-between gap-3">
-                <span className="text-slate-500">Success</span>
-                <span className="font-medium">{activeSelectedMarker.metrics?.status_counts?.success ?? 0}</span>
-              </div>
-              <div className="flex justify-between gap-3">
-                <span className="text-slate-500">Failed</span>
-                <span className="font-medium">{activeSelectedMarker.metrics?.status_counts?.failed ?? 0}</span>
-              </div>
-              <div className="flex justify-between gap-3">
-                <span className="text-slate-500">Sub Sessions</span>
-                <span className="font-medium">{activeSelectedMarker.subSessionCount ?? "N/A"}</span>
-              </div>
-              <div className="flex justify-between gap-3">
-                <span className="text-slate-500">Avg Speed</span>
-                <span className="font-medium">
-                  {formatMetric(
-                    activeSelectedMarker.metrics?.avg_speed == null
-                      ? null
-                      : Number(activeSelectedMarker.metrics.avg_speed) / 1000,
-                    " Mbps",
-                  )}
-                </span>
-              </div>
-            </div>
-          </div>
+          <SubSessionTooltip marker={activeSelectedMarker} />
         </InfoWindowF>
       )}
     </>

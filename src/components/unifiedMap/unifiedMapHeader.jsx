@@ -15,6 +15,7 @@ import {
   SlidersHorizontal,
   Eye,
   Trash2,
+  Radio,
 } from "lucide-react";
 import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { mapViewApi } from "@/api/apiEndpoints";
@@ -540,6 +541,21 @@ function UnifiedHeader({
           .filter((id) => id)
       : []);
   const [isUploading, setIsUploading] = useState(false);
+  const l3Flag = project?.l3 ?? project?.L3;
+  const hasProjectL3 =
+    l3Flag === true || l3Flag === 1 || String(l3Flag).toLowerCase() === "true";
+  const l3SessionIds = [...new Set(
+    (Array.isArray(effectiveSessionIds) ? effectiveSessionIds : String(effectiveSessionIds || "").split(","))
+      .map(Number)
+      .filter((id) => Number.isInteger(id) && id > 0),
+  )];
+  const handleOpenL3 = () => {
+    if (!l3SessionIds.length) return;
+    const params = new URLSearchParams({ sessionIds: l3SessionIds.join(",") });
+    if (effectiveProjectId) params.set("projectId", String(effectiveProjectId));
+    const url = new URL(`/project-l3-events?${params}`, window.location.href);
+    window.open(url.toString(), "_blank", "noopener,noreferrer");
+  };
   const [selectedFile, setSelectedFile] = useState(null);
   const [activeQuickControl, setActiveQuickControl] = useState(null);
   const [openImportDialog, setOpenImportDialog] = useState(false);
@@ -1009,6 +1025,20 @@ function UnifiedHeader({
                 {showAnalytics ? "Hide" : "Analytics"}
               </span>
             </Button>
+
+            {hasProjectL3 && (
+              <Button
+                onClick={handleOpenL3}
+                disabled={l3SessionIds.length === 0}
+                size="sm"
+                title={l3SessionIds.length ? "Open L3 for current sessions in a new tab" : "No sessions available for L3"}
+                aria-label="Open L3 analysis in a new tab"
+                className="h-9 shrink-0 flex gap-1 items-center bg-blue-600 hover:bg-blue-500 text-white"
+              >
+                <Radio className="h-4 w-4" />
+                <span>L3</span>
+              </Button>
+            )}
 
             <Button
               onClick={() => onOpenMultiView?.()}

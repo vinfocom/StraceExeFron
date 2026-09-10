@@ -1806,12 +1806,11 @@ const MapWithMultipleCircles = ({
 
     const activeLegendFilters = getLegendFilterItems(legendFilter);
     if (activeLegendFilters.length && !enableGrid) {
-      filtered = filtered.map((log) => ({
-        ...log,
-        _legendDimmed: !activeLegendFilters.some((filter) =>
+      filtered = filtered.filter((log) =>
+        activeLegendFilters.some((filter) =>
           matchesPrimaryLegendFilter(log, filter),
         ),
-      }));
+      );
     }
 
     return filtered;
@@ -1944,12 +1943,11 @@ const MapWithMultipleCircles = ({
 
     const activeLegendFilters = getLegendFilterItems(legendFilter);
     if (activeLegendFilters.length) {
-      parsed = parsed.map((n) => ({
-        ...n,
-        _legendDimmed: !activeLegendFilters.some((filter) =>
+      parsed = parsed.filter((n) =>
+        activeLegendFilters.some((filter) =>
           matchesNeighborLegendFilter(n, filter),
         ),
-      }));
+      );
     }
 
     return parsed;
@@ -2007,12 +2005,11 @@ const MapWithMultipleCircles = ({
     const activeLegendFilters = getLegendFilterItems(legendFilter);
     if (!activeLegendFilters.length) return gridCells;
 
-    return gridCells.map((cell) => ({
-      ...cell,
-      _legendDimmed: !activeLegendFilters.some((filter) =>
+    return gridCells.filter((cell) =>
+      activeLegendFilters.some((filter) =>
         matchesGridCellLegendFilter(cell, filter),
       ),
-    }));
+    );
   }, [gridCells, legendFilter]);
 
   const polygonGridAverages = useMemo(() => {
@@ -2096,7 +2093,8 @@ const MapWithMultipleCircles = ({
 
     const metricKey = String(selectedMetric || "rsrp").trim().toLowerCase();
     const categoryKey = String(colorBy || "").trim().toLowerCase();
-    const rows = visibleGridCells
+    // Keep every range available in the legend while filtering map visibility.
+    const rows = gridCells
       .filter((cell) => cell.count > 0)
       .filter((cell) => {
         if (categoryKey !== "pci") return true;
@@ -2163,7 +2161,7 @@ const MapWithMultipleCircles = ({
       });
 
     callback(rows);
-  }, [enableGrid, visibleGridCells, selectedMetric, colorBy]);
+  }, [enableGrid, gridCells, selectedMetric, colorBy]);
 
   const getPrimaryColor = useCallback((loc) => {
     if (colorBy && colorBy !== 'metric') {

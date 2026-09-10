@@ -3767,13 +3767,13 @@ const UnifiedMapSidebar = ({
                  <span className="text-xs text-slate-400">KPI Filters</span>
 
                 <SelectRow
-                  label={colorBy === "mac_detail" ? "MAC Detail Field" : undefined}
+                  label={colorBy === "mac_detail" ? "L3 KPIs" : undefined}
                   value={metric}
                   onChange={setMetric}
                   options={colorBy === "mac_detail" ? macDetailMetricOptions : metricOptions}
                   searchable={true}
                   placeholder={
-                    colorBy === "mac_detail" ? "Select MAC detail field" : "Select metric"
+                    colorBy === "mac_detail" ? "Select L3 KPI" : "Select metric"
                   }
                 />
 
@@ -4621,13 +4621,13 @@ const UnifiedMapSidebar = ({
           {canUseGridApi && (
             <div className="pt-2 border-t border-slate-700/50 space-y-2">
               <ToggleRow
-                label={`Show Stored ${
+                label={`Show  ${
                   normalizedStoredGridVersion === "updated"
                     ? "Optimized"
                     : normalizedStoredGridVersion === "delta"
                       ? "Delta"
                       : "Baseline"
-                } Grid`}
+                }Prediction Grid`}
                 description={
                   deltaGridApiState?.computing
                     ? "Computing grid..."
