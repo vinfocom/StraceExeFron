@@ -318,8 +318,8 @@ const normalizeSitePredictionRows = (rows = [], options = {}) => {
         site:
           item.site ||
           item.site_id ||
-          item.siteId ||
-       
+          item.siteId,
+
         lat,
         lng,
         azimuth: getFirstFiniteNumber([item.azimuth_deg_5, item.azimuth_deg_5_soft, item.azimuth], 0),

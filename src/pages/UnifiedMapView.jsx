@@ -2014,6 +2014,15 @@ const UnifiedMapView = () => {
     setStoredGridVersion(resolvedVersion);
   }, []);
 
+  const handleUnifiedTechnologyChange = useCallback((nextTechnology) => {
+    const normalized = String(nextTechnology || "ALL").trim().toUpperCase();
+    const technology = ["4G", "5G"].includes(normalized) ? normalized : "ALL";
+    const technologies = technology === "ALL" ? [] : [technology];
+    setStoredGridTechnology(technology);
+    setDataFilters((prev) => ({ ...prev, technologies }));
+    setSiteFilters((prev) => ({ ...prev, technologies }));
+  }, []);
+
   const clearStoredGridOverlay = useCallback((showToast = false) => {
     setDeltaGridApiState((prev) => {
       if (
@@ -2068,7 +2077,10 @@ const UnifiedMapView = () => {
       setManualSiteDataReady(false);
       setSelectedSites([]);
       setSiteLegendFilter(null);
-      setSiteFilters(DEFAULT_SITE_FILTERS);
+      setSiteFilters((prev) => ({
+        ...DEFAULT_SITE_FILTERS,
+        technologies: prev.technologies,
+      }));
     }
   }, [enableSiteToggle]);
 
@@ -3021,6 +3033,30 @@ const UnifiedMapView = () => {
   }, [projectId, lteGridSizeMeters, setLteGridSizeMeters, storedGridVersion, storedGridScenarioId, storedGridTechnology, clearSectorWiseGridData]);
 
   useEffect(() => {
+    if (
+      !deltaGridApiState.gridVisible ||
+      deltaGridApiState.fetching ||
+      deltaGridApiState.computing ||
+      deltaGridApiState.storedGridTechnology === storedGridTechnology
+    ) return;
+
+    void handleDeltaGridFetchStored({
+      version: storedGridVersion,
+      scenarioId: storedGridScenarioId,
+      technology: storedGridTechnology,
+    });
+  }, [
+    deltaGridApiState.gridVisible,
+    deltaGridApiState.fetching,
+    deltaGridApiState.computing,
+    deltaGridApiState.storedGridTechnology,
+    storedGridTechnology,
+    storedGridVersion,
+    storedGridScenarioId,
+    handleDeltaGridFetchStored,
+  ]);
+
+  useEffect(() => {
     setStoredGridScenarioOptions([]);
     setStoredGridScenarioId(null);
   }, [projectId]);
@@ -3709,30 +3745,7 @@ const UnifiedMapView = () => {
     sitePredictionVersion,
   ]);
 
-  const effectiveSiteFiltersForMap = useMemo(() => {
-    const baseFilters = siteFilters || DEFAULT_SITE_FILTERS;
-    if (!isStoredGridOverlayVisible) {
-      return baseFilters;
-    }
-
-    const technology = String(
-      deltaGridApiState?.storedGridTechnology || storedGridTechnology || "ALL",
-    )
-      .trim()
-      .toUpperCase();
-    if (technology === "4G" || technology === "5G") {
-      return {
-        ...baseFilters,
-        technologies: [technology],
-      };
-    }
-    return baseFilters;
-  }, [
-    siteFilters,
-    isStoredGridOverlayVisible,
-    deltaGridApiState?.storedGridTechnology,
-    storedGridTechnology,
-  ]);
+  const effectiveSiteFiltersForMap = siteFilters || DEFAULT_SITE_FILTERS;
 
   
   useEffect(() => {
@@ -7496,7 +7509,7 @@ const UnifiedMapView = () => {
         storedGridVersion={storedGridVersion}
         setStoredGridVersion={setStoredGridVersion}
         storedGridTechnology={storedGridTechnology}
-        setStoredGridTechnology={setStoredGridTechnology}
+        setStoredGridTechnology={handleUnifiedTechnologyChange}
         storedGridScenarioId={storedGridScenarioId}
         setStoredGridScenarioId={setStoredGridScenarioId}
         storedGridScenarioOptions={storedGridScenarioOptions}

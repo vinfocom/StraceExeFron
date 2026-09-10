@@ -1098,6 +1098,7 @@ const UnifiedMapSidebar = ({
   );
 
   const clearAllDataFilters = useCallback(() => {
+    setStoredGridTechnology?.("ALL");
     setDataFilters?.((prev) => ({
       ...prev,
       providers: [],
@@ -1108,7 +1109,7 @@ const UnifiedMapSidebar = ({
       excludedMetricValue: "",
     }));
     setPciThreshold(0);
-  }, [setDataFilters, setPciThreshold]);
+  }, [setDataFilters, setPciThreshold, setStoredGridTechnology]);
 
   const toggleAppFilter = useCallback(
     (appName, checked) => {
@@ -1218,13 +1219,14 @@ const UnifiedMapSidebar = ({
   );
 
   const clearAllSiteFilters = useCallback(() => {
+    setStoredGridTechnology?.("ALL");
     setSiteFilters?.({
       technologies: [],
       operators: [],
       bands: [],
       pcis: [],
     });
-  }, [setSiteFilters]);
+  }, [setSiteFilters, setStoredGridTechnology]);
 
   const activeAppFiltersCount = useMemo(
     () => (Array.isArray(dataFilters?.apps) ? dataFilters.apps.length : 0),
@@ -1809,21 +1811,9 @@ const UnifiedMapSidebar = ({
     (nextTechnology) => {
       const normalizedTechnology = String(nextTechnology || "ALL").trim().toUpperCase();
       setStoredGridTechnology?.(normalizedTechnology);
-      if (Boolean(deltaGridApiState?.gridVisible)) {
-        onDeltaGridFetchStored?.({
-          version: normalizedStoredGridVersion,
-          scenarioId: storedGridScenarioId,
-          technology: normalizedTechnology,
-          forceFetch: true,
-        });
-      }
     },
     [
       setStoredGridTechnology,
-      deltaGridApiState?.gridVisible,
-      onDeltaGridFetchStored,
-      normalizedStoredGridVersion,
-      storedGridScenarioId,
     ],
   );
   const handleStoredGridScenarioChange = useCallback(
@@ -3931,15 +3921,14 @@ const UnifiedMapSidebar = ({
                       disabled={!enableDataToggle}
                     />
 
-                    <MultiSelectRow
+                    <SelectRow
                       label="Technology"
-                      values={dataFilters?.technologies || []}
-                      onChange={(v) => updateDataFilter("technologies", v)}
+                      value={storedGridTechnology}
+                      onChange={handleStoredGridTechnologyChange}
                       options={[
-                        { value: "all", label: "All Technologies" },
-                        ...(accumulatedFilterOptions.technologies
-                          .filter((t) => t && t.toLowerCase() !== "unknown")
-                          .map((t) => ({ value: t, label: t }))),
+                        { value: "ALL", label: "All Technologies" },
+                        { value: "4G", label: "4G" },
+                        { value: "5G", label: "5G" },
                       ]}
                       placeholder="All Technologies"
                       disabled={!enableDataToggle}
@@ -3976,16 +3965,14 @@ const UnifiedMapSidebar = ({
                     )}
                   </div>
 
-                  <MultiSelectRow
+                  <SelectRow
                     label="Technology"
-                    values={siteFilters?.technologies || []}
-                    onChange={(v) => updateSiteFilter("technologies", v)}
+                    value={storedGridTechnology}
+                    onChange={handleStoredGridTechnologyChange}
                     options={[
-                      { value: "all", label: "All Technologies" },
-                      ...((siteFilterOptions?.technologies || []).map((item) => ({
-                        value: item,
-                        label: item,
-                      }))),
+                      { value: "ALL", label: "All Technologies" },
+                      { value: "4G", label: "4G" },
+                      { value: "5G", label: "5G" },
                     ]}
                     placeholder="All Technologies"
                     disabled={!enableSiteToggle || !hasValidProjectId}
