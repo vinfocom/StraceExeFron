@@ -1790,6 +1790,7 @@ const UnifiedMapSidebar = ({
       if (Boolean(deltaGridApiState?.gridVisible)) {
         onDeltaGridFetchStored?.({
           version: resolvedVersion,
+          scenarioId: storedGridScenarioId,
           technology: storedGridTechnology,
           forceFetch: true,
         });
@@ -1801,6 +1802,7 @@ const UnifiedMapSidebar = ({
       deltaGridApiState?.gridVisible,
       onDeltaGridFetchStored,
       storedGridTechnology,
+      storedGridScenarioId,
     ],
   );
   const handleStoredGridTechnologyChange = useCallback(
@@ -4198,21 +4200,23 @@ const UnifiedMapSidebar = ({
             <>
           {activeSidebarTab === "optimisation" && (
           <CollapsibleSection title="Prediction" icon={Radio}>
+            {(enableSiteToggle || Boolean(deltaGridApiState?.gridVisible)) && (
+              <SegmentedControl
+                value={enableSiteToggle
+                  ? String(sitePredictionVersion || "original").trim().toLowerCase()
+                  : normalizedStoredGridVersion}
+                onChange={handleSitePredictionVersionChange}
+                options={[
+                  { value: "original", label: "Baseline" },
+                  { value: "updated", label: "Optimized" },
+                  { value: "delta", label: "Delta" },
+                ]}
+              />
+            )}
             {enableSiteToggle && (
               <>
                 
                 <div className="mt-3 pt-3 border-t border-slate-700/50 space-y-2">
-                  {isCellMode && (
-                    <SegmentedControl
-                      value={String(sitePredictionVersion || "original").trim().toLowerCase()}
-                      onChange={handleSitePredictionVersionChange}
-                      options={[
-                        { value: "original", label: "Baseline" },
-                        { value: "updated", label: "Optimized" },
-                        { value: "delta", label: "Delta" },
-                      ]}
-                    />
-                  )}
                   
 
                   {lteGridAvailable ? (

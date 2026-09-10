@@ -3021,6 +3021,11 @@ const UnifiedMapView = () => {
   }, [projectId, lteGridSizeMeters, setLteGridSizeMeters, storedGridVersion, storedGridScenarioId, storedGridTechnology, clearSectorWiseGridData]);
 
   useEffect(() => {
+    setStoredGridScenarioOptions([]);
+    setStoredGridScenarioId(null);
+  }, [projectId]);
+
+  useEffect(() => {
     const normalizedVersion = String(storedGridVersion || "original").trim().toLowerCase();
     const shouldLoadScenarios =
       normalizedVersion === "updated" ||
@@ -3028,8 +3033,8 @@ const UnifiedMapView = () => {
       normalizedVersion === "optimised" ||
       normalizedVersion === "delta";
     if (!shouldLoadScenarios) {
-      setStoredGridScenarioOptions([]);
-      setStoredGridScenarioId(null);
+      // Baseline does not use a scenario, but keep the selection for the return
+      // to Optimized or Delta so their first grid request uses the same scenario.
       return;
     }
 
