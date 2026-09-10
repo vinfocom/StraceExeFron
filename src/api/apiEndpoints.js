@@ -787,6 +787,12 @@ export const predictionApi = {
       if (params.radius !== null) {
         payload.radius = params.radius ?? 2000.0;
       }
+      if (params.prediction_scope) {
+        payload.prediction_scope = params.prediction_scope;
+      }
+      if (params.cell_edge_rsrp_dbm != null) {
+        payload.cell_edge_rsrp_dbm = Number(params.cell_edge_rsrp_dbm);
+      }
       addLteCountryContext(payload, params);
       if (params.polygon_ids) {
         payload.polygon_ids = params.polygon_ids;

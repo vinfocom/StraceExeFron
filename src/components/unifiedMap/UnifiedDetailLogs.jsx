@@ -101,11 +101,6 @@ const ConditionLogsTab = lazy(() =>
     default: module.ConditionLogsTab || module.default,
   })),
 );
-const L3EventsTab = lazy(() =>
-  import("./tabs/L3EventsTab").then((module) => ({
-    default: module.L3EventsTab || module.default,
-  })),
-);
 const InsightsTab = lazy(() => import("./tabs/InsightsTab"));
 
 const DEFAULT_DATA_FILTERS = {
@@ -2311,7 +2306,6 @@ function UnifiedDetailLogs({
             />
           )}
 
-          {activeTab === "l3Events" && <L3EventsTab />}
 
           {activeTab === "insights" && <InsightsTab insights={insights} />}
 

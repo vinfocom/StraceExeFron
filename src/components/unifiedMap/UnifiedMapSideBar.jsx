@@ -1435,14 +1435,12 @@ const UnifiedMapSidebar = ({
   const [isRunningLtePrediction, setIsRunningLtePrediction] = useState(false);
   const [ltePredictionRadiusMeters, setLtePredictionRadiusMeters] = useState(500);
   const [ltePredictionScope, setLtePredictionScope] = useState("radius");
-  // H Cell scope: the backend solves each cell's own radius from its link
-  // budget, and radius_m becomes a LOWER BOUND on that solved value
-  // (services.py `max(solved, radius_m)`). Kept separate from the flat radius
-  // so switching scope never silently ships 500 m as a floor - that would
-  // inflate every cell whose own radius solves below it. It must stay
-  // positive: services.py reads it through an `or` chain, so 0 falls back
-  // to 500.
-  const [ltePredictionMinRadiusMeters, setLtePredictionMinRadiusMeters] = useState(100);
+  // H Cell scope: the radius is DERIVED, so the operator's lever is the service
+  // edge it is derived from, not the radius. Each cell's radius is solved from
+  // its own link budget down to this RSRP level, so lowering it grows every
+  // cell (about 1.37x per 5 dB) and raising it shrinks them. Backend default is
+  // -110 dBm; it validates -160..-40.
+  const [ltePredictionCellEdgeDbm, setLtePredictionCellEdgeDbm] = useState(-110);
   const [ltePredictionOperator, setLtePredictionOperator] = useState("auto");
   const ltePredictionPollingRef = useRef(null);
   const ltePredictionToastIdRef = useRef(null);
@@ -1452,9 +1450,9 @@ const UnifiedMapSidebar = ({
   const [lteTiltRecommendationRsrp, setLteTiltRecommendationRsrp] = useState(-90);
   const [lteTiltRecommendationRsrq, setLteTiltRecommendationRsrq] = useState(-14);
   const [lteTiltRecommendationSinr, setLteTiltRecommendationSinr] = useState(0);
-  const [lteTiltRecommendationRsrpWeight, setLteTiltRecommendationRsrpWeight] = useState(20);
-  const [lteTiltRecommendationRsrqWeight, setLteTiltRecommendationRsrqWeight] = useState(20);
-  const [lteTiltRecommendationSinrWeight, setLteTiltRecommendationSinrWeight] = useState(60);
+  const [lteTiltRecommendationRsrpWeight, setLteTiltRecommendationRsrpWeight] = useState(60);
+  const [lteTiltRecommendationRsrqWeight, setLteTiltRecommendationRsrqWeight] = useState(40);
+  const [lteTiltRecommendationSinrWeight, setLteTiltRecommendationSinrWeight] = useState(0);
   const [lteTiltRecommendationRadiusMeters, setLteTiltRecommendationRadiusMeters] = useState(LTE_RECOMMENDATION_OPTIMIZED_DEFAULTS.radiusMeters);
   const [lteTiltRecommendationGridResolutionMeters, setLteTiltRecommendationGridResolutionMeters] = useState(LTE_RECOMMENDATION_OPTIMIZED_DEFAULTS.gridResolutionMeters);
   const [lteTiltRecommendationEtltCandidateMaxDeltaDeg, setLteTiltRecommendationEtltCandidateMaxDeltaDeg] = useState(
@@ -1523,7 +1521,9 @@ const UnifiedMapSidebar = ({
   const pciOptimizationToastIdRef = useRef(null);
   const pciOptimizationJobIdRef = useRef(null);
   const [isRunningLteOptimisedPrediction, setIsRunningLteOptimisedPrediction] = useState(false);
-  const [lteOptimisedPredictionScope, setLteOptimisedPredictionScope] = useState("radius");
+  // No scope state for the optimised route: its `radius` is a single disc
+  // around the mean site position, not a per-cell radius, so there is no
+  // second scope to choose. Per-cell footprints come from the baseline run.
   const [lteOptimisedSelectedOperators, setLteOptimisedSelectedOperators] = useState([]);
   const lteOptimisedPredictionPollingRef = useRef(null);
   const lteOptimisedPredictionToastIdRef = useRef(null);
@@ -2670,12 +2670,18 @@ const UnifiedMapSidebar = ({
         session_ids: validSessionIds,
         grid_resolution_m: Number(lteGridSizeMeters) || 25,
         // The backend switches on `prediction_scope`, never on a missing
-        // radius. In H Cell scope radius_m is still sent - it is the floor
-        // under each solved per-cell radius, not the radius itself.
+        // radius. In H Cell scope the radius is solved per cell from
+        // cell_edge_rsrp_dbm; radius_m is still sent because routes.py defaults
+        // a missing one to 500, which would become a 500 m floor under every
+        // solved radius and clip the smaller 5G cells.
         prediction_scope: ltePredictionScope === "hcell" ? "hcell" : "radius",
+        cell_edge_rsrp_dbm:
+          ltePredictionScope === "hcell"
+            ? Number(ltePredictionCellEdgeDbm) || -110
+            : undefined,
         radius_m:
           ltePredictionScope === "hcell"
-            ? Number(ltePredictionMinRadiusMeters) || 100
+            ? 100
             : Number(ltePredictionRadiusMeters) || 500,
         use_buildings: Boolean(ltePredictionUseBuildings),
         operator: ltePredictionOperator,
@@ -2738,7 +2744,7 @@ const UnifiedMapSidebar = ({
     sessionIds,
     lteGridSizeMeters,
     ltePredictionRadiusMeters,
-    ltePredictionMinRadiusMeters,
+    ltePredictionCellEdgeDbm,
     ltePredictionScope,
     ltePredictionUseBuildings,
     ltePredictionOperator,
@@ -2791,9 +2797,16 @@ const UnifiedMapSidebar = ({
         region: lteRegion || undefined,
         country_code: lteCountryCode || undefined,
         grid_resolution: Number(lteGridSizeMeters) || 25,
+        prediction_scope: ltePredictionScope === "hcell" ? "hcell" : "radius",
+        cell_edge_rsrp_dbm:
+          ltePredictionScope === "hcell"
+            ? Number(ltePredictionCellEdgeDbm) || -110
+            : undefined,
+        // H-Cell solves each modified cell's own radius; this is only the
+        // lower safety bound used if a link budget cannot be solved.
         radius:
-          lteOptimisedPredictionScope === "edge"
-            ? null
+          ltePredictionScope === "hcell"
+            ? 100
             : Number(ltePredictionRadiusMeters) || 5000,
         operator: effectiveOperators.length > 0 ? effectiveOperators.join(",") : "all",
         operators: effectiveOperators,
@@ -2859,7 +2872,6 @@ const UnifiedMapSidebar = ({
     projectId,
     lteGridSizeMeters,
     ltePredictionRadiusMeters,
-    lteOptimisedPredictionScope,
     lteOptimisedSelectedOperators,
     lteOptimisedOperatorOptions,
     sitePredictionScenarioId,
@@ -4331,22 +4343,22 @@ const UnifiedMapSidebar = ({
                             ) : (
                               <div className="mt-2">
                                 <div className="flex items-center justify-between text-xs mb-2">
-                                  <span className="text-slate-400">Minimum Radius</span>
+                                  <span className="text-slate-400">Cell Edge</span>
                                 </div>
                                 <ThresholdInput
-                                  value={Number(ltePredictionMinRadiusMeters) || 100}
+                                  value={Number(ltePredictionCellEdgeDbm) || -110}
                                   onChange={(next) =>
-                                    setLtePredictionMinRadiusMeters(Math.round(next))
+                                    setLtePredictionCellEdgeDbm(Math.round(next))
                                   }
-                                  min={50}
-                                  max={5000}
-                                  step={50}
-                                  unit="m"
+                                  min={-130}
+                                  max={-90}
+                                  step={1}
+                                  unit="dBm"
                                 />
                                 <p className="text-[10px] text-slate-400 mt-1">
                                   Each cell's radius is solved from its own link budget
-                                  at the -110 dBm service edge. This only sets a floor
-                                  under that solved value.
+                                  down to this level. Lower = larger cells (about 1.37x
+                                  per 5 dB).
                                 </p>
                               </div>
                             )}
@@ -4405,14 +4417,14 @@ const UnifiedMapSidebar = ({
                               <span className="text-slate-400">Prediction Scope</span>
                             </div>
                             <SegmentedControl
-                              value={lteOptimisedPredictionScope}
-                              onChange={setLteOptimisedPredictionScope}
+                              value={ltePredictionScope}
+                              onChange={setLtePredictionScope}
                               options={[
                                 { value: "radius", label: "Radius" },
-                                { value: " ", label: "H Cell" },
+                                { value: "hcell", label: "H Cell" },
                               ]}
                             />
-                            {lteOptimisedPredictionScope === "radius" && (
+                            {ltePredictionScope === "radius" ? (
                               <div className="mt-2">
                                 <div className="flex items-center justify-between text-xs mb-2">
                                   <span className="text-slate-400">Radius</span>
@@ -4427,6 +4439,23 @@ const UnifiedMapSidebar = ({
                                   step={100}
                                   unit="m"
                                 />
+                              </div>
+                            ) : (
+                              <div className="mt-2">
+                                <div className="flex items-center justify-between text-xs mb-2">
+                                  <span className="text-slate-400">Cell Edge</span>
+                                </div>
+                                <ThresholdInput
+                                  value={Number(ltePredictionCellEdgeDbm) || -110}
+                                  onChange={(next) => setLtePredictionCellEdgeDbm(Math.round(next))}
+                                  min={-130}
+                                  max={-90}
+                                  step={1}
+                                  unit="dBm"
+                                />
+                                <p className="text-[10px] text-slate-400 mt-1">
+                                  Each modified cell uses a newly solved link-budget radius.
+                                </p>
                               </div>
                             )}
                           </div>
@@ -4906,8 +4935,9 @@ const UnifiedMapSidebar = ({
                             value={
                               Number.isFinite(Number(lteTiltRecommendationSinrWeight))
                                 ? Number(lteTiltRecommendationSinrWeight)
-                                : 60
+                                : 0
                             }
+                            disabled
                             onChange={(next) => setLteTiltRecommendationSinrWeight(Number(next))}
                             min={0}
                             max={100}
