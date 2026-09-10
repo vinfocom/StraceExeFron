@@ -1435,6 +1435,14 @@ const UnifiedMapSidebar = ({
   const [isRunningLtePrediction, setIsRunningLtePrediction] = useState(false);
   const [ltePredictionRadiusMeters, setLtePredictionRadiusMeters] = useState(500);
   const [ltePredictionScope, setLtePredictionScope] = useState("radius");
+  // H Cell scope: the backend solves each cell's own radius from its link
+  // budget, and radius_m becomes a LOWER BOUND on that solved value
+  // (services.py `max(solved, radius_m)`). Kept separate from the flat radius
+  // so switching scope never silently ships 500 m as a floor - that would
+  // inflate every cell whose own radius solves below it. It must stay
+  // positive: services.py reads it through an `or` chain, so 0 falls back
+  // to 500.
+  const [ltePredictionMinRadiusMeters, setLtePredictionMinRadiusMeters] = useState(100);
   const [ltePredictionOperator, setLtePredictionOperator] = useState("auto");
   const ltePredictionPollingRef = useRef(null);
   const ltePredictionToastIdRef = useRef(null);
@@ -2661,9 +2669,13 @@ const UnifiedMapSidebar = ({
         country_code: lteCountryCode || undefined,
         session_ids: validSessionIds,
         grid_resolution_m: Number(lteGridSizeMeters) || 25,
+        // The backend switches on `prediction_scope`, never on a missing
+        // radius. In H Cell scope radius_m is still sent - it is the floor
+        // under each solved per-cell radius, not the radius itself.
+        prediction_scope: ltePredictionScope === "hcell" ? "hcell" : "radius",
         radius_m:
-          ltePredictionScope === "edge"
-            ? null
+          ltePredictionScope === "hcell"
+            ? Number(ltePredictionMinRadiusMeters) || 100
             : Number(ltePredictionRadiusMeters) || 500,
         use_buildings: Boolean(ltePredictionUseBuildings),
         operator: ltePredictionOperator,
@@ -2726,6 +2738,7 @@ const UnifiedMapSidebar = ({
     sessionIds,
     lteGridSizeMeters,
     ltePredictionRadiusMeters,
+    ltePredictionMinRadiusMeters,
     ltePredictionScope,
     ltePredictionUseBuildings,
     ltePredictionOperator,
@@ -4299,7 +4312,7 @@ const UnifiedMapSidebar = ({
                                 { value: "hcell", label: "H Cell" },
                               ]}
                             />
-                            {ltePredictionScope === "radius" && (
+                            {ltePredictionScope === "radius" ? (
                               <div className="mt-2">
                                 <div className="flex items-center justify-between text-xs mb-2">
                                   <span className="text-slate-400">Radius</span>
@@ -4314,6 +4327,27 @@ const UnifiedMapSidebar = ({
                                   step={100}
                                   unit="m"
                                 />
+                              </div>
+                            ) : (
+                              <div className="mt-2">
+                                <div className="flex items-center justify-between text-xs mb-2">
+                                  <span className="text-slate-400">Minimum Radius</span>
+                                </div>
+                                <ThresholdInput
+                                  value={Number(ltePredictionMinRadiusMeters) || 100}
+                                  onChange={(next) =>
+                                    setLtePredictionMinRadiusMeters(Math.round(next))
+                                  }
+                                  min={50}
+                                  max={5000}
+                                  step={50}
+                                  unit="m"
+                                />
+                                <p className="text-[10px] text-slate-400 mt-1">
+                                  Each cell's radius is solved from its own link budget
+                                  at the -110 dBm service edge. This only sets a floor
+                                  under that solved value.
+                                </p>
                               </div>
                             )}
                           </div>

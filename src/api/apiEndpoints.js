@@ -696,10 +696,22 @@ export const predictionApi = {
           25.0,
         building: params.building ?? params.use_buildings ?? true
       };
-      // A null radius explicitly selects edge-based prediction. Omit the
-      // field instead of sending null or a fallback value.
-      if (params.radius_m !== null) {
-        payload.radius_m = params.radius_m ?? 5000.0;
+      // Scope is selected by `prediction_scope`, which is what the backend
+      // reads. `radius_m` is always sent: in radius scope it is the radius
+      // every cell is evaluated over, in hcell scope it is the lower bound on
+      // each cell's own solved link-budget radius. It must be positive - the
+      // backend resolves it through an `or` chain, so 0 falls back to 500.
+      payload.radius_m = Number(params.radius_m) || 500.0;
+      if (String(params.prediction_scope || "").toLowerCase() === "hcell") {
+        payload.prediction_scope = "hcell";
+        // Optional overrides. Omitted, the backend uses its planning default
+        // of -110 dBm and applies no cap.
+        if (params.cell_edge_rsrp_dbm != null) {
+          payload.cell_edge_rsrp_dbm = Number(params.cell_edge_rsrp_dbm);
+        }
+        if (params.cell_edge_radius_cap_m != null) {
+          payload.cell_edge_radius_cap_m = Number(params.cell_edge_radius_cap_m);
+        }
       }
       addLteCountryContext(payload, params);
 
