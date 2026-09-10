@@ -97,16 +97,16 @@ const SideBar = ({ compact = false }) => {
 
   const isChildActive = (children) => children.some((child) => location.pathname === child.path);
   const labelClass = compact
-    ? 'hidden group-hover/mapSidebar:inline'
+    ? 'sidebar-label'
     : 'inline';
   const titleClass = compact
-    ? 'hidden group-hover/mapSidebar:block'
+    ? 'sidebar-label'
     : 'block';
   const chevronClass = compact
-    ? 'hidden group-hover/mapSidebar:inline-flex'
+    ? 'sidebar-label inline-flex'
     : 'inline-flex';
   const iconSpacingClass = compact
-    ? 'h-5 w-5 mr-0 group-hover/mapSidebar:mr-3 flex-shrink-0'
+    ? 'h-5 w-5 mr-3 flex-shrink-0'
     : 'h-5 w-5 mr-3 flex-shrink-0';
 
   const renderNavItem = (link, index) => {
@@ -122,7 +122,7 @@ const SideBar = ({ compact = false }) => {
           <>
             <button
               onClick={() => toggleDropdown(link.text)}
-              className={`w-full flex items-center ${compact ? 'justify-center group-hover/mapSidebar:justify-between' : 'justify-between'} p-3 rounded-lg transition-all duration-300 ease-out ${isParentActive
+              className={`w-full flex items-center justify-between p-3 rounded-lg transition-colors duration-300 ease-out ${isParentActive
                   ? 'bg-primary/90 text-primary-foreground shadow-sm'
                   : 'text-slate-200 hover:bg-slate-700/80 hover:text-white'
                 }`}
@@ -136,7 +136,7 @@ const SideBar = ({ compact = false }) => {
               </span>
             </button>
 
-            <ul className={`overflow-hidden transition-all duration-300 ease-out ${compact
+            <ul className={`sidebar-expanded-content overflow-hidden transition-all duration-300 ease-out ${compact
                 ? isOpen
                   ? 'max-h-0 opacity-0 mt-0 group-hover/mapSidebar:max-h-40 group-hover/mapSidebar:opacity-100 group-hover/mapSidebar:mt-1'
                   : 'max-h-0 opacity-0 mt-0'
@@ -166,7 +166,7 @@ const SideBar = ({ compact = false }) => {
           <NavLink
             to={link.path}
             className={({ isActive }) =>
-              `flex items-center ${compact ? 'justify-center group-hover/mapSidebar:justify-start' : ''} p-3 rounded-lg transition-all duration-300 ease-out ${isActive
+              `flex items-center p-3 rounded-lg transition-colors duration-300 ease-out ${isActive
                 ? 'bg-primary text-primary-foreground shadow-sm'
                 : 'text-slate-200 hover:bg-slate-700/80 hover:text-white'
               }`
@@ -181,23 +181,23 @@ const SideBar = ({ compact = false }) => {
   };
 
   return (
-    <div className="h-full w-full bg-slate-900/90 text-white flex flex-col">
-      <div className={`p-4 flex items-center h-16 flex-shrink-0 border-b border-slate-700/40 ${compact ? 'justify-center group-hover/mapSidebar:justify-start' : 'justify-center'}`}>
-        <img src={vinfocomvinfocom} alt="vinfocom" className="h-11 sm:h-10 object-contain" />
+    <div className={`h-full ${compact ? 'w-[270px]' : 'w-full'} bg-slate-900/90 text-white flex flex-col`}>
+      <div className={`p-4 flex items-center h-16 flex-shrink-0 border-b border-slate-700/40 ${compact ? 'justify-start' : 'justify-center'}`}>
+        <img src={vinfocomvinfocom} alt="vinfocom" className="h-11 w-10 shrink-0 sm:h-10 object-contain" />
         <span className={`ml-2 font-semibold tracking-wide text-lg whitespace-nowrap ${titleClass}`}>S-Tracer</span>
       </div>
 
-      <nav className="flex-1 overflow-y-auto p-2.5">
+      <nav className="flex-1 overflow-y-auto overflow-x-hidden p-2.5">
         <ul>{navLinks.map(renderNavItem)}</ul>
       </nav>
 
       <div className="border-t border-slate-700/40 p-2.5">
         <button
           onClick={() => setShowUserMenu((prev) => !prev)}
-          className={`w-full flex items-center rounded-lg p-2.5 transition-colors duration-200 text-slate-200 hover:bg-slate-700/80 hover:text-white ${compact ? 'justify-center group-hover/mapSidebar:justify-start' : ''}`}
+          className="w-full flex items-center rounded-lg p-2.5 transition-colors duration-200 text-slate-200 hover:bg-slate-700/80 hover:text-white"
         >
           <div
-            className={`${compact ? 'inline-flex group-hover/mapSidebar:hidden' : 'hidden'} h-7 w-7 items-center justify-center rounded-full border border-slate-500/70 text-xs font-semibold`}
+            className={`${compact ? 'inline-flex mr-3 shrink-0' : 'hidden'} h-7 w-7 items-center justify-center rounded-full border border-slate-500/70 text-xs font-semibold`}
           >
             {user?.name?.charAt(0).toUpperCase()}
           </div>
@@ -207,7 +207,7 @@ const SideBar = ({ compact = false }) => {
         </button>
 
         <div
-          className={`overflow-hidden transition-all duration-300 ease-out ${compact
+          className={`sidebar-expanded-content overflow-hidden transition-all duration-300 ease-out ${compact
               ? showUserMenu
                 ? 'max-h-0 opacity-0 mt-0 group-hover/mapSidebar:max-h-16 group-hover/mapSidebar:opacity-100 group-hover/mapSidebar:mt-2'
                 : 'max-h-0 opacity-0'

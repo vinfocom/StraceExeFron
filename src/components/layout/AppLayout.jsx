@@ -77,8 +77,8 @@ const AppLayout = ({ children }) => {
                 ? `fixed ${isElectronRuntime ? "top-8 h-[calc(100%-2rem)]" : "top-0 h-full"} left-0 z-50 w-[270px] -translate-x-full shadow-2xl ${
                     isSidebarOpen ? "translate-x-0" : ""
                   }`
-                : `peer group/mapSidebar fixed left-0 ${isElectronRuntime ? "top-8 h-[calc(100%-2rem)]" : "top-0 h-full"} z-40 w-[74px] hover:w-[270px]`
-            } bg-slate-900/95 backdrop-blur-md border-r border-slate-700/40 flex flex-col transition-all duration-300 ease-in-out`}
+                : `desktop-sidebar group/mapSidebar fixed left-0 ${isElectronRuntime ? "top-8 h-[calc(100%-2rem)]" : "top-0 h-full"} z-40 w-[74px] hover:w-[270px]`
+            } bg-slate-900/95 backdrop-blur-md border-r border-slate-700/40 flex flex-col transition-[width,transform] duration-300 ease-out motion-reduce:transition-none`}
           >
             <div className="flex-1 overflow-hidden">
               <SideBar compact={!isCompactViewport} />
@@ -88,9 +88,9 @@ const AppLayout = ({ children }) => {
       )}
 
       <div
-        className={`min-w-0 max-w-full flex-1 flex flex-col overflow-x-hidden transition-all duration-300 ease-in-out ${
+        className={`min-w-0 max-w-full flex-1 flex flex-col overflow-x-hidden ${
           shouldShowSidebar && !isCompactViewport
-            ? "ml-[74px] peer-hover:ml-[270px]"
+            ? "ml-[74px]"
             : "ml-0"
         }`}
       >

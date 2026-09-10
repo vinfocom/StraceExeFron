@@ -215,16 +215,16 @@ const DashboardPage = () => {
           </div>
 
           <div className="rounded-[1.5rem] border border-white/80 bg-white/70 p-3 backdrop-blur-sm sm:p-4 lg:p-5">
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4 2xl:grid-cols-5 sm:gap-6">
+            <div className="flex flex-wrap gap-4 sm:gap-6">
               {isKPILoading ? (
                 Array.from({ length: 8 }).map((_, i) => (
-                  <div key={i} className="min-w-0">
+                  <div key={i} className="min-w-0 flex-[1_1_18rem]">
                     <StatCardSkeleton />
                   </div>
                 ))
               ) : (
                 stats.map(s => (
-                  <div key={s.title} className="min-w-0">
+                  <div key={s.title} className="min-w-0 flex-[1_1_18rem]">
                     <MemoizedStatCard {...s} />
                   </div>
                 ))
