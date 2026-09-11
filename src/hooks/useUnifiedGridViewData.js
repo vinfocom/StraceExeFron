@@ -415,17 +415,20 @@ export const useUnifiedGridViewData = ({
         const metricStats = {};
         METRICS_TO_AGGREGATE.forEach((metricKey) => {
           const metricValues = bucket.metrics.get(metricKey) || EMPTY_ARRAY;
+          const average = mean(metricValues);
           metricStats[metricKey] = {
-            avg: mean(metricValues),
-            mean: mean(metricValues),
+            avg: average,
+            mean: average,
             median: median(metricValues),
             min: min(metricValues),
             max: max(metricValues),
           };
-          aggregatedMetrics[metricKey] = getAggregateValue(
-            metricValues,
-            normalizedAggregationMethod,
-          );
+          // These statistics are already calculated for analytics/export.
+          // Reuse them rather than reducing (or sorting for median) again.
+          const aggregateKey = ["avg", "mean", "min", "max"].includes(normalizedAggregationMethod || "mean")
+            ? normalizedAggregationMethod || "mean"
+            : "median";
+          aggregatedMetrics[metricKey] = metricStats[metricKey][aggregateKey];
         });
 
         const dominantPciRaw = pickTopCategory(bucket.pcis);
@@ -608,3 +611,38 @@ export const useUnifiedGridViewData = ({
 };
 
 export default useUnifiedGridViewData;
+
+// Filtering often creates a new array containing the exact same immutable rows.
+// Preserve order in this comparison because it also determines category tie breaks.
+export const useUnifiedGridViewDataPair = ({
+  enabled = false,
+  displayLocations = EMPTY_ARRAY,
+  filteredLocations = EMPTY_ARRAY,
+  filteredEnabled = true,
+  ...gridOptions
+}) => {
+  const shareDisplayResult = useMemo(
+    () => enabled && filteredEnabled && (
+      displayLocations === filteredLocations || (
+        displayLocations.length === filteredLocations.length &&
+        displayLocations.every((row, index) => row === filteredLocations[index])
+      )
+    ),
+    [enabled, filteredEnabled, displayLocations, filteredLocations],
+  );
+  const displayData = useUnifiedGridViewData({
+    ...gridOptions,
+    enabled,
+    locations: displayLocations,
+  });
+  const separateFilteredData = useUnifiedGridViewData({
+    ...gridOptions,
+    enabled: enabled && filteredEnabled && !shareDisplayResult,
+    locations: filteredLocations,
+  });
+
+  return {
+    displayData,
+    filteredData: shareDisplayResult ? displayData : separateFilteredData,
+  };
+};

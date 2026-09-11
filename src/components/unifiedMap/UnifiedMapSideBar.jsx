@@ -1809,7 +1809,9 @@ const UnifiedMapSidebar = ({
   );
   const handleStoredGridTechnologyChange = useCallback(
     (nextTechnology) => {
-      const normalizedTechnology = String(nextTechnology || "ALL").trim().toUpperCase();
+      const normalizedTechnology = Array.isArray(nextTechnology)
+        ? nextTechnology
+        : String(nextTechnology || "ALL").trim().toUpperCase();
       setStoredGridTechnology?.(normalizedTechnology);
     },
     [
@@ -3921,15 +3923,15 @@ const UnifiedMapSidebar = ({
                       disabled={!enableDataToggle}
                     />
 
-                    <SelectRow
+                    <MultiSelectRow
                       label="Technology"
-                      value={storedGridTechnology}
+                      values={dataFilters?.technologies || []}
                       onChange={handleStoredGridTechnologyChange}
                       options={[
-                        { value: "ALL", label: "All Technologies" },
+                        { value: "all", label: "All Technologies" },
                         ...([...new Set([
                           ...(availableFilterOptions?.technologies || []),
-                          ...(storedGridTechnology !== "ALL" ? [storedGridTechnology] : []),
+                          ...(dataFilters?.technologies || []),
                         ])].map((technology) => ({
                           value: technology,
                           label: technology,
@@ -3970,15 +3972,15 @@ const UnifiedMapSidebar = ({
                     )}
                   </div>
 
-                  <SelectRow
+                  <MultiSelectRow
                     label="Technology"
-                    value={storedGridTechnology}
+                    values={dataFilters?.technologies || []}
                     onChange={handleStoredGridTechnologyChange}
                     options={[
-                      { value: "ALL", label: "All Technologies" },
+                      { value: "all", label: "All Technologies" },
                       ...([...new Set([
                         ...(siteFilterOptions?.technologies || []),
-                        ...(storedGridTechnology !== "ALL" ? [storedGridTechnology] : []),
+                        ...(dataFilters?.technologies || []),
                       ])].map((technology) => ({
                         value: technology,
                         label: technology,
@@ -4663,16 +4665,16 @@ const UnifiedMapSidebar = ({
               />
               {Boolean(deltaGridApiState?.gridVisible) && (
                 <div className="pt-1 bg-slate-900/40 rounded-lg p-2 space-y-2">
-                  <SelectRow
+                  <MultiSelectRow
                     label="Technology"
-                    value={String(storedGridTechnology || "ALL").trim().toUpperCase()}
+                    values={dataFilters?.technologies || []}
                     onChange={handleStoredGridTechnologyChange}
                     options={[
-                      { value: "ALL", label: "All" },
+                      { value: "all", label: "All Technologies" },
                       ...([...new Set([
                         "4G",
                         "5G",
-                        ...(storedGridTechnology !== "ALL" ? [storedGridTechnology] : []),
+                        ...(dataFilters?.technologies || []),
                       ])].map((technology) => ({ value: technology, label: technology }))),
                     ]}
                     placeholder="Select technology"

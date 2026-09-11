@@ -11,6 +11,7 @@ import MapChildFooter from "./MapChildFooter";
 import DrawingToolsLayer from "@/components/map/tools/DrawingToolsLayer";
 import { PolygonF } from "@react-google-maps/api";
 import { useLtePrediction } from "@/hooks/useLtePrediction";
+import { useSiteData } from "@/hooks/useSiteData";
 import {
   pickThresholdBucketValue,
   resolveSelectedTechnologyBucket,
@@ -149,6 +150,15 @@ const MapChild = ({
   const [colorBy, setColorBy] = useState(null);
   const [legendFilter, setLegendFilter] = useState(null);
   const [mapRef, setMapRef] = useState(null);
+  const { siteData, error: siteError, refetch: refetchSites } = useSiteData({
+    enableSiteToggle: isSiteMode && Boolean(mapRef),
+    siteToggle: "Cell",
+    sitePredictionVersion,
+    projectId,
+    autoFetch: isSiteMode && Boolean(mapRef),
+    filterEnabled: sharedPolygons.length > 0,
+    polygons: sharedPolygons,
+  });
   const [viewport, setViewport] = useState(null);
   const [selectedSiteIds, setSelectedSiteIds] = useState([]);
 
@@ -648,6 +658,9 @@ const MapChild = ({
         >
         {isSiteMode && mapRef && (
           <NetworkPlannerMap
+            siteData={siteData}
+            siteError={siteError}
+            refetchSites={refetchSites}
             projectId={projectId}
             map={mapRef}
             viewport={viewport}

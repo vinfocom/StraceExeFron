@@ -12,7 +12,6 @@ import {
 } from "@/utils/colorUtils";
 import { hexToRgbaArray } from "@/utils/unifiedMapConfig";
 import { getPciColor } from "@/utils/metrics";
-import { useSiteData } from "@/hooks/useSiteData";
 import { mapViewApi, sitePredictionApi } from "@/api/apiEndpoints";
 import { clearProjectSessionCacheByProjectResource } from "@/utils/projectSessionCache";
 import { toast } from "react-toastify";
@@ -1534,7 +1533,9 @@ const NetworkPlannerMap = ({
   enableSiteToggle = true,
   showSiteMarkers = true,
   showSiteSectors = true,
-  onDataLoaded,
+  siteData,
+  siteError: error,
+  refetchSites: fetchSiteData,
   viewport = null,
   colorMode = "Operator",
   siteLabelField = "none",
@@ -1558,17 +1559,6 @@ const NetworkPlannerMap = ({
   onSectorGridSettingChange = null,
 }) => {
   const siteLteDebugEnabled = useMemo(() => isSiteLteDebugEnabled(), []);
-  const { siteData, loading, error, fetchSiteData } = useSiteData({
-    enableSiteToggle,
-    siteToggle,
-    sitePredictionVersion,
-    sitePredictionScenarioId,
-    defaultBeamwidth,
-    projectId,
-    autoFetch: true,
-    filterEnabled: onlyInsidePolygons,
-    polygons: filterPolygons,
-  });
 
   const activePolygonIdsParam = useMemo(() => {
     if (!onlyInsidePolygons || !Array.isArray(filterPolygons)) return undefined;
@@ -1860,12 +1850,6 @@ const NetworkPlannerMap = ({
       });
     }
   }, [selectedSiteIds]);
-
-  useEffect(() => {
-    if (onDataLoaded) {
-      onDataLoaded(siteData, loading);
-    }
-  }, [siteData, loading, onDataLoaded]);
 
   useEffect(() => {
     if (!enableSiteToggle) {

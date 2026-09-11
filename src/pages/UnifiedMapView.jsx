@@ -56,7 +56,7 @@ import { useSessionNeighbors } from "@/hooks/useSessionNeighbors";
 import { useSubSessionAnalytics } from "@/hooks/useSubSessionAnalytics";
 import { useProjectPolygons } from "@/hooks/useProjectPolygons";
 import { useAreaPolygons } from "@/hooks/useAreaPolygons";
-import { useUnifiedGridViewData } from "@/hooks/useUnifiedGridViewData";
+import { useUnifiedGridViewDataPair } from "@/hooks/useUnifiedGridViewData";
 
 // Utils
 import {
@@ -1970,8 +1970,13 @@ const UnifiedMapView = () => {
   const [storedGridScenarioOptions, setStoredGridScenarioOptions] = useState([]);
   const [storedGridTechnology, setStoredGridTechnology] = useState("ALL");
   const handleUnifiedTechnologyChange = useCallback((nextTechnology) => {
-    const technology = String(nextTechnology || "ALL").trim().toUpperCase();
-    const technologies = technology === "ALL" ? [] : [technology];
+    const values = Array.isArray(nextTechnology)
+      ? nextTechnology
+      : String(nextTechnology || "ALL").split(",");
+    const technologies = [...new Set(values
+      .map((value) => String(value).trim().toUpperCase())
+      .filter((value) => value && value !== "ALL"))].sort();
+    const technology = technologies.length ? technologies.join(",") : "ALL";
     setStoredGridTechnology(technology);
     setDataFilters((prev) => ({ ...prev, technologies }));
     setSiteFilters((prev) => ({ ...prev, technologies }));
@@ -2006,9 +2011,6 @@ const UnifiedMapView = () => {
   const [pciDistData, setPciDistData] = useState(null);
   const [pciThreshold, setPciThreshold] = useState(0);
   const [dominanceData, setDominanceData] = useState([]);
-  const [manualSiteData, setManualSiteData] = useState([]);
-  const [manualSiteLoading, setManualSiteLoading] = useState(false);
-  const [manualSiteDataReady, setManualSiteDataReady] = useState(false);
 
   const setUnifiedSitePredictionVersion = useCallback((nextVersion) => {
     const normalizedVersion = String(nextVersion || "original").trim().toLowerCase();
@@ -2071,9 +2073,6 @@ const UnifiedMapView = () => {
 
   useEffect(() => {
     if (!enableSiteToggle) {
-      setManualSiteData([]);
-      setManualSiteLoading(false);
-      setManualSiteDataReady(false);
       setSelectedSites([]);
       setSiteLegendFilter(null);
       setSiteFilters((prev) => ({
@@ -2132,12 +2131,6 @@ const UnifiedMapView = () => {
     return () => {
       clearHandoverPolylines();
     };
-  }, []);
-
-  const handleSitesLoaded = useCallback((data, isLoading) => {
-    setManualSiteData(Array.isArray(data) ? data : []);
-    setManualSiteLoading(Boolean(isLoading));
-    setManualSiteDataReady(true);
   }, []);
 
   const handleSitePredictionScenarioSaved = useCallback((scenario) => {
@@ -3954,8 +3947,6 @@ const UnifiedMapView = () => {
 
       setSitePredictionScenarioOptions(options);
       setSitePredictionScenarioId(nextScenarioId);
-      setManualSiteData([]);
-      setManualSiteDataReady(!nextScenarioId);
     } catch (error) {
       const message = String(error?.message || "").trim() || "Failed to delete site prediction scenario.";
       toast.error(message);
@@ -3963,8 +3954,6 @@ const UnifiedMapView = () => {
   }, [projectId, sitePredictionScenarioId]);
 
   const siteData = rawSiteData || [];
-  const effectiveSiteData = manualSiteDataReady ? manualSiteData : siteData;
-  const effectiveSiteLoading = manualSiteLoading || siteLoading;
   const {
     allNeighbors: rawAllNeighbors,
     stats: neighborStats,
@@ -4695,18 +4684,17 @@ const UnifiedMapView = () => {
   }, [locations, renderedLegendFilteredLocations, polygonFilteredNeighborData]);
   const effectiveGridColorBy = useMemo(() => colorBy, [colorBy]);
 
-  const gridDisplayData = useUnifiedGridViewData({
-    enabled: enableGrid,
-    locations: deferredGridDisplayLocations,
-    selectedMetric,
-    colorBy: effectiveGridColorBy,
-    gridSizeMeters,
-    aggregationMethod: normalizedLteGridAggregationMethod,
-  });
-
-  const gridFilteredData = useUnifiedGridViewData({
-    enabled: enableGrid,
-    locations: deferredGridFilteredLocations,
+  // Filtered grids feed analytics, the open sidebar, and polygon-color fallbacks.
+  // Stored-grid mode only needs log-grid data for the open sidebar's log summary.
+  const needsFilteredGrid = showAnalytics || isSideOpen || (
+    (showPolygons || buildingBorderEnabled || areaEnabled) &&
+    renderedGridLegendLogs.length === 0
+  );
+  const { displayData: gridDisplayData, filteredData: gridFilteredData } = useUnifiedGridViewDataPair({
+    enabled: mapGridEnabled || (enableGrid && isSideOpen),
+    displayLocations: deferredGridDisplayLocations,
+    filteredLocations: deferredGridFilteredLocations,
+    filteredEnabled: needsFilteredGrid,
     selectedMetric,
     colorBy: effectiveGridColorBy,
     gridSizeMeters,
@@ -7168,7 +7156,7 @@ const UnifiedMapView = () => {
     const bands = new Set();
     const pcis = new Set();
 
-    (effectiveSiteData || []).forEach((site) => {
+    (siteData || []).forEach((site) => {
       const technologyName = normalizeTechName(
         site?.technology ?? site?.Technology ?? site?.network ?? site?.Network ?? "",
         site?.band ?? site?.Band,
@@ -7215,7 +7203,7 @@ const UnifiedMapView = () => {
       ),
       pcis: Array.from(pcis).sort((a, b) => Number(a) - Number(b)),
     };
-  }, [effectiveSiteData]);
+  }, [siteData]);
 
   if (mapsConfigError)
     return (
@@ -7306,7 +7294,7 @@ const UnifiedMapView = () => {
             dataToggle={dataToggle}
             enableDataToggle={enableDataToggle}
             selectedMetric={selectedMetric}
-            siteData={effectiveSiteData}
+            siteData={siteData}
             durationTime={durationTime}
             siteToggle={siteToggle}
             enableSiteToggle={enableSiteToggle}
@@ -7575,9 +7563,9 @@ const UnifiedMapView = () => {
 
         <SiteLegend
           enabled={enableSiteToggle}
-          sites={effectiveSiteData}
+          sites={siteData}
           colorMode={siteLegendColorMode}
-          isLoading={effectiveSiteLoading}
+          isLoading={siteLoading}
           sitePredictionVersion={sitePredictionVersion}
           activeFilter={siteLegendFilter}
           onFilterChange={setSiteLegendFilter}
@@ -7831,7 +7819,9 @@ const UnifiedMapView = () => {
                   hoveredCellId={hoveredCellId}
                   hoveredLog={hoveredLog}
                   locations={finalDisplayLocations}
-                  onDataLoaded={handleSitesLoaded}
+                  siteData={siteData}
+                  siteError={siteError}
+                  refetchSites={refetchSites}
                   onSitePredictionScenarioSaved={handleSitePredictionScenarioSaved}
                   colorMode={siteLegendColorMode}
                   siteLabelField={siteLabelField}
@@ -7940,7 +7930,7 @@ const UnifiedMapView = () => {
         onSuccess={() => refetchSites(true)}
         availableBands={combinedBands}
         availablePcis={combinedPcis}
-        siteData={effectiveSiteData}
+        siteData={siteData}
       />
     </div>
   );

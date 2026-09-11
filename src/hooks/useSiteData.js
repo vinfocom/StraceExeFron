@@ -432,7 +432,8 @@ export const useSiteData = ({
   const [error, setError] = useState(null);
   
   const isMounted = useRef(true);
-  const lastFetchParams = useRef(null);
+  // Track successful requests without making auto-fetch depend on the loaded row count.
+  const lastSuccessfulParams = useRef(null);
 
   // DEBUG: Log current state on every render
   useEffect(() => {
@@ -450,7 +451,7 @@ export const useSiteData = ({
     if (!enableSiteToggle) {
       setSiteData([]);
       setLoading(false);
-      lastFetchParams.current = null;
+      lastSuccessfulParams.current = null;
       return;
     }
 
@@ -478,8 +479,7 @@ export const useSiteData = ({
     if (
       shouldUseLocalCache &&
       !forceRefresh &&
-      lastFetchParams.current === currentParams &&
-      siteData.length > 0
+      lastSuccessfulParams.current === currentParams
     ) {
       return;
     }
@@ -496,9 +496,9 @@ export const useSiteData = ({
       if (Array.isArray(cacheEntry?.data)) {
         setSiteData(cacheEntry.data);
         setError(null);
-        lastFetchParams.current = currentParams;
 
         if (isProjectSessionCacheFresh(cacheEntry, SITE_DATA_CACHE_MAX_AGE_MS)) {
+          lastSuccessfulParams.current = currentParams;
           setLoading(false);
           return;
         }
@@ -507,7 +507,7 @@ export const useSiteData = ({
 
     setLoading(true);
     setError(null);
-    lastFetchParams.current = currentParams;
+    lastSuccessfulParams.current = null;
     
     try {
       const params = { projectId: projectId || '' };
@@ -586,6 +586,7 @@ export const useSiteData = ({
       }
 
       setSiteData(finalData);
+      lastSuccessfulParams.current = currentParams;
       if (shouldUseLocalCache && (!filterEnabled || polygons?.length === 0)) {
         writeProjectSessionCache(cacheKey, finalData);
       }
@@ -598,7 +599,7 @@ export const useSiteData = ({
     } finally {
       if (isMounted.current) setLoading(false);
     }
-  }, [enableSiteToggle, siteToggle, sitePredictionVersion, sitePredictionScenarioId, defaultBeamwidth, projectId, sessionIds, siteData.length, filterEnabled, polygons]);
+  }, [enableSiteToggle, siteToggle, sitePredictionVersion, sitePredictionScenarioId, defaultBeamwidth, projectId, sessionIds, filterEnabled, polygons]);
 
   useEffect(() => {
     if (autoFetch) {
