@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
-import { ArrowLeft, Download, Edit3, FileUp, FolderOpen, History, Loader2, RefreshCw, Save, Search, Trash2, Upload, X } from "lucide-react";
+import { ArrowLeft, Download, Edit3, FileUp, History, Loader2, RefreshCw, Save, Search, Trash2, Upload, X } from "lucide-react";
 import { toast } from "react-toastify";
 import { l3EventApi } from "@/api/apiEndpoints";
 import { parseTimestampValue } from "@/utils/l3Events/timelineBuilder";
@@ -196,7 +196,7 @@ function downloadBlob(blob, fileName) {
   URL.revokeObjectURL(url);
 }
 
-function UploadHistoryLanding({ projectId, projectName, onOpenAnalysis, onOpenProject, onBack }) {
+function UploadHistoryLanding({ projectId, projectName, onOpenAnalysis, onBack }) {
   const [uploading, setUploading] = useState(false);
   const [progress, setProgress] = useState(0);
   const [historyLoading, setHistoryLoading] = useState(true);
@@ -208,7 +208,6 @@ function UploadHistoryLanding({ projectId, projectName, onOpenAnalysis, onOpenPr
   const [syncing, setSyncing] = useState(false);
   const [syncCandidates, setSyncCandidates] = useState(null);
   const [selectedSyncSessionIds, setSelectedSyncSessionIds] = useState([]);
-  const [manualProjectId, setManualProjectId] = useState(projectId ? String(projectId) : "");
   const [manualSessionId, setManualSessionId] = useState("");
   const [manualRemarks, setManualRemarks] = useState("");
   const [historySearch, setHistorySearch] = useState("");
@@ -235,7 +234,7 @@ function UploadHistoryLanding({ projectId, projectName, onOpenAnalysis, onOpenPr
   const syncNewSessions = async () => {
     setSyncing(true);
     try {
-      const selectedProjectId = numberOrNull(projectId) || numberOrNull(manualProjectId);
+      const selectedProjectId = numberOrNull(projectId);
       const response = await l3EventApi.syncNewSessionDiagnostics({ projectId: selectedProjectId });
       if (response?.status !== 1) throw new Error(response?.message || "Session sync failed.");
       const candidates = Array.isArray(response?.data) ? response.data : [];
@@ -257,7 +256,7 @@ function UploadHistoryLanding({ projectId, projectName, onOpenAnalysis, onOpenPr
 
     setSyncing(true);
     try {
-      const selectedProjectId = numberOrNull(projectId) || numberOrNull(manualProjectId);
+      const selectedProjectId = numberOrNull(projectId);
       const response = await l3EventApi.syncNewSessionDiagnostics({
         projectId: selectedProjectId,
         sessionIds: selectedSyncSessionIds,
@@ -284,7 +283,7 @@ function UploadHistoryLanding({ projectId, projectName, onOpenAnalysis, onOpenPr
     const replaceHistoryId = Number(replaceRow?.id);
     const selectedProjectId = replaceRow
       ? replaceRow.projectId || null
-      : manualProjectId.trim() ? Number(manualProjectId) : null;
+      : numberOrNull(projectId);
     const selectedSessionId = replaceRow
       ? replaceRow.sessionId || null
       : manualSessionId.trim() ? Number(manualSessionId) : null;
@@ -430,7 +429,6 @@ function UploadHistoryLanding({ projectId, projectName, onOpenAnalysis, onOpenPr
 
     return historyRows.filter((row) => [
       row.id,
-      row.projectId,
       row.sessionId,
       row.originalFileName,
       row.uploadedOn,
@@ -453,16 +451,12 @@ function UploadHistoryLanding({ projectId, projectName, onOpenAnalysis, onOpenPr
         </div>
 
         <section className="l3-glass rounded-lg p-[clamp(0.8rem,1.7vw,1.25rem)]">
-          <div className="mb-4 grid gap-3 sm:grid-cols-2">
-            <label className="text-xs text-slate-300">
-              <span className="mb-1 block">Project ID (optional)</span>
-              <input type="number" min="1" value={manualProjectId} onChange={(event) => setManualProjectId(event.target.value)} placeholder="Enter project ID" className="l3-glass-control l3-ui-copy h-9 w-full rounded px-3 text-white outline-none" />
-            </label>
+          <div className="mb-4 grid gap-3">
             <label className="text-xs text-slate-300">
               <span className="mb-1 block">Session ID (optional)</span>
               <input type="number" min="1" value={manualSessionId} onChange={(event) => setManualSessionId(event.target.value)} placeholder="Leave empty to create a new session" className="l3-glass-control l3-ui-copy h-9 w-full rounded px-3 text-white outline-none" />
             </label>
-            <label className="text-xs text-slate-300 sm:col-span-2">
+            <label className="text-xs text-slate-300">
               <span className="mb-1 block">Remarks <span className="text-red-300">*</span></span>
               <input value={manualRemarks} onChange={(event) => setManualRemarks(event.target.value)} placeholder="Enter a remark for this upload" className="l3-glass-control l3-ui-copy h-9 w-full rounded px-3 text-white outline-none" />
             </label>
@@ -496,32 +490,18 @@ function UploadHistoryLanding({ projectId, projectName, onOpenAnalysis, onOpenPr
           </div>
           <div className="l3-table-shell max-h-[calc(100vh-360px)] rounded border border-slate-800/70">
             <table className="l3-history-table l3-ui-copy text-xs">
-              <thead className="bg-slate-800 text-left text-slate-400"><tr><th className="px-3 py-2">ID</th><th className="px-3 py-2">Project ID</th><th className="px-3 py-2">Session ID</th><th className="px-3 py-2">File Name</th><th className="px-3 py-2">Uploaded On</th><th className="px-3 py-2">Remarks</th><th className="px-3 py-2">Action</th></tr></thead>
+              <thead className="bg-slate-800 text-left text-slate-400"><tr><th className="px-3 py-2">ID</th><th className="px-3 py-2">Session ID</th><th className="px-3 py-2">File Name</th><th className="px-3 py-2">Uploaded On</th><th className="px-3 py-2">Remarks</th><th className="px-3 py-2">Action</th></tr></thead>
               <tbody>
-                {historyLoading ? <tr><td colSpan={7} className="p-8 text-center"><Loader2 className="mx-auto h-5 w-5 animate-spin" /></td></tr> : filteredHistoryRows.length ? filteredHistoryRows.map((row) => (
+                {historyLoading ? <tr><td colSpan={6} className="p-8 text-center"><Loader2 className="mx-auto h-5 w-5 animate-spin" /></td></tr> : filteredHistoryRows.length ? filteredHistoryRows.map((row) => (
                   <tr key={row.id || row.uploadHistoryId} className="border-t border-slate-800 text-slate-200">
                     <td className="px-3 py-2 font-mono">{row.id || "—"}</td>
-                    <td className="px-3 py-2 font-mono">
-                      {row.projectId ? (
-                        <button
-                          type="button"
-                          onClick={() => onOpenProject(row)}
-                          className="inline-flex items-center gap-1.5 rounded border border-blue-400/50 bg-blue-400/10 px-2 py-1 text-blue-200 transition hover:border-blue-300 hover:bg-blue-400/20"
-                          title={`Open project ${row.projectId} in a new tab`}
-                          aria-label={`Open project ${row.projectId} in a new tab`}
-                        >
-                          <FolderOpen className="h-3.5 w-3.5" />
-                          <span>{row.projectId}</span>
-                        </button>
-                      ) : "—"}
-                    </td>
                     <td className="px-3 py-2 font-mono">{row.sessionId || "—"}</td>
                     <td className="max-w-80 px-3 py-2"><div className="break-all font-medium text-white">{row.originalFileName || "—"}</div></td>
                     <td className="px-3 py-2">{row.uploadedOn ? new Date(row.uploadedOn).toLocaleString() : "—"}</td>
                     <td className="max-w-80 px-3 py-2">{row.remarks || "-"}</td>
                     <td className="px-3"><div className="flex items-center gap-2"><button type="button" onClick={() => onOpenAnalysis(row)} disabled={deletingHistoryId === Number(row.id) || uploading || savingHistory || !row.id} className="inline-flex items-center gap-1 rounded bg-blue-600 px-3 py-1.5 font-medium hover:bg-blue-500 disabled:opacity-50">Analysis</button><button type="button" onClick={() => openEditHistory(row)} disabled={deletingHistoryId !== null || uploading || savingHistory} className="inline-flex items-center gap-1 rounded border border-cyan-400/60 bg-cyan-400/10 px-3 py-1.5 font-medium text-cyan-200 hover:bg-cyan-400/20 disabled:opacity-50"><Edit3 className="h-3.5 w-3.5" /></button><button type="button" onClick={() => deleteHistory(row)} disabled={deletingHistoryId !== null || uploading || savingHistory} className="inline-flex items-center gap-1 rounded border border-red-500/60 bg-red-500/10 px-3 py-1.5 font-medium text-red-300 hover:bg-red-500/20 disabled:opacity-50">{deletingHistoryId === Number(row.id) ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}</button></div></td>
                   </tr>
-                )) : <tr><td colSpan={7} className="p-8 text-center text-slate-500">{historySearch.trim() ? "No L3 sessions match your search." : "No L3 sessions were found."}</td></tr>}
+                )) : <tr><td colSpan={6} className="p-8 text-center text-slate-500">{historySearch.trim() ? "No L3 sessions match your search." : "No L3 sessions were found."}</td></tr>}
               </tbody>
             </table>
           </div>
@@ -550,7 +530,6 @@ function UploadHistoryLanding({ projectId, projectName, onOpenAnalysis, onOpenPr
               <button type="button" onClick={() => setEditingRow(null)} disabled={savingHistory} className="rounded border border-slate-700 p-1.5 hover:bg-slate-800 disabled:opacity-50"><X className="h-4 w-4" /></button>
             </div>
             <div className="grid gap-3 sm:grid-cols-2">
-              <label className="text-xs text-slate-300"><span className="mb-1 block">Project ID</span><input type="number" min="1" value={editingRow.projectId} onChange={(event) => updateEditField("projectId", event.target.value)} className="h-9 w-full rounded border border-slate-700 bg-slate-950 px-3 text-sm text-white outline-none focus:border-cyan-500" /></label>
               <label className="text-xs text-slate-300"><span className="mb-1 block">Session ID</span><input type="number" min="1" value={editingRow.sessionId} onChange={(event) => updateEditField("sessionId", event.target.value)} className="h-9 w-full rounded border border-slate-700 bg-slate-950 px-3 text-sm text-white outline-none focus:border-cyan-500" /></label>
               <label className="text-xs text-slate-300"><span className="mb-1 block">Status</span><input type="number" min="0" value={editingRow.status} onChange={(event) => updateEditField("status", event.target.value)} className="h-9 w-full rounded border border-slate-700 bg-slate-950 px-3 text-sm text-white outline-none focus:border-cyan-500" /></label>
               <label className="text-xs text-slate-300 sm:col-span-2"><span className="mb-1 block">File Name</span><input value={editingRow.originalFileName} onChange={(event) => updateEditField("originalFileName", event.target.value)} className="h-9 w-full rounded border border-slate-700 bg-slate-950 px-3 text-sm text-white outline-none focus:border-cyan-500" /></label>
@@ -709,20 +688,12 @@ export default function BackendL3EventAnalyzer() {
     setSearchParams(nextParams);
   };
 
-  const openProjectInNewTab = (row) => {
-    const selectedProjectId = valueOf(row, "projectId", "project_id");
-    if (!selectedProjectId) return;
-
-    const projectUrl = new URL("/unified-map", window.location.origin);
-    projectUrl.searchParams.set("project_id", String(selectedProjectId));
-    window.open(projectUrl.toString(), "_blank", "noopener,noreferrer");
-  };
 
   return (
     <div className="h-screen min-h-0 w-full overflow-hidden bg-slate-950">
       {sessionIds.length || analysisId
         ? <BackendAnalyzer sessionIds={sessionIds} analysisId={analysisId} projectName={projectName} onBack={() => setSearchParams(projectId ? { projectId: String(projectId) } : {})} />
-        : <UploadHistoryLanding projectId={projectId} projectName={projectName} onOpenAnalysis={openAnalysis} onOpenProject={openProjectInNewTab} onBack={() => navigate("/viewProject")} />}
+        : <UploadHistoryLanding projectId={projectId} projectName={projectName} onOpenAnalysis={openAnalysis} onBack={() => navigate("/viewProject")} />}
     </div>
   );
 }
