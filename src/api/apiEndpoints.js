@@ -2305,6 +2305,7 @@ export const l3EventApi = {
     "/api/L3Event/SyncNewSessionDiagnostics",
     null,
     {
+      cancelOnNavigation: false,
       params: {
         ...(Number(projectId) > 0 ? { projectId: Number(projectId) } : {}),
         ...(Array.isArray(sessionIds) && sessionIds.length

@@ -173,13 +173,14 @@ const getNormalizedTechnology = (log, band = null) => {
   ];
 
   for (const candidate of candidates) {
+    if (!String(candidate ?? "").trim()) continue;
     const normalized = normalizeTechName(candidate, band);
     if (normalized && normalized !== "Unknown") {
       return normalized;
     }
   }
 
-  return "Unknown";
+  return normalizeTechName(null, band);
 };
 
 

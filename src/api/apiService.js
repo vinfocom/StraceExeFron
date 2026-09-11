@@ -309,11 +309,11 @@ const redirectToLogin = () => {
 // src/api/apiService.js
 
 const apiService = async (endpoint, options = {}) => {
-  const { priority = 0, dedupe = true, ...axiosOptions } = options;
+  const { priority = 0, dedupe = true, cancelOnNavigation = true, ...axiosOptions } = options;
 
   const makeRequest = async () => {
     const controller = new AbortController();
-    activeAbortControllers.add(controller);
+    if (cancelOnNavigation) activeAbortControllers.add(controller);
 
     // Preserve caller-provided abort signal while allowing global cancellation.
     if (axiosOptions.signal) {
@@ -339,6 +339,10 @@ const apiService = async (endpoint, options = {}) => {
       activeAbortControllers.delete(controller);
     }
   };
+
+  // Navigation clears the shared queue as well as aborting active requests.
+  // Persistent operations must start outside that queue to survive either case.
+  if (!cancelOnNavigation) return makeRequest();
 
   if (priority === 0) {
     // FIX: Create a unique key that includes parameters/data

@@ -469,13 +469,14 @@ const getNormalizedLocationTechnology = (row = {}) => {
   ];
 
   for (const candidate of candidates) {
+    if (!String(candidate ?? "").trim()) continue;
     const normalized = normalizeTechName(candidate, band);
     if (normalized && String(normalized).trim().toLowerCase() !== "unknown") {
       return normalized;
     }
   }
 
-  return "Unknown";
+  return normalizeTechName(null, band);
 };
 
 const buildDurationRowsFromNetworkLogs = (logs = []) => {
@@ -1968,6 +1969,13 @@ const UnifiedMapView = () => {
   const [storedGridScenarioId, setStoredGridScenarioId] = useState(null);
   const [storedGridScenarioOptions, setStoredGridScenarioOptions] = useState([]);
   const [storedGridTechnology, setStoredGridTechnology] = useState("ALL");
+  const handleUnifiedTechnologyChange = useCallback((nextTechnology) => {
+    const technology = String(nextTechnology || "ALL").trim().toUpperCase();
+    const technologies = technology === "ALL" ? [] : [technology];
+    setStoredGridTechnology(technology);
+    setDataFilters((prev) => ({ ...prev, technologies }));
+    setSiteFilters((prev) => ({ ...prev, technologies }));
+  }, []);
   const [deltaGridScope, setDeltaGridScope] = useState("selected");
   const [deltaGridApiState, setDeltaGridApiState] = useState({
     computing: false,
@@ -2012,15 +2020,6 @@ const UnifiedMapView = () => {
           : "original";
     setSitePredictionVersion(resolvedVersion);
     setStoredGridVersion(resolvedVersion);
-  }, []);
-
-  const handleUnifiedTechnologyChange = useCallback((nextTechnology) => {
-    const normalized = String(nextTechnology || "ALL").trim().toUpperCase();
-    const technology = ["4G", "5G"].includes(normalized) ? normalized : "ALL";
-    const technologies = technology === "ALL" ? [] : [technology];
-    setStoredGridTechnology(technology);
-    setDataFilters((prev) => ({ ...prev, technologies }));
-    setSiteFilters((prev) => ({ ...prev, technologies }));
   }, []);
 
   const clearStoredGridOverlay = useCallback((showToast = false) => {
@@ -4626,6 +4625,17 @@ const UnifiedMapView = () => {
     const apps = new Set();
     const macDetailFields = new Set();
 
+    // Keep log technology choices available regardless of active map filters.
+    (locations || []).forEach((loc) => {
+      const technologyName = normalizeTechName(
+        loc?.technology ?? loc?.networkType ?? loc?.network ?? "",
+        loc?.band ?? loc?.Band,
+      );
+      if (technologyName && !isUnknownOption(technologyName)) {
+        technologies.add(technologyName);
+      }
+    });
+
     (renderedLegendFilteredLocations || []).forEach((loc) => {
       if (loc?.extra_fields && typeof loc.extra_fields === "object") {
         Object.keys(loc.extra_fields).forEach((key) => {
@@ -4639,13 +4649,6 @@ const UnifiedMapView = () => {
       if (loc.band) {
         const norm = normalizeBandName(loc.band);
         if (norm && norm !== "Unknown") bands.add(norm);
-      }
-      const technologyName = normalizeTechName(
-        loc?.technology ?? loc?.networkType ?? "",
-        loc?.band,
-      );
-      if (technologyName && !isUnknownOption(technologyName)) {
-        technologies.add(technologyName);
       }
       const cellId = String(
         loc?.cell_id ?? loc?.cellId ?? loc?.CellId ?? "",
@@ -4689,7 +4692,7 @@ const UnifiedMapView = () => {
       apps: [...apps].sort((a, b) => a.localeCompare(b)),
       macDetailFields: [...macDetailFields].sort((a, b) => a.localeCompare(b)),
     };
-  }, [renderedLegendFilteredLocations, polygonFilteredNeighborData]);
+  }, [locations, renderedLegendFilteredLocations, polygonFilteredNeighborData]);
   const effectiveGridColorBy = useMemo(() => colorBy, [colorBy]);
 
   const gridDisplayData = useUnifiedGridViewData({
@@ -7897,6 +7900,7 @@ const UnifiedMapView = () => {
               <InsightMarkers
                 show={showInsights}
                 insights={insights}
+                radius={logRadius}
               />
 
             </MapWithMultipleCircles>

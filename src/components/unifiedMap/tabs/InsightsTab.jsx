@@ -2,7 +2,6 @@ import React, { useState } from "react";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import {
-  formatInsightDetails,
   getInsightSeverity,
   getInsightSeverityColor,
   getInsightValue,
@@ -54,7 +53,6 @@ const InsightsTab = ({ insights = [] }) => {
               const severity = getInsightSeverity(insight);
               const title = getInsightValue(insight, "title", "Title") || "Untitled insight";
               const description = getInsightValue(insight, "description", "Description") || "No description available";
-              const details = getInsightValue(insight, "details", "Details");
 
               return (
                 <React.Fragment key={`${rowKey}-${index}`}>
@@ -93,14 +91,6 @@ const InsightsTab = ({ insights = [] }) => {
                               Description
                             </div>
                             <p className="leading-6 text-slate-300">{description}</p>
-                          </div>
-                          <div>
-                            <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-500">
-                              Details
-                            </div>
-                            <pre className="max-h-60 overflow-auto rounded-md bg-slate-950 p-3 text-xs leading-5 text-slate-300 whitespace-pre-wrap break-words">
-                              {formatInsightDetails(details)}
-                            </pre>
                           </div>
                         </div>
                       </td>

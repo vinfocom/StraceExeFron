@@ -3927,8 +3927,13 @@ const UnifiedMapSidebar = ({
                       onChange={handleStoredGridTechnologyChange}
                       options={[
                         { value: "ALL", label: "All Technologies" },
-                        { value: "4G", label: "4G" },
-                        { value: "5G", label: "5G" },
+                        ...([...new Set([
+                          ...(availableFilterOptions?.technologies || []),
+                          ...(storedGridTechnology !== "ALL" ? [storedGridTechnology] : []),
+                        ])].map((technology) => ({
+                          value: technology,
+                          label: technology,
+                        }))),
                       ]}
                       placeholder="All Technologies"
                       disabled={!enableDataToggle}
@@ -3971,8 +3976,13 @@ const UnifiedMapSidebar = ({
                     onChange={handleStoredGridTechnologyChange}
                     options={[
                       { value: "ALL", label: "All Technologies" },
-                      { value: "4G", label: "4G" },
-                      { value: "5G", label: "5G" },
+                      ...([...new Set([
+                        ...(siteFilterOptions?.technologies || []),
+                        ...(storedGridTechnology !== "ALL" ? [storedGridTechnology] : []),
+                      ])].map((technology) => ({
+                        value: technology,
+                        label: technology,
+                      }))),
                     ]}
                     placeholder="All Technologies"
                     disabled={!enableSiteToggle || !hasValidProjectId}
@@ -4659,8 +4669,11 @@ const UnifiedMapSidebar = ({
                     onChange={handleStoredGridTechnologyChange}
                     options={[
                       { value: "ALL", label: "All" },
-                      { value: "4G", label: "4G" },
-                      { value: "5G", label: "5G" },
+                      ...([...new Set([
+                        "4G",
+                        "5G",
+                        ...(storedGridTechnology !== "ALL" ? [storedGridTechnology] : []),
+                      ])].map((technology) => ({ value: technology, label: technology }))),
                     ]}
                     placeholder="Select technology"
                   />

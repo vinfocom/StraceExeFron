@@ -183,6 +183,27 @@ export const normalizeProviderName = (rawName) => {
 };
 
 export const normalizeTechName = (tech, band = null) => {
+  const technologyToken = String(tech ?? "").trim().toUpperCase().replace(/[^A-Z0-9]/g, "");
+  // Preserve explicit modes before an NR band can reduce the label to generic 5G.
+  if (technologyToken.includes("LTEANCHOR") && technologyToken.includes("NSA")) {
+    return "4G(LTE-ANCHOR NSA)";
+  }
+  if (
+    technologyToken.includes("NSA") ||
+    technologyToken.includes("NONSTANDALONE") ||
+    technologyToken.includes("ENDC")
+  ) {
+    return "5G NSA";
+  }
+  if (
+    technologyToken === "SA" ||
+    /(?:^|[^A-Z0-9])SA(?:$|[^A-Z0-9])/i.test(String(tech ?? "")) ||
+    /^(?:5G|NR)(?:5G|NR)?SA$/.test(technologyToken) ||
+    technologyToken.includes("STANDALONE")
+  ) {
+    return "5G SA";
+  }
+
   if (band) {
     const bandStr = String(band).trim().toLowerCase();
     const nrBandPattern = /^n\d+/i;
@@ -219,6 +240,7 @@ export const normalizeTechName = (tech, band = null) => {
   }
 
   const has5GSignal =
+    t === "NR" ||
     t.includes("5G") ||
     t.includes("NR NSA") ||
     t.includes("NR SA") ||
@@ -320,6 +342,8 @@ export const COLOR_SCHEMES = {
   },
   technology: {
     "5G": "#EC4899",
+    "5G SA": "#EC4899",
+    "5G NSA": "#EC4899",
     "NR (5G NSA)": "#EC4899",
     "NR (5G SA)": "#EC4899",
     "4G(LTE-ANCHOR NSA)": "#6366F1",
@@ -420,6 +444,8 @@ export const applyTechnologyColorSettings = (settings = {}) => {
     LTE: fourGColor,
     "4G(LTE-ANCHOR NSA)": fourGColor,
     "5G": fiveGColor,
+    "5G SA": fiveGColor,
+    "5G NSA": fiveGColor,
     "NR (5G NSA)": fiveGColor,
     "NR (5G SA)": fiveGColor,
   });

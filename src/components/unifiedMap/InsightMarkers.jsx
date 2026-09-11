@@ -1,20 +1,12 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef } from "react";
 import { GoogleMapsOverlay } from "@deck.gl/google-maps";
-import { ScatterplotLayer } from "@deck.gl/layers";
+import { PathLayer, ScatterplotLayer } from "@deck.gl/layers";
 import { useGoogleMap } from "@react-google-maps/api";
 import {
   getInsightCoordinates,
   getInsightSeverity,
   getInsightSeverityColor,
 } from "./insightUtils";
-
-const BASE_RADIUS_BY_SEVERITY = {
-  HIGH: 8,
-  CRITICAL: 8,
-  MEDIUM: 7,
-  WARNING: 7,
-  LOW: 6,
-};
 
 const hexToRgba = (hex, alpha = 230) => {
   const normalized = String(hex || "").replace("#", "");
@@ -31,18 +23,9 @@ const hexToRgba = (hex, alpha = 230) => {
   ];
 };
 
-// The marker radius follows the map zoom: zooming out shrinks points and
-// zooming in enlarges them, while staying within readable pixel limits.
-const getDynamicRadius = (severity, zoom) => {
-  const baseRadius = BASE_RADIUS_BY_SEVERITY[severity] || 6;
-  const zoomScale = 1.18 ** (zoom - 13);
-  return Math.max(2, Math.min(42, baseRadius * zoomScale));
-};
-
-const InsightMarkers = ({ insights = [], show = false }) => {
+const InsightMarkers = ({ insights = [], show = false, radius = 10 }) => {
   const map = useGoogleMap();
   const overlayRef = useRef(null);
-  const [zoom, setZoom] = useState(() => map?.getZoom?.() || 13);
 
   const markerRows = useMemo(
     () =>
@@ -63,18 +46,10 @@ const InsightMarkers = ({ insights = [], show = false }) => {
   useEffect(() => {
     if (!map) return undefined;
 
-    const updateZoom = () => setZoom(map.getZoom?.() || 13);
-    updateZoom();
-    const listener = map.addListener("zoom_changed", updateZoom);
-    return () => listener?.remove?.();
-  }, [map]);
-
-  useEffect(() => {
-    if (!map) return undefined;
-
     if (!overlayRef.current) {
       overlayRef.current = new GoogleMapsOverlay({
         interleaved: false,
+        style: { zIndex: "10", pointerEvents: "none" },
         glOptions: { preserveDrawingBuffer: false },
       });
     }
@@ -86,6 +61,31 @@ const InsightMarkers = ({ insights = [], show = false }) => {
     };
   }, [map]);
 
+  const severityPaths = useMemo(() => {
+    const groups = new Map();
+    // Connect each severity in the order its insights were returned.
+    markerRows.forEach((marker) => {
+      if (!groups.has(marker.severity)) groups.set(marker.severity, []);
+      groups.get(marker.severity).push([marker.lng, marker.lat]);
+    });
+    return Array.from(groups, ([severity, path]) => ({ severity, path }))
+      .filter(({ path }) => path.length > 1);
+  }, [markerRows]);
+
+  const connectionLayer = useMemo(
+    () => new PathLayer({
+      id: "unified-map-insight-severity-lines",
+      data: severityPaths,
+      getPath: (group) => group.path,
+      getColor: (group) => hexToRgba(getInsightSeverityColor(group.severity), 225),
+      getWidth: 2,
+      widthUnits: "pixels",
+      pickable: false,
+      parameters: { depthTest: false },
+    }),
+    [severityPaths],
+  );
+
   const markerLayer = useMemo(
     () => new ScatterplotLayer({
       id: "unified-map-insight-markers",
@@ -94,26 +94,28 @@ const InsightMarkers = ({ insights = [], show = false }) => {
       getFillColor: (marker) => hexToRgba(getInsightSeverityColor(marker.severity), 225),
       getLineColor: [255, 255, 255, 235],
       getLineWidth: 1,
-      getRadius: (marker) => getDynamicRadius(marker.severity, zoom),
+      getRadius: radius,
       radiusUnits: "pixels",
+      radiusMinPixels: 4,
+      radiusMaxPixels: 40,
       lineWidthUnits: "pixels",
       lineWidthMinPixels: 1,
-      stroked: true,
+      stroked: false,
       filled: true,
       pickable: false,
       parameters: { depthTest: false },
       updateTriggers: {
-        getRadius: [zoom],
+        getRadius: [radius],
         getFillColor: [markerRows],
       },
     }),
-    [markerRows, zoom],
+    [markerRows, radius],
   );
 
   useEffect(() => {
     if (!overlayRef.current) return;
-    overlayRef.current.setProps({ layers: show ? [markerLayer] : [] });
-  }, [markerLayer, show]);
+    overlayRef.current.setProps({ layers: show ? [connectionLayer, markerLayer] : [] });
+  }, [connectionLayer, markerLayer, show]);
 
   useEffect(() => {
     if (!show || !map || !window.google?.maps || markerRows.length === 0) return;
