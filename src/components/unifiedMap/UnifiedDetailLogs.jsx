@@ -51,6 +51,7 @@ import { calculateStats, calculateIOSummary } from "@/utils/analyticsHelpers";
 import { exportAnalytics } from "@/utils/exportService";
 import { TABS } from "@/utils/constants";
 import { FEATURE_KEYS, hasFeatureAccess } from "@/utils/featureAccess";
+import { getMetricLabelsForLocations } from "@/utils/technologyMetricLabels";
 import { adminApi, homeApi, reportApi } from "@/api/apiEndpoints";
 import { useAuth } from "@/hooks/useAuth";
 
@@ -1575,6 +1576,12 @@ function UnifiedDetailLogs({
         : deferredRawLocations,
     [deferredRawLocations, dataFilters, hasActiveFilters],
   );
+  const metricLabels = useMemo(
+    () => getMetricLabelsForLocations(
+      filteredRawLocations.length > 0 ? filteredRawLocations : filteredLocations,
+    ),
+    [filteredLocations, filteredRawLocations],
+  );
 
   const exportLocations = useMemo(() => {
     if (Array.isArray(rawFilteredLocations) && rawFilteredLocations.length > 0) {
@@ -2217,6 +2224,7 @@ function UnifiedDetailLogs({
               availableBands={availableBands}
               gridViewEnabled={gridViewEnabled}
               gridViewSummary={gridViewSummary}
+              metricLabels={metricLabels}
             />
             )}
 
@@ -2227,6 +2235,7 @@ function UnifiedDetailLogs({
               thresholds={thresholds}
               expanded={expanded}
               chartRefs={chartRefs}
+              metricLabels={metricLabels}
             />
           )}
 
@@ -2248,6 +2257,7 @@ function UnifiedDetailLogs({
               storedGridMetricMode={storedGridMetricMode}
               viewport={viewport}
               expanded={expanded}
+              metricLabels={metricLabels}
             />
           )}
 
@@ -2257,6 +2267,7 @@ function UnifiedDetailLogs({
               chartRefs={chartRefs}
               expanded={expanded}
               enableSiteToggle={enableSiteToggle}
+              metricLabels={metricLabels}
             />
           )}
 
@@ -2265,6 +2276,7 @@ function UnifiedDetailLogs({
               locations={gridViewEnabled ? filteredLocations : filteredRawLocations}
               expanded={expanded}
               chartRefs={chartRefs}
+              metricLabels={metricLabels}
             />
           )}
 
@@ -2273,6 +2285,7 @@ function UnifiedDetailLogs({
               locations={filteredRawLocations}
               expanded={expanded}
               chartRefs={chartRefs}
+              metricLabels={metricLabels}
               onHighlightLogs={onHighlightLogs}
             />
           )}
@@ -2282,6 +2295,7 @@ function UnifiedDetailLogs({
               appSummary={appSummary}
               expanded={expanded}
               chartRefs={chartRefs}
+              metricLabels={metricLabels}
             />
           )}
 
@@ -2291,6 +2305,7 @@ function UnifiedDetailLogs({
               outdoor={outdoor}
               expanded={expanded}
               chartRefs={chartRefs}
+              metricLabels={metricLabels}
             />
           )}
 
@@ -2303,6 +2318,7 @@ function UnifiedDetailLogs({
               showTechnology={techHandOver}
               showBand={bandHandover}
               showPci={pciHandover}
+              metricLabels={metricLabels}
             />
           )}
 
@@ -2315,6 +2331,7 @@ function UnifiedDetailLogs({
               n78NeighborLoading={n78NeighborLoading}
               thresholds={thresholds}
               expanded={expanded}
+              metricLabels={metricLabels}
               primaryData={filteredRawLocations.length > 0 ? filteredRawLocations : filteredLocations}
             />
           )}
@@ -2329,6 +2346,7 @@ function UnifiedDetailLogs({
               selectedSubSessionTarget={selectedSubSessionTarget}
               selectedSubSessionTargets={selectedSubSessionTargets}
               onSubSessionSelect={onSubSessionSelect}
+              metricLabels={metricLabels}
             />
           )}
         </Suspense>

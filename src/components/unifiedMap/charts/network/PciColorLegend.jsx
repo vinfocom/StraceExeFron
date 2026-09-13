@@ -213,6 +213,21 @@ const CELL_SORT_OPTIONS = {
   nodebId: { label: "NodeB ID", key: "nodebId", getValue: (item) => item.nodebId || "" },
 };
 
+const getMetricDisplayLabel = (metricKey, metricLabels = {}) =>
+  metricLabels[metricKey] !== undefined
+    ? metricLabels[metricKey]
+    : ({ rsrp: "RSRP", rsrq: "RSRQ", sinr: "SINR" }[metricKey] || metricKey);
+
+const getDisplaySortOptions = (options, metricLabels = {}) =>
+  Object.fromEntries(
+    Object.entries(options).map(([key, option]) => [
+      key,
+      ["rsrp", "rsrq", "sinr"].includes(key)
+        ? { ...option, label: getMetricDisplayLabel(key, metricLabels) }
+        : option,
+    ]),
+  );
+
 const getTechnologyColor = (tech) => {
   if (!tech) return "#6B7280";
   if (TECHNOLOGY_COLORS[tech]) return TECHNOLOGY_COLORS[tech];
@@ -446,7 +461,7 @@ const resolvePciValue = (loc) => {
   return String(rawPci);
 };
 
-export const PciColorLegend = React.forwardRef(({ locations }, ref) => {
+export const PciColorLegend = React.forwardRef(({ locations, metricLabels = {} }, ref) => {
   const [viewMode, setViewMode] = useState("color-map");
   const [selectedPci, setSelectedPci] = useState(null);
   
@@ -862,6 +877,7 @@ export const PciColorLegend = React.forwardRef(({ locations }, ref) => {
           sortConfig={pciSortConfig}
           onSortChange={setPciSortConfig}
           isGridDataset={isGridDataset}
+          metricLabels={metricLabels}
         />
       )}
 
@@ -870,6 +886,7 @@ export const PciColorLegend = React.forwardRef(({ locations }, ref) => {
           providerData={sortedProviderData}
           sortConfig={providerSortConfig}
           onSortChange={setProviderSortConfig}
+          metricLabels={metricLabels}
         />
       )}
 
@@ -878,6 +895,7 @@ export const PciColorLegend = React.forwardRef(({ locations }, ref) => {
           cellData={sortedCellData}
           sortConfig={cellSortConfig}
           onSortChange={setCellSortConfig}
+          metricLabels={metricLabels}
         />
       )}
     </ChartContainer>
@@ -894,11 +912,13 @@ const PCIColorMapView = ({
   sortConfig,
   onSortChange,
   isGridDataset = false,
+  metricLabels = {},
 }) => {
   const [expandedPci, setExpandedPci] = useState(null);
 
   // Get the display info for current sort option
-  const sortOption = SORT_OPTIONS[sortConfig.key] || SORT_OPTIONS.count;
+  const displaySortOptions = getDisplaySortOptions(SORT_OPTIONS, metricLabels);
+  const sortOption = displaySortOptions[sortConfig.key] || displaySortOptions.count;
 
   return (
     <div className="space-y-2">
@@ -906,7 +926,7 @@ const PCIColorMapView = ({
         <SortControl 
           sortConfig={sortConfig} 
           onSortChange={onSortChange} 
-          options={SORT_OPTIONS}
+          options={displaySortOptions}
         />
         <div className="text-[13px] text-white font-medium">
           {pciColorMap.length} {isGridDataset ? "Best PCIs" : "PCIs"}
@@ -916,7 +936,7 @@ const PCIColorMapView = ({
       <QuickSortChips 
         sortConfig={sortConfig} 
         onSortChange={onSortChange} 
-        options={SORT_OPTIONS}
+        options={displaySortOptions}
       />
 
       <div className="space-y-1 max-h-[350px] overflow-y-auto scrollbar-hide">
@@ -998,14 +1018,14 @@ const PCIColorMapView = ({
                 <div className="border-t border-slate-700 bg-slate-900/50 p-2 space-y-2">
                   <div className="grid grid-cols-4 gap-1">
                     <MetricMiniCard 
-                      label="RSRP" 
+                      label={getMetricDisplayLabel("rsrp", metricLabels)}
                       value={item.avgRsrp?.avg} 
                       unit="dBm"
                       color={parseFloat(item.avgRsrp?.avg) >= -90 ? "green" : 
                              parseFloat(item.avgRsrp?.avg) >= -105 ? "yellow" : "red"}
                     />
-                    <MetricMiniCard label="RSRQ" value={item.avgRsrq?.avg} unit="dB" color="blue" />
-                    <MetricMiniCard label="SINR" value={item.avgSinr?.avg} unit="dB" color="green" />
+                    <MetricMiniCard label={getMetricDisplayLabel("rsrq", metricLabels)} value={item.avgRsrq?.avg} unit="dB" color="blue" />
+                    <MetricMiniCard label={getMetricDisplayLabel("sinr", metricLabels)} value={item.avgSinr?.avg} unit="dB" color="green" />
                     <MetricMiniCard label="MOS" value={item.avgMos?.avg} unit="" color="yellow" />
                   </div>
 
@@ -1074,7 +1094,7 @@ const MetricMiniCard = ({ label, value, unit, color }) => {
 };
 
 // Provider View Component (keeping existing implementation)
-const PCIByProviderView = ({ providerData, sortConfig, onSortChange }) => {
+const PCIByProviderView = ({ providerData, sortConfig, onSortChange, metricLabels = {} }) => {
   const [expandedProvider, setExpandedProvider] = useState(null);
 
   if (!providerData?.length) {
@@ -1091,7 +1111,7 @@ const PCIByProviderView = ({ providerData, sortConfig, onSortChange }) => {
         <SortControl 
           sortConfig={sortConfig} 
           onSortChange={onSortChange} 
-          options={PROVIDER_SORT_OPTIONS}
+          options={getDisplaySortOptions(PROVIDER_SORT_OPTIONS, metricLabels)}
         />
         <div className="text-[13px] text-white">
           {providerData.length} providers
@@ -1101,7 +1121,7 @@ const PCIByProviderView = ({ providerData, sortConfig, onSortChange }) => {
       <QuickSortChips 
         sortConfig={sortConfig} 
         onSortChange={onSortChange} 
-        options={PROVIDER_SORT_OPTIONS}
+        options={getDisplaySortOptions(PROVIDER_SORT_OPTIONS, metricLabels)}
       />
 
       <div className="space-y-2 max-h-[300px] overflow-y-auto scrollbar-hide">
@@ -1148,13 +1168,13 @@ const PCIByProviderView = ({ providerData, sortConfig, onSortChange }) => {
 
             <div className="grid grid-cols-6 gap-1 px-2 pb-2">
               <MetricMiniCard 
-                label="RSRP" 
+                label={getMetricDisplayLabel("rsrp", metricLabels)}
                 value={provider.avgRsrp?.avg} 
                 unit=""
                 color={parseFloat(provider.avgRsrp?.avg) >= -90 ? "green" : 
                        parseFloat(provider.avgRsrp?.avg) >= -105 ? "yellow" : "red"}
               />
-              <MetricMiniCard label="SINR" value={provider.avgSinr?.avg} unit="" color="green" />
+              <MetricMiniCard label={getMetricDisplayLabel("sinr", metricLabels)} value={provider.avgSinr?.avg} unit="" color="green" />
               <MetricMiniCard label="MOS" value={provider.avgMos?.avg} unit="" color="yellow" />
               <MetricMiniCard label="DL" value={provider.avgDl?.avg} unit="" color="cyan" />
               <MetricMiniCard label="UL" value={provider.avgUl?.avg} unit="" color="orange" />
@@ -1180,7 +1200,7 @@ const PCIByProviderView = ({ providerData, sortConfig, onSortChange }) => {
                         <th className="text-center p-1 text-white font-medium">Cells</th>
                         <th className="text-center p-1 text-white font-medium">Tech</th>
                         <th className="text-center p-1 text-white font-medium">Band</th>
-                        <th className="text-center p-1 text-white font-medium">RSRP</th>
+                        <th className="text-center p-1 text-white font-medium">{getMetricDisplayLabel("rsrp", metricLabels)}</th>
                         <th className="text-center p-1 text-white font-medium">DL</th>
                         <th className="text-center p-1 text-white font-medium">MOS</th>
                       </tr>
@@ -1231,7 +1251,7 @@ const PCIByProviderView = ({ providerData, sortConfig, onSortChange }) => {
 };
 
 // Cell View Component (keeping existing implementation)
-const PCIByCellView = ({ cellData, sortConfig, onSortChange }) => {
+const PCIByCellView = ({ cellData, sortConfig, onSortChange, metricLabels = {} }) => {
   if (!cellData?.length) {
     return (
       <div className="text-center py-4 text-white text-[14px]">
@@ -1246,7 +1266,7 @@ const PCIByCellView = ({ cellData, sortConfig, onSortChange }) => {
         <SortControl 
           sortConfig={sortConfig} 
           onSortChange={onSortChange} 
-          options={CELL_SORT_OPTIONS}
+          options={getDisplaySortOptions(CELL_SORT_OPTIONS, metricLabels)}
         />
         <div className="text-[13px] text-white">
           {cellData.length} cells
@@ -1256,7 +1276,7 @@ const PCIByCellView = ({ cellData, sortConfig, onSortChange }) => {
       <QuickSortChips 
         sortConfig={sortConfig} 
         onSortChange={onSortChange} 
-        options={CELL_SORT_OPTIONS}
+        options={getDisplaySortOptions(CELL_SORT_OPTIONS, metricLabels)}
       />
 
       <div className="grid grid-cols-4 gap-1">
@@ -1277,7 +1297,7 @@ const PCIByCellView = ({ cellData, sortConfig, onSortChange }) => {
                 <th className="text-center p-2 text-white font-medium">Samples</th>
                 <th className="text-center p-2 text-white font-medium">Tech</th>
                 <th className="text-center p-2 text-white font-medium">Band</th>
-                <th className="text-center p-2 text-white font-medium">RSRP</th>
+                <th className="text-center p-2 text-white font-medium">{getMetricDisplayLabel("rsrp", metricLabels)}</th>
                 <th className="text-center p-2 text-white font-medium">DL</th>
                 <th className="text-center p-2 text-white font-medium">MOS</th>
               </tr>

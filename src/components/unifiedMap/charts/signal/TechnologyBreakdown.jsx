@@ -14,6 +14,7 @@ import { ChartContainer } from "../../common/ChartContainer";
 import { EmptyState } from "../../common/EmptyState";
 import { CHART_CONFIG, getTechnologyColor } from "@/utils/constants"; // ✅ Import helper function
 import { filterValidData } from "@/utils/analyticsHelpers";
+import { getTechnologyMetricLabels } from "@/utils/technologyMetricLabels";
 
 export const TechnologyBreakdown = React.forwardRef(({ locations }, ref) => {
   const data = useMemo(() => {
@@ -115,8 +116,8 @@ export const TechnologyBreakdown = React.forwardRef(({ locations }, ref) => {
               </span>
             </div>
             <div className="ml-5 text-slate-400 text-[10px]">
-              RSRP: <span className="text-blue-400">{item.avgRsrp} dBm</span> |
-              SINR: <span className="text-green-400">{item.avgSinr} dB</span>
+              {getTechnologyMetricLabels(item.name).rsrp}: <span className="text-blue-400">{item.avgRsrp} dBm</span> |
+              {getTechnologyMetricLabels(item.name).sinr}: <span className="text-green-400">{item.avgSinr} dB</span>
             </div>
           </div>
         ))}

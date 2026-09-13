@@ -4,16 +4,18 @@ import { OperatorComparisonChart } from "../charts/network/OperatorComparisonCha
 import { PciColorLegend } from "../charts/network/PciColorLegend";
 import { ProviderPerformanceChart } from "../charts/network/ProviderPerformanceChart";
 
-export const NetworkTab = ({ locations, expanded, chartRefs }) => {
+export const NetworkTab = ({ locations, expanded, chartRefs, metricLabels }) => {
   return (
     <div className={`grid ${expanded ? "grid-cols-2" : "grid-cols-1"} gap-4`}>
       <PciColorLegend 
         ref={chartRefs.pciColorLegend}
-        locations={locations} 
+        locations={locations}
+        metricLabels={metricLabels}
       />
       <ProviderPerformanceChart 
         ref={chartRefs.providerPerf}
-        locations={locations} 
+        locations={locations}
+        metricLabels={metricLabels}
       />
     </div>
   );

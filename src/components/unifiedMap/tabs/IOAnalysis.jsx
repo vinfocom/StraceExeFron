@@ -325,7 +325,14 @@ const DataTable = memo(({ data, title, colorType }) => {
 });
 
 // Main Component
-export const IOAnalysis = ({ indoor = [], outdoor = [], expanded = true }) => {
+export const IOAnalysis = ({ indoor = [], outdoor = [], expanded = true, metricLabels = {} }) => {
+  const displayKpis = useMemo(() => ({
+    ...ALL_KPIS,
+    avg_rsrp: { ...ALL_KPIS.avg_rsrp, label: metricLabels.rsrp ?? ALL_KPIS.avg_rsrp.label },
+    avg_rsrq: { ...ALL_KPIS.avg_rsrq, label: metricLabels.rsrq ?? ALL_KPIS.avg_rsrq.label },
+    avg_sinr: { ...ALL_KPIS.avg_sinr, label: metricLabels.sinr ?? ALL_KPIS.avg_sinr.label },
+  }), [metricLabels]);
+
   // State for KPI selection
   const [selectedKPIs, setSelectedKPIs] = useState(Object.keys(ALL_KPIS));
   
@@ -357,11 +364,11 @@ export const IOAnalysis = ({ indoor = [], outdoor = [], expanded = true }) => {
     };
 
     return selectedKPIs.map((key) => ({
-      name: ALL_KPIS[key].label,
+      name: displayKpis[key].label,
       Indoor: calcAvg(indoor, key),
       Outdoor: calcAvg(outdoor, key),
     })).filter(d => d.Indoor !== null || d.Outdoor !== null);
-  }, [indoor, outdoor, selectedKPIs]);
+  }, [displayKpis, indoor, outdoor, selectedKPIs]);
 
   // 2. Operator Comparison Data (filter out Unknown)
   const operatorData = useMemo(() => {
@@ -512,13 +519,13 @@ const techData = useMemo(() => {
 
       {/* Chart 1: KPI Comparison */}
       <Section 
-        title={`KPI Comparison (${selectedKPIs.length}/${Object.keys(ALL_KPIS).length})`}
+        title={`KPI Comparison (${selectedKPIs.length}/${Object.keys(displayKpis).length})`}
         defaultExpanded={true}
         showSettings={true}
         settingsContent={(closeDropdown) => (
           <div className="p-2">
             <div className="text-xs text-slate-400 px-2 py-1 font-medium">Select KPIs</div>
-            {Object.entries(ALL_KPIS).map(([key, { label }]) => (
+            {Object.entries(displayKpis).map(([key, { label }]) => (
               <label
                 key={key}
                 className="flex items-center gap-2 p-2 hover:bg-slate-700 rounded cursor-pointer transition-colors"
@@ -535,7 +542,7 @@ const techData = useMemo(() => {
             <div className="border-t border-slate-700 mt-2 pt-2 flex gap-1 px-1">
               <button
                 onClick={() => {
-                  Object.keys(ALL_KPIS).forEach(key => {
+                  Object.keys(displayKpis).forEach(key => {
                     if (!selectedKPIs.includes(key)) handleToggleKPI(key);
                   });
                 }}
@@ -561,13 +568,13 @@ const techData = useMemo(() => {
 
       {/* Chart 2: Operator Comparison */}
       <Section 
-        title={`Operator Comparison - ${ALL_KPIS[operatorMetric]?.label || "RSRP"}`}
+        title={`Operator Comparison - ${displayKpis[operatorMetric]?.label || "RSRP"}`}
         defaultExpanded={true}
         showSettings={true}
         settingsContent={(closeDropdown) => (
           <div className="p-2">
             <div className="text-xs text-slate-400 px-2 py-1 font-medium">Select Metric</div>
-            {Object.entries(ALL_KPIS).map(([key, { label, unit }]) => (
+            {Object.entries(displayKpis).map(([key, { label, unit }]) => (
               <button
                 key={key}
                 onClick={() => {
@@ -591,13 +598,13 @@ const techData = useMemo(() => {
           <>
             <SimpleBarChart 
               data={operatorData} 
-              title={`By Operator (${ALL_KPIS[operatorMetric]?.label})`} 
+              title={`By Operator (${displayKpis[operatorMetric]?.label})`}
               colorType="provider"
             />
             <div className="mt-2">
               <DataTable 
                 data={operatorData} 
-                title={`Operator ${ALL_KPIS[operatorMetric]?.label}`} 
+                title={`Operator ${displayKpis[operatorMetric]?.label}`}
                 colorType="provider"
               />
             </div>
@@ -611,13 +618,13 @@ const techData = useMemo(() => {
 
       {/* Chart 3: Technology Comparison */}
       <Section 
-        title={`Technology Comparison - ${ALL_KPIS[techMetric]?.label || "RSRP"}`}
+        title={`Technology Comparison - ${displayKpis[techMetric]?.label || "RSRP"}`}
         defaultExpanded={true}
         showSettings={true}
         settingsContent={(closeDropdown) => (
           <div className="p-2">
             <div className="text-xs text-slate-400 px-2 py-1 font-medium">Select Metric</div>
-            {Object.entries(ALL_KPIS).map(([key, { label, unit }]) => (
+            {Object.entries(displayKpis).map(([key, { label, unit }]) => (
               <button
                 key={key}
                 onClick={() => {
@@ -641,13 +648,13 @@ const techData = useMemo(() => {
           <>
             <SimpleBarChart 
               data={techData} 
-              title={`By Technology (${ALL_KPIS[techMetric]?.label})`} 
+              title={`By Technology (${displayKpis[techMetric]?.label})`}
               colorType="technology"
             />
             <div className="mt-2">
               <DataTable 
                 data={techData} 
-                title={`Technology ${ALL_KPIS[techMetric]?.label}`} 
+                title={`Technology ${displayKpis[techMetric]?.label}`}
                 colorType="technology"
               />
             </div>

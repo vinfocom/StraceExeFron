@@ -21,7 +21,7 @@ const COLORS = ['#3B82F6', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6', '#EC4899'
 
 const METRIC_CONFIG = {
   rsrp: {
-    label: 'RSRP',
+    label: 'nrRSRP',
     unit: 'dBm',
     neighborKey: 'neighbourRsrp',
     primaryKey: 'rsrp',
@@ -37,7 +37,7 @@ const METRIC_CONFIG = {
     ]
   },
   rsrq: {
-    label: 'RSRQ',
+    label: 'nrRSRQ',
     unit: 'dB',
     neighborKey: 'neighbourRsrq',
     primaryKey: 'rsrq',
@@ -52,7 +52,7 @@ const METRIC_CONFIG = {
     ]
   },
   sinr: {
-    label: 'SINR',
+    label: 'nrSINR',
     unit: 'dB',
     neighborKey: 'neighbourSinr',
     primaryKey: 'sinr',

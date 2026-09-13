@@ -27,6 +27,7 @@ import {
   normalizeBandName,
   getProviderColor as getProviderColorFromUtils,
 } from "@/utils/colorUtils";
+import { getTechnologyMetricLabels } from "@/utils/technologyMetricLabels";
 
 const safeNumber = (value) => {
   if (value == null || value === "") return null;
@@ -408,9 +409,15 @@ export const OperatorComparisonChart = React.forwardRef(
       wrapMetricCharts = false,
       highContrastText = false,
       showCdf = true,
+      metricLabels = {},
     },
     ref
   ) => {
+    const getDisplayMetricLabel = (metricKey) =>
+      metricLabels[metricKey] !== undefined
+        ? metricLabels[metricKey]
+        : AVAILABLE_METRICS[metricKey]?.label || metricKey;
+
     const [selectedMetrics, setSelectedMetrics] = useState(defaultMetrics);
     const [showSettings, setShowSettings] = useState(false);
     const [viewMode, setViewMode] = useState("bar");
@@ -758,7 +765,7 @@ export const OperatorComparisonChart = React.forwardRef(
 
       return selectedMetrics.map((metricKey) => {
         const config = AVAILABLE_METRICS[metricKey];
-        const dataPoint = { metric: config.label };
+        const dataPoint = { metric: getDisplayMetricLabel(metricKey) };
 
         operatorData.forEach((op) => {
           const rawValue = getDisplayMetricValue(op, metricKey, resolveStatMode(metricKey));
@@ -768,7 +775,7 @@ export const OperatorComparisonChart = React.forwardRef(
 
         return dataPoint;
       });
-    }, [operatorData, selectedMetrics, resolveStatMode, getDisplayMetricValue]);
+    }, [operatorData, selectedMetrics, resolveStatMode, getDisplayMetricValue, metricLabels]);
 
     const toggleMetric = useCallback((metricKey) => {
       if (showAllMetrics) return;
@@ -844,7 +851,7 @@ export const OperatorComparisonChart = React.forwardRef(
                         className="w-2 h-2 rounded-full"
                         style={{ backgroundColor: config.color }}
                       />
-                      <span className="text-white">{config.label}</span>
+                      <span className="text-white">{getDisplayMetricLabel(metricKey)}</span>
                     </div>
                     <span className="text-white font-semibold">
                       {formatDisplayMetricValue(value, metricKey)}{" "}
@@ -965,7 +972,7 @@ export const OperatorComparisonChart = React.forwardRef(
           <div className="sticky top-0 z-10 bg-slate-900/95 backdrop-blur border-b border-slate-700 px-3 py-2">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div className={`text-xs font-medium ${primaryTextClass}`}>
-              {config.label} ({isGridPciMetric(metricKey) ? "Best PCI" : isCountOnlyMetric(metricKey) ? "Count" : STAT_MODES[currentMode]?.label}
+              {getDisplayMetricLabel(metricKey)} ({isGridPciMetric(metricKey) ? "Best PCI" : isCountOnlyMetric(metricKey) ? "Count" : STAT_MODES[currentMode]?.label}
               {config.unit ? ` • ${config.unit}` : ""})
               </div>
               {!isCountOnlyMetric(metricKey) && !isGridPciMetric(metricKey) && individualStatMode && (
@@ -1039,7 +1046,7 @@ export const OperatorComparisonChart = React.forwardRef(
                 />
                 <Bar
                   dataKey="value"
-                  name={config.label}
+                  name={getDisplayMetricLabel(metricKey)}
                   radius={[4, 4, 0, 0]}
                   fill={config.color}
                 >
@@ -1175,7 +1182,7 @@ export const OperatorComparisonChart = React.forwardRef(
                               style={{ backgroundColor: config.color }}
                             />
                             <span className={`text-xs ${primaryTextClass}`}>
-                              {config.label}
+                              {getDisplayMetricLabel(key)}
                             </span>
                             <span className={`text-[9px] ml-auto ${tertiaryTextClass}`}>
                               {config.unit}
@@ -1240,7 +1247,7 @@ export const OperatorComparisonChart = React.forwardRef(
                     <Bar
                       key={metricKey}
                       dataKey={metricKey}
-                      name={config.label}
+                      name={getDisplayMetricLabel(metricKey)}
                       radius={[4, 4, 0, 0]}
                       fill={config.color}
                     >
@@ -1279,7 +1286,7 @@ export const OperatorComparisonChart = React.forwardRef(
                         className="text-center p-2 font-medium"
                         style={{ color: config.color }}
                       >
-                        <div>{config.label}</div>
+                        <div>{getDisplayMetricLabel(metricKey)}</div>
                         <div className="text-[9px] text-white/70 mt-0.5">
                           {isGridPciMetric(metricKey)
                             ? "Best PCI"
@@ -1403,7 +1410,7 @@ export const OperatorComparisonChart = React.forwardRef(
         {showCdf && cdfChartsByTechnology.length > 0 && (
           <div className="mt-4 pt-3 border-t border-slate-700/50 space-y-3">
             <div className={`text-xs font-semibold ${primaryTextClass}`}>
-              RSRP CDF By Technology
+              {metricLabels.rsrp || "RSRP"} CDF By Technology
             </div>
             <div
               className={
@@ -1423,7 +1430,7 @@ export const OperatorComparisonChart = React.forwardRef(
                 >
                   <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
                     <div className={`text-xs font-medium ${primaryTextClass}`}>
-                      {techChart.technology} RSRP CDF
+                      {techChart.technology} {getTechnologyMetricLabels(techChart.technology).rsrp} CDF
                     </div>
                     <div className={`text-[10px] ${secondaryTextClass}`}>
                       {techChart.series.length} operators • {techChart.totalSamples} samples
@@ -1443,7 +1450,7 @@ export const OperatorComparisonChart = React.forwardRef(
                         
                         tick={{ fill: axisTickColor, fontSize: 11 }}
                         label={{
-                          value: "RSRP (dBm)",
+                          value: `${getTechnologyMetricLabels(techChart.technology).rsrp} (dBm)`,
                           position: "insideBottom",
                           offset: -5,
                           fill: axisTickColor,
@@ -1467,7 +1474,7 @@ export const OperatorComparisonChart = React.forwardRef(
                           `${Number(value).toFixed(1)}%`,
                           String(name),
                         ]}
-                        labelFormatter={(label) => `RSRP: ${Number(label).toFixed(1)} dBm`}
+                        labelFormatter={(label) => `${getTechnologyMetricLabels(techChart.technology).rsrp}: ${Number(label).toFixed(1)} dBm`}
                         contentStyle={{
                           backgroundColor: "#0F172A",
                           border: "1px solid #334155",

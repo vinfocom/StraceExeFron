@@ -224,6 +224,7 @@ export default function SubSessionAnalyticsTab({
   onSubSessionSelect,
   selectedSubSessionTarget = null,
   selectedSubSessionTargets = [],
+  metricLabels = {},
 }) {
   const [sortBy, setSortBy] = useState("NONE");
   const [isSortOpen, setIsSortOpen] = useState(false);
@@ -766,9 +767,9 @@ export default function SubSessionAnalyticsTab({
               <span>Number</span>
               <span>Direction</span>
               <span>Duration</span>
-              <span>RSRP</span>
-              <span>RSRQ</span>
-              <span>SINR</span>
+              <span>{metricLabels.rsrp ?? "RSRP"}</span>
+              <span>{metricLabels.rsrq ?? "RSRQ"}</span>
+              <span>{metricLabels.sinr ?? "SINR"}</span>
               <span>Status</span>
               <span>Map</span>
             </>
@@ -778,9 +779,9 @@ export default function SubSessionAnalyticsTab({
               <span>Duration</span>
               <span>Avg Speed</span>
               <span>File Size</span>
-              <span>RSRP</span>
-              <span>RSRQ</span>
-              <span>SINR</span>
+              <span>{metricLabels.rsrp ?? "RSRP"}</span>
+              <span>{metricLabels.rsrq ?? "RSRQ"}</span>
+              <span>{metricLabels.sinr ?? "SINR"}</span>
               <span>Map</span>
             </>
           )}

@@ -12,6 +12,7 @@ export const OperatorComparisonTab = ({
   chartRefs,
   expanded = false,
   enableSiteToggle = false,
+  metricLabels,
 }) => {
   const [siteDetailsOpen, setSiteDetailsOpen] = useState(false);
   const siteSummary = useMemo(() => {
@@ -43,6 +44,7 @@ export const OperatorComparisonTab = ({
         individualStatMode
         wrapMetricCharts={expanded}
         highContrastText
+        metricLabels={metricLabels}
       />
 
       {enableSiteToggle && (
