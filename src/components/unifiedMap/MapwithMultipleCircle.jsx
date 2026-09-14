@@ -1,3 +1,4 @@
+import { getLogTechnology, getTechnologyMetricLabels, getTechnologyMetricValue, getTechnologySignalRows } from "@/utils/technologyMetricLabels";
 // src/components/MapWithMultipleCircles.jsx
 import React, { useCallback, useMemo, useState, useEffect, useRef } from "react";
 import { GoogleMap, PolygonF, InfoWindow } from "@react-google-maps/api";
@@ -1137,6 +1138,8 @@ const generateGridCellsOptimized = (
 // ============== InfoWindows ==============
 const NeighborInfoWindow = React.memo(({ neighbor, onClose, resolveColor, selectedMetric }) => {
   if (!neighbor) return null;
+  const labels = getTechnologyMetricLabels(getLogTechnology(neighbor));
+  const sinrUnit = labels.sinr === "RxQual" ? "" : " dB";
   const isRsrp = selectedMetric === 'rsrp';
   const isRsrq = selectedMetric === 'rsrq';
   const isSinr = selectedMetric === 'sinr';
@@ -1152,7 +1155,7 @@ const NeighborInfoWindow = React.memo(({ neighbor, onClose, resolveColor, select
         <div className="flex items-center justify-between pb-2 mb-2 border-b border-gray-200">
           <div className="flex items-center gap-2">
             <Square className="w-4 h-4" style={{ color: displayColor }} fill={displayColor} />
-            <span className="font-bold text-sm">PCI: {neighbor.pci ?? 'N/A'}</span>
+            <span className="font-bold text-sm">{labels.pci}: {getTechnologyMetricValue(neighbor, "pci") ?? 'N/A'}</span>
           </div>
           <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full" style={{ backgroundColor: `${displayColor}20`, color: displayColor, border: `1px solid ${displayColor}40` }}>
             {neighbor.quality || 'Unknown'}
@@ -1163,11 +1166,11 @@ const NeighborInfoWindow = React.memo(({ neighbor, onClose, resolveColor, select
           <div className="text-[10px] font-semibold text-blue-600 uppercase tracking-wide">📡 Primary Cell</div>
           <div className="grid grid-cols-2 gap-x-4 gap-y-1">
             {neighbor.band && <div className="flex justify-between text-xs"><span className="text-gray-500">Band</span><span className="font-semibold text-blue-600">{neighbor.band}</span></div>}
-            {neighbor.pci && <div className="flex justify-between text-xs"><span className="text-gray-500">PCI</span><span className="font-medium">{neighbor.pci}</span></div>}
+            {neighbor.pci && <div className="flex justify-between text-xs"><span className="text-gray-500">{labels.pci}</span><span className="font-medium">{neighbor.pci}</span></div>}
           </div>
-          {neighbor.rsrp !== null && <div className="flex justify-between text-xs items-center"><span className={`text-gray-500 ${isRsrp ? 'font-bold text-gray-700' : ''}`}>RSRP</span><div className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full" style={{ backgroundColor: resolveColor(neighbor.rsrp, 'rsrp') }} /><span className="font-semibold" style={{ color: resolveColor(neighbor.rsrp, 'rsrp') }}>{neighbor.rsrp?.toFixed?.(1)} dBm</span></div></div>}
-          {neighbor.rsrq !== null && <div className="flex justify-between text-xs items-center"><span className={`text-gray-500 ${isRsrq ? 'font-bold text-gray-700' : ''}`}>RSRQ</span><div className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full" style={{ backgroundColor: resolveColor(neighbor.rsrq, 'rsrq') }} /><span className="font-medium">{neighbor.rsrq?.toFixed?.(1)} dB</span></div></div>}
-          {neighbor.sinr !== null && <div className="flex justify-between text-xs items-center"><span className={`text-gray-500 ${isSinr ? 'font-bold text-gray-700' : ''}`}>SINR</span><div className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full" style={{ backgroundColor: resolveColor(neighbor.sinr, 'sinr') }} /><span className="font-medium">{neighbor.sinr?.toFixed?.(1)} dB</span></div></div>}
+          {neighbor.rsrp !== null && <div className="flex justify-between text-xs items-center"><span className={`text-gray-500 ${isRsrp ? 'font-bold text-gray-700' : ''}`}>{labels.rsrp}</span><div className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full" style={{ backgroundColor: resolveColor(neighbor.rsrp, 'rsrp') }} /><span className="font-semibold" style={{ color: resolveColor(neighbor.rsrp, 'rsrp') }}>{neighbor.rsrp?.toFixed?.(1)} dBm</span></div></div>}
+          {labels.rsrq && neighbor.rsrq !== null && <div className="flex justify-between text-xs items-center"><span className={`text-gray-500 ${isRsrq ? 'font-bold text-gray-700' : ''}`}>{labels.rsrq}</span><div className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full" style={{ backgroundColor: resolveColor(neighbor.rsrq, 'rsrq') }} /><span className="font-medium">{neighbor.rsrq?.toFixed?.(1)} dB</span></div></div>}
+          {neighbor.sinr !== null && <div className="flex justify-between text-xs items-center"><span className={`text-gray-500 ${isSinr ? 'font-bold text-gray-700' : ''}`}>{labels.sinr}</span><div className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full" style={{ backgroundColor: resolveColor(neighbor.sinr, 'sinr') }} /><span className="font-medium">{neighbor.sinr?.toFixed?.(1)}{sinrUnit}</span></div></div>}
         </div>
 
         {(neighbor.neighbourRsrp !== null || neighbor.neighbourBand) && (
@@ -1175,11 +1178,11 @@ const NeighborInfoWindow = React.memo(({ neighbor, onClose, resolveColor, select
             <div className="text-[10px] font-semibold text-purple-600 uppercase tracking-wide">Neighbour Cell</div>
             <div className="grid grid-cols-2 gap-x-4 gap-y-1">
               {neighbor.neighbourBand && <div className="flex justify-between text-xs"><span className="text-gray-500">Band</span><span className="font-semibold text-purple-600">{neighbor.neighbourBand}</span></div>}
-              {neighbor.neighbourPci && <div className="flex justify-between text-xs"><span className="text-gray-500">PCI</span><span className="font-medium">{neighbor.neighbourPci}</span></div>}
+              {neighbor.neighbourPci && <div className="flex justify-between text-xs"><span className="text-gray-500">{labels.pci}</span><span className="font-medium">{neighbor.neighbourPci}</span></div>}
             </div>
-            {neighbor.neighbourRsrp !== null && <div className="flex justify-between text-xs items-center"><span className={`text-gray-500 ${isRsrp ? 'font-bold text-gray-700' : ''}`}>RSRP</span><span className="font-semibold" style={{ color: resolveColor(neighbor.neighbourRsrp, 'rsrp') }}>{neighbor.neighbourRsrp?.toFixed?.(1)} dBm</span></div>}
-            {neighbor.neighbourRsrq !== null && <div className="flex justify-between text-xs items-center"><span className={`text-gray-500 ${isRsrq ? 'font-bold text-gray-700' : ''}`}>RSRQ</span><span className="font-semibold" style={{ color: resolveColor(neighbor.neighbourRsrq, 'rsrq') }}>{neighbor.neighbourRsrq?.toFixed?.(1)} dB</span></div>}
-            {neighbor.neighbourSinr !== null && <div className="flex justify-between text-xs items-center"><span className={`text-gray-500 ${isSinr ? 'font-bold text-gray-700' : ''}`}>SINR</span><span className="font-semibold" style={{ color: resolveColor(neighbor.neighbourSinr, 'sinr') }}>{neighbor.neighbourSinr?.toFixed?.(1)} dB</span></div>}
+            {neighbor.neighbourRsrp !== null && <div className="flex justify-between text-xs items-center"><span className={`text-gray-500 ${isRsrp ? 'font-bold text-gray-700' : ''}`}>{labels.rsrp}</span><span className="font-semibold" style={{ color: resolveColor(neighbor.neighbourRsrp, 'rsrp') }}>{neighbor.neighbourRsrp?.toFixed?.(1)} dBm</span></div>}
+            {labels.rsrq && neighbor.neighbourRsrq !== null && <div className="flex justify-between text-xs items-center"><span className={`text-gray-500 ${isRsrq ? 'font-bold text-gray-700' : ''}`}>{labels.rsrq}</span><span className="font-semibold" style={{ color: resolveColor(neighbor.neighbourRsrq, 'rsrq') }}>{neighbor.neighbourRsrq?.toFixed?.(1)} dB</span></div>}
+            {neighbor.neighbourSinr !== null && <div className="flex justify-between text-xs items-center"><span className={`text-gray-500 ${isSinr ? 'font-bold text-gray-700' : ''}`}>{labels.sinr}</span><span className="font-semibold" style={{ color: resolveColor(neighbor.neighbourSinr, 'sinr') }}>{neighbor.neighbourSinr?.toFixed?.(1)}{sinrUnit}</span></div>}
           </div>
         )}
         <div className="mt-2 pt-2 border-t border-gray-100 space-y-1">
@@ -1334,7 +1337,9 @@ const PrimaryLogInfoWindow = React.memo(({ log, onClose, resolveColor, selectedM
     ["wifi", "wi-fi"].includes(
       String(log?.log_type ?? log?.connection_type ?? log?.connectionType ?? "").trim().toLowerCase()
     );
-  const signalLabel = isWifiLog ? "RSSI" : "RSRP";
+  const labels = getTechnologyMetricLabels(getLogTechnology(log));
+  const cellChannel = getTechnologyMetricValue(log, "pci");
+  const signalLabel = isWifiLog ? "RSSI" : labels.rsrp;
   const signalValue = isWifiLog ? (log.rssi ?? log.signal_value ?? log.rsrp) : log.rsrp;
   const ciValue = getMetricValueFromLog(log, "ci_db");
   const logTypeLabel = isWifiLog ? "Wi-Fi Log" : "Network Log";
@@ -1369,11 +1374,14 @@ const PrimaryLogInfoWindow = React.memo(({ log, onClose, resolveColor, selectedM
               {log.provider && <div className="flex justify-between text-xs"><span className="text-gray-500">Provider</span><span className="font-medium">{log.provider}</span></div>}
               {log.technology && <div className="flex justify-between text-xs"><span className="text-gray-500">Technology</span><span className="font-medium">{log.technology}</span></div>}
               {log.band && <div className="flex justify-between text-xs"><span className="text-gray-500">Band</span><span className="font-semibold text-blue-600">{log.band}</span></div>}
-              {signalValue !== null && signalValue !== undefined && <div className="flex justify-between text-xs items-center"><span className="text-gray-500">RSRP</span><span className="font-semibold" style={{ color: resolveColor(signalValue, 'rsrp') }}>{signalValue?.toFixed?.(1)} dBm</span></div>}
-              {log.rsrq !== null && log.rsrq !== undefined && <div className="flex justify-between text-xs items-center"><span className="text-gray-500">RSRQ</span><span className="font-medium" style={{ color: resolveColor(log.rsrq, 'rsrq') }}>{log.rsrq?.toFixed?.(1)} dB</span></div>}
-              {log.sinr !== null && log.sinr !== undefined && <div className="flex justify-between text-xs items-center"><span className="text-gray-500">SINR</span><span className="font-medium" style={{ color: resolveColor(log.sinr, 'sinr') }}>{log.sinr?.toFixed?.(1)} dB</span></div>}
+              {getTechnologySignalRows(log).map(({ key, label, value, unit }) => value != null && (
+                <div key={key} className="flex justify-between text-xs items-center">
+                  <span className="text-gray-500">{label}</span>
+                  <span className="font-medium" style={{ color: resolveColor(value, key) }}>{Number(value).toFixed(1)}{unit ? ` ${unit}` : ""}</span>
+                </div>
+              ))}
               {Number.isFinite(ciValue) && <div className="flex justify-between text-xs items-center"><span className="text-gray-500">C/I</span><span className="font-medium" style={{ color: resolveColor(ciValue, 'ci_db') }}>{ciValue?.toFixed?.(1)} dB</span></div>}
-              {log.pci && <div className="flex justify-between text-xs"><span className="text-gray-500">PCI/BCCH</span><span className="font-medium">{log.pci}</span></div>}
+              {cellChannel != null && <div className="flex justify-between text-xs"><span className="text-gray-500">{labels.pci}</span><span className="font-medium">{cellChannel}</span></div>}
               {log.cell_id && <div className="flex justify-between text-xs"><span className="text-gray-500">Cell ID</span><span className="font-medium">{log.cell_id}</span></div>}
               {log.nodeb_id && <div className="flex justify-between text-xs"><span className="text-gray-500">NodeB</span><span className="font-medium">{log.nodeb_id}</span></div>}
             </>

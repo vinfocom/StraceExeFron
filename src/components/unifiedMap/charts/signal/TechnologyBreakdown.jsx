@@ -14,20 +14,20 @@ import { ChartContainer } from "../../common/ChartContainer";
 import { EmptyState } from "../../common/EmptyState";
 import { CHART_CONFIG, getTechnologyColor } from "@/utils/constants"; // ✅ Import helper function
 import { filterValidData } from "@/utils/analyticsHelpers";
-import { getTechnologyMetricLabels } from "@/utils/technologyMetricLabels";
+import { getTechnologyMetricLabels, getLogTechnology, is2GTechnology } from "@/utils/technologyMetricLabels";
 
 export const TechnologyBreakdown = React.forwardRef(({ locations }, ref) => {
   const data = useMemo(() => {
     if (!locations?.length) return [];
 
     const grouped = locations.reduce((acc, loc) => {
-      const tech = loc.technology || "Unknown";
+      const tech = getLogTechnology(loc) || "Unknown";
       if (!acc[tech]) {
         acc[tech] = { count: 0, avgRsrp: [], avgSinr: [] };
       }
       acc[tech].count++;
-      if (loc.rsrp != null) acc[tech].avgRsrp.push(loc.rsrp);
-      if (loc.sinr != null) acc[tech].avgSinr.push(loc.sinr);
+      if (loc.rsrp != null) acc[tech].avgRsrp.push(Number(loc.rsrp));
+      if (loc.sinr != null) acc[tech].avgSinr.push(Number(loc.sinr));
       return acc;
     }, {});
 
@@ -117,7 +117,7 @@ export const TechnologyBreakdown = React.forwardRef(({ locations }, ref) => {
             </div>
             <div className="ml-5 text-slate-400 text-[10px]">
               {getTechnologyMetricLabels(item.name).rsrp}: <span className="text-blue-400">{item.avgRsrp} dBm</span> |
-              {getTechnologyMetricLabels(item.name).sinr}: <span className="text-green-400">{item.avgSinr} dB</span>
+              {getTechnologyMetricLabels(item.name).sinr}: <span className="text-green-400">{item.avgSinr}{is2GTechnology(item.name) ? "" : " dB"}</span>
             </div>
           </div>
         ))}

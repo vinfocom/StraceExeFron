@@ -20,7 +20,7 @@ import {
 
 const TAKE = 50000;
 const VIEW_TABS = [
-  { id: "summary", label: "Call Summary" },
+  { id: "summary", label: "Summary" },
   { id: "map", label: "Map View" },
   { id: "excel", label: "Excel View" },
   { id: "analyzer", label: "Analyzer" },
@@ -119,11 +119,61 @@ function normalizeCall(call = {}) {
     const value = valueOf(call, key);
     if (value !== null) normalized[key] = value;
   });
+  const startTime = valueOf(call, "startTime", "start");
+  const endTime = valueOf(call, "endTime", "end", "terminationTime");
+  const setupTimeMs = valueOf(call, "callSetupTimeMs", "setupTimeMs");
+  const durationMs = valueOf(call, "connectedDurationMs", "talkTimeMs", "durationMs");
+  const setupTimeSeconds = valueOf(call, "setupTime");
+  const durationSeconds = valueOf(call, "duration");
+  if (startTime !== null) normalized.startTime = startTime;
+  if (endTime !== null) {
+    normalized.endTime = endTime;
+    normalized.terminationTime = endTime;
+  }
+  if (setupTimeMs !== null) normalized.callSetupTimeMs = Number(setupTimeMs);
+  else if (setupTimeSeconds !== null && Number.isFinite(Number(setupTimeSeconds))) normalized.callSetupTimeMs = Math.round(Number(setupTimeSeconds) * 1000);
+  if (durationMs !== null) normalized.connectedDurationMs = Number(durationMs);
+  else if (durationSeconds !== null && Number.isFinite(Number(durationSeconds))) normalized.connectedDurationMs = Math.round(Number(durationSeconds) * 1000);
+  normalized.status = valueOf(call, "status", "result", "callResult") || normalized.status || "Not Connected";
+  normalized.disconnectReason = valueOf(call, "disconnectReason", "reason") || normalized.disconnectReason || "";
+  const technology = valueOf(call, "technology");
+  if (technology !== null) {
+    normalized.technologyStart = normalized.technologyStart || technology;
+    normalized.technologyEnd = normalized.technologyEnd || technology;
+  }
   ["startTime", "dialTime", "alertingTime", "connectedTime", "endTime", "terminationTime"].forEach((key) => {
     normalized[key] = asDate(normalized[key]);
   });
   normalized.id = normalized.id || normalized.call || "Call";
   return normalized;
+}
+
+function unwrapDiagnosticSummary(response) {
+  if (Array.isArray(response)) return { rows: response };
+  if (!response || typeof response !== "object") return null;
+
+  const payload = response.data && typeof response.data === "object" && !Array.isArray(response.data)
+    ? response.data
+    : response;
+  const nestedSummary = payload.summary || payload.frontend_summary || payload.frontendSummary;
+  return nestedSummary && typeof nestedSummary === "object" && !Array.isArray(nestedSummary)
+    ? { ...payload, ...nestedSummary }
+    : payload;
+}
+
+function diagnosticRowsFromResponse(response) {
+  if (Array.isArray(response)) return response;
+  const payload = unwrapDiagnosticSummary(response) || {};
+  if (Array.isArray(payload.rows)) return payload.rows;
+  if (Array.isArray(payload.timeline)) return payload.timeline;
+  if (Array.isArray(payload.data)) return payload.data;
+  if (payload.data && typeof payload.data === "object") {
+    return [
+      ...(Array.isArray(payload.data.events) ? payload.data.events : []),
+      ...(Array.isArray(payload.data.l3) ? payload.data.l3 : []),
+    ];
+  }
+  return [];
 }
 
 function normalizeSummary(summary, fallbackCalls = []) {
@@ -138,14 +188,31 @@ function normalizeSummary(summary, fallbackCalls = []) {
     .filter(Number.isFinite)
     .reduce((total, value) => total + value, 0);
   return {
+    sourceFile: valueOf(summary, "sourceFile"),
+    scope: valueOf(summary, "scope"),
+    generatedAt: valueOf(summary, "generatedAt"),
+    totalRows: valueOf(summary, "totalRows"),
+    l3Rows: valueOf(summary, "l3Rows"),
+    eventRows: valueOf(summary, "eventRows"),
+    kpis: Array.isArray(valueOf(summary, "kpis")) ? valueOf(summary, "kpis") : [],
+    mobility: Array.isArray(valueOf(summary, "mobility")) ? valueOf(summary, "mobility") : [],
+    parameters: Array.isArray(valueOf(summary, "parameters")) ? valueOf(summary, "parameters") : [],
+    technologies: Array.isArray(valueOf(summary, "technologies")) ? valueOf(summary, "technologies") : [],
     totalCalls: valueOf(summary, "totalCalls") ?? calls.length,
     connected: valueOf(summary, "connected") ?? calls.filter((call) => call.status === "Connected").length,
     dropped: valueOf(summary, "dropped") ?? calls.filter((call) => call.status === "Dropped").length,
-    notConnected: valueOf(summary, "notConnected") ?? calls.filter((call) => call.status === "Not Connected").length,
+    notConnected: valueOf(summary, "notConnected", "not_connected") ?? calls.filter((call) => call.status === "Not Connected").length,
     averageSetupTime: valueOf(summary, "averageSetupTime") ?? average(setupTimes),
     averageTalkTime: valueOf(summary, "averageTalkTime") ?? average(talkTimes),
     totalDurationMs: valueOf(summary, "totalDurationMs") ?? totalDurationMs,
     totalConnectedDurationMs: valueOf(summary, "totalConnectedDurationMs") ?? totalDurationMs,
+    totalAttemptDurationMs: valueOf(summary, "totalAttemptDurationMs", "total_attempt_duration_ms") ?? 0,
+    successRate: valueOf(summary, "successRate", "success_rate"),
+    busy: valueOf(summary, "busy"),
+    rejected: valueOf(summary, "rejected"),
+    setupFailures: valueOf(summary, "setupFailures", "setup_failures"),
+    ongoing: valueOf(summary, "ongoing"),
+    unknown: valueOf(summary, "unknown"),
     calls,
   };
 }
@@ -565,9 +632,21 @@ function BackendAnalyzer({ sessionIds, analysisId, projectName, onBack }) {
     let cancelled = false;
     setLoading(true);
     setError("");
-    l3EventApi.getExcelRows(scope).then((rowResponse) => {
+    const loadDiagnosticData = async () => {
+      let summaryResponse = null;
+      try {
+        summaryResponse = await l3EventApi.getDiagnosticL3Summary(scope);
+      } catch (summaryError) {
+        console.warn("Diagnostic L3 summary API unavailable; using Excel rows fallback:", summaryError);
+      }
+
       if (cancelled) return;
-      const normalizedTimeline = (rowResponse?.rows || []).map((row) => normalizeTimelineRow(row));
+      const summaryRows = diagnosticRowsFromResponse(summaryResponse);
+      const rowResponse = summaryRows.length ? summaryResponse : await l3EventApi.getExcelRows(scope);
+      if (cancelled) return;
+
+      const sourceRows = summaryRows.length ? summaryRows : rowResponse?.rows || [];
+      const normalizedTimeline = sourceRows.map((row) => normalizeTimelineRow(row));
       const normalizedL3Messages = normalizedTimeline.filter((row) => row.type === "l3");
       const normalizedEventMessages = normalizedTimeline.filter((row) => row.type === "event");
       setCounts({
@@ -578,10 +657,12 @@ function BackendAnalyzer({ sessionIds, analysisId, projectName, onBack }) {
       });
       setMapTimeline(normalizedTimeline);
       setTimeline(normalizedTimeline);
-      setSummary(normalizeSummary(null, rowResponse?.calls));
+      setSummary(normalizeSummary(unwrapDiagnosticSummary(summaryResponse), rowResponse?.calls));
       setL3Messages(normalizedL3Messages);
       setEventMessages(normalizedEventMessages);
-    }).catch((requestError) => {
+    };
+
+    loadDiagnosticData().catch((requestError) => {
       if (!cancelled) setError(requestError?.message || "Failed to load diagnostic session data.");
     }).finally(() => {
       if (!cancelled) setLoading(false);
@@ -603,12 +684,19 @@ function BackendAnalyzer({ sessionIds, analysisId, projectName, onBack }) {
     () => enrichCallSummaryTechnology(summary, fullAnalysis.procedures),
     [fullAnalysis.procedures, summary],
   );
-  const protocolAnalysis = useMemo(() => buildProtocolAnalysis(protocolTimeline, []), [protocolTimeline]);
+  const protocolAnalysis = useMemo(
+    () => selectedCall ? buildProtocolAnalysis(protocolTimeline, []) : fullAnalysis,
+    [fullAnalysis, protocolTimeline, selectedCall],
+  );
   const signalingRows = useMemo(() => buildUnifiedSignalingRows(timeline, enrichedSummary.calls, fullAnalysis), [enrichedSummary.calls, fullAnalysis, timeline]);
-  const mapFullAnalysis = useMemo(() => buildProtocolAnalysis(mapTimeline.length ? mapTimeline : timeline, []), [mapTimeline, timeline]);
+  const mapAnalysisTimeline = mapTimeline.length ? mapTimeline : timeline;
+  const mapFullAnalysis = useMemo(
+    () => mapAnalysisTimeline === timeline ? fullAnalysis : buildProtocolAnalysis(mapAnalysisTimeline, []),
+    [fullAnalysis, mapAnalysisTimeline, timeline],
+  );
   const mapSignalingRows = useMemo(
-    () => buildUnifiedSignalingRows(mapTimeline.length ? mapTimeline : timeline, enrichedSummary.calls, mapFullAnalysis),
-    [enrichedSummary.calls, mapFullAnalysis, mapTimeline, timeline],
+    () => mapAnalysisTimeline === timeline ? signalingRows : buildUnifiedSignalingRows(mapAnalysisTimeline, enrichedSummary.calls, mapFullAnalysis),
+    [enrichedSummary.calls, mapAnalysisTimeline, mapFullAnalysis, signalingRows, timeline],
   );
   const rsrpByRowId = useMemo(() => buildRsrpByRowId(mapFullAnalysis), [mapFullAnalysis]);
   const mapPoints = useMemo(() => buildMapPoints(mapSignalingRows, rsrpByRowId), [mapSignalingRows, rsrpByRowId]);
@@ -650,7 +738,7 @@ function BackendAnalyzer({ sessionIds, analysisId, projectName, onBack }) {
         {VIEW_TABS.map((tab) => <button key={tab.id} type="button" onClick={() => setActiveView(tab.id)} className={`border px-2.5 py-1.5 text-xs ${activeView === tab.id ? "border-blue-500 bg-blue-600" : "border-slate-700 bg-slate-900 text-slate-300 hover:bg-slate-700"}`}>{tab.label} ({countForTab(tab.id).toLocaleString()})</button>)}
       </header>
       <main className="l3-analysis-main flex min-h-0 flex-1 flex-col overflow-hidden">
-        {activeView === "summary" && <div className="h-full overflow-auto p-3"><HomeCallSummary summary={enrichedSummary} /></div>}
+        {activeView === "summary" && <div className="h-full overflow-auto p-3"><HomeCallSummary summary={enrichedSummary} diagnosticRows={timeline} /></div>}
         {activeView === "analyzer" && selectedCall && (
           <div className="shrink-0 flex items-center justify-between gap-2 border-b border-blue-500/30 bg-blue-500/10 px-2 py-1 text-xs">
             <span className="truncate text-blue-300">

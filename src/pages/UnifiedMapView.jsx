@@ -6375,6 +6375,32 @@ const UnifiedMapView = () => {
         count: Number(drawing?.count) || 0,
         area: Number.isFinite(areaMeters) ? areaMeters : null,
         areaInSqKm,
+        length: Number.isFinite(Number(drawing?.length)) ? Number(drawing.length) : null,
+        lengthInKm: Number.isFinite(Number(drawing?.lengthInKm))
+          ? Number(drawing.lengthInKm)
+          : null,
+        terrainMode: drawing?.terrainMode === true,
+        terrainDistance: Number.isFinite(Number(drawing?.terrainDistance))
+          ? Number(drawing.terrainDistance)
+          : null,
+        terrainLengthInKm: Number.isFinite(Number(drawing?.terrainLengthInKm))
+          ? Number(drawing.terrainLengthInKm)
+          : null,
+        elevationGain: Number.isFinite(Number(drawing?.elevationGain))
+          ? Number(drawing.elevationGain)
+          : null,
+        elevationLoss: Number.isFinite(Number(drawing?.elevationLoss))
+          ? Number(drawing.elevationLoss)
+          : null,
+        minElevation: Number.isFinite(Number(drawing?.minElevation))
+          ? Number(drawing.minElevation)
+          : null,
+        maxElevation: Number.isFinite(Number(drawing?.maxElevation))
+          ? Number(drawing.maxElevation)
+          : null,
+        elevationSamples: Number.isFinite(Number(drawing?.samples))
+          ? Number(drawing.samples)
+          : null,
         grid: grid
           ? {
             cells: Number.isFinite(gridCells) ? gridCells : 0,
@@ -7707,6 +7733,7 @@ const UnifiedMapView = () => {
                 onUIChange={handleUIChange}
                 clearSignal={ui.drawClearSignal}
                 onDrawingsChange={handleDrawingsChange}
+                terrainEnabled={ui.basemapStyle === "terrain"}
               />
 
               {/* LTE Prediction Layer â€” renders for prediction mode, LTE grid, or selected sites */}

@@ -1,4 +1,5 @@
 import { resolveMacDetailMetricKey } from "@/utils/colorUtils";
+import { getLogTechnology, getTechnologyMetricValue, is2GTechnology } from "./technologyMetricLabels.js";
 
 export const PCI_COLOR_PALETTE = [
   "#FF6B6B", "#4ECDC4", "#45B7D1", "#FFA07A", "#98D8C8",
@@ -266,6 +267,12 @@ export const METRIC_CONFIG = {
     unit: '',
     fields: ['pci', 'PCI', 'Pci', 'physical_cell_id'],
   },
+  earfcn: {
+    thresholdKey: 'earfcn',
+    label: 'EARFCN',
+    unit: '',
+    fields: ['earfcn', 'EARFCN', 'Earfcn', 'arfcn', 'ARFCN'],
+  },
   cell_id: {
     thresholdKey: 'cell_id',
     label: 'Cell ID',
@@ -487,6 +494,10 @@ export const getMetricValueFromLog = (log, metric) => {
   const config = getMetricConfig(metric);
   if (!config?.fields) return NaN;
   const metricKey = String(config.key || metric || "").toLowerCase();
+  if (is2GTechnology(getLogTechnology(log)) && ["rsrp", "rsrq", "sinr", "pci", "earfcn"].includes(metricKey)) {
+    const value = Number.parseFloat(getTechnologyMetricValue(log, metricKey));
+    return Number.isFinite(value) ? value : NaN;
+  }
   const isWifiLog =
     log?.is_wifi === true ||
     ["wifi", "wi-fi"].includes(
@@ -555,6 +566,7 @@ export const getMetricValueFromLog = (log, metric) => {
 export const getColorForMetric = (metric, value, thresholds) => {
   const metricKey = String(metric).toLowerCase();
   const config = getMetricConfig(metric);
+  if (config.thresholdKey === 'earfcn') return getEarfcnColor(value);
   if (metricKey === 'pci' || config.thresholdKey === 'pci') {
     return getPciColor(value);
   }

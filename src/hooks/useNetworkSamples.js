@@ -1,3 +1,4 @@
+import { getTechnologyMetricValue, is2GTechnology } from "@/utils/technologyMetricLabels";
 // src/hooks/useNetworkSamples.js
 import { useState, useRef, useCallback, useEffect, startTransition } from 'react';
 import { toast } from 'react-toastify';
@@ -454,8 +455,8 @@ const parseLogEntry = (log, sessionId) => {
     networkType: technology,
     network: log.network || technology,
     band,
-    pci: log.pci ?? log.Pci ?? log.PCI ?? '',
-    earfcn: log.earfcn ?? log.EARFCN ?? log.Earfcn ?? '',
+    pci: is2GTechnology(technology) ? getTechnologyMetricValue({ ...log, technology }, 'pci') ?? '' : log.pci ?? log.Pci ?? log.PCI ?? '',
+    earfcn: is2GTechnology(technology) ? getTechnologyMetricValue({ ...log, technology }, 'earfcn') ?? '' : log.earfcn ?? log.EARFCN ?? log.Earfcn ?? '',
     nrarfcn: log.nrarfcn ?? log.nr_arfcn ?? log.NRARFCN ?? '',
     arfcn: log.arfcn ?? log.ARFCN ?? '',
     nodeb_id: log.nodeb_id ?? log.nodebId ?? log.nodebid ?? log.nodeb ?? log.NodeBId ?? log.NodeB ?? log.nodeB ?? '',

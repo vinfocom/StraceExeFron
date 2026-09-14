@@ -1,3 +1,4 @@
+import { getLogTechnology, normalizeMetricTechnology, getTechnologySignalRows, getTechnologyMetricValue } from "@/utils/technologyMetricLabels";
 import React, { memo, useEffect, useMemo, useState } from "react";
 import {
   FLOAT_PANE,
@@ -153,15 +154,7 @@ const formatSubSessionType = (subSessionType) => {
   return value || "N/A";
 };
 
-const normalizeMarkerTechnology = (value) => {
-  const raw = String(value ?? "").trim().toUpperCase();
-  if (!raw) return "Unknown";
-  if (raw.includes("5G") || raw.includes("NR")) return "5G";
-  if (raw.includes("4G") || raw.includes("LTE")) return "4G";
-  if (raw.includes("3G") || raw.includes("UMTS") || raw.includes("WCDMA")) return "3G";
-  if (raw.includes("2G") || raw.includes("GSM") || raw.includes("GERAN")) return "2G";
-  return raw;
-};
+const normalizeMarkerTechnology = normalizeMetricTechnology;
 
 const hasNetworkSignalMetric = (sample) => [
   sample?.rsrp,
@@ -200,39 +193,17 @@ const getSubSessionMarkerPath = (subSessionType, statusRaw) => {
 
 const SubSessionTooltip = ({ marker }) => {
   const isCs = formatSubSessionType(marker.subSessionType) === "CS";
-  const technology = normalizeMarkerTechnology(marker.technology ?? marker.networkType ?? marker.network);
-  const technologyMetrics =
-    technology === "2G"
-      ? [
-          ["RxLev", marker.rsrp, " dBm"],
-          ["RxQual", marker.sinr, ""],
-        ]
-      : technology === "3G"
-        ? [
-            ["RSCP", marker.rsrp, " dBm"],
-            ["Ec/No", marker.rsrq, " dB"],
-            ["EcNo-derived", marker.sinr, " dB"],
-          ]
-        : technology === "5G"
-          ? [
-              ["nrRSRP", marker.rsrp, " dBm"],
-              ["nrRSRQ", marker.rsrq, " dB"],
-              ["nrSINR", marker.sinr, " dB"],
-            ]
-          : [
-              ["RSRP", marker.rsrp, " dBm"],
-              ["RSRQ", marker.rsrq, " dB"],
-              ["SINR", marker.sinr, " dB"],
-            ];
+  const technology = normalizeMarkerTechnology(getLogTechnology(marker));
+  const technologyMetrics = getTechnologySignalRows(marker);
   const rows = [
     ["Technology", technology],
     isCs
       ? ["Call Duration", formatDuration(marker.duration)]
       : ["Avg Speed", formatMetric(marker.metrics?.avg_speed == null ? null : Number(marker.metrics.avg_speed) / 1000, " Mbps")],
-    ...technologyMetrics.map(([label, value, suffix]) => [label, formatMetric(value, suffix)]),
+    ...technologyMetrics.map(({ label, value, unit }) => [label, formatMetric(value, unit ? ` ${unit}` : "")]),
     ["CI", formatField(marker.ci ?? marker.ci_db)],
     ["NodeB", formatField(marker.nodeb_id ?? marker.nodebId)],
-    ["BCCH", formatField(marker.bcch)],
+    ["BCCH", formatField(technology === "2G" ? getTechnologyMetricValue(marker, "earfcn") : marker.bcch)],
   ];
 
   return (

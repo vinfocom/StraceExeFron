@@ -33,6 +33,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
+import { getMetricLabelsForLocations, getTechnologyMetricOptions } from "@/utils/technologyMetricLabels";
 
 const LTE_RECOMMENDATION_OPTIMIZED_DEFAULTS = Object.freeze({
   operator: "all",
@@ -948,6 +949,14 @@ const UnifiedMapSidebar = ({
     [enableDataToggle, showSessionNeighbors],
   );
 
+  const metricTechnology = useMemo(() => {
+    const technologies = dataFilters?.technologies?.length
+      ? dataFilters.technologies
+      : availableFilterOptions?.technologies || [];
+    const labels = getMetricLabelsForLocations(technologies.map((technology) => ({ technology })));
+    return labels.rsrp === "RxLev" ? "2G" : "";
+  }, [dataFilters?.technologies, availableFilterOptions?.technologies]);
+
   // Metric options
   const metricOptions = useMemo(
     () => {
@@ -973,11 +982,11 @@ const UnifiedMapSidebar = ({
         { value: "coverage_violation", label: "Coverage Violation" },
       ];
 
-      const baseOptions = !enableGrid
+      const baseOptions = getTechnologyMetricOptions(!enableGrid
         ? allOptions
         : allOptions.filter((option) =>
         GRID_VIEW_ALLOWED_METRICS.includes(option.value),
-      );
+      ), metricTechnology);
 
       if (!isSecondaryOnlyMode) return baseOptions;
 
@@ -989,7 +998,7 @@ const UnifiedMapSidebar = ({
           disabled: !Boolean(secondaryMetricAvailability?.[option.value]),
         }));
     },
-    [enableGrid, isSecondaryOnlyMode, secondaryMetricAvailability],
+    [enableGrid, isSecondaryOnlyMode, secondaryMetricAvailability, metricTechnology],
   );
 
   useEffect(() => {
@@ -1042,7 +1051,7 @@ const UnifiedMapSidebar = ({
           { value: "provider", label: "Best Operator" },
           { value: "band", label: "Best Band" },
           { value: "technology", label: "Best Technology" },
-          { value: "earfcn", label: "Best EARFCN" },
+          { value: "earfcn", label: metricTechnology === "2G" ? "Best BCCH" : "Best EARFCN" },
           { value: "cell_id", label: "Best Cell ID" },
           { value: "nodebid", label: "Best NodeB ID" },
           { value: "pci", label: "Best Server" },
@@ -1054,13 +1063,13 @@ const UnifiedMapSidebar = ({
         { value: "provider", label: "By Provider" },
         { value: "band", label: "By Band" },
         { value: "technology", label: "By Technology" },
-        { value: "earfcn", label: "By EARFCN" },
+        { value: "earfcn", label: metricTechnology === "2G" ? "By BCCH" : "By EARFCN" },
         { value: "cell_id", label: "By Cell ID" },
         { value: "nodebid", label: "By NodeB ID" },
         { value: "mac_detail", label: "L3 detail" },
       ];
     },
-    [enableGrid],
+    [enableGrid, metricTechnology],
   );
 
   const handleColorByChange = useCallback(

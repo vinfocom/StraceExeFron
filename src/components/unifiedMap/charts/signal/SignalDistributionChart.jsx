@@ -16,7 +16,7 @@ import { CHART_CONFIG } from "@/utils/constants";
 
 export const SignalDistributionChart = React.forwardRef(
   ({ locations, metric, thresholds, metricLabels }, ref) => {
-    const metricLabel = metricLabels?.[metric] || metric?.toUpperCase();
+    const metricLabel = metricLabels?.[metric] ?? metric?.toUpperCase();
     const data = useMemo(() => {
       if (!locations?.length || !metric || !thresholds?.[metric]) return [];
 
@@ -38,6 +38,8 @@ export const SignalDistributionChart = React.forwardRef(
         })
         .filter((item) => item.count > 0);
     }, [locations, metric, thresholds]);
+
+    if (!metricLabel) return null;
 
     if (!data.length) {
       return (

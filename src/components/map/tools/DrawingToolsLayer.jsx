@@ -1170,6 +1170,7 @@ function DrawingToolsLayerComponent({
   polygonFillOpacity = null,
   logPolygonOffsetMeters = 50,
   onUIChange,
+  terrainEnabled = false,
 }) {
   const [activeDraft, setActiveDraft] = useState(null);
   const activeDrawingRef = useRef(null);
@@ -1186,6 +1187,96 @@ function DrawingToolsLayerComponent({
   const resolvedPolygonOpacity = clampOpacity(polygonOpacity);
   const resolvedPolygonFillOpacity =
     polygonFillOpacity === null ? resolvedPolygonOpacity : clampOpacity(polygonFillOpacity, 0);
+
+  const requestTerrainMetrics = useCallback(async (path) => {
+    const gm = window.google?.maps;
+    if (!terrainEnabled || !gm?.ElevationService || !gm?.geometry?.spherical || path.length < 2) {
+      return null;
+    }
+
+    const samples = Math.min(256, Math.max(path.length, path.length * 4));
+    const elevationService = new gm.ElevationService();
+    const results = await new Promise((resolve, reject) => {
+      elevationService.getElevationAlongPath(
+        { path, samples },
+        (response, status) => {
+          if (status === "OK" && Array.isArray(response) && response.length > 1) {
+            resolve(response);
+          } else {
+            reject(new Error(`Elevation request failed: ${status || "unknown status"}`));
+          }
+        },
+      );
+    });
+
+    let terrainDistance = 0;
+    let elevationGain = 0;
+    let elevationLoss = 0;
+    let minElevation = Infinity;
+    let maxElevation = -Infinity;
+
+    for (let index = 1; index < results.length; index += 1) {
+      const previous = results[index - 1];
+      const current = results[index];
+      const previousElevation = Number(previous?.elevation);
+      const currentElevation = Number(current?.elevation);
+      if (!Number.isFinite(previousElevation) || !Number.isFinite(currentElevation)) continue;
+
+      const segmentHorizontal = gm.geometry.spherical.computeDistanceBetween(
+        previous.location,
+        current.location,
+      );
+      const elevationDelta = currentElevation - previousElevation;
+      terrainDistance += Math.sqrt(
+        segmentHorizontal ** 2 + elevationDelta ** 2,
+      );
+      if (elevationDelta > 0) elevationGain += elevationDelta;
+      if (elevationDelta < 0) elevationLoss += Math.abs(elevationDelta);
+      minElevation = Math.min(minElevation, previousElevation, currentElevation);
+      maxElevation = Math.max(maxElevation, previousElevation, currentElevation);
+    }
+
+    if (!Number.isFinite(terrainDistance)) return null;
+    return {
+      terrainDistance,
+      terrainLengthInKm: (terrainDistance / 1000).toFixed(3),
+      elevationGain,
+      elevationLoss,
+      minElevation,
+      maxElevation,
+      samples: results.length,
+    };
+  }, [terrainEnabled]);
+
+  const applyTerrainMetrics = useCallback(async (shapeObj, entry) => {
+    if (!terrainEnabled || shapeObj.type !== "polyline") return;
+    const path = shapeObj.overlay?.getPath?.()?.getArray?.() || [];
+    if (path.length < 2) return;
+
+    const requestId = (shapeObj.terrainRequestId || 0) + 1;
+    shapeObj.terrainRequestId = requestId;
+    try {
+      const metrics = await requestTerrainMetrics(path);
+      if (!metrics || shapeObj.terrainRequestId !== requestId) return;
+      const updatedEntry = { ...entry, ...metrics, terrainMode: true };
+      const index = collectedDrawingRef.current.findIndex((drawing) => drawing.id === shapeObj.id);
+      if (index < 0) return;
+      collectedDrawingRef.current[index] = updatedEntry;
+      callbacksRef.current.onDrawingsChange?.([...collectedDrawingRef.current]);
+      callbacksRef.current.onSummary?.(updatedEntry);
+      if (shapeObj.labelMarker) {
+        const label = shapeObj.labelMarker.getLabel?.() || {};
+        const text = metrics.terrainDistance >= 1000
+          ? `${metrics.terrainLengthInKm} km terrain`
+          : `${Math.round(metrics.terrainDistance)} m terrain`;
+        shapeObj.labelMarker.setLabel({ ...label, text });
+      }
+    } catch (error) {
+      if (shapeObj.terrainRequestId === requestId) {
+        console.warn("[UnifiedMap] Terrain elevation request failed:", error);
+      }
+    }
+  }, [requestTerrainMetrics, terrainEnabled]);
 
   useEffect(() => {
     callbacksRef.current = { onSummary, onDrawingsChange, onUIChange };
@@ -1254,8 +1345,9 @@ function DrawingToolsLayerComponent({
 
     callbacksRef.current.onDrawingsChange?.([...collectedDrawingRef.current]);
     callbacksRef.current.onSummary?.(entry);
+    void applyTerrainMetrics(shapeObj, entry);
     return entry;
-  }, [logs, sessions, selectedMetric, thresholds, pixelateRect, cellSizeMeters, map, colorizeCells]);
+  }, [logs, sessions, selectedMetric, thresholds, pixelateRect, cellSizeMeters, map, colorizeCells, applyTerrainMetrics]);
   useEffect(() => {
     reAnalyzeShapeRef.current = reAnalyzeShape;
   }, [reAnalyzeShape]);
@@ -1343,7 +1435,12 @@ function DrawingToolsLayerComponent({
     if (type === "polyline") {
       const updateDistanceLabel = () => {
         const { length, center } = getPolylineDetails(overlay);
-        const text = length >= 1000 ? `${(length / 1000).toFixed(2)} km` : `${Math.round(length)} m`;
+        const displayedLength = terrainEnabled && shapeObj.terrainDistance
+          ? shapeObj.terrainDistance
+          : length;
+        const text = displayedLength >= 1000
+          ? `${(displayedLength / 1000).toFixed(2)} km${terrainEnabled && shapeObj.terrainDistance ? " terrain" : ""}`
+          : `${Math.round(displayedLength)} m${terrainEnabled && shapeObj.terrainDistance ? " terrain" : ""}`;
         if (!shapeObj.labelMarker) {
           shapeObj.labelMarker = new window.google.maps.Marker({
             map,
@@ -1424,7 +1521,26 @@ function DrawingToolsLayerComponent({
     }
 
     callbacksRef.current.onUIChange?.({ drawEnabled: false, shapeMode: null });
-  }, [map]);
+  }, [map, terrainEnabled]);
+
+  useEffect(() => {
+    if (!terrainEnabled) {
+      shapesRef.current.forEach((shapeObj) => {
+        if (shapeObj.type !== "polyline" || !shapeObj.labelMarker) return;
+        const { length } = getPolylineDetails(shapeObj.overlay);
+        const label = shapeObj.labelMarker.getLabel?.() || {};
+        shapeObj.labelMarker.setLabel({
+          ...label,
+          text: length >= 1000 ? `${(length / 1000).toFixed(2)} km` : `${Math.round(length)} m`,
+        });
+      });
+      return;
+    }
+    shapesRef.current.forEach((shapeObj) => {
+      if (shapeObj.type !== "polyline") return;
+      void reAnalyzeShapeRef.current?.(shapeObj);
+    });
+  }, [terrainEnabled]);
 
   useEffect(() => {
     registerCompletedShapeRef.current = registerCompletedShape;

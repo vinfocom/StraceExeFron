@@ -389,20 +389,127 @@ export const L3EventsTab = () => {
   );
 };
 
-export function HomeCallSummary({ summary }) {
+function summaryRowValue(row, ...keys) {
+  for (const key of keys) {
+    if (row?.[key] !== undefined && row?.[key] !== null) return row[key];
+    const pascalKey = key ? key.charAt(0).toUpperCase() + key.slice(1) : key;
+    if (row?.[pascalKey] !== undefined && row?.[pascalKey] !== null) return row[pascalKey];
+  }
+  return "";
+}
+
+function DiagnosticRowsSummary({ rows = [] }) {
+  if (!rows.length) return null;
+  const previewRows = rows.slice(0, 100);
+  const formatCoordinate = (value) => {
+    const numeric = Number(value);
+    return Number.isFinite(numeric) ? numeric.toFixed(5) : "—";
+  };
+
+  return (
+    <section className="mt-4 overflow-hidden rounded-lg border border-slate-700">
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-700 bg-slate-800/70 px-3 py-2">
+        <div>
+          <h4 className="text-xs font-semibold uppercase tracking-wide text-white">Diagnostic L3/Event Data</h4>
+          <p className="text-[11px] text-slate-400">{rows.length.toLocaleString()} rows loaded for this diagnostic scope.</p>
+        </div>
+        {rows.length > previewRows.length && <span className="text-[11px] text-slate-500">Showing first {previewRows.length}; open Excel View for all rows.</span>}
+      </div>
+      <div className="max-h-[28rem] overflow-auto">
+        <table className="w-full min-w-[1250px] border-collapse text-xs">
+          <thead className="sticky top-0 z-10 bg-slate-800/95 text-left text-[10px] uppercase tracking-wide text-slate-400">
+            <tr>
+              {['Time', 'Source', 'Category', 'Domain', 'Title / Message', 'Summary / Detail', 'Technology', 'Interface', 'Latitude', 'Longitude', 'Call'].map((label) => <th key={label} className="border-b border-r border-slate-700 px-2 py-2">{label}</th>)}
+            </tr>
+          </thead>
+          <tbody>
+            {previewRows.map((row, index) => {
+              const rowId = summaryRowValue(row, "id", "sourceId", "sourceIndex") || index;
+              const title = summaryRowValue(row, "title", "message", "officialName") || "—";
+              return (
+                <tr key={`${rowId}-${index}`} className="border-b border-slate-800/90 bg-slate-950/40 text-slate-200 last:border-b-0 hover:bg-slate-800/50">
+                  <td className="border-r border-slate-800 px-2 py-1.5 font-mono whitespace-nowrap">{summaryRowValue(row, "timestampLabel", "timestamp") || "—"}</td>
+                  <td className="border-r border-slate-800 px-2 py-1.5 whitespace-nowrap">{summaryRowValue(row, "sourceType", "type") || "—"}</td>
+                  <td className="border-r border-slate-800 px-2 py-1.5 whitespace-nowrap">{summaryRowValue(row, "category", "sourceCategory") || "—"}</td>
+                  <td className="border-r border-slate-800 px-2 py-1.5 whitespace-nowrap">{summaryRowValue(row, "domain") || "—"}</td>
+                  <td className="max-w-56 border-r border-slate-800 px-2 py-1.5" title={title}><div className="truncate">{title}</div></td>
+                  <td className="max-w-72 border-r border-slate-800 px-2 py-1.5" title={summaryRowValue(row, "summary", "rawMessage", "detail")}><div className="truncate">{summaryRowValue(row, "summary", "rawMessage", "detail") || "—"}</div></td>
+                  <td className="border-r border-slate-800 px-2 py-1.5 whitespace-nowrap">{summaryRowValue(row, "technology") || "—"}</td>
+                  <td className="border-r border-slate-800 px-2 py-1.5 whitespace-nowrap">{summaryRowValue(row, "interface") || "—"}</td>
+                  <td className="border-r border-slate-800 px-2 py-1.5 font-mono whitespace-nowrap">{formatCoordinate(summaryRowValue(row, "latitude"))}</td>
+                  <td className="border-r border-slate-800 px-2 py-1.5 font-mono whitespace-nowrap">{formatCoordinate(summaryRowValue(row, "longitude"))}</td>
+                  <td className="px-2 py-1.5 whitespace-nowrap">{summaryRowValue(row, "callId") || "—"}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  );
+}
+
+function DiagnosticApiOverview({ summary }) {
+  const hasOverview = summary.sourceFile || summary.scope || summary.kpis?.length || summary.mobility?.length || summary.parameters?.length || summary.technologies?.length;
+  if (!hasOverview) return null;
+  const counters = [
+    { label: "Rows", value: summary.totalRows ?? 0 },
+    { label: "L3 Rows", value: summary.l3Rows ?? 0 },
+    { label: "Event Rows", value: summary.eventRows ?? 0 },
+  ];
+  const dashboardValues = [
+    ...summary.kpis.map((item) => ({ ...item, group: "KPI" })),
+    ...summary.mobility.map((item) => ({ ...item, group: "Mobility" })),
+    ...summary.parameters.map((item) => ({ ...item, group: "Parameter" })),
+  ].slice(0, 30);
+
+  return (
+    <section className="mt-4 rounded-lg border border-slate-700 bg-slate-950/30 p-3">
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div>
+          <h4 className="text-xs font-semibold uppercase tracking-wide text-white">Diagnostic API Overview</h4>
+          {summary.sourceFile && <p className="mt-1 text-[11px] text-slate-400">Source: {summary.sourceFile}</p>}
+          {summary.scope && <p className="text-[11px] text-slate-500">{summary.scope}</p>}
+        </div>
+        {summary.generatedAt && <span className="text-[11px] text-slate-500">Generated: {summary.generatedAt}</span>}
+      </div>
+      <div className="mt-3 grid gap-2 sm:grid-cols-3">
+        {counters.map((counter) => <div key={counter.label} className="rounded border border-slate-700 bg-slate-900/70 px-3 py-2"><div className="text-[10px] uppercase tracking-wide text-slate-500">{counter.label}</div><div className="mt-1 text-lg font-semibold text-white">{Number(counter.value).toLocaleString()}</div></div>)}
+      </div>
+      {dashboardValues.length > 0 && (
+        <div className="mt-3 overflow-x-auto rounded border border-slate-700">
+          <table className="w-full min-w-[680px] border-collapse text-xs">
+            <thead className="bg-slate-800/90 text-left text-[10px] uppercase tracking-wide text-slate-400"><tr><th className="border-b border-r border-slate-700 px-2 py-2">Group</th><th className="border-b border-r border-slate-700 px-2 py-2">Parameter</th><th className="border-b border-slate-700 px-2 py-2">Result</th></tr></thead>
+            <tbody>{dashboardValues.map((item, index) => <tr key={`${item.group}-${item.parameter}-${index}`} className="border-b border-slate-800/90 last:border-b-0"><td className="border-r border-slate-800 px-2 py-1.5 text-slate-500">{item.group}</td><td className="border-r border-slate-800 px-2 py-1.5 text-slate-200">{item.parameter || "—"}</td><td className="px-2 py-1.5 text-slate-300">{item.result || "—"}{item.observation ? <span className="ml-2 text-slate-500">({item.observation})</span> : null}</td></tr>)}</tbody>
+          </table>
+        </div>
+      )}
+      {summary.technologies.length > 0 && <p className="mt-2 text-[11px] text-slate-500">Technologies: {summary.technologies.map((item) => `${item.technology || "Unknown"} (${Number(item.rows || 0).toLocaleString()})`).join(", ")}</p>}
+    </section>
+  );
+}
+
+export function HomeCallSummary({ summary, diagnosticRows = [] }) {
   const stats = [
     { label: "Connected", value: summary.connected || 0, className: "border-emerald-500/35 bg-emerald-500/10 text-emerald-300" },
     { label: "Dropped", value: summary.dropped || 0, className: "border-red-500/35 bg-red-500/10 text-red-300" },
     { label: "Not Connected", value: summary.notConnected || 0, className: "border-amber-500/35 bg-amber-500/10 text-amber-300" },
     { label: "Avg Call Setup", value: formatAverageSetupMs(summary.averageSetupTime), className: "border-blue-500/35 bg-blue-500/10 text-blue-300" },
     { label: "Avg Connected Duration", value: formatDurationMs(summary.averageTalkTime || 0), className: "border-cyan-500/35 bg-cyan-500/10 text-cyan-300" },
-  ];
+    summary.successRate !== undefined && summary.successRate !== null && Number.isFinite(Number(summary.successRate))
+      ? { label: "Success Rate", value: `${(Number(summary.successRate) <= 1 ? Number(summary.successRate) * 100 : Number(summary.successRate)).toFixed(1)}%`, className: "border-violet-500/35 bg-violet-500/10 text-violet-300" }
+      : null,
+    summary.busy !== undefined ? { label: "Busy", value: summary.busy || 0, className: "border-orange-500/35 bg-orange-500/10 text-orange-300" } : null,
+    summary.rejected !== undefined ? { label: "Rejected", value: summary.rejected || 0, className: "border-rose-500/35 bg-rose-500/10 text-rose-300" } : null,
+    summary.setupFailures !== undefined ? { label: "Setup Failures", value: summary.setupFailures || 0, className: "border-yellow-500/35 bg-yellow-500/10 text-yellow-300" } : null,
+    summary.ongoing !== undefined ? { label: "Ongoing", value: summary.ongoing || 0, className: "border-sky-500/35 bg-sky-500/10 text-sky-300" } : null,
+  ].filter(Boolean);
 
   return (
     <div className="rounded-lg border border-slate-700 bg-slate-900/70 p-4">
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
         <div>
-          <h3 className="text-sm font-semibold text-white">Call Summary</h3>
+          <h3 className="text-sm font-semibold text-white">Summary</h3>
           <p className="text-[11px] text-slate-400">
             {summary.totalCalls || 0} total call attempt{summary.totalCalls === 1 ? "" : "s"}
           </p>
@@ -417,6 +524,7 @@ export function HomeCallSummary({ summary }) {
           </div>
         ))}
       </div>
+      <DiagnosticApiOverview summary={summary} />
       {summary.calls?.length > 0 && (
         <div className="mt-4 overflow-x-auto rounded-lg border border-slate-700">
           <table className="w-full min-w-[980px] border-collapse text-xs">
@@ -456,6 +564,7 @@ export function HomeCallSummary({ summary }) {
           </table>
         </div>
       )}
+      <DiagnosticRowsSummary rows={diagnosticRows} />
     </div>
   );
 }

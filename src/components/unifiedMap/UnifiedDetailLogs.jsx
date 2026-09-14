@@ -51,7 +51,7 @@ import { calculateStats, calculateIOSummary } from "@/utils/analyticsHelpers";
 import { exportAnalytics } from "@/utils/exportService";
 import { TABS } from "@/utils/constants";
 import { FEATURE_KEYS, hasFeatureAccess } from "@/utils/featureAccess";
-import { getMetricLabelsForLocations } from "@/utils/technologyMetricLabels";
+import { getMetricLabelsForLocations, getTechnologyDisplayLog } from "@/utils/technologyMetricLabels";
 import { adminApi, homeApi, reportApi } from "@/api/apiEndpoints";
 import { useAuth } from "@/hooks/useAuth";
 
@@ -1560,8 +1560,10 @@ function UnifiedDetailLogs({
     );
   }, [dataFilters]);
 
-  const deferredLocations = useDeferredValue(locations);
-  const deferredRawLocations = useDeferredValue(rawLocations);
+  const displayLocations = useMemo(() => (locations || []).map(getTechnologyDisplayLog), [locations]);
+  const displayRawLocations = useMemo(() => (rawLocations || []).map(getTechnologyDisplayLog), [rawLocations]);
+  const deferredLocations = useDeferredValue(displayLocations);
+  const deferredRawLocations = useDeferredValue(displayRawLocations);
   const filteredLocations = useMemo(
     () =>
       hasActiveFilters
@@ -2263,7 +2265,7 @@ function UnifiedDetailLogs({
 
           {activeTab === "operatorComparison" && (
             <OperatorComparisonTab
-              locations={filteredRawLocations}
+              locations={filteredRawLocations.length > 0 ? filteredRawLocations : filteredLocations}
               chartRefs={chartRefs}
               expanded={expanded}
               enableSiteToggle={enableSiteToggle}

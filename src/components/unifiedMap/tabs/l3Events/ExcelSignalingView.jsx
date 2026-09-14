@@ -1,9 +1,15 @@
-import React, { memo, useEffect, useMemo, useRef, useState } from "react";
+import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ChevronDown, ChevronUp, Download, Loader2, Search, X } from "lucide-react";
 import toast from "react-hot-toast";
 import { downloadExcelSignalingSummaryPdf } from "@/utils/l3Events/pdfReport";
+import { downloadExcelSignalingSummaryExcel } from "@/utils/l3Events/excelSummaryReport";
+import { Dialog, DialogContent, DialogTrigger } from "@/components/ui/dialog";
 
 const SOURCE_OPTIONS = ["l3", "event"];
+const SIGNALING_ROW_HEIGHT = 32;
+const SIGNALING_HEADER_HEIGHT = 68;
+const SIGNALING_OVERSCAN = 12;
+const DEFAULT_VIEWPORT_HEIGHT = 600;
 
 const SEVERITY_CLASS = {
   failure: "bg-red-500/10 text-white",
@@ -93,11 +99,13 @@ function TextColumnSearchFilter({
   value,
   onChange,
   matches,
+  suggestions = [],
   activeMatchNumber,
   onNext,
   onPrevious,
   onClear,
   onSelectMatch,
+  onSelectSuggestion,
   placeholder,
   getMatchLabel,
   noMatchesLabel,
@@ -107,6 +115,8 @@ function TextColumnSearchFilter({
   const hasSearch = Boolean(value.trim());
   const matchCount = matches.length;
   const hasMatches = matchCount > 0;
+  const dropdownRows = hasSearch ? matches : suggestions;
+  const hasDropdownRows = dropdownRows.length > 0;
 
   return (
     <div className="relative flex min-w-0 items-center gap-1">
@@ -136,9 +146,9 @@ function TextColumnSearchFilter({
           className="h-7 w-full rounded border border-slate-700 bg-slate-950 py-0 pl-7 pr-2 text-[12px] font-normal normal-case text-white placeholder:text-slate-500 focus:border-blue-500 focus:outline-none"
         />
       </div>
-      {isOpen && hasSearch && (
+      {isOpen && (hasSearch || hasDropdownRows) && (
         <div className="absolute left-0 right-0 top-8 z-40 max-h-48 overflow-auto rounded border border-slate-700 bg-slate-950 py-1 text-left shadow-xl shadow-black/30">
-          {hasMatches ? matches.map((row, index) => (
+          {hasDropdownRows ? dropdownRows.map((row, index) => (
             <button
               key={row.id}
               type="button"
@@ -146,7 +156,8 @@ function TextColumnSearchFilter({
               onMouseDown={(event) => event.preventDefault()}
               onClick={(event) => {
                 event.stopPropagation();
-                onSelectMatch(index, row);
+                if (hasSearch) onSelectMatch(index, row);
+                else onSelectSuggestion?.(getMatchLabel(row), row);
                 setIsOpen(false);
               }}
               className={`flex w-full min-w-0 items-center gap-2 px-2 py-1.5 text-left text-[12px] hover:bg-blue-500/20 hover:text-white ${index === activeMatchNumber - 1 ? "bg-amber-500/20 text-amber-50" : "text-white"}`}
@@ -254,6 +265,96 @@ const SignalingRow = memo(React.forwardRef(function SignalingRow({ row, selected
   );
 }));
 
+function VirtualizedSignalingBody({
+  rows,
+  columnCount,
+  tableContainerRef,
+  rowRefs,
+  selectedRow,
+  causeMatchIds,
+  messageMatchIds,
+  activeCauseMatch,
+  activeMessageMatch,
+  onSelect,
+  includeLocation,
+  includeRadio,
+  includeCore,
+}) {
+  const [scrollTop, setScrollTop] = useState(0);
+  const [viewportHeight, setViewportHeight] = useState(DEFAULT_VIEWPORT_HEIGHT);
+
+  useEffect(() => {
+    const container = tableContainerRef.current;
+    if (!container) return undefined;
+
+    const updateViewport = () => setViewportHeight(container.clientHeight || DEFAULT_VIEWPORT_HEIGHT);
+    let frameId = null;
+    const handleScroll = () => {
+      if (frameId !== null) return;
+      frameId = window.requestAnimationFrame(() => {
+        frameId = null;
+        setScrollTop(container.scrollTop);
+      });
+    };
+
+    updateViewport();
+    container.addEventListener("scroll", handleScroll, { passive: true });
+    const resizeObserver = typeof ResizeObserver === "function" ? new ResizeObserver(updateViewport) : null;
+    resizeObserver?.observe(container);
+
+    return () => {
+      container.removeEventListener("scroll", handleScroll);
+      if (frameId !== null) window.cancelAnimationFrame(frameId);
+      resizeObserver?.disconnect();
+    };
+  }, [tableContainerRef]);
+
+  useEffect(() => {
+    const maxScrollTop = Math.max(0, SIGNALING_HEADER_HEIGHT + rows.length * SIGNALING_ROW_HEIGHT - viewportHeight);
+    if (tableContainerRef.current && tableContainerRef.current.scrollTop > maxScrollTop) {
+      tableContainerRef.current.scrollTop = maxScrollTop;
+      setScrollTop(maxScrollTop);
+    }
+  }, [rows.length, tableContainerRef, viewportHeight]);
+
+  if (!rows.length) {
+    return <tr><td colSpan={columnCount} className="py-16 text-center text-xs text-slate-500">No signaling rows match the current filters.</td></tr>;
+  }
+
+  const firstVisibleIndex = Math.max(0, Math.floor(Math.max(0, scrollTop - SIGNALING_HEADER_HEIGHT) / SIGNALING_ROW_HEIGHT));
+  const startIndex = Math.max(0, firstVisibleIndex - SIGNALING_OVERSCAN);
+  const visibleCount = Math.ceil(viewportHeight / SIGNALING_ROW_HEIGHT) + SIGNALING_OVERSCAN * 2 + 2;
+  const endIndex = Math.min(rows.length, startIndex + visibleCount);
+  const visibleRows = rows.slice(startIndex, endIndex);
+  const topSpacerHeight = startIndex * SIGNALING_ROW_HEIGHT;
+  const bottomSpacerHeight = (rows.length - endIndex) * SIGNALING_ROW_HEIGHT;
+  const spacerStyle = { height: `${topSpacerHeight}px`, padding: 0, border: 0 };
+
+  return (
+    <>
+      {topSpacerHeight > 0 && <tr aria-hidden="true"><td colSpan={columnCount} style={spacerStyle} /></tr>}
+      {visibleRows.map((row) => (
+        <SignalingRow
+          key={row.id}
+          ref={(node) => {
+            if (node) rowRefs.current.set(row.id, node);
+            else rowRefs.current.delete(row.id);
+          }}
+          row={row}
+          selected={selectedRow?.id === row.id}
+          searchMatch={causeMatchIds.has(row.id) || messageMatchIds.has(row.id)}
+          activeSearchMatch={activeCauseMatch?.id === row.id || activeMessageMatch?.id === row.id}
+          onSelect={onSelect}
+          includeLocation={includeLocation}
+          includeRadio={includeRadio}
+          includeCore={includeCore}
+        />
+      ))}
+      {bottomSpacerHeight > 0 && <tr aria-hidden="true"><td colSpan={columnCount} style={{ ...spacerStyle, height: `${bottomSpacerHeight}px` }} /></tr>}
+    </>
+  );
+}
+
 function SelectFilter({ label, value, onChange, options, allLabel = "All" }) {
   return (
     <label className="flex items-center gap-1.5 text-[11px] text-slate-400">
@@ -299,7 +400,9 @@ export function ExcelSignalingView({ rows = [], calls = [], selectedCall, onSele
   const [activeCauseMatchIndex, setActiveCauseMatchIndex] = useState(0);
   const [activeMessageMatchIndex, setActiveMessageMatchIndex] = useState(0);
   const [isDownloadingSummary, setIsDownloadingSummary] = useState(false);
+  const [summaryDialogOpen, setSummaryDialogOpen] = useState(false);
   const rowRefs = useRef(new Map());
+  const tableContainerRef = useRef(null);
 
   useEffect(() => setCallFilter(selectedCall?.id || "all"), [selectedCall]);
 
@@ -336,10 +439,49 @@ export function ExcelSignalingView({ rows = [], calls = [], selectedCall, onSele
     if (!messageNeedle) return [];
     return filtered.filter((row) => String(row.message || "").toLowerCase().includes(messageNeedle));
   }, [filtered, messageNeedle]);
+  const causeSuggestions = useMemo(() => {
+    const seen = new Set();
+    return filtered
+      .filter((row) => {
+        const value = String(row.cause || "").trim();
+        if (!value || seen.has(value)) return false;
+        seen.add(value);
+        return true;
+      })
+      .sort((left, right) => String(left.cause).localeCompare(String(right.cause)))
+      .slice(0, 40);
+  }, [filtered]);
+  const messageSuggestions = useMemo(() => {
+    const seen = new Set();
+    return filtered
+      .filter((row) => {
+        const value = String(row.message || "").trim();
+        if (!value || seen.has(value)) return false;
+        seen.add(value);
+        return true;
+      })
+      .sort((left, right) => String(left.message).localeCompare(String(right.message)))
+      .slice(0, 40);
+  }, [filtered]);
   const activeCauseMatch = causeMatches[activeCauseMatchIndex] || null;
   const activeMessageMatch = messageMatches[activeMessageMatchIndex] || null;
   const causeMatchIds = useMemo(() => new Set(causeMatches.map((row) => row.id)), [causeMatches]);
   const messageMatchIds = useMemo(() => new Set(messageMatches.map((row) => row.id)), [messageMatches]);
+  const filteredRowIndexes = useMemo(() => {
+    const indexes = new Map();
+    filtered.forEach((row, index) => indexes.set(row.id, index));
+    return indexes;
+  }, [filtered]);
+
+  const scrollToRow = useCallback((row) => {
+    const index = filteredRowIndexes.get(row?.id);
+    const container = tableContainerRef.current;
+    if (!Number.isInteger(index) || !container) return;
+
+    const bodyViewportHeight = Math.max(0, container.clientHeight - SIGNALING_HEADER_HEIGHT);
+    const targetTop = SIGNALING_HEADER_HEIGHT + index * SIGNALING_ROW_HEIGHT - Math.max(0, (bodyViewportHeight - SIGNALING_ROW_HEIGHT) / 2);
+    container.scrollTo({ top: Math.max(0, targetTop), behavior: "smooth" });
+  }, [filteredRowIndexes]);
 
   useEffect(() => {
     if (selectedRow && !filtered.some((row) => row.id === selectedRow.id)) {
@@ -363,8 +505,8 @@ export function ExcelSignalingView({ rows = [], calls = [], selectedCall, onSele
       return;
     }
     setSelectedRow(activeCauseMatch);
-    rowRefs.current.get(activeCauseMatch.id)?.scrollIntoView({ block: "center", inline: "nearest" });
-  }, [activeCauseMatch, activeCauseMatchIndex, causeMatches, causeNeedle]);
+    scrollToRow(activeCauseMatch);
+  }, [activeCauseMatch, activeCauseMatchIndex, causeMatches, causeNeedle, scrollToRow]);
 
   useEffect(() => {
     if (!messageNeedle) return;
@@ -377,8 +519,8 @@ export function ExcelSignalingView({ rows = [], calls = [], selectedCall, onSele
       return;
     }
     setSelectedRow(activeMessageMatch);
-    rowRefs.current.get(activeMessageMatch.id)?.scrollIntoView({ block: "center", inline: "nearest" });
-  }, [activeMessageMatch, activeMessageMatchIndex, messageMatches, messageNeedle]);
+    scrollToRow(activeMessageMatch);
+  }, [activeMessageMatch, activeMessageMatchIndex, messageMatches, messageNeedle, scrollToRow]);
 
   const exportCalls = useMemo(() => {
     if (callFilter !== "all") {
@@ -432,6 +574,9 @@ export function ExcelSignalingView({ rows = [], calls = [], selectedCall, onSele
     setSelectedRow(null);
     setActiveCauseMatchIndex(0);
   };
+  const selectCauseSuggestion = (value) => {
+    changeCauseColumnFilter(value);
+  };
   const changeMessageColumnFilter = (value) => {
     setMessageColumnFilter(value);
     setSelectedRow(null);
@@ -441,6 +586,9 @@ export function ExcelSignalingView({ rows = [], calls = [], selectedCall, onSele
     setMessageColumnFilter("");
     setSelectedRow(null);
     setActiveMessageMatchIndex(0);
+  };
+  const selectMessageSuggestion = (value) => {
+    changeMessageColumnFilter(value);
   };
   const moveCauseMatch = (step) => {
     if (!causeMatches.length) return;
@@ -461,23 +609,25 @@ export function ExcelSignalingView({ rows = [], calls = [], selectedCall, onSele
     setSelectedRow(row);
   };
   const changeSort = (key) => setSort((current) => ({ key, direction: current.key === key && current.direction === "asc" ? "desc" : "asc" }));
-  const downloadSummary = async () => {
+  const downloadSummary = async (format) => {
     if (!filtered.length || isDownloadingSummary) return;
     setIsDownloadingSummary(true);
     try {
       await new Promise((resolve) => setTimeout(resolve, 0));
       const scopedCall = callFilter === "all" ? null : exportCalls[0] || null;
-      downloadExcelSignalingSummaryPdf({
+      const download = format === "Excel" ? downloadExcelSignalingSummaryExcel : downloadExcelSignalingSummaryPdf;
+      await download({
         sourceFileName,
         rows: filtered,
         calls: exportCalls,
         selectedCall: scopedCall,
         includeLocation,
       });
-      toast.success("Summary PDF downloaded.");
+      setSummaryDialogOpen(false);
+      toast.success(`Summary ${format} downloaded.`);
     } catch (error) {
-      console.error("Failed to download summary PDF:", error);
-      toast.error(error?.message || "Failed to generate summary PDF.");
+      console.error(`Failed to download summary ${format}:`, error);
+      toast.error(error?.message || `Failed to generate summary ${format}.`);
     } finally {
       setIsDownloadingSummary(false);
     }
@@ -497,20 +647,35 @@ export function ExcelSignalingView({ rows = [], calls = [], selectedCall, onSele
         <label className="flex items-center gap-1 text-[11px] text-slate-300"><input type="checkbox" checked={includeCore} onChange={(event) => { setIncludeCore(event.target.checked); if (!event.target.checked) setCoreDirection("all"); }} className="accent-blue-500" />Include MME/AMF/Core</label>
         <div className="relative min-w-52 flex-1"><Search className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-slate-500" /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search signaling..." className="h-8 w-full rounded border border-slate-700 bg-slate-950 pl-8 pr-2 text-xs text-white placeholder:text-slate-500 focus:border-blue-500 focus:outline-none" /></div>
         <button type="button" onClick={clearFilters} className="flex h-8 items-center gap-1 rounded border border-slate-700 bg-slate-900 px-2 text-[11px] text-slate-300 hover:bg-slate-700"><X className="h-3 w-3" />Clear Filters</button>
+        <Dialog open={summaryDialogOpen} onOpenChange={(open) => { if (!isDownloadingSummary) setSummaryDialogOpen(open); }}>
+        <DialogTrigger asChild>
         <button
           type="button"
-          onClick={downloadSummary}
           disabled={!filtered.length || isDownloadingSummary}
           className="flex h-8 items-center gap-1.5 rounded border border-blue-500/60 bg-blue-600 px-3 text-[11px] font-medium text-white hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
         >
           {isDownloadingSummary ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
           Download Summary
         </button>
+        </DialogTrigger>
+        <DialogContent title="Download Summary" showCloseButton={!isDownloadingSummary} style={{ width: "400px", background: "#0f172a", color: "white", border: "1px solid #334155" }}>
+          <h2 className="mb-2 text-lg font-semibold">Download Summary</h2>
+          <p className="mb-5 text-sm text-slate-300">Choose a format. Both include the same summary and currently filtered messages.</p>
+          <div className="flex gap-3" aria-busy={isDownloadingSummary}>
+            {["PDF", "Excel"].map((format) => (
+              <button key={format} type="button" disabled={isDownloadingSummary || !filtered.length} onClick={() => downloadSummary(format)} className="flex flex-1 items-center justify-center gap-2 rounded bg-blue-600 px-4 py-3 text-sm font-medium hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-50">
+                <Download className="h-4 w-4" />{format}
+              </button>
+            ))}
+          </div>
+          {isDownloadingSummary && <p role="status" className="mt-3 flex items-center gap-2 text-sm text-slate-300"><Loader2 className="h-4 w-4 animate-spin" />Preparing summary...</p>}
+        </DialogContent>
+        </Dialog>
       </div>
       <div className="shrink-0 flex items-center justify-between border-b border-slate-800 px-1 py-0.5 text-[10px] text-slate-400">
         <span>Showing {filtered.length.toLocaleString()} matching rows ({rows.length.toLocaleString()} total)</span>
       </div>
-      <div className="min-h-0 flex-1 overflow-auto">
+      <div ref={tableContainerRef} className="min-h-0 flex-1 overflow-auto">
         <table className="l3-responsive-data-table border-collapse text-white">
           <thead>
             <tr>
@@ -549,11 +714,13 @@ export function ExcelSignalingView({ rows = [], calls = [], selectedCall, onSele
                   value={causeColumnFilter}
                   onChange={changeCauseColumnFilter}
                   matches={causeMatches}
+                  suggestions={causeSuggestions}
                   activeMatchNumber={causeMatches.length ? activeCauseMatchIndex + 1 : 0}
                   onNext={() => moveCauseMatch(1)}
                   onPrevious={() => moveCauseMatch(-1)}
                   onClear={clearCauseColumnFilter}
                   onSelectMatch={selectCauseMatch}
+                  onSelectSuggestion={selectCauseSuggestion}
                   placeholder="Find cause"
                   getMatchLabel={(row) => row.cause || ""}
                   noMatchesLabel="No causes found"
@@ -565,11 +732,13 @@ export function ExcelSignalingView({ rows = [], calls = [], selectedCall, onSele
                   value={messageColumnFilter}
                   onChange={changeMessageColumnFilter}
                   matches={messageMatches}
+                  suggestions={messageSuggestions}
                   activeMatchNumber={messageMatches.length ? activeMessageMatchIndex + 1 : 0}
                   onNext={() => moveMessageMatch(1)}
                   onPrevious={() => moveMessageMatch(-1)}
                   onClear={clearMessageColumnFilter}
                   onSelectMatch={selectMessageMatch}
+                  onSelectSuggestion={selectMessageSuggestion}
                   placeholder="Find L3/Event"
                   getMatchLabel={(row) => row.message || ""}
                   noMatchesLabel="No messages found"
@@ -578,23 +747,23 @@ export function ExcelSignalingView({ rows = [], calls = [], selectedCall, onSele
               </th>
             </tr>
           </thead>
-          <tbody>{filtered.length ? filtered.map((row) => (
-            <SignalingRow
-              key={row.id}
-              ref={(node) => {
-                if (node) rowRefs.current.set(row.id, node);
-                else rowRefs.current.delete(row.id);
-              }}
-              row={row}
-              selected={selectedRow?.id === row.id}
-              searchMatch={causeMatchIds.has(row.id) || messageMatchIds.has(row.id)}
-              activeSearchMatch={activeCauseMatch?.id === row.id || activeMessageMatch?.id === row.id}
+          <tbody>
+            <VirtualizedSignalingBody
+              rows={filtered}
+              columnCount={columnCount}
+              tableContainerRef={tableContainerRef}
+              rowRefs={rowRefs}
+              selectedRow={selectedRow}
+              causeMatchIds={causeMatchIds}
+              messageMatchIds={messageMatchIds}
+              activeCauseMatch={activeCauseMatch}
+              activeMessageMatch={activeMessageMatch}
               onSelect={setSelectedRow}
               includeLocation={includeLocation}
               includeRadio={includeRadio}
               includeCore={includeCore}
             />
-          )) : <tr><td colSpan={columnCount} className="py-16 text-center text-xs text-slate-500">No signaling rows match the current filters.</td></tr>}</tbody>
+          </tbody>
         </table>
       </div>
       <div className="basis-[22%] shrink-0 border-t border-slate-700 shadow-2xl shadow-black/30">
