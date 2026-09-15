@@ -410,6 +410,7 @@ function DiagnosticApiOverview({ summary, timeline = [] }) {
       name,
       rows: Number(item.rows ?? item.Rows ?? 0) || 0,
       interfaces: item.interfaces ?? item.Interfaces ?? "",
+      observedEvents: item.observedEvents ?? item.ObservedEvents,
     });
   });
   technologies.sort((left, right) => right.rows - left.rows || left.name.localeCompare(right.name));
@@ -438,9 +439,12 @@ function DiagnosticApiOverview({ summary, timeline = [] }) {
     if (/\bhand[\s-]?over\b/i.test(text)) counts.handoverRows += 1;
     return counts;
   }, { endcSetupRows: 0, handoverRows: 0 });
-  const allObservedEvents = countObservedEvents(timeline);
-  const technologyRows = selectedTechnology ? rowsForTechnology(selectedTechnology.name) : timeline;
-  const visibleObservedEvents = showAll ? allObservedEvents : countObservedEvents(technologyRows);
+  const backendObservedEvents = summary.observedEvents;
+  const allObservedEvents = backendObservedEvents || countObservedEvents(timeline);
+  const visibleObservedEvents = showAll ? allObservedEvents
+    : selectedTechnology?.observedEvents || (backendObservedEvents
+      ? { endcSetupRows: 0, handoverRows: 0 }
+      : countObservedEvents(rowsForTechnology(selectedTechnology.name)));
   const technologyMobility = selectedTechnology
     ? mobility
       .filter((item) => getParameter(item).toLocaleLowerCase().startsWith((selectedTechnology.name + " ").toLocaleLowerCase()))
@@ -454,8 +458,10 @@ function DiagnosticApiOverview({ summary, timeline = [] }) {
   const tableValues = showAll
     ? [
       ...dashboardValues,
-      { parameter: "Observed EN-DC setup rows", result: String(allObservedEvents.endcSetupRows) },
-      { parameter: "Observed handover rows", result: String(allObservedEvents.handoverRows) },
+      ...(!backendObservedEvents ? [
+        { parameter: "Observed EN-DC setup rows", result: String(allObservedEvents.endcSetupRows) },
+        { parameter: "Observed handover rows", result: String(allObservedEvents.handoverRows) },
+      ] : []),
     ]
     : [
       { parameter: "Technology", result: selectedTechnology.name },
@@ -471,7 +477,7 @@ function DiagnosticApiOverview({ summary, timeline = [] }) {
     <section className="mt-4 rounded-lg border border-slate-700 bg-slate-950/30 p-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h4 className="text-xs font-semibold uppercase tracking-wide text-white">Overview</h4>
-        <span className="text-[10px] text-slate-500">Counts are based on explicit EN-DC setup/action and handover text in the rows.</span>
+        <span className="text-[10px] text-slate-500">Message text observations; these are not unique handovers or confirmed successes.</span>
       </div>
       <div className="mt-3 grid gap-2 sm:grid-cols-2">
         <div className="rounded border border-slate-700 bg-slate-900/70 px-3 py-2">
@@ -486,7 +492,7 @@ function DiagnosticApiOverview({ summary, timeline = [] }) {
       <div className="mt-3 grid gap-3 md:grid-cols-[10rem_minmax(0,1fr)]">
         <nav role="tablist" aria-label="Overview by technology" className="flex gap-1 overflow-x-auto md:flex-col md:overflow-visible">
           <button type="button" role="tab" aria-selected={showAll} onClick={() => setActiveTechnology("All")} className={"shrink-0 rounded px-3 py-2 text-left text-xs " + (showAll ? "bg-blue-600 text-white" : "bg-slate-900 text-slate-300 hover:bg-slate-800")}>
-            All technologies ({timeline.length.toLocaleString()})
+            All technologies ({(summary.totalRows ?? timeline.length).toLocaleString()})
           </button>
           {technologies.map((technology) => {
             const active = !showAll && selectedTechnology?.name === technology.name;
