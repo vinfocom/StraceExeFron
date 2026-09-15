@@ -298,6 +298,7 @@ export const ApplicationTab = ({
   appSummary,
   expanded,
   chartRefs,
+  metricLabels,
   dataFilters = { providers: [], bands: [], technologies: [] },
 }) => {
   const [appSubTab, setAppSubTab] = useState("table");
@@ -606,7 +607,7 @@ export const ApplicationTab = ({
 
       {/* Comparison View */}
       {appSubTab === "comparison" && (
-        <AppComparisonView chartData={chartData} chartRefs={chartRefs} />
+        <AppComparisonView chartData={chartData} chartRefs={chartRefs} metricLabels={metricLabels} />
       )}
     </div>
   );
@@ -676,13 +677,13 @@ const AppTableView = ({ data, sortConfig, onSort, expanded }) => {
                 Duration
               </HeaderCell>
               <HeaderCell sortKey="avgRsrp" className="min-w-[90px]">
-                RSRP
+                {metricLabels?.rsrp ?? "RSRP"}
               </HeaderCell>
               <HeaderCell sortKey="avgRsrq" className="min-w-[90px]">
-                RSRQ
+                {metricLabels?.rsrq ?? "RSRQ"}
               </HeaderCell>
               <HeaderCell sortKey="avgSinr" className="min-w-[90px]">
-                SINR
+                {metricLabels?.sinr ?? "SINR"}
               </HeaderCell>
               <HeaderCell sortKey="avgDl" className="min-w-[100px]">
                 Download
@@ -852,7 +853,7 @@ const AppTableView = ({ data, sortConfig, onSort, expanded }) => {
 };
 
 // ==================== COMPARISON VIEW COMPONENT ====================
-const AppComparisonView = ({ chartData, chartRefs }) => {
+const AppComparisonView = ({ chartData, chartRefs, metricLabels = {} }) => {
   const [selectedQualityMetric, setSelectedQualityMetric] = useState("mos");
   const [selectedPerformanceMetric, setSelectedPerformanceMetric] =
     useState("latency");
@@ -868,7 +869,7 @@ const AppComparisonView = ({ chartData, chartRefs }) => {
     },
     sinr: {
       key: "avgSinr",
-      label: "SINR",
+      label: metricLabels?.sinr ?? "SINR",
       color: "#22c55e",
       format: (val) => `${val?.toFixed(1) || 0} dB`,
       domain: [-20, 30],
@@ -876,7 +877,7 @@ const AppComparisonView = ({ chartData, chartRefs }) => {
     },
     rsrp: {
       key: "avgRsrp",
-      label: "RSRP",
+      label: metricLabels?.rsrp ?? "RSRP",
       color: "#3b82f6",
       format: (val) => `${val?.toFixed(1) || 0} dBm`,
       domain: [-140, -40],
@@ -884,7 +885,7 @@ const AppComparisonView = ({ chartData, chartRefs }) => {
     },
     rsrq: {
       key: "avgRsrq",
-      label: "RSRQ",
+      label: metricLabels?.rsrq ?? "RSRQ",
       color: "#a855f7",
       format: (val) => `${val?.toFixed(1) || 0} dB`,
       domain: [-20, 0],

@@ -1,3 +1,4 @@
+import { getMetricLabelsForLocations, getTechnologyMetricLabels, getLogTechnology, getTechnologyMetricValue, is2GTechnology } from "@/utils/technologyMetricLabels";
 // src/components/analytics/PciColorLegend.jsx
 import React, { useState, useMemo } from "react";
 import { 
@@ -212,6 +213,21 @@ const CELL_SORT_OPTIONS = {
   latency: { label: "Latency", key: "latency", getValue: (item) => parseFloat(item.avgLatency?.avg) || 9999 },
   nodebId: { label: "NodeB ID", key: "nodebId", getValue: (item) => item.nodebId || "" },
 };
+
+const getMetricDisplayLabel = (metricKey, metricLabels = {}) =>
+  metricLabels[metricKey] !== undefined
+    ? metricLabels[metricKey]
+    : ({ rsrp: "RSRP", rsrq: "RSRQ", sinr: "SINR" }[metricKey] || metricKey);
+
+const getDisplaySortOptions = (options, metricLabels = {}) =>
+  Object.fromEntries(
+    Object.entries(options).filter(([key]) => metricLabels[key] !== "").map(([key, option]) => [
+      key,
+      ["rsrp", "rsrq", "sinr", "pci"].includes(key)
+        ? { ...option, label: getMetricDisplayLabel(key, metricLabels) }
+        : option,
+    ]),
+  );
 
 const getTechnologyColor = (tech) => {
   if (!tech) return "#6B7280";
@@ -437,7 +453,7 @@ const sortData = (data, sortConfig, options) => {
 
 const resolvePciValue = (loc) => {
   const rawPci =
-    loc?.best_pci ??
+    (is2GTechnology(getLogTechnology(loc)) ? getTechnologyMetricValue(loc, "pci") : null) ?? loc?.best_pci ??
     loc?.bestPci ??
     loc?.pci ??
     loc?.PCI ??
@@ -446,12 +462,137 @@ const resolvePciValue = (loc) => {
   return String(rawPci);
 };
 
-export const PciColorLegend = React.forwardRef(({ locations }, ref) => {
+const resolveTechnologyValue = (loc) => {
+  const value = [getLogTechnology(loc)]
+    .find((value) => value != null && String(value).trim() !== "");
+  return value == null ? "Unknown" : String(value).trim();
+};
+
+const buildPciColorMap = (locations) => {
+  if (!locations?.length) return [];
+
+  const pciStats = locations.reduce((acc, loc) => {
+    const pci = resolvePciValue(loc);
+    const channelLabel = is2GTechnology(getLogTechnology(loc)) ? "BCCH" : "PCI";
+    const groupKey = `${channelLabel}:${pci}`;
+
+    if (!acc[groupKey]) {
+      acc[groupKey] = {
+        pci,
+        channelLabel,
+        count: 0,
+        samples: [],
+        providers: {},
+        technologies: {},
+        bands: {},
+        sessions: new Set(),
+        nodebIds: new Set(),
+        cellIds: new Set(),
+        rsrp: [],
+        rsrq: [],
+        sinr: [],
+        mos: [],
+        dl_tpt: [],
+        ul_tpt: [],
+        latency: [],
+        jitter: [],
+        speed: [],
+        lte_bler: [],
+      };
+    }
+
+    acc[groupKey].count++;
+    acc[groupKey].samples.push(loc);
+
+    const provider = loc.provider || "Unknown";
+    const technology = resolveTechnologyValue(loc);
+    const band = normalizeBandName(loc.band || loc.primaryBand);
+
+    acc[groupKey].providers[provider] = (acc[groupKey].providers[provider] || 0) + 1;
+    acc[groupKey].technologies[technology] = (acc[groupKey].technologies[technology] || 0) + 1;
+    acc[groupKey].bands[band] = (acc[groupKey].bands[band] || 0) + 1;
+
+    if (loc.session_id != null) acc[groupKey].sessions.add(String(loc.session_id));
+    if (loc.nodeb_id != null && loc.nodeb_id !== "Unknown") acc[groupKey].nodebIds.add(String(loc.nodeb_id));
+    if (loc.cell_id != null && loc.cell_id !== "Unknown") acc[groupKey].cellIds.add(String(loc.cell_id));
+
+    if (loc.rsrp != null && !isNaN(loc.rsrp)) acc[groupKey].rsrp.push(parseFloat(loc.rsrp));
+    if (loc.rsrq != null && !isNaN(loc.rsrq)) acc[groupKey].rsrq.push(parseFloat(loc.rsrq));
+    if (loc.sinr != null && !isNaN(loc.sinr)) acc[groupKey].sinr.push(parseFloat(loc.sinr));
+    if (loc.mos != null && !isNaN(loc.mos)) acc[groupKey].mos.push(parseFloat(loc.mos));
+    if (loc.dl_tpt != null && !isNaN(loc.dl_tpt)) acc[groupKey].dl_tpt.push(parseFloat(loc.dl_tpt));
+    if (loc.ul_tpt != null && !isNaN(loc.ul_tpt)) acc[groupKey].ul_tpt.push(parseFloat(loc.ul_tpt));
+    if (loc.latency != null && !isNaN(loc.latency)) acc[groupKey].latency.push(parseFloat(loc.latency));
+    if (loc.jitter != null && !isNaN(loc.jitter)) acc[groupKey].jitter.push(parseFloat(loc.jitter));
+    if (loc.speed != null && !isNaN(loc.speed)) acc[groupKey].speed.push(parseFloat(loc.speed));
+    if (loc.lte_bler != null && !isNaN(loc.lte_bler)) acc[groupKey].lte_bler.push(parseFloat(loc.lte_bler));
+
+    return acc;
+  }, {});
+
+  return Object.entries(pciStats)
+    .map(([id, data]) => {
+      const { pci, channelLabel } = data;
+      const pciNum = parseInt(pci);
+      const colorIndex = isNaN(pciNum) ? 0 : pciNum % PCI_COLOR_PALETTE.length;
+
+      const dominantProvider = Object.entries(data.providers).sort((a, b) => b[1] - a[1])[0];
+      const dominantTechnology = Object.entries(data.technologies).sort((a, b) => b[1] - a[1])[0];
+      const dominantBand = Object.entries(data.bands).sort((a, b) => b[1] - a[1])[0];
+
+      return {
+        id,
+        channelLabel,
+        pci,
+        pciNum: isNaN(pciNum) ? -1 : pciNum,
+        color: PCI_COLOR_PALETTE[colorIndex],
+        colorIndex,
+        count: data.count,
+        providers: data.providers,
+        technologies: data.technologies,
+        bands: data.bands,
+        dominantProvider: dominantProvider?.[0] || "Unknown",
+        dominantProviderCount: dominantProvider?.[1] || 0,
+        dominantTechnology: dominantTechnology?.[0] || "Unknown",
+        dominantBand: dominantBand?.[0] || "Unknown",
+        sessions: Array.from(data.sessions).sort(),
+        sessionCount: data.sessions.size,
+        nodebIds: Array.from(data.nodebIds).sort(),
+        nodebCount: data.nodebIds.size,
+        cellIds: Array.from(data.cellIds).sort(),
+        cellCount: data.cellIds.size,
+        avgRsrp: calculateStats(data.rsrp),
+        avgRsrq: calculateStats(data.rsrq),
+        avgSinr: calculateStats(data.sinr),
+        avgMos: calculateStats(data.mos),
+        avgDl: calculateStats(data.dl_tpt),
+        avgUl: calculateStats(data.ul_tpt),
+        avgLatency: calculateStats(data.latency),
+        avgJitter: calculateStats(data.jitter),
+        avgSpeed: calculateStats(data.speed),
+        avgBler: calculateStats(data.lte_bler),
+        rawData: {
+          rsrp: data.rsrp,
+          rsrq: data.rsrq,
+          sinr: data.sinr,
+          mos: data.mos,
+          dl_tpt: data.dl_tpt,
+          ul_tpt: data.ul_tpt,
+          latency: data.latency,
+          jitter: data.jitter,
+        },
+      };
+    });
+};
+
+export const PciColorLegend = React.forwardRef(({ locations, metricLabels: providedMetricLabels = {} }, ref) => {
+  const metricLabels = useMemo(() => ({ ...providedMetricLabels, ...getMetricLabelsForLocations(locations) }), [providedMetricLabels, locations]);
   const [viewMode, setViewMode] = useState("color-map");
   const [selectedPci, setSelectedPci] = useState(null);
   
   const [pciSortConfig, setPciSortConfig] = useState({ key: 'count', direction: 'desc' });
   const [providerSortConfig, setProviderSortConfig] = useState({ key: 'count', direction: 'desc' });
+  const [technologySortConfig, setTechnologySortConfig] = useState({ key: 'count', direction: 'desc' });
   const [cellSortConfig, setCellSortConfig] = useState({ key: 'count', direction: 'desc' });
   const isGridDataset = useMemo(
     () => (locations || []).some((loc) => Boolean(loc?.is_grid_cell)),
@@ -462,113 +603,21 @@ export const PciColorLegend = React.forwardRef(({ locations }, ref) => {
   // ENHANCED PCI DATA PROCESSING
   // ============================================
   const pciColorMap = useMemo(() => {
-    if (!locations?.length) return [];
+    return buildPciColorMap(locations);
+  }, [locations]);
 
-    const pciStats = locations.reduce((acc, loc) => {
-      const pci = resolvePciValue(loc);
-      
-      if (!acc[pci]) {
-        acc[pci] = {
-          count: 0,
-          samples: [],
-          providers: {},
-          technologies: {},
-          bands: {},
-          sessions: new Set(),
-          nodebIds: new Set(),
-          cellIds: new Set(),
-          rsrp: [],
-          rsrq: [],
-          sinr: [],
-          mos: [],
-          dl_tpt: [],
-          ul_tpt: [],
-          latency: [],
-          jitter: [],
-          speed: [],
-          lte_bler: [],
-        };
-      }
-
-      acc[pci].count++;
-      acc[pci].samples.push(loc);
-
-      const provider = loc.provider || "Unknown";
-      const technology = loc.technology || "Unknown";
-      const band = normalizeBandName(loc.band || loc.primaryBand);
-
-      acc[pci].providers[provider] = (acc[pci].providers[provider] || 0) + 1;
-      acc[pci].technologies[technology] = (acc[pci].technologies[technology] || 0) + 1;
-      acc[pci].bands[band] = (acc[pci].bands[band] || 0) + 1;
-
-      if (loc.session_id != null) acc[pci].sessions.add(String(loc.session_id));
-      if (loc.nodeb_id != null && loc.nodeb_id !== "Unknown") acc[pci].nodebIds.add(String(loc.nodeb_id));
-      if (loc.cell_id != null && loc.cell_id !== "Unknown") acc[pci].cellIds.add(String(loc.cell_id));
-
-      if (loc.rsrp != null && !isNaN(loc.rsrp)) acc[pci].rsrp.push(parseFloat(loc.rsrp));
-      if (loc.rsrq != null && !isNaN(loc.rsrq)) acc[pci].rsrq.push(parseFloat(loc.rsrq));
-      if (loc.sinr != null && !isNaN(loc.sinr)) acc[pci].sinr.push(parseFloat(loc.sinr));
-      if (loc.mos != null && !isNaN(loc.mos)) acc[pci].mos.push(parseFloat(loc.mos));
-      if (loc.dl_tpt != null && !isNaN(loc.dl_tpt)) acc[pci].dl_tpt.push(parseFloat(loc.dl_tpt));
-      if (loc.ul_tpt != null && !isNaN(loc.ul_tpt)) acc[pci].ul_tpt.push(parseFloat(loc.ul_tpt));
-      if (loc.latency != null && !isNaN(loc.latency)) acc[pci].latency.push(parseFloat(loc.latency));
-      if (loc.jitter != null && !isNaN(loc.jitter)) acc[pci].jitter.push(parseFloat(loc.jitter));
-      if (loc.speed != null && !isNaN(loc.speed)) acc[pci].speed.push(parseFloat(loc.speed));
-      if (loc.lte_bler != null && !isNaN(loc.lte_bler)) acc[pci].lte_bler.push(parseFloat(loc.lte_bler));
-
-      return acc;
-    }, {});
-
-    return Object.entries(pciStats)
-      .map(([pci, data]) => {
-        const pciNum = parseInt(pci);
-        const colorIndex = isNaN(pciNum) ? 0 : pciNum % PCI_COLOR_PALETTE.length;
-
-        const dominantProvider = Object.entries(data.providers).sort((a, b) => b[1] - a[1])[0];
-        const dominantTechnology = Object.entries(data.technologies).sort((a, b) => b[1] - a[1])[0];
-        const dominantBand = Object.entries(data.bands).sort((a, b) => b[1] - a[1])[0];
-
-        return {
-          pci,
-          pciNum: isNaN(pciNum) ? -1 : pciNum,
-          color: PCI_COLOR_PALETTE[colorIndex],
-          colorIndex,
-          count: data.count,
-          providers: data.providers,
-          technologies: data.technologies,
-          bands: data.bands,
-          dominantProvider: dominantProvider?.[0] || "Unknown",
-          dominantProviderCount: dominantProvider?.[1] || 0,
-          dominantTechnology: dominantTechnology?.[0] || "Unknown",
-          dominantBand: dominantBand?.[0] || "Unknown",
-          sessions: Array.from(data.sessions).sort(),
-          sessionCount: data.sessions.size,
-          nodebIds: Array.from(data.nodebIds).sort(),
-          nodebCount: data.nodebIds.size,
-          cellIds: Array.from(data.cellIds).sort(),
-          cellCount: data.cellIds.size,
-          avgRsrp: calculateStats(data.rsrp),
-          avgRsrq: calculateStats(data.rsrq),
-          avgSinr: calculateStats(data.sinr),
-          avgMos: calculateStats(data.mos),
-          avgDl: calculateStats(data.dl_tpt),
-          avgUl: calculateStats(data.ul_tpt),
-          avgLatency: calculateStats(data.latency),
-          avgJitter: calculateStats(data.jitter),
-          avgSpeed: calculateStats(data.speed),
-          avgBler: calculateStats(data.lte_bler),
-          rawData: {
-            rsrp: data.rsrp,
-            rsrq: data.rsrq,
-            sinr: data.sinr,
-            mos: data.mos,
-            dl_tpt: data.dl_tpt,
-            ul_tpt: data.ul_tpt,
-            latency: data.latency,
-            jitter: data.jitter,
-          },
-        };
-      });
+  const technologyPciData = useMemo(() => {
+    const groups = new Map();
+    for (const loc of locations || []) {
+      const technology = resolveTechnologyValue(loc);
+      if (!groups.has(technology)) groups.set(technology, []);
+      groups.get(technology).push(loc);
+    }
+    return Array.from(groups, ([technology, samples]) => ({
+      technology,
+      count: samples.length,
+      pcis: buildPciColorMap(samples),
+    })).sort((a, b) => b.count - a.count || a.technology.localeCompare(b.technology));
   }, [locations]);
 
   const sortedPciColorMap = useMemo(() => {
@@ -584,7 +633,7 @@ export const PciColorLegend = React.forwardRef(({ locations }, ref) => {
     locations.forEach((loc) => {
       const provider = loc.provider || "Unknown";
       const pci = resolvePciValue(loc);
-      const technology = loc.technology || "Unknown";
+      const technology = resolveTechnologyValue(loc);
       const band = normalizeBandName(loc.band || loc.primaryBand);
 
       if (!providerStats[provider]) {
@@ -819,8 +868,8 @@ export const PciColorLegend = React.forwardRef(({ locations }, ref) => {
 
   if (!pciColorMap.length) {
     return (
-      <ChartContainer ref={ref} title={isGridDataset ? "Best PCI Analysis" : "PCI Analysis"} icon={Antenna}>
-        <EmptyState message={isGridDataset ? "No best PCI data available" : "No PCI data available"} />
+      <ChartContainer ref={ref} title={isGridDataset ? `Best ${metricLabels.pci || "PCI"} Analysis` : `${metricLabels.pci || "PCI"} Analysis`} icon={Antenna}>
+        <EmptyState message={isGridDataset ? `No best ${metricLabels.pci || "PCI"} data available` : `No ${metricLabels.pci || "PCI"} data available`} />
       </ChartContainer>
     );
   }
@@ -842,7 +891,7 @@ export const PciColorLegend = React.forwardRef(({ locations }, ref) => {
   return (
     <ChartContainer 
       ref={ref} 
-      title={`${isGridDataset ? "Best PCI Analysis" : "PCI Analysis"} (${pciColorMap.length} ${isGridDataset ? "Best PCIs" : "PCIs"})`} 
+      title={`${isGridDataset ? `Best ${metricLabels.pci || "PCI"} Analysis` : `${metricLabels.pci || "PCI"} Analysis`} (${pciColorMap.length} ${isGridDataset ? `Best ${metricLabels.pci || "PCI"}s` : `${metricLabels.pci || "PCI"}s`})`}
       icon={Antenna}
       subtitle={`${providerPciData.summary.totalSamples} samples • ${providerPciData.summary.totalNodebs} cells`}
       collapsible
@@ -851,6 +900,7 @@ export const PciColorLegend = React.forwardRef(({ locations }, ref) => {
       <div className="flex flex-wrap gap-1 mb-3">
         <ViewModeButton mode="color-map" icon={MapPin} label="Map" />
         <ViewModeButton mode="by-provider" icon={Globe} label="Provider" />
+        <ViewModeButton mode="by-technology" icon={Wifi} label="Technology" />
         <ViewModeButton mode="by-cell" icon={Antenna} label="Cells" />
       </div>
 
@@ -862,6 +912,7 @@ export const PciColorLegend = React.forwardRef(({ locations }, ref) => {
           sortConfig={pciSortConfig}
           onSortChange={setPciSortConfig}
           isGridDataset={isGridDataset}
+          metricLabels={metricLabels}
         />
       )}
 
@@ -870,7 +921,36 @@ export const PciColorLegend = React.forwardRef(({ locations }, ref) => {
           providerData={sortedProviderData}
           sortConfig={providerSortConfig}
           onSortChange={setProviderSortConfig}
+          metricLabels={metricLabels}
         />
+      )}
+
+      {viewMode === "by-technology" && (
+        <div className="space-y-3">
+          <p className="text-xs text-slate-300">
+            {isGridDataset ? `Best ${metricLabels.pci || "PCI"} results` : `${metricLabels.pci || "PCI"} results`} grouped by technology.
+            {" "}Sort each technology's PCIs by samples or a performance metric.
+          </p>
+          {technologyPciData.map(({ technology, count, pcis }) => (
+            <section key={technology} className="rounded-lg border border-slate-700 p-2 space-y-2">
+              <div className="flex items-center justify-between gap-2">
+                <h3 className="text-sm font-semibold" style={{ color: getTechnologyColor(technology) }}>
+                  {technology}
+                </h3>
+                <span className="text-xs text-slate-300">
+                  {count} {isGridDataset ? "grid cells" : "samples"}
+                </span>
+              </div>
+              <PCIColorMapView
+                pciColorMap={sortData(pcis, technologySortConfig, SORT_OPTIONS)}
+                sortConfig={technologySortConfig}
+                onSortChange={setTechnologySortConfig}
+                isGridDataset={isGridDataset}
+                metricLabels={getTechnologyMetricLabels(technology)}
+              />
+            </section>
+          ))}
+        </div>
       )}
 
       {viewMode === "by-cell" && (
@@ -878,6 +958,7 @@ export const PciColorLegend = React.forwardRef(({ locations }, ref) => {
           cellData={sortedCellData}
           sortConfig={cellSortConfig}
           onSortChange={setCellSortConfig}
+          metricLabels={metricLabels}
         />
       )}
     </ChartContainer>
@@ -894,11 +975,13 @@ const PCIColorMapView = ({
   sortConfig,
   onSortChange,
   isGridDataset = false,
+  metricLabels = {},
 }) => {
   const [expandedPci, setExpandedPci] = useState(null);
 
   // Get the display info for current sort option
-  const sortOption = SORT_OPTIONS[sortConfig.key] || SORT_OPTIONS.count;
+  const displaySortOptions = getDisplaySortOptions(SORT_OPTIONS, metricLabels);
+  const sortOption = displaySortOptions[sortConfig.key] || displaySortOptions.count;
 
   return (
     <div className="space-y-2">
@@ -906,21 +989,27 @@ const PCIColorMapView = ({
         <SortControl 
           sortConfig={sortConfig} 
           onSortChange={onSortChange} 
-          options={SORT_OPTIONS}
+          options={displaySortOptions}
         />
         <div className="text-[13px] text-white font-medium">
-          {pciColorMap.length} {isGridDataset ? "Best PCIs" : "PCIs"}
+          {pciColorMap.length} {isGridDataset ? `Best ${metricLabels.pci || "PCI"}s` : `${metricLabels.pci || "PCI"}s`}
         </div>
       </div>
 
       <QuickSortChips 
         sortConfig={sortConfig} 
         onSortChange={onSortChange} 
-        options={SORT_OPTIONS}
+        options={displaySortOptions}
       />
 
       <div className="space-y-1 max-h-[350px] overflow-y-auto scrollbar-hide">
         {pciColorMap.map((item, idx) => {
+          const rowMetricLabels = getTechnologyMetricLabels(item.dominantTechnology);
+          const rowSortOption = {
+            ...sortOption,
+            label: rowMetricLabels[sortConfig.key] ?? sortOption.label,
+            unit: rowMetricLabels.sinr === "RxQual" && sortConfig.key === "sinr" ? "" : sortOption.unit,
+          };
           // Get the value for the currently sorted metric
           const sortValue = sortOption.getValue(item);
           const displayValue = sortValue !== -999 && sortValue !== 9999 && sortValue !== 0 
@@ -928,12 +1017,12 @@ const PCIColorMapView = ({
             : null;
 
           return (
-            <div key={idx} className="bg-slate-800/50 rounded overflow-hidden">
+            <div key={item.id} className="bg-slate-800/50 rounded overflow-hidden">
               <div 
                 className={`flex items-center gap-2 p-2 cursor-pointer hover:bg-slate-800 transition-colors ${
-                  expandedPci === item.pci ? 'bg-slate-800' : ''
+                  expandedPci === item.id ? 'bg-slate-800' : ''
                 }`}
-                onClick={() => setExpandedPci(expandedPci === item.pci ? null : item.pci)}
+                onClick={() => setExpandedPci(expandedPci === item.id ? null : item.id)}
               >
                 <div
                   className="w-4 h-4 rounded-full flex-shrink-0 border-2 border-white/20"
@@ -942,7 +1031,7 @@ const PCIColorMapView = ({
                 
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2">
-                    <span className="font-bold text-white text-[14px]">{isGridDataset ? "Best PCI" : "PCI"} {item.pci}</span>
+                    <span className="font-bold text-white text-[14px]">{isGridDataset ? `Best ${item.channelLabel}` : item.channelLabel} {item.pci}</span>
                     <span className="text-[11px] px-1.5 py-0.5 rounded bg-slate-700 text-white">
                       {item.count}
                     </span>
@@ -975,37 +1064,37 @@ const PCIColorMapView = ({
 
                 {/* Show SORTED METRIC VALUE */}
                 <div className="flex items-center gap-2 flex-shrink-0">
-                  {displayValue != null && (
+                  {displayValue != null && rowSortOption.label && (
                     <div className="flex flex-col items-end">
                       <span className="text-[9px] text-white uppercase tracking-wide">
-                        {sortOption.label}
+                        {rowSortOption.label}
                       </span>
                       <span className={`text-[15px] font-bold px-2 py-0.5 rounded ${
                         getMetricColorClass(sortConfig.key, displayValue)
                       }`}>
                         {displayValue}
-                        {sortOption.unit && <span className="text-[11px] ml-0.5">{sortOption.unit}</span>}
+                        {rowSortOption.unit && <span className="text-[11px] ml-0.5">{rowSortOption.unit}</span>}
                       </span>
                     </div>
                   )}
                   <span className="text-white text-[13px]">
-                    {expandedPci === item.pci ? '▲' : '▼'}
+                    {expandedPci === item.id ? '▲' : '▼'}
                   </span>
                 </div>
               </div>
 
-              {expandedPci === item.pci && (
+              {expandedPci === item.id && (
                 <div className="border-t border-slate-700 bg-slate-900/50 p-2 space-y-2">
                   <div className="grid grid-cols-4 gap-1">
                     <MetricMiniCard 
-                      label="RSRP" 
+                      label={getMetricDisplayLabel("rsrp", rowMetricLabels)}
                       value={item.avgRsrp?.avg} 
                       unit="dBm"
                       color={parseFloat(item.avgRsrp?.avg) >= -90 ? "green" : 
                              parseFloat(item.avgRsrp?.avg) >= -105 ? "yellow" : "red"}
                     />
-                    <MetricMiniCard label="RSRQ" value={item.avgRsrq?.avg} unit="dB" color="blue" />
-                    <MetricMiniCard label="SINR" value={item.avgSinr?.avg} unit="dB" color="green" />
+                    {rowMetricLabels.rsrq !== "" && <MetricMiniCard label={getMetricDisplayLabel("rsrq", rowMetricLabels)} value={item.avgRsrq?.avg} unit="dB" color="blue" />}
+                    <MetricMiniCard label={getMetricDisplayLabel("sinr", rowMetricLabels)} value={item.avgSinr?.avg} unit={rowMetricLabels.sinr === "RxQual" ? "" : "dB"} color="green" />
                     <MetricMiniCard label="MOS" value={item.avgMos?.avg} unit="" color="yellow" />
                   </div>
 
@@ -1074,7 +1163,7 @@ const MetricMiniCard = ({ label, value, unit, color }) => {
 };
 
 // Provider View Component (keeping existing implementation)
-const PCIByProviderView = ({ providerData, sortConfig, onSortChange }) => {
+const PCIByProviderView = ({ providerData, sortConfig, onSortChange, metricLabels = {} }) => {
   const [expandedProvider, setExpandedProvider] = useState(null);
 
   if (!providerData?.length) {
@@ -1091,7 +1180,7 @@ const PCIByProviderView = ({ providerData, sortConfig, onSortChange }) => {
         <SortControl 
           sortConfig={sortConfig} 
           onSortChange={onSortChange} 
-          options={PROVIDER_SORT_OPTIONS}
+          options={getDisplaySortOptions(PROVIDER_SORT_OPTIONS, metricLabels)}
         />
         <div className="text-[13px] text-white">
           {providerData.length} providers
@@ -1101,7 +1190,7 @@ const PCIByProviderView = ({ providerData, sortConfig, onSortChange }) => {
       <QuickSortChips 
         sortConfig={sortConfig} 
         onSortChange={onSortChange} 
-        options={PROVIDER_SORT_OPTIONS}
+        options={getDisplaySortOptions(PROVIDER_SORT_OPTIONS, metricLabels)}
       />
 
       <div className="space-y-2 max-h-[300px] overflow-y-auto scrollbar-hide">
@@ -1121,7 +1210,7 @@ const PCIByProviderView = ({ providerData, sortConfig, onSortChange }) => {
                 />
                 <span className="font-semibold text-white text-[13px]">{provider.name}</span>
                 <span className="text-[11px] text-white">
-                  ({provider.pciCount} PCIs)
+                  ({provider.pciCount} {metricLabels.pci || "PCI"}s)
                 </span>
               </div>
               <div className="flex items-center gap-2">
@@ -1148,13 +1237,13 @@ const PCIByProviderView = ({ providerData, sortConfig, onSortChange }) => {
 
             <div className="grid grid-cols-6 gap-1 px-2 pb-2">
               <MetricMiniCard 
-                label="RSRP" 
+                label={getMetricDisplayLabel("rsrp", metricLabels)}
                 value={provider.avgRsrp?.avg} 
                 unit=""
                 color={parseFloat(provider.avgRsrp?.avg) >= -90 ? "green" : 
                        parseFloat(provider.avgRsrp?.avg) >= -105 ? "yellow" : "red"}
               />
-              <MetricMiniCard label="SINR" value={provider.avgSinr?.avg} unit="" color="green" />
+              <MetricMiniCard label={getMetricDisplayLabel("sinr", metricLabels)} value={provider.avgSinr?.avg} unit="" color="green" />
               <MetricMiniCard label="MOS" value={provider.avgMos?.avg} unit="" color="yellow" />
               <MetricMiniCard label="DL" value={provider.avgDl?.avg} unit="" color="cyan" />
               <MetricMiniCard label="UL" value={provider.avgUl?.avg} unit="" color="orange" />
@@ -1169,18 +1258,18 @@ const PCIByProviderView = ({ providerData, sortConfig, onSortChange }) => {
             {expandedProvider === provider.name && (
               <div className="border-t border-slate-700 bg-slate-900/50 p-2">
                 <div className="text-[11px] text-white mb-1.5 font-medium">
-                  PCIs for {provider.name}
+                  {metricLabels.pci || "PCI"}s for {provider.name}
                 </div>
                 <div className="max-h-[180px] overflow-y-auto scrollbar-hide">
                   <table className="w-full text-[11px]">
                     <thead className="sticky top-0 bg-slate-900">
                       <tr className="border-b border-slate-700">
-                        <th className="text-left p-1 text-white font-medium">PCI</th>
+                        <th className="text-left p-1 text-white font-medium">{metricLabels.pci || "PCI"}</th>
                         <th className="text-center p-1 text-white font-medium">Samples</th>
                         <th className="text-center p-1 text-white font-medium">Cells</th>
                         <th className="text-center p-1 text-white font-medium">Tech</th>
                         <th className="text-center p-1 text-white font-medium">Band</th>
-                        <th className="text-center p-1 text-white font-medium">RSRP</th>
+                        <th className="text-center p-1 text-white font-medium">{getMetricDisplayLabel("rsrp", metricLabels)}</th>
                         <th className="text-center p-1 text-white font-medium">DL</th>
                         <th className="text-center p-1 text-white font-medium">MOS</th>
                       </tr>
@@ -1217,7 +1306,7 @@ const PCIByProviderView = ({ providerData, sortConfig, onSortChange }) => {
                   </table>
                   {provider.pcis.length > 20 && (
                     <div className="text-center text-[11px] text-white mt-1">
-                      +{provider.pcis.length - 20} more PCIs
+                      +{provider.pcis.length - 20} more {metricLabels.pci || "PCI"}s
                     </div>
                   )}
                 </div>
@@ -1231,7 +1320,7 @@ const PCIByProviderView = ({ providerData, sortConfig, onSortChange }) => {
 };
 
 // Cell View Component (keeping existing implementation)
-const PCIByCellView = ({ cellData, sortConfig, onSortChange }) => {
+const PCIByCellView = ({ cellData, sortConfig, onSortChange, metricLabels = {} }) => {
   if (!cellData?.length) {
     return (
       <div className="text-center py-4 text-white text-[14px]">
@@ -1246,7 +1335,7 @@ const PCIByCellView = ({ cellData, sortConfig, onSortChange }) => {
         <SortControl 
           sortConfig={sortConfig} 
           onSortChange={onSortChange} 
-          options={CELL_SORT_OPTIONS}
+          options={getDisplaySortOptions(CELL_SORT_OPTIONS, metricLabels)}
         />
         <div className="text-[13px] text-white">
           {cellData.length} cells
@@ -1256,13 +1345,13 @@ const PCIByCellView = ({ cellData, sortConfig, onSortChange }) => {
       <QuickSortChips 
         sortConfig={sortConfig} 
         onSortChange={onSortChange} 
-        options={CELL_SORT_OPTIONS}
+        options={getDisplaySortOptions(CELL_SORT_OPTIONS, metricLabels)}
       />
 
       <div className="grid grid-cols-4 gap-1">
         <StatCard label="NodeBs" value={[...new Set(cellData.map(c => c.nodebId))].length} color="orange" />
         <StatCard label="Cells" value={cellData.length} color="cyan" />
-        <StatCard label="Total PCIs" value={[...new Set(cellData.flatMap(c => c.pcis))].length} color="blue" />
+        <StatCard label={`Total ${metricLabels.pci || "PCI"}s`} value={[...new Set(cellData.flatMap(c => c.pcis))].length} color="blue" />
         <StatCard label="Samples" value={cellData.reduce((sum, c) => sum + c.count, 0)} color="green" />
       </div>
 
@@ -1273,11 +1362,11 @@ const PCIByCellView = ({ cellData, sortConfig, onSortChange }) => {
               <tr className="border-b border-slate-700">
                 <th className="text-left p-2 text-white font-medium">NodeB</th>
                 <th className="text-center p-2 text-white font-medium">Cell</th>
-                <th className="text-center p-2 text-white font-medium">PCIs</th>
+                <th className="text-center p-2 text-white font-medium">{metricLabels.pci || "PCI"}s</th>
                 <th className="text-center p-2 text-white font-medium">Samples</th>
                 <th className="text-center p-2 text-white font-medium">Tech</th>
                 <th className="text-center p-2 text-white font-medium">Band</th>
-                <th className="text-center p-2 text-white font-medium">RSRP</th>
+                <th className="text-center p-2 text-white font-medium">{getMetricDisplayLabel("rsrp", metricLabels)}</th>
                 <th className="text-center p-2 text-white font-medium">DL</th>
                 <th className="text-center p-2 text-white font-medium">MOS</th>
               </tr>

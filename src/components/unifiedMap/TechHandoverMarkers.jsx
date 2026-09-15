@@ -4,6 +4,10 @@ import { MarkerClusterer } from "@googlemaps/markerclusterer";
 import { OverlayView, Polyline, useGoogleMap } from "@react-google-maps/api";
 import { ArrowRightLeft, Hand, Download } from "lucide-react";
 import { COLOR_SCHEMES, normalizeTechName, getBandColor } from "@/utils/colorUtils";
+import {
+  getTechnologyMetricLabels,
+  normalizeMetricTechnology,
+} from "@/utils/technologyMetricLabels";
 
 const HANDOVER_POLYLINE_REGISTRY_KEY = "__stracer_handover_polylines__";
 const DEFAULT_CLUSTER_THRESHOLD = 80;
@@ -347,10 +351,10 @@ const HandoverMarker = memo(({ transition, onClick, isSelected, type }) => {
         className={`relative cursor-pointer transform -translate-x-1/2 -translate-y-1/2 transition-all duration-200 ${isSelected ? "scale-125 z-50" : "hover:scale-110 z-10"}`}
         onClick={() => onClick?.(transition)}
       >
-        <div className={`flex items-center gap-1 px-2 py-1 rounded-full ${bgColor} border-2 ${borderColor} shadow-lg`}>
-          <span className="text-[10px] font-bold text-white px-1.5 py-0.5 rounded min-w-[20px] text-center" style={{ backgroundColor: fromColor }}>{displayFrom}</span>
+        <div className={`flex flex-row items-center gap-1 px-2 py-1 rounded-full ${bgColor} border-2 ${borderColor} shadow-lg`}>
+          <span className="inline-flex shrink-0 items-center whitespace-nowrap text-[10px] font-bold text-white px-1.5 py-0.5 rounded min-w-[20px] text-center" style={{ backgroundColor: fromColor }}>{displayFrom}</span>
           <ArrowRightLeft className="h-3 w-3 text-white" />
-          <span className="text-[10px] font-bold text-white px-1.5 py-0.5 rounded min-w-[20px] text-center" style={{ backgroundColor: toColor }}>{displayTo}</span>
+          <span className="inline-flex shrink-0 items-center whitespace-nowrap text-[10px] font-bold text-white px-1.5 py-0.5 rounded min-w-[20px] text-center" style={{ backgroundColor: toColor }}>{displayTo}</span>
         </div>
         {type === 'technology' && (
             <div className={`absolute -top-1 -right-1 w-4 h-4 rounded-full flex items-center justify-center text-white text-[8px] font-bold shadow ${handoverType === "upgrade" ? "bg-green-600" : handoverType === "downgrade" ? "bg-red-600" : "bg-blue-600"}`}>
@@ -463,13 +467,17 @@ const HandoverPopup = memo(({ transition, onClose, type }) => {
   const forwardNeighborRsrp =
     transition?.forwardNeighborRsrp ?? transition?.targetNeighborRsrp;
   const reverseNeighborRsrp = transition?.reverseNeighborRsrp;
-  const hasLegacy2g3gSide =
-    isLegacy2g3gTech(transition?.fromTechnology) ||
-    isLegacy2g3gTech(transition?.toTechnology) ||
-    (type === "technology" && (isLegacy2g3gTech(from) || isLegacy2g3gTech(to)));
-  const pciLabel = hasLegacy2g3gSide ? "PCI/BCCH" : "PCI/BCCH";
-  const rsrpLabel = hasLegacy2g3gSide ? "RxLev" : "RSRP";
-  const sinrLabel = hasLegacy2g3gSide ? "RxQual" : "SINR";
+  const fromTechnology = normalizeMetricTechnology(transition?.fromTechnology || from);
+  const toTechnology = normalizeMetricTechnology(transition?.toTechnology || to);
+  const metricTechnology =
+    fromTechnology !== "Unknown" && fromTechnology === toTechnology
+      ? fromTechnology
+      : "Unknown";
+  const metricLabels = getTechnologyMetricLabels(metricTechnology);
+  const pciLabel = "PCI/BCCH";
+  const rsrpLabel = metricLabels.rsrp;
+  const rsrqLabel = metricLabels.rsrq;
+  const sinrLabel = metricLabels.sinr;
   const neighborRelationLabel = (() => {
     if (transition?.neighborRelation === "two_way") return "Two-way";
     if (transition?.neighborRelation === "one_way") {
@@ -494,9 +502,9 @@ const HandoverPopup = memo(({ transition, onClose, type }) => {
           <div className="space-y-2">
             {type !== "pci" && (
               <div className="flex items-center justify-center gap-2">
-                <span className="px-2 py-1 rounded text-sm font-bold text-white min-w-[30px] text-center" style={{ backgroundColor: getColor(from, type) }}>{displayFrom}</span>
+                <span className="inline-flex shrink-0 items-center whitespace-nowrap px-2 py-1 rounded text-sm font-bold text-white min-w-[30px] text-center" style={{ backgroundColor: getColor(from, type) }}>{displayFrom}</span>
                 <span className="text-lg">→</span>
-                <span className="px-2 py-1 rounded text-sm font-bold text-white min-w-[30px] text-center" style={{ backgroundColor: getColor(to, type) }}>{displayTo}</span>
+                <span className="inline-flex shrink-0 items-center whitespace-nowrap px-2 py-1 rounded text-sm font-bold text-white min-w-[30px] text-center" style={{ backgroundColor: getColor(to, type) }}>{displayTo}</span>
               </div>
             )}
             {type !== "pci" && (
@@ -534,7 +542,7 @@ const HandoverPopup = memo(({ transition, onClose, type }) => {
                 </div>
               )}
               {(transition?.rsrp != null || transition?.nextRsrp != null) && <div className="flex justify-between gap-3"><span className="text-slate-400">{rsrpLabel}:</span><span>{formatSignalPair(transition?.rsrp, transition?.nextRsrp, "dBm")}</span></div>}
-              {!hasLegacy2g3gSide && (transition?.rsrq != null || transition?.nextRsrq != null) && <div className="flex justify-between gap-3"><span className="text-slate-400">RSRQ:</span><span>{formatSignalPair(transition?.rsrq, transition?.nextRsrq, "dB")}</span></div>}
+              {rsrqLabel && (transition?.rsrq != null || transition?.nextRsrq != null) && <div className="flex justify-between gap-3"><span className="text-slate-400">{rsrqLabel}:</span><span>{formatSignalPair(transition?.rsrq, transition?.nextRsrq, "dB")}</span></div>}
               {(transition?.sinr != null || transition?.nextSinr != null) && <div className="flex justify-between gap-3"><span className="text-slate-400">{sinrLabel}:</span><span>{formatSignalPair(transition?.sinr, transition?.nextSinr, "dB")}</span></div>}
             </div>
           </div>

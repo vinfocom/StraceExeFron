@@ -318,7 +318,7 @@ export const L3EventsTab = () => {
 
           {activeView === "summary" && (
             <div className="min-h-0 flex-1 overflow-auto">
-              <HomeCallSummary summary={enrichedCallSummary} />
+              <HomeCallSummary summary={enrichedCallSummary} timeline={timeline} />
             </div>
           )}
 
@@ -389,20 +389,146 @@ export const L3EventsTab = () => {
   );
 };
 
-export function HomeCallSummary({ summary }) {
+function DiagnosticApiOverview({ summary, timeline = [] }) {
+  const kpis = Array.isArray(summary.kpis) ? summary.kpis : [];
+  const mobility = Array.isArray(summary.mobility) ? summary.mobility : [];
+  const parameters = Array.isArray(summary.parameters) ? summary.parameters : [];
+  const dashboardValues = [...kpis, ...mobility, ...parameters];
+  const technologies = [];
+  const technologyIndexes = new Map();
+  (Array.isArray(summary.technologies) ? summary.technologies : []).forEach((item) => {
+    const name = String(item.technology ?? item.Technology ?? "").trim();
+    if (!name) return;
+    const key = name.toLocaleLowerCase();
+    const existingIndex = technologyIndexes.get(key);
+    if (existingIndex !== undefined) {
+      technologies[existingIndex].rows += Number(item.rows ?? item.Rows ?? 0) || 0;
+      return;
+    }
+    technologyIndexes.set(key, technologies.length);
+    technologies.push({
+      name,
+      rows: Number(item.rows ?? item.Rows ?? 0) || 0,
+      interfaces: item.interfaces ?? item.Interfaces ?? "",
+      observedEvents: item.observedEvents ?? item.ObservedEvents,
+    });
+  });
+  technologies.sort((left, right) => right.rows - left.rows || left.name.localeCompare(right.name));
+  const [activeTechnology, setActiveTechnology] = useState("");
+  const selectedTechnology = activeTechnology === "All"
+    ? null
+    : technologies.find((item) => item.name.toLocaleLowerCase() === activeTechnology.toLocaleLowerCase()) || technologies[0] || null;
+  const showAll = activeTechnology === "All" || !selectedTechnology;
+  const hasOverview = dashboardValues.length || technologies.length || summary.totalRows != null || summary.l3Rows != null || summary.eventRows != null;
+  if (!hasOverview) return null;
+
+  const getParameter = (item) => String(item.parameter ?? item.Parameter ?? "");
+  const getResult = (item) => item.result ?? item.Result ?? "—";
+  const rowsForTechnology = (technology) => timeline.filter((row) => (
+    String(row.technology ?? row.Technology ?? "Unknown").trim().toLocaleLowerCase() === technology.toLocaleLowerCase()
+  ));
+  const countObservedEvents = (rows) => rows.reduce((counts, row) => {
+    const text = [
+      row.title, row.officialName, row.message, row.eventKey, row.category, row.sourceCategory,
+      row.summary, row.rawMessage, row.procedure, row.protocol,
+    ].filter(Boolean).join(" ");
+    if (/\b(?:en[-\s]?dc|scg|secondary\s+cell\s+group|s?gnb)\b/i.test(text)
+      && /\b(?:setup|addition|add|request|reconfig(?:uration)?|activation|activate|active|establish(?:ment)?)\b/i.test(text)) {
+      counts.endcSetupRows += 1;
+    }
+    if (/\bhand[\s-]?over\b/i.test(text)) counts.handoverRows += 1;
+    return counts;
+  }, { endcSetupRows: 0, handoverRows: 0 });
+  const backendObservedEvents = summary.observedEvents;
+  const allObservedEvents = backendObservedEvents || countObservedEvents(timeline);
+  const visibleObservedEvents = showAll ? allObservedEvents
+    : selectedTechnology?.observedEvents || (backendObservedEvents
+      ? { endcSetupRows: 0, handoverRows: 0 }
+      : countObservedEvents(rowsForTechnology(selectedTechnology.name)));
+  const technologyMobility = selectedTechnology
+    ? mobility
+      .filter((item) => getParameter(item).toLocaleLowerCase().startsWith((selectedTechnology.name + " ").toLocaleLowerCase()))
+      .map((item) => ({ ...item, parameter: getParameter(item).slice(selectedTechnology.name.length).trim() }))
+    : [];
+  const scopedValues = selectedTechnology
+    ? [...kpis, ...parameters].filter((item) => (
+      String(item.technology ?? item.Technology ?? "").toLocaleLowerCase() === selectedTechnology.name.toLocaleLowerCase()
+    ))
+    : [];
+  const tableValues = showAll
+    ? [
+      ...dashboardValues,
+      ...(!backendObservedEvents ? [
+        { parameter: "Observed EN-DC setup rows", result: String(allObservedEvents.endcSetupRows) },
+        { parameter: "Observed handover rows", result: String(allObservedEvents.handoverRows) },
+      ] : []),
+    ]
+    : [
+      { parameter: "Technology", result: selectedTechnology.name },
+      { parameter: "Rows", result: String(selectedTechnology.rows) },
+      { parameter: "Interfaces", result: selectedTechnology.interfaces || "—" },
+      { parameter: "Observed EN-DC setup rows", result: String(visibleObservedEvents.endcSetupRows) },
+      { parameter: "Observed handover rows", result: String(visibleObservedEvents.handoverRows) },
+      ...technologyMobility,
+      ...scopedValues,
+    ];
+
+  return (
+    <section className="mt-4 rounded-lg border border-slate-700 bg-slate-950/30 p-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h4 className="text-xs font-semibold uppercase tracking-wide text-white">Overview</h4>
+        <span className="text-[10px] text-slate-500">Message text observations; these are not unique handovers or confirmed successes.</span>
+      </div>
+      <div className="mt-3 grid gap-2 sm:grid-cols-2">
+        <div className="rounded border border-slate-700 bg-slate-900/70 px-3 py-2">
+          <div className="text-[10px] uppercase tracking-wide text-slate-500">Observed EN-DC Setup Rows</div>
+          <div className="mt-1 text-lg font-semibold text-white">{allObservedEvents.endcSetupRows.toLocaleString()}</div>
+        </div>
+        <div className="rounded border border-slate-700 bg-slate-900/70 px-3 py-2">
+          <div className="text-[10px] uppercase tracking-wide text-slate-500">Observed Handover Rows</div>
+          <div className="mt-1 text-lg font-semibold text-white">{allObservedEvents.handoverRows.toLocaleString()}</div>
+        </div>
+      </div>
+      <div className="mt-3 grid gap-3 md:grid-cols-[10rem_minmax(0,1fr)]">
+        <nav role="tablist" aria-label="Overview by technology" className="flex gap-1 overflow-x-auto md:flex-col md:overflow-visible">
+          <button type="button" role="tab" aria-selected={showAll} onClick={() => setActiveTechnology("All")} className={"shrink-0 rounded px-3 py-2 text-left text-xs " + (showAll ? "bg-blue-600 text-white" : "bg-slate-900 text-slate-300 hover:bg-slate-800")}>
+            All technologies ({(summary.totalRows ?? timeline.length).toLocaleString()})
+          </button>
+          {technologies.map((technology) => {
+            const active = !showAll && selectedTechnology?.name === technology.name;
+            return (
+              <button key={technology.name} type="button" role="tab" aria-selected={active} onClick={() => setActiveTechnology(technology.name)} className={"shrink-0 rounded px-3 py-2 text-left text-xs " + (active ? "bg-blue-600 text-white" : "bg-slate-900 text-slate-300 hover:bg-slate-800")}>
+                {technology.name} ({technology.rows.toLocaleString()})
+              </button>
+            );
+          })}
+        </nav>
+        <div className="min-w-0 overflow-x-auto rounded border border-slate-700">
+          <table className="w-full min-w-[520px] border-collapse text-xs">
+            <thead className="bg-slate-800/90 text-left text-[10px] uppercase tracking-wide text-slate-400"><tr><th className="border-b border-r border-slate-700 px-2 py-2">Parameter</th><th className="border-b border-slate-700 px-2 py-2">Result</th></tr></thead>
+            <tbody>{tableValues.map((item, index) => <tr key={getParameter(item) + "-" + index} className="border-b border-slate-800/90 last:border-b-0"><td className="border-r border-slate-800 px-2 py-1.5 text-slate-200">{getParameter(item) || "—"}</td><td className="px-2 py-1.5 text-slate-300">{getResult(item)}</td></tr>)}</tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+  );
+}
+export function HomeCallSummary({ summary, timeline = [] }) {
   const stats = [
     { label: "Connected", value: summary.connected || 0, className: "border-emerald-500/35 bg-emerald-500/10 text-emerald-300" },
     { label: "Dropped", value: summary.dropped || 0, className: "border-red-500/35 bg-red-500/10 text-red-300" },
     { label: "Not Connected", value: summary.notConnected || 0, className: "border-amber-500/35 bg-amber-500/10 text-amber-300" },
     { label: "Avg Call Setup", value: formatAverageSetupMs(summary.averageSetupTime), className: "border-blue-500/35 bg-blue-500/10 text-blue-300" },
     { label: "Avg Connected Duration", value: formatDurationMs(summary.averageTalkTime || 0), className: "border-cyan-500/35 bg-cyan-500/10 text-cyan-300" },
-  ];
+   
+  ].filter(Boolean);
 
   return (
-    <div className="rounded-lg border border-slate-700 bg-slate-900/70 p-4">
+    <div className="space-y-4">
+      <section className="rounded-lg border border-slate-700 bg-slate-900/70 p-4">
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
         <div>
-          <h3 className="text-sm font-semibold text-white">Call Summary</h3>
+          <h3 className="text-sm font-semibold text-white">Summary</h3>
           <p className="text-[11px] text-slate-400">
             {summary.totalCalls || 0} total call attempt{summary.totalCalls === 1 ? "" : "s"}
           </p>
@@ -456,6 +582,8 @@ export function HomeCallSummary({ summary }) {
           </table>
         </div>
       )}
+      </section>
+      <DiagnosticApiOverview summary={summary} timeline={timeline} />
     </div>
   );
 }

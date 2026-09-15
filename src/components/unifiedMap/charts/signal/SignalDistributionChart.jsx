@@ -15,7 +15,8 @@ import { EmptyState } from "../../common/EmptyState";
 import { CHART_CONFIG } from "@/utils/constants";
 
 export const SignalDistributionChart = React.forwardRef(
-  ({ locations, metric, thresholds }, ref) => {
+  ({ locations, metric, thresholds, metricLabels }, ref) => {
+    const metricLabel = metricLabels?.[metric] ?? metric?.toUpperCase();
     const data = useMemo(() => {
       if (!locations?.length || !metric || !thresholds?.[metric]) return [];
 
@@ -38,16 +39,18 @@ export const SignalDistributionChart = React.forwardRef(
         .filter((item) => item.count > 0);
     }, [locations, metric, thresholds]);
 
+    if (!metricLabel) return null;
+
     if (!data.length) {
       return (
-        <ChartContainer ref={ref} title={`${metric?.toUpperCase()} Distribution`} icon={BarChart3}>
+        <ChartContainer ref={ref} title={`${metricLabel} Distribution`} icon={BarChart3}>
           <EmptyState message="No data available for this metric" />
         </ChartContainer>
       );
     }
 
     return (
-      <ChartContainer ref={ref} title={`${metric?.toUpperCase()} Distribution`} icon={BarChart3}>
+      <ChartContainer ref={ref} title={`${metricLabel} Distribution`} icon={BarChart3}>
         <ResponsiveContainer width="100%" height={250}>
           <BarChart data={data} margin={CHART_CONFIG.margin}>
             <CartesianGrid {...CHART_CONFIG.grid} />

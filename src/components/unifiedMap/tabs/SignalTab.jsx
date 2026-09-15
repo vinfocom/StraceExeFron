@@ -8,7 +8,8 @@ export const SignalTab = ({
   selectedMetric, 
   thresholds, 
   expanded,
-  chartRefs 
+  chartRefs,
+  metricLabels,
 }) => {
   return (
     <div className={`grid ${expanded ? "grid-cols-2" : "grid-cols-1"} gap-4`}>
@@ -17,10 +18,12 @@ export const SignalTab = ({
         locations={locations}
         metric={selectedMetric}
         thresholds={thresholds}
+        metricLabels={metricLabels}
       />
       <TechnologyBreakdown 
         ref={chartRefs.tech}
-        locations={locations} 
+        locations={locations}
+        metricLabels={metricLabels}
       />
 
       <OperatorComparisonChart
@@ -29,6 +32,7 @@ export const SignalTab = ({
         metric={selectedMetric}
         thresholds={thresholds}
         showCdf={false}
+        metricLabels={metricLabels}
       />
     </div>
   );

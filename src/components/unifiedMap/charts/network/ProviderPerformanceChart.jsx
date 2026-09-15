@@ -103,6 +103,20 @@ const AVAILABLE_FIELDS = {
   },
 };
 
+const getDisplayFieldLabel = (fieldKey, metricLabels = {}) => {
+  const metricKeyByField = {
+    avgRsrp: "rsrp",
+    avgRsrq: "rsrq",
+    avgSinr: "sinr",
+  };
+  const metricKey = metricKeyByField[fieldKey];
+  return metricKey
+    ? metricLabels[metricKey] !== undefined
+      ? metricLabels[metricKey]
+      : AVAILABLE_FIELDS[fieldKey]?.label || fieldKey
+    : AVAILABLE_FIELDS[fieldKey]?.label || fieldKey;
+};
+
 // Field categories for organized display
 const FIELD_CATEGORIES = {
   throughput: { label: "Throughput", icon: "📶" },
@@ -171,7 +185,7 @@ const ViewToggle = ({ isTable, setIsTable }) => {
 };
 
 // Settings Dropdown Component
-const FieldSettingsDropdown = ({ selectedFields, onFieldsChange, isOpen, setIsOpen }) => {
+const FieldSettingsDropdown = ({ selectedFields, onFieldsChange, isOpen, setIsOpen, metricLabels }) => {
   const toggleField = useCallback((fieldKey) => {
     onFieldsChange(prev => {
       if (prev.includes(fieldKey)) {
@@ -260,7 +274,7 @@ const FieldSettingsDropdown = ({ selectedFields, onFieldsChange, isOpen, setIsOp
                     className="w-3 h-3 rounded-sm flex-shrink-0"
                     style={{ backgroundColor: field.color }}
                   />
-                  <span className="text-sm text-slate-200 flex-1">{field.label}</span>
+                  <span className="text-sm text-slate-200 flex-1">{getDisplayFieldLabel(field.key, metricLabels)}</span>
                   {field.unit && (
                     <span className="text-xs text-slate-500">({field.unit})</span>
                   )}
@@ -296,7 +310,7 @@ const FieldSettingsDropdown = ({ selectedFields, onFieldsChange, isOpen, setIsOp
 };
 
 // Data Table Component
-const DataTable = ({ data, selectedFields }) => {
+const DataTable = ({ data, selectedFields, metricLabels }) => {
   const [sortConfig, setSortConfig] = useState({ key: 'samples', direction: 'desc' });
 
   const handleSort = (key) => {
@@ -363,7 +377,7 @@ const DataTable = ({ data, selectedFields }) => {
                   onClick={() => handleSort(fieldKey)}
                 >
                   <div className="flex items-center justify-end gap-2">
-                    {config.label}
+                    {getDisplayFieldLabel(fieldKey, metricLabels)}
                     {config.unit && <span className="text-slate-500 text-xs">({config.unit})</span>}
                     <SortIcon fieldKey={fieldKey} />
                   </div>
@@ -435,7 +449,7 @@ const DataTable = ({ data, selectedFields }) => {
 };
 
 // Custom Tooltip Component
-const CustomTooltip = ({ active, payload, label }) => {
+const CustomTooltip = ({ active, payload, label, metricLabels }) => {
   if (!active || !payload?.length) return null;
 
   return (
@@ -454,7 +468,7 @@ const CustomTooltip = ({ active, payload, label }) => {
                   style={{ backgroundColor: entry.color }}
                 />
                 <span className="text-slate-300 text-sm">
-                  {fieldConfig?.label || entry.dataKey}
+                  {getDisplayFieldLabel(entry.dataKey, metricLabels)}
                 </span>
               </div>
               <span className="font-semibold text-white text-sm">
@@ -478,6 +492,7 @@ export const ProviderPerformanceChart = React.forwardRef(({
   showFieldSelector = true,
   defaultFields = null,
   defaultViewTable = false,
+  metricLabels = {},
 }, ref) => {
   
   // Initialize selected fields - default to DL and UL
@@ -611,6 +626,7 @@ export const ProviderPerformanceChart = React.forwardRef(({
                 onFieldsChange={setSelectedFields}
                 isOpen={settingsOpen}
                 setIsOpen={setSettingsOpen}
+                metricLabels={metricLabels}
               />
             </div>
           )}
@@ -620,7 +636,7 @@ export const ProviderPerformanceChart = React.forwardRef(({
       {/* Main Content */}
       <div className="mb-4">
         {isTable ? (
-          <DataTable data={validData} selectedFields={selectedFields} />
+          <DataTable data={validData} selectedFields={selectedFields} metricLabels={metricLabels} />
         ) : (
           <>
             {/* Selected Fields Summary */}
@@ -642,7 +658,7 @@ export const ProviderPerformanceChart = React.forwardRef(({
                         className="w-1.5 h-1.5 rounded-full"
                         style={{ backgroundColor: config.color }}
                       />
-                      {config.label}
+                      {getDisplayFieldLabel(fieldKey, metricLabels)}
                     </span>
                   );
                 })}
@@ -661,10 +677,10 @@ export const ProviderPerformanceChart = React.forwardRef(({
                   tick={{ fill: "#9CA3AF", fontSize: 11 }}
                 />
                 <YAxis tick={{ fill: "#9CA3AF", fontSize: 12 }} />
-                <Tooltip content={<CustomTooltip />} />
+                <Tooltip content={<CustomTooltip metricLabels={metricLabels} />} />
                 <Legend 
                   wrapperStyle={{ fontSize: "12px" }}
-                  formatter={(value) => AVAILABLE_FIELDS[value]?.label || value}
+                  formatter={(value) => getDisplayFieldLabel(value, metricLabels)}
                 />
                 {selectedFields.map((fieldKey) => {
                   const config = AVAILABLE_FIELDS[fieldKey];
@@ -675,7 +691,7 @@ export const ProviderPerformanceChart = React.forwardRef(({
                       dataKey={fieldKey}
                       fill={config.color}
                       radius={[4, 4, 0, 0]}
-                      name={config.label}
+                      name={getDisplayFieldLabel(fieldKey, metricLabels)}
                     />
                   );
                 })}

@@ -6,7 +6,7 @@ import { l3EventApi } from "@/api/apiEndpoints";
 import { parseTimestampValue } from "@/utils/l3Events/timelineBuilder";
 import { decodeEventItem, decodeL3Item } from "@/utils/l3Events/eventDecoder";
 import { buildProtocolAnalysis } from "@/utils/l3Events/protocolAnalyzer";
-import { buildUnifiedSignalingRows } from "@/utils/l3Events/signalingModel";
+import { buildBackendDetailModel, createBackendL3Loader } from "@/utils/l3Events/backendDetailModel";
 import { ExcelSignalingView } from "@/components/unifiedMap/tabs/l3Events/ExcelSignalingView";
 import { ProtocolAnalyzerView } from "@/components/unifiedMap/tabs/l3Events/ProtocolAnalyzerView";
 import { TimelineCard } from "@/components/unifiedMap/tabs/l3Events/TimelineCard";
@@ -15,12 +15,11 @@ import {
   L3EventsMapView,
   buildMapPoints,
   buildRsrpByRowId,
-  enrichCallSummaryTechnology,
 } from "@/components/unifiedMap/tabs/L3EventsTab";
 
 const TAKE = 50000;
 const VIEW_TABS = [
-  { id: "summary", label: "Call Summary" },
+  { id: "summary", label: "Summary" },
   { id: "map", label: "Map View" },
   { id: "excel", label: "Excel View" },
   { id: "analyzer", label: "Analyzer" },
@@ -119,6 +118,28 @@ function normalizeCall(call = {}) {
     const value = valueOf(call, key);
     if (value !== null) normalized[key] = value;
   });
+  const startTime = valueOf(call, "startTime", "start");
+  const endTime = valueOf(call, "endTime", "end", "terminationTime");
+  const setupTimeMs = valueOf(call, "callSetupTimeMs", "setupTimeMs");
+  const durationMs = valueOf(call, "connectedDurationMs", "talkTimeMs", "durationMs");
+  const setupTimeSeconds = valueOf(call, "setupTime");
+  const durationSeconds = valueOf(call, "duration");
+  if (startTime !== null) normalized.startTime = startTime;
+  if (endTime !== null) {
+    normalized.endTime = endTime;
+    normalized.terminationTime = endTime;
+  }
+  if (setupTimeMs !== null) normalized.callSetupTimeMs = Number(setupTimeMs);
+  else if (setupTimeSeconds !== null && Number.isFinite(Number(setupTimeSeconds))) normalized.callSetupTimeMs = Math.round(Number(setupTimeSeconds) * 1000);
+  if (durationMs !== null) normalized.connectedDurationMs = Number(durationMs);
+  else if (durationSeconds !== null && Number.isFinite(Number(durationSeconds))) normalized.connectedDurationMs = Math.round(Number(durationSeconds) * 1000);
+  normalized.status = valueOf(call, "status", "result", "callResult") || normalized.status || "Not Connected";
+  normalized.disconnectReason = valueOf(call, "disconnectReason", "reason") || normalized.disconnectReason || "";
+  const technology = valueOf(call, "technology");
+  if (technology !== null) {
+    normalized.technologyStart = normalized.technologyStart || technology;
+    normalized.technologyEnd = normalized.technologyEnd || technology;
+  }
   ["startTime", "dialTime", "alertingTime", "connectedTime", "endTime", "terminationTime"].forEach((key) => {
     normalized[key] = asDate(normalized[key]);
   });
@@ -126,26 +147,65 @@ function normalizeCall(call = {}) {
   return normalized;
 }
 
-function normalizeSummary(summary, fallbackCalls = []) {
+function unwrapDiagnosticSummary(response) {
+  if (Array.isArray(response)) return { rows: response };
+  if (!response || typeof response !== "object") return null;
+
+  const payload = response.data && typeof response.data === "object" && !Array.isArray(response.data)
+    ? response.data
+    : response;
+  const nestedSummary = payload.summary || payload.frontend_summary || payload.frontendSummary;
+  return nestedSummary && typeof nestedSummary === "object" && !Array.isArray(nestedSummary)
+    ? { ...payload, ...nestedSummary }
+    : payload;
+}
+
+function diagnosticRowsFromResponse(response) {
+  if (Array.isArray(response)) return response;
+  const payload = unwrapDiagnosticSummary(response) || {};
+  if (Array.isArray(payload.rows)) return payload.rows;
+  if (Array.isArray(payload.timeline)) return payload.timeline;
+  if (Array.isArray(payload.data)) return payload.data;
+  if (payload.data && typeof payload.data === "object") {
+    return [
+      ...(Array.isArray(payload.data.events) ? payload.data.events : []),
+      ...(Array.isArray(payload.data.l3) ? payload.data.l3 : []),
+    ];
+  }
+  return [];
+}
+
+function normalizeSummary(summary) {
   const backendCalls = valueOf(summary, "calls");
-  const calls = (Array.isArray(backendCalls) ? backendCalls : fallbackCalls || []).map(normalizeCall);
-  const connectedCalls = calls.filter((call) => call.status === "Connected");
-  const average = (values) => values.length ? Math.round(values.reduce((total, value) => total + value, 0) / values.length) : 0;
-  const setupTimes = connectedCalls.map((call) => Number(call.callSetupTimeMs ?? call.setupTimeMs)).filter(Number.isFinite);
-  const talkTimes = connectedCalls.map((call) => Number(call.connectedDurationMs ?? call.talkTimeMs ?? call.durationMs)).filter(Number.isFinite);
-  const totalDurationMs = calls
-    .map((call) => Number(call.durationMs ?? call.connectedDurationMs ?? 0))
-    .filter(Number.isFinite)
-    .reduce((total, value) => total + value, 0);
+  const calls = (Array.isArray(backendCalls) ? backendCalls : []).map(normalizeCall);
   return {
-    totalCalls: valueOf(summary, "totalCalls") ?? calls.length,
-    connected: valueOf(summary, "connected") ?? calls.filter((call) => call.status === "Connected").length,
-    dropped: valueOf(summary, "dropped") ?? calls.filter((call) => call.status === "Dropped").length,
-    notConnected: valueOf(summary, "notConnected") ?? calls.filter((call) => call.status === "Not Connected").length,
-    averageSetupTime: valueOf(summary, "averageSetupTime") ?? average(setupTimes),
-    averageTalkTime: valueOf(summary, "averageTalkTime") ?? average(talkTimes),
-    totalDurationMs: valueOf(summary, "totalDurationMs") ?? totalDurationMs,
-    totalConnectedDurationMs: valueOf(summary, "totalConnectedDurationMs") ?? totalDurationMs,
+    sourceFile: valueOf(summary, "sourceFile"),
+    scope: valueOf(summary, "scope"),
+    generatedAt: valueOf(summary, "generatedAt"),
+    totalRows: valueOf(summary, "totalRows"),
+    l3Rows: valueOf(summary, "l3Rows"),
+    eventRows: valueOf(summary, "eventRows"),
+    kpis: Array.isArray(valueOf(summary, "kpis")) ? valueOf(summary, "kpis") : [],
+    mobility: Array.isArray(valueOf(summary, "mobility")) ? valueOf(summary, "mobility") : [],
+    parameters: Array.isArray(valueOf(summary, "parameters")) ? valueOf(summary, "parameters") : [],
+    technologies: Array.isArray(valueOf(summary, "technologies")) ? valueOf(summary, "technologies") : [],
+    totalCalls: valueOf(summary, "totalCalls") ?? 0,
+    observedEvents: valueOf(summary, "observedEvents"),
+    summaryVersion: valueOf(summary, "summaryVersion"),
+    connected: valueOf(summary, "connected") ?? 0,
+    dropped: valueOf(summary, "dropped") ?? 0,
+    notConnected: valueOf(summary, "notConnected") ?? 0,
+    averageSetupTime: valueOf(summary, "averageSetupTime") ?? 0,
+    averageTalkTime: valueOf(summary, "averageTalkTime") ?? 0,
+    totalDurationMs: valueOf(summary, "totalDurationMs") ?? 0,
+    totalConnectedDurationMs: valueOf(summary, "totalConnectedDurationMs") ?? 0,
+    totalAttemptDurationMs: valueOf(summary, "totalAttemptDurationMs", "total_attempt_duration_ms") ?? 0,
+    successRate: valueOf(summary, "successRate", "success_rate"),
+    busy: valueOf(summary, "busy"),
+    rejected: valueOf(summary, "rejected"),
+    setupFailures: valueOf(summary, "setupFailures", "setup_failures"),
+    ongoing: valueOf(summary, "ongoing"),
+    unknown: valueOf(summary, "unknown"),
     calls,
   };
 }
@@ -555,40 +615,47 @@ function BackendAnalyzer({ sessionIds, analysisId, projectName, onBack }) {
   const [selectedCall, setSelectedCall] = useState(null);
   const [counts, setCounts] = useState({});
   const [timeline, setTimeline] = useState([]);
-  const [mapTimeline, setMapTimeline] = useState([]);
+  const [detailsLoaded, setDetailsLoaded] = useState(false);
+  const [loadResponse] = useState(() => createBackendL3Loader(l3EventApi.getDiagnosticL3Summary));
   const [summary, setSummary] = useState(normalizeSummary(null));
   const [l3Messages, setL3Messages] = useState([]);
   const [eventMessages, setEventMessages] = useState([]);
-  const scope = useMemo(() => ({ sessionIds, uploadId: analysisId, take: TAKE }), [analysisId, sessionIds]);
+  const sessionKey = sessionIds.join(",");
+  const scope = useMemo(() => ({ sessionIds: sessionKey, uploadId: analysisId, take: TAKE }), [analysisId, sessionKey]);
 
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
     setError("");
-    l3EventApi.getExcelRows(scope).then((rowResponse) => {
+    const loadDiagnosticData = async () => {
+      const response = await loadResponse(scope);
       if (cancelled) return;
-      const normalizedTimeline = (rowResponse?.rows || []).map((row) => normalizeTimelineRow(row));
-      const normalizedL3Messages = normalizedTimeline.filter((row) => row.type === "l3");
-      const normalizedEventMessages = normalizedTimeline.filter((row) => row.type === "event");
+      const payload = unwrapDiagnosticSummary(response);
+      if (payload?.summaryVersion !== 1) throw new Error("The backend must be updated to support Summary metrics.");
+      if (!Array.isArray(payload.rows)) throw new Error("Invalid diagnostic response: timeline rows are missing.");
+      const rows = diagnosticRowsFromResponse(response).map((row) => normalizeTimelineRow(row));
+      setTimeline(rows);
+      setL3Messages(rows.filter((row) => row.type === "l3"));
+      setEventMessages(rows.filter((row) => row.type === "event"));
+      setDetailsLoaded(true);
+      setSummary(normalizeSummary(payload));
       setCounts({
-        map_view_count: normalizedTimeline.length,
-        excel_view_count: normalizedTimeline.length,
-        l3_count: normalizedL3Messages.length,
-        event_count: normalizedEventMessages.length,
+        excel_view_count: payload.totalRows ?? 0,
+        l3_count: payload.l3Rows ?? 0,
+        event_count: payload.eventRows ?? 0,
       });
-      setMapTimeline(normalizedTimeline);
-      setTimeline(normalizedTimeline);
-      setSummary(normalizeSummary(null, rowResponse?.calls));
-      setL3Messages(normalizedL3Messages);
-      setEventMessages(normalizedEventMessages);
-    }).catch((requestError) => {
-      if (!cancelled) setError(requestError?.message || "Failed to load diagnostic session data.");
+    };
+
+    loadDiagnosticData().catch((requestError) => {
+      if (!cancelled) setError(requestError?.response?.data?.message || requestError?.message || "Failed to load diagnostic summary.");
     }).finally(() => {
       if (!cancelled) setLoading(false);
     });
     return () => { cancelled = true; };
-  }, [scope]);
+  }, [scope, loadResponse]);
 
+  // The initial response supplies every tab. Tab changes only select stored data.
+  const detailModel = useMemo(() => detailsLoaded ? buildBackendDetailModel(timeline, summary.calls) : null, [detailsLoaded, timeline, summary.calls]);
   const protocolTimeline = useMemo(() => {
     if (!selectedCall) return timeline;
     const start = selectedCall.startTime?.getTime();
@@ -598,30 +665,25 @@ function BackendAnalyzer({ sessionIds, analysisId, projectName, onBack }) {
       return Number.isFinite(time) && Number.isFinite(start) && Number.isFinite(end) && time >= start && time <= end;
     });
   }, [selectedCall, timeline]);
-  const fullAnalysis = useMemo(() => buildProtocolAnalysis(timeline, []), [timeline]);
-  const enrichedSummary = useMemo(
-    () => enrichCallSummaryTechnology(summary, fullAnalysis.procedures),
-    [fullAnalysis.procedures, summary],
+  const fullAnalysis = detailModel?.analysis;
+  const enrichedSummary = summary;
+  const protocolAnalysis = useMemo(
+    () => activeView === "analyzer" && selectedCall ? buildProtocolAnalysis(protocolTimeline, []) : fullAnalysis,
+    [activeView, fullAnalysis, protocolTimeline, selectedCall],
   );
-  const protocolAnalysis = useMemo(() => buildProtocolAnalysis(protocolTimeline, []), [protocolTimeline]);
-  const signalingRows = useMemo(() => buildUnifiedSignalingRows(timeline, enrichedSummary.calls, fullAnalysis), [enrichedSummary.calls, fullAnalysis, timeline]);
-  const mapFullAnalysis = useMemo(() => buildProtocolAnalysis(mapTimeline.length ? mapTimeline : timeline, []), [mapTimeline, timeline]);
-  const mapSignalingRows = useMemo(
-    () => buildUnifiedSignalingRows(mapTimeline.length ? mapTimeline : timeline, enrichedSummary.calls, mapFullAnalysis),
-    [enrichedSummary.calls, mapFullAnalysis, mapTimeline, timeline],
-  );
-  const rsrpByRowId = useMemo(() => buildRsrpByRowId(mapFullAnalysis), [mapFullAnalysis]);
-  const mapPoints = useMemo(() => buildMapPoints(mapSignalingRows, rsrpByRowId), [mapSignalingRows, rsrpByRowId]);
+  const signalingRows = detailModel?.signalingRows;
+  const rsrpByRowId = useMemo(() => fullAnalysis ? buildRsrpByRowId(fullAnalysis) : new Map(), [fullAnalysis]);
+  const mapPoints = useMemo(() => signalingRows ? buildMapPoints(signalingRows, rsrpByRowId) : [], [signalingRows, rsrpByRowId]);
   const rawRows = activeView === "events" ? eventMessages : l3Messages;
   const countForTab = useCallback((tabId) => {
     if (tabId === "summary") return enrichedSummary?.totalCalls ?? 0;
-    if (tabId === "map") return mapPoints.length;
-    if (tabId === "excel") return signalingRows.length || counts.excel_view_count || 0;
-    if (tabId === "analyzer") return protocolAnalysis?.stats?.totalProcedures ?? counts.analyzer_count ?? 0;
+    if (tabId === "map") return detailsLoaded ? mapPoints.length : null;
+    if (tabId === "excel") return signalingRows?.length ?? counts.excel_view_count ?? 0;
+    if (tabId === "analyzer") return fullAnalysis?.stats?.totalProcedures ?? null;
     if (tabId === "l3") return l3Messages.length || counts.l3_count || 0;
     if (tabId === "events") return eventMessages.length || counts.event_count || 0;
     return 0;
-  }, [counts.analyzer_count, counts.event_count, counts.excel_view_count, counts.l3_count, enrichedSummary?.totalCalls, eventMessages.length, l3Messages.length, mapPoints.length, protocolAnalysis?.stats?.totalProcedures, signalingRows.length]);
+  }, [detailsLoaded, counts.event_count, counts.excel_view_count, counts.l3_count, enrichedSummary?.totalCalls, eventMessages.length, l3Messages.length, mapPoints.length, fullAnalysis?.stats?.totalProcedures, signalingRows?.length]);
   const visibleRawRows = useMemo(() => {
     const needle = search.trim().toLowerCase();
     if (!needle) return rawRows;
@@ -647,11 +709,11 @@ function BackendAnalyzer({ sessionIds, analysisId, projectName, onBack }) {
       <header className="l3-glass flex shrink-0 flex-wrap items-center gap-2 border-x-0 border-t-0 px-[clamp(0.5rem,1.2vw,1rem)] py-[clamp(0.5rem,1vw,0.75rem)]">
         <button type="button" onClick={onBack} className="inline-flex items-center gap-1 rounded border border-slate-600 px-2 py-1.5 text-xs hover:bg-slate-700"><ArrowLeft className="h-3.5 w-3.5" />L3 Session</button>
         <div className="mr-auto min-w-0"><div className="l3-ui-copy max-w-[min(52vw,36rem)] truncate font-semibold">{projectName}</div><div className="l3-meta-copy text-slate-400">{analysisId ? `L3 Session ID: ${analysisId}` : `Sessions: ${sessionIds.join(", ")}`}</div></div>
-        {VIEW_TABS.map((tab) => <button key={tab.id} type="button" onClick={() => setActiveView(tab.id)} className={`border px-2.5 py-1.5 text-xs ${activeView === tab.id ? "border-blue-500 bg-blue-600" : "border-slate-700 bg-slate-900 text-slate-300 hover:bg-slate-700"}`}>{tab.label} ({countForTab(tab.id).toLocaleString()})</button>)}
+        {VIEW_TABS.map((tab) => <button key={tab.id} type="button" onClick={() => setActiveView(tab.id)} className={`border px-2.5 py-1.5 text-xs ${activeView === tab.id ? "border-blue-500 bg-blue-600" : "border-slate-700 bg-slate-900 text-slate-300 hover:bg-slate-700"}`}>{tab.label}{countForTab(tab.id) != null ? ` (${countForTab(tab.id).toLocaleString()})` : ""}</button>)}
       </header>
       <main className="l3-analysis-main flex min-h-0 flex-1 flex-col overflow-hidden">
-        {activeView === "summary" && <div className="h-full overflow-auto p-3"><HomeCallSummary summary={enrichedSummary} /></div>}
-        {activeView === "analyzer" && selectedCall && (
+        {activeView === "summary" && <div className="h-full overflow-auto p-3"><HomeCallSummary summary={enrichedSummary} timeline={timeline} /></div>}
+        {detailsLoaded && activeView === "analyzer" && selectedCall && (
           <div className="shrink-0 flex items-center justify-between gap-2 border-b border-blue-500/30 bg-blue-500/10 px-2 py-1 text-xs">
             <span className="truncate text-blue-300">
               Analyzer scoped to {selectedCall.id} starting at {selectedCall.startTime?.toLocaleTimeString([], { hour12: false, timeZone: "UTC" })}
@@ -661,10 +723,10 @@ function BackendAnalyzer({ sessionIds, analysisId, projectName, onBack }) {
             </button>
           </div>
         )}
-        {activeView === "map" && <L3EventsMapView points={mapPoints} />}
-        {activeView === "excel" && <ExcelSignalingView rows={signalingRows} calls={enrichedSummary.calls} selectedCall={selectedCall} onSelectCall={setSelectedCall} sourceFileName={analysisId ? `l3-session-${analysisId}` : `sessions-${sessionIds.join("-")}`} />}
-        {activeView === "analyzer" && <div className="flex h-full min-h-0 flex-col"><div className="flex shrink-0 gap-3 border-b border-slate-800 px-3 py-1.5 text-[11px] text-slate-300"><span>RRC: {protocolAnalysis?.states?.rrc || "—"}</span><span>NAS: {protocolAnalysis?.states?.nas || "—"}</span><span>IMS: {protocolAnalysis?.states?.ims || "—"}</span><span>Failures: {protocolAnalysis?.stats?.failures ?? 0}</span></div><div className="min-h-0 flex-1"><ProtocolAnalyzerView analysis={protocolAnalysis} calls={enrichedSummary.calls} callScoped={Boolean(selectedCall)} /></div></div>}
-        {(activeView === "l3" || activeView === "events") && <div className="l3-glass flex h-full min-h-0 flex-col"><div className="l3-glass-subtle flex shrink-0 flex-wrap items-center justify-between gap-2 border-x-0 border-t-0 px-2 py-1"><div><h3 className="l3-ui-copy font-semibold text-white">{activeView === "l3" ? "All L3 Messages" : "All Event Rows"}</h3><p className="l3-meta-copy text-slate-400">Showing {visibleRawRows.length.toLocaleString()} of {rawRows.length.toLocaleString()} backend rows.</p></div><div className="relative w-full sm:w-80"><Search className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-slate-500" /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search timestamp, file, title, or raw text..." className="l3-glass-control l3-ui-copy w-full rounded-md py-2 pl-8 pr-2 text-white outline-none" /></div></div><div className="min-h-0 flex-1 space-y-2 overflow-auto">{visibleRawRows.length ? visibleRawRows.map((row) => <TimelineCard key={row.id} item={row} />) : <div className="py-10 text-center l3-ui-copy text-slate-400">No matching {activeView === "l3" ? "L3 messages" : "event rows"}.</div>}</div></div>}
+        {detailsLoaded && activeView === "map" && <L3EventsMapView points={mapPoints} />}
+        {detailsLoaded && activeView === "excel" && <ExcelSignalingView rows={signalingRows} calls={enrichedSummary.calls} selectedCall={selectedCall} onSelectCall={setSelectedCall} sourceFileName={analysisId ? `l3-session-${analysisId}` : `sessions-${sessionIds.join("-")}`} />}
+        {detailsLoaded && activeView === "analyzer" && <div className="flex h-full min-h-0 flex-col"><div className="flex shrink-0 gap-3 border-b border-slate-800 px-3 py-1.5 text-[11px] text-slate-300"><span>RRC: {protocolAnalysis?.states?.rrc || "—"}</span><span>NAS: {protocolAnalysis?.states?.nas || "—"}</span><span>IMS: {protocolAnalysis?.states?.ims || "—"}</span><span>Failures: {protocolAnalysis?.stats?.failures ?? 0}</span></div><div className="min-h-0 flex-1"><ProtocolAnalyzerView analysis={protocolAnalysis} calls={enrichedSummary.calls} callScoped={Boolean(selectedCall)} /></div></div>}
+        {detailsLoaded && (activeView === "l3" || activeView === "events") && <div className="l3-glass flex h-full min-h-0 flex-col"><div className="l3-glass-subtle flex shrink-0 flex-wrap items-center justify-between gap-2 border-x-0 border-t-0 px-2 py-1"><div><h3 className="l3-ui-copy font-semibold text-white">{activeView === "l3" ? "All L3 Messages" : "All Event Rows"}</h3><p className="l3-meta-copy text-slate-400">Showing {visibleRawRows.length.toLocaleString()} of {rawRows.length.toLocaleString()} backend rows.</p></div><div className="relative w-full sm:w-80"><Search className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-slate-500" /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search timestamp, file, title, or raw text..." className="l3-glass-control l3-ui-copy w-full rounded-md py-2 pl-8 pr-2 text-white outline-none" /></div></div><div className="min-h-0 flex-1 space-y-2 overflow-auto">{visibleRawRows.length ? visibleRawRows.map((row) => <TimelineCard key={row.id} item={row} />) : <div className="py-10 text-center l3-ui-copy text-slate-400">No matching {activeView === "l3" ? "L3 messages" : "event rows"}.</div>}</div></div>}
       </main>
     </div>
   );
@@ -692,7 +754,7 @@ export default function BackendL3EventAnalyzer() {
   return (
     <div className="h-screen min-h-0 w-full overflow-hidden bg-slate-950">
       {sessionIds.length || analysisId
-        ? <BackendAnalyzer sessionIds={sessionIds} analysisId={analysisId} projectName={projectName} onBack={() => setSearchParams(projectId ? { projectId: String(projectId) } : {})} />
+        ? <BackendAnalyzer key={`${analysisId || ""}:${sessionIds.join(",")}`} sessionIds={sessionIds} analysisId={analysisId} projectName={projectName} onBack={() => setSearchParams(projectId ? { projectId: String(projectId) } : {})} />
         : <UploadHistoryLanding projectId={projectId} projectName={projectName} onOpenAnalysis={openAnalysis} onBack={() => navigate("/viewProject")} />}
     </div>
   );

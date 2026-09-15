@@ -38,6 +38,7 @@ import InsightMarkers from "@/components/unifiedMap/InsightMarkers";
 import { extractInsightRows } from "@/components/unifiedMap/insightUtils";
 import AddSiteFormDialog from "@/components/unifiedMap/AddSiteFormDialog";
 import LtePredictionLocationLayer from "@/components/unifiedMap/LtePredictionLocationLayer";
+import ClutterTilesLayer from "@/components/unifiedMap/ClutterTilesLayer";
 import { normalizeBandName } from "@/utils/colorUtils";
 
 // Hooks
@@ -55,8 +56,9 @@ import { usePredictionData } from "@/hooks/usePredictionData";
 import { useSessionNeighbors } from "@/hooks/useSessionNeighbors";
 import { useSubSessionAnalytics } from "@/hooks/useSubSessionAnalytics";
 import { useProjectPolygons } from "@/hooks/useProjectPolygons";
+import { useProjectBuildingClutterTiles } from "@/hooks/useProjectBuildingClutterTiles";
 import { useAreaPolygons } from "@/hooks/useAreaPolygons";
-import { useUnifiedGridViewData } from "@/hooks/useUnifiedGridViewData";
+import { useUnifiedGridViewDataPair } from "@/hooks/useUnifiedGridViewData";
 
 // Utils
 import {
@@ -141,6 +143,78 @@ const getIndoorOutdoorBucket = (value) => {
   return formatIndoorOutdoorValue(value);
 };
 
+const TerrainElevationProfile = ({ drawing }) => {
+  const profile = Array.isArray(drawing?.elevationProfile)
+    ? drawing.elevationProfile
+    : [];
+  if (profile.length < 2) return null;
+
+  const width = 420;
+  const height = 148;
+  const pad = { top: 12, right: 14, bottom: 24, left: 48 };
+  const plotWidth = width - pad.left - pad.right;
+  const plotHeight = height - pad.top - pad.bottom;
+  const elevations = profile.map((point) => point.elevation);
+  const minElevation = Math.min(...elevations);
+  const maxElevation = Math.max(...elevations);
+  const elevationRange = Math.max(1, maxElevation - minElevation);
+  const totalDistance = Math.max(1, profile[profile.length - 1].distance);
+  const points = profile
+    .map((point) => {
+      const x = pad.left + (point.distance / totalDistance) * plotWidth;
+      const y = pad.top + ((maxElevation - point.elevation) / elevationRange) * plotHeight;
+      return `${x.toFixed(1)},${y.toFixed(1)}`;
+    })
+    .join(" ");
+  const horizontalLabel = totalDistance >= 1000
+    ? `${(totalDistance / 1000).toFixed(2)} km`
+    : `${Math.round(totalDistance)} m`;
+  const terrainDistance = Number(drawing?.terrainDistance);
+
+  return (
+    <section className="absolute bottom-4 right-4 z-[650] w-[min(440px,calc(100%-2rem))] rounded-xl border border-slate-700 bg-slate-950/95 p-3 text-white shadow-2xl backdrop-blur-sm">
+      <div className="mb-2 flex items-start justify-between gap-3">
+        <div>
+          <h2 className="text-sm font-semibold">Elevation profile</h2>
+          <p className="text-[11px] text-slate-400">Google Terrain · sampled along measured line</p>
+        </div>
+        <div className="text-right text-[11px] leading-5 text-slate-300">
+          <div>Terrain distance: <span className="font-semibold text-cyan-300">{Number.isFinite(terrainDistance) ? `${(terrainDistance / 1000).toFixed(2)} km` : "Calculating…"}</span></div>
+          <div>Horizontal: {horizontalLabel}</div>
+        </div>
+      </div>
+      <svg
+        viewBox={`0 0 ${width} ${height}`}
+        className="block w-full overflow-visible"
+        role="img"
+        aria-label={`Elevation profile from ${Math.round(minElevation)} to ${Math.round(maxElevation)} meters across ${horizontalLabel}`}
+      >
+        {[0, 0.5, 1].map((fraction) => {
+          const y = pad.top + fraction * plotHeight;
+          const value = maxElevation - fraction * elevationRange;
+          return (
+            <g key={fraction}>
+              <line x1={pad.left} y1={y} x2={width - pad.right} y2={y} stroke="#334155" strokeDasharray="3 4" />
+              <text x={pad.left - 7} y={y + 3.5} textAnchor="end" fill="#94a3b8" fontSize="10">{Math.round(value)}m</text>
+            </g>
+          );
+        })}
+        <line x1={pad.left} y1={height - pad.bottom} x2={width - pad.right} y2={height - pad.bottom} stroke="#64748b" />
+        <polyline points={points} fill="none" stroke="#38bdf8" strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round" />
+        <circle cx={pad.left} cy={Number(points.split(" ")[0].split(",")[1])} r="3.5" fill="#22c55e" />
+        <circle cx={width - pad.right} cy={Number(points.split(" ").at(-1).split(",")[1])} r="3.5" fill="#f97316" />
+        <text x={pad.left} y={height - 6} textAnchor="start" fill="#94a3b8" fontSize="10">0 km</text>
+        <text x={width - pad.right} y={height - 6} textAnchor="end" fill="#94a3b8" fontSize="10">{horizontalLabel}</text>
+      </svg>
+      <div className="mt-1 flex justify-between gap-2 text-[11px] text-slate-300">
+        <span>↑ Gain {Math.round(Number(drawing?.elevationGain) || 0)} m</span>
+        <span>↓ Loss {Math.round(Number(drawing?.elevationLoss) || 0)} m</span>
+        <span>{profile.length} samples</span>
+      </div>
+    </section>
+  );
+};
+
 const DEFAULT_SITE_FILTERS = Object.freeze({
   technologies: [],
   operators: [],
@@ -148,6 +222,7 @@ const DEFAULT_SITE_FILTERS = Object.freeze({
   pcis: [],
 });
 
+const CLUTTER_TILES_FEATURE_AVAILABLE = false;
 const SITE_CLUSTER_COLOR_PATTERN =
   /^(#(?:[0-9a-f]{3}|[0-9a-f]{4}|[0-9a-f]{6}|[0-9a-f]{8})|rgba?\([^)]{1,80}\)|hsla?\([^)]{1,80}\))$/i;
 
@@ -1794,6 +1869,8 @@ const UnifiedMapView = () => {
   const [selectedSubSessionTargets, setSelectedSubSessionTargets] = useState([]);
 
   const [showPolygons, setShowPolygons] = useState(false);
+  const [showClutterTiles, setShowClutterTiles] = useState(false);
+  const clutterTilesEnabled = CLUTTER_TILES_FEATURE_AVAILABLE && showClutterTiles;
   const [polygonSource, setPolygonSource] = useState("map");
   const [projectPolygonEditEnabled, setProjectPolygonEditEnabled] =
     useState(false);
@@ -1970,8 +2047,13 @@ const UnifiedMapView = () => {
   const [storedGridScenarioOptions, setStoredGridScenarioOptions] = useState([]);
   const [storedGridTechnology, setStoredGridTechnology] = useState("ALL");
   const handleUnifiedTechnologyChange = useCallback((nextTechnology) => {
-    const technology = String(nextTechnology || "ALL").trim().toUpperCase();
-    const technologies = technology === "ALL" ? [] : [technology];
+    const values = Array.isArray(nextTechnology)
+      ? nextTechnology
+      : String(nextTechnology || "ALL").split(",");
+    const technologies = [...new Set(values
+      .map((value) => String(value).trim().toUpperCase())
+      .filter((value) => value && value !== "ALL"))].sort();
+    const technology = technologies.length ? technologies.join(",") : "ALL";
     setStoredGridTechnology(technology);
     setDataFilters((prev) => ({ ...prev, technologies }));
     setSiteFilters((prev) => ({ ...prev, technologies }));
@@ -2006,9 +2088,6 @@ const UnifiedMapView = () => {
   const [pciDistData, setPciDistData] = useState(null);
   const [pciThreshold, setPciThreshold] = useState(0);
   const [dominanceData, setDominanceData] = useState([]);
-  const [manualSiteData, setManualSiteData] = useState([]);
-  const [manualSiteLoading, setManualSiteLoading] = useState(false);
-  const [manualSiteDataReady, setManualSiteDataReady] = useState(false);
 
   const setUnifiedSitePredictionVersion = useCallback((nextVersion) => {
     const normalizedVersion = String(nextVersion || "original").trim().toLowerCase();
@@ -2071,9 +2150,6 @@ const UnifiedMapView = () => {
 
   useEffect(() => {
     if (!enableSiteToggle) {
-      setManualSiteData([]);
-      setManualSiteLoading(false);
-      setManualSiteDataReady(false);
       setSelectedSites([]);
       setSiteLegendFilter(null);
       setSiteFilters((prev) => ({
@@ -2132,12 +2208,6 @@ const UnifiedMapView = () => {
     return () => {
       clearHandoverPolylines();
     };
-  }, []);
-
-  const handleSitesLoaded = useCallback((data, isLoading) => {
-    setManualSiteData(Array.isArray(data) ? data : []);
-    setManualSiteLoading(Boolean(isLoading));
-    setManualSiteDataReady(true);
   }, []);
 
   const handleSitePredictionScenarioSaved = useCallback((scenario) => {
@@ -2772,6 +2842,13 @@ const UnifiedMapView = () => {
     loading: polygonLoading,
     refetch: refetchPolygons,
   } = useProjectPolygons(projectId, shouldLoadProjectPolygons, polygonSource);
+
+  const {
+    tiles: clutterTiles,
+    loading: clutterTileLoading,
+    error: clutterTileError,
+    hasMore: clutterTilesHaveMore,
+  } = useProjectBuildingClutterTiles(projectId, clutterTilesEnabled);
 
   // âœ… 5. Use Area Polygons Hook
   const {
@@ -3954,8 +4031,6 @@ const UnifiedMapView = () => {
 
       setSitePredictionScenarioOptions(options);
       setSitePredictionScenarioId(nextScenarioId);
-      setManualSiteData([]);
-      setManualSiteDataReady(!nextScenarioId);
     } catch (error) {
       const message = String(error?.message || "").trim() || "Failed to delete site prediction scenario.";
       toast.error(message);
@@ -3963,8 +4038,6 @@ const UnifiedMapView = () => {
   }, [projectId, sitePredictionScenarioId]);
 
   const siteData = rawSiteData || [];
-  const effectiveSiteData = manualSiteDataReady ? manualSiteData : siteData;
-  const effectiveSiteLoading = manualSiteLoading || siteLoading;
   const {
     allNeighbors: rawAllNeighbors,
     stats: neighborStats,
@@ -4695,18 +4768,17 @@ const UnifiedMapView = () => {
   }, [locations, renderedLegendFilteredLocations, polygonFilteredNeighborData]);
   const effectiveGridColorBy = useMemo(() => colorBy, [colorBy]);
 
-  const gridDisplayData = useUnifiedGridViewData({
-    enabled: enableGrid,
-    locations: deferredGridDisplayLocations,
-    selectedMetric,
-    colorBy: effectiveGridColorBy,
-    gridSizeMeters,
-    aggregationMethod: normalizedLteGridAggregationMethod,
-  });
-
-  const gridFilteredData = useUnifiedGridViewData({
-    enabled: enableGrid,
-    locations: deferredGridFilteredLocations,
+  // Filtered grids feed analytics, the open sidebar, and polygon-color fallbacks.
+  // Stored-grid mode only needs log-grid data for the open sidebar's log summary.
+  const needsFilteredGrid = showAnalytics || isSideOpen || (
+    (showPolygons || buildingBorderEnabled || areaEnabled) &&
+    renderedGridLegendLogs.length === 0
+  );
+  const { displayData: gridDisplayData, filteredData: gridFilteredData } = useUnifiedGridViewDataPair({
+    enabled: mapGridEnabled || (enableGrid && isSideOpen),
+    displayLocations: deferredGridDisplayLocations,
+    filteredLocations: deferredGridFilteredLocations,
+    filteredEnabled: needsFilteredGrid,
     selectedMetric,
     colorBy: effectiveGridColorBy,
     gridSizeMeters,
@@ -6387,6 +6459,40 @@ const UnifiedMapView = () => {
         count: Number(drawing?.count) || 0,
         area: Number.isFinite(areaMeters) ? areaMeters : null,
         areaInSqKm,
+        length: Number.isFinite(Number(drawing?.length)) ? Number(drawing.length) : null,
+        lengthInKm: Number.isFinite(Number(drawing?.lengthInKm))
+          ? Number(drawing.lengthInKm)
+          : null,
+        terrainMode: drawing?.terrainMode === true,
+        terrainDistance: Number.isFinite(Number(drawing?.terrainDistance))
+          ? Number(drawing.terrainDistance)
+          : null,
+        terrainLengthInKm: Number.isFinite(Number(drawing?.terrainLengthInKm))
+          ? Number(drawing.terrainLengthInKm)
+          : null,
+        elevationGain: Number.isFinite(Number(drawing?.elevationGain))
+          ? Number(drawing.elevationGain)
+          : null,
+        elevationLoss: Number.isFinite(Number(drawing?.elevationLoss))
+          ? Number(drawing.elevationLoss)
+          : null,
+        minElevation: Number.isFinite(Number(drawing?.minElevation))
+          ? Number(drawing.minElevation)
+          : null,
+        maxElevation: Number.isFinite(Number(drawing?.maxElevation))
+          ? Number(drawing.maxElevation)
+          : null,
+        elevationSamples: Number.isFinite(Number(drawing?.samples))
+          ? Number(drawing.samples)
+          : null,
+        elevationProfile: Array.isArray(drawing?.elevationProfile)
+          ? drawing.elevationProfile
+              .map((point) => ({
+                distance: Number(point?.distance),
+                elevation: Number(point?.elevation),
+              }))
+              .filter((point) => Number.isFinite(point.distance) && Number.isFinite(point.elevation))
+          : [],
         grid: grid
           ? {
             cells: Number.isFinite(gridCells) ? gridCells : 0,
@@ -7168,7 +7274,7 @@ const UnifiedMapView = () => {
     const bands = new Set();
     const pcis = new Set();
 
-    (effectiveSiteData || []).forEach((site) => {
+    (siteData || []).forEach((site) => {
       const technologyName = normalizeTechName(
         site?.technology ?? site?.Technology ?? site?.network ?? site?.Network ?? "",
         site?.band ?? site?.Band,
@@ -7215,7 +7321,7 @@ const UnifiedMapView = () => {
       ),
       pcis: Array.from(pcis).sort((a, b) => Number(a) - Number(b)),
     };
-  }, [effectiveSiteData]);
+  }, [siteData]);
 
   if (mapsConfigError)
     return (
@@ -7306,7 +7412,7 @@ const UnifiedMapView = () => {
             dataToggle={dataToggle}
             enableDataToggle={enableDataToggle}
             selectedMetric={selectedMetric}
-            siteData={effectiveSiteData}
+            siteData={siteData}
             durationTime={durationTime}
             siteToggle={siteToggle}
             enableSiteToggle={enableSiteToggle}
@@ -7452,6 +7558,13 @@ const UnifiedMapView = () => {
         onOpenMultiView={handleNavigateToMultiView}
         showPolygons={showPolygons}
         setShowPolygons={setShowPolygons}
+        showClutterTiles={clutterTilesEnabled}
+        setShowClutterTiles={setShowClutterTiles}
+        clutterTilesAvailable={CLUTTER_TILES_FEATURE_AVAILABLE}
+        clutterTileCount={clutterTiles.length}
+        clutterTileLoading={clutterTileLoading}
+        clutterTileError={clutterTileError}
+        clutterTilesHaveMore={clutterTilesHaveMore}
         polygonSource={polygonSource}
         setPolygonSource={setPolygonSource}
         buildingBorderEnabled={buildingBorderEnabled}
@@ -7575,9 +7688,9 @@ const UnifiedMapView = () => {
 
         <SiteLegend
           enabled={enableSiteToggle}
-          sites={effectiveSiteData}
+          sites={siteData}
           colorMode={siteLegendColorMode}
-          isLoading={effectiveSiteLoading}
+          isLoading={siteLoading}
           sitePredictionVersion={sitePredictionVersion}
           activeFilter={siteLegendFilter}
           onFilterChange={setSiteLegendFilter}
@@ -7719,6 +7832,15 @@ const UnifiedMapView = () => {
                 onUIChange={handleUIChange}
                 clearSignal={ui.drawClearSignal}
                 onDrawingsChange={handleDrawingsChange}
+                terrainEnabled={ui.basemapStyle === "terrain"}
+              />
+
+              <ClutterTilesLayer
+                enabled={clutterTilesEnabled}
+                tiles={clutterTiles}
+                loading={clutterTileLoading}
+                error={clutterTileError}
+                hasMore={clutterTilesHaveMore}
               />
 
               {/* LTE Prediction Layer â€” renders for prediction mode, LTE grid, or selected sites */}
@@ -7831,7 +7953,9 @@ const UnifiedMapView = () => {
                   hoveredCellId={hoveredCellId}
                   hoveredLog={hoveredLog}
                   locations={finalDisplayLocations}
-                  onDataLoaded={handleSitesLoaded}
+                  siteData={siteData}
+                  siteError={siteError}
+                  refetchSites={refetchSites}
                   onSitePredictionScenarioSaved={handleSitePredictionScenarioSaved}
                   colorMode={siteLegendColorMode}
                   siteLabelField={siteLabelField}
@@ -7905,6 +8029,13 @@ const UnifiedMapView = () => {
 
             </MapWithMultipleCircles>
           )}
+          {ui.basemapStyle === "terrain" && (
+            <TerrainElevationProfile
+              drawing={[...(drawnShapeAnalytics || [])]
+                .reverse()
+                .find((item) => item?.type === "polyline" && item?.terrainMode && item?.elevationProfile?.length > 1)}
+            />
+          )}
         </div>
       </div>
       </div>
@@ -7940,7 +8071,7 @@ const UnifiedMapView = () => {
         onSuccess={() => refetchSites(true)}
         availableBands={combinedBands}
         availablePcis={combinedPcis}
-        siteData={effectiveSiteData}
+        siteData={siteData}
       />
     </div>
   );

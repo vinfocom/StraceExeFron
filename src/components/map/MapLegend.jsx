@@ -1,3 +1,4 @@
+import { getMetricLabelsForLocations } from "@/utils/technologyMetricLabels";
 import React, {
   useCallback,
   useEffect,
@@ -1365,6 +1366,8 @@ export default function MapLegend({
   };
 
   const { content, title } = useMemo(() => {
+    const technologyLabels = getMetricLabelsForLocations(logs);
+    const is2G = technologyLabels.rsrp === "RxLev";
     const macDetailMetricKey =
       colorBy === "mac_detail" ? resolveMacDetailMetricKey(selectedMetric) : null;
 
@@ -1390,7 +1393,7 @@ export default function MapLegend({
     if (colorBy) {
       const colorByTitle =
         colorBy === "earfcn"
-          ? "EARFCN/BCCH"
+          ? (is2G ? "BCCH" : "EARFCN/BCCH")
           : colorBy === "cell_id"
           ? "Cell ID"
           : colorBy === "nodebid"
@@ -1423,7 +1426,7 @@ export default function MapLegend({
             onFilterChange={onFilterChange}
           />
         ),
-        title: String(selectedMetric || "").toLowerCase() === "best_pci" ? "Best PCI" : "PCI/BSIC",
+        title: is2G ? "BCCH" : String(selectedMetric || "").toLowerCase() === "best_pci" ? "Best PCI" : "PCI/BSIC",
       };
     }
 
@@ -1464,7 +1467,7 @@ export default function MapLegend({
             onFilterChange={onFilterChange}
           />
         ),
-        title: "EARFCN/BCCH",
+        title: is2G ? "BCCH" : "EARFCN/BCCH",
       };
     }
 
@@ -1479,7 +1482,7 @@ export default function MapLegend({
           onFilterChange={onFilterChange}
         />
       ),
-      title: `${config.label}${config.unit ? ` (${config.unit})` : ""}`,
+      title: `${is2G ? (technologyLabels[selectedMetric] ?? config.label) : config.label}${config.unit && !(is2G && selectedMetric === "sinr") ? ` (${config.unit})` : ""}`,
     };
   }, [colorBy, selectedMetric, thresholds, logs, activeFilter, onFilterChange]);
 

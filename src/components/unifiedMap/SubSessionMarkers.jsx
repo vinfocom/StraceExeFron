@@ -1,3 +1,4 @@
+import { getLogTechnology, normalizeMetricTechnology, getTechnologySignalRows, getTechnologyMetricValue } from "@/utils/technologyMetricLabels";
 import React, { memo, useEffect, useMemo, useState } from "react";
 import {
   FLOAT_PANE,
@@ -13,6 +14,11 @@ const formatMetric = (value, suffix = "") => {
   return `${Number(value).toLocaleString(undefined, { maximumFractionDigits: 2 })}${suffix}`;
 };
 
+const formatField = (value) => {
+  if (value == null || String(value).trim() === "") return "N/A";
+  return String(value);
+};
+
 const formatDuration = (value) => {
   if (value == null || Number.isNaN(Number(value))) return "N/A";
   const totalSeconds = Math.floor(Number(value) / 1000);
@@ -26,6 +32,13 @@ const toMetric = (value) => {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : null;
 };
+
+const firstPresentValue = (...values) =>
+  values.find((value) => {
+    if (value == null) return false;
+    const normalized = String(value).trim().toLowerCase();
+    return normalized !== "" && !["na", "n/a", "null", "undefined", "-"].includes(normalized);
+  }) ?? null;
 
 const NETWORK_LOG_BUCKET_PRECISION = 4;
 const MAX_THPUT_MATCH_DISTANCE_METERS = 50;
@@ -141,6 +154,33 @@ const formatSubSessionType = (subSessionType) => {
   return value || "N/A";
 };
 
+const normalizeMarkerTechnology = normalizeMetricTechnology;
+
+const hasNetworkSignalMetric = (sample) => [
+  sample?.rsrp,
+  sample?.RSRP,
+  sample?.nr_rsrp,
+  sample?.nrRsrp,
+  sample?.rsrq,
+  sample?.RSRQ,
+  sample?.nr_rsrq,
+  sample?.nrRsrq,
+  sample?.sinr,
+  sample?.SINR,
+  sample?.nr_sinr,
+  sample?.nrSinr,
+  sample?.rxlev,
+  sample?.RxLev,
+  sample?.rxqual,
+  sample?.RxQual,
+  sample?.cqi,
+  sample?.CQI,
+  sample?.rscp,
+  sample?.RSCP,
+  sample?.ecno,
+  sample?.EcNo,
+].some((value) => toMetric(value) != null);
+
 const getSubSessionMarkerPath = (subSessionType, statusRaw) => {
   if (getNormalizedStatus(statusRaw) === "failed") return CROSS_PATH;
 
@@ -153,13 +193,17 @@ const getSubSessionMarkerPath = (subSessionType, statusRaw) => {
 
 const SubSessionTooltip = ({ marker }) => {
   const isCs = formatSubSessionType(marker.subSessionType) === "CS";
+  const technology = normalizeMarkerTechnology(getLogTechnology(marker));
+  const technologyMetrics = getTechnologySignalRows(marker);
   const rows = [
+    ["Technology", technology],
     isCs
       ? ["Call Duration", formatDuration(marker.duration)]
       : ["Avg Speed", formatMetric(marker.metrics?.avg_speed == null ? null : Number(marker.metrics.avg_speed) / 1000, " Mbps")],
-    ["RSRP", formatMetric(marker.rsrp, " dBm")],
-    ["RSRQ", formatMetric(marker.rsrq, " dB")],
-    ["SINR", formatMetric(marker.sinr, " dB")],
+    ...technologyMetrics.map(({ label, value, unit }) => [label, formatMetric(value, unit ? ` ${unit}` : "")]),
+    ["CI", formatField(marker.ci ?? marker.ci_db)],
+    ["NodeB", formatField(marker.nodeb_id ?? marker.nodebId)],
+    ["BCCH", formatField(technology === "2G" ? getTechnologyMetricValue(marker, "earfcn") : marker.bcch)],
   ];
 
   return (
@@ -248,8 +292,7 @@ const SubSessionMarkers = ({
         );
         const signalSample = findNearestNetworkSample(
           position, bucketedNetworkLogs,
-          (sample) => [sample.rsrp ?? sample.RSRP, sample.rsrq ?? sample.RSRQ, sample.sinr ?? sample.SINR]
-            .some((value) => toMetric(value) != null),
+          hasNetworkSignalMetric,
         );
         const dlThroughput = toMetric(
           marker.dlThroughput ??
@@ -264,13 +307,53 @@ const SubSessionMarkers = ({
           isPsMarker && dlThroughput != null
             ? getColorForMetric("dl_thpt", dlThroughput, thresholds)
             : null;
+        const cellId = firstPresentValue(
+          marker.cell_id,
+          marker.cellId,
+          signalSample?.cell_id,
+          signalSample?.cellId,
+          signalSample?.CellId,
+          signalSample?.CELL_ID,
+        );
 
         return {
           ...marker,
           dlThroughput,
+          technology: normalizeMarkerTechnology(
+            marker.technology ??
+              marker.networkType ??
+              marker.network ??
+              signalSample?.technology ??
+              signalSample?.networkType ??
+              signalSample?.network,
+          ),
           rsrp: toMetric(marker.rsrp ?? signalSample?.rsrp ?? signalSample?.RSRP),
           rsrq: toMetric(marker.rsrq ?? signalSample?.rsrq ?? signalSample?.RSRQ),
           sinr: toMetric(marker.sinr ?? signalSample?.sinr ?? signalSample?.SINR),
+          rxlev: toMetric(marker.rxlev ?? signalSample?.rxlev ?? signalSample?.RxLev ?? signalSample?.RXLEV),
+          rxqual: toMetric(marker.rxqual ?? signalSample?.rxqual ?? signalSample?.RxQual ?? signalSample?.RXQUAL),
+          cqi: toMetric(marker.cqi ?? signalSample?.cqi ?? signalSample?.CQI),
+          rscp: toMetric(marker.rscp ?? signalSample?.rscp ?? signalSample?.RSCP),
+          ecno: toMetric(marker.ecno ?? signalSample?.ecno ?? signalSample?.EcNo ?? signalSample?.ECNO),
+          nrRsrp: toMetric(marker.nrRsrp ?? signalSample?.nrRsrp ?? signalSample?.nr_rsrp ?? signalSample?.NR_RSRP ?? signalSample?.rsrp ?? signalSample?.RSRP),
+          nrRsrq: toMetric(marker.nrRsrq ?? signalSample?.nrRsrq ?? signalSample?.nr_rsrq ?? signalSample?.NR_RSRQ ?? signalSample?.rsrq ?? signalSample?.RSRQ),
+          nrSinr: toMetric(marker.nrSinr ?? signalSample?.nrSinr ?? signalSample?.nr_sinr ?? signalSample?.NR_SINR),
+          ci: cellId ?? marker.ci ?? signalSample?.ci ?? signalSample?.CI ?? signalSample?.ci_db ?? signalSample?.ciDb,
+          ci_db: marker.ci_db ?? signalSample?.ci_db ?? signalSample?.ciDb ?? signalSample?.CI_DB,
+          cell_id: cellId,
+          nodeb_id: marker.nodeb_id ?? marker.nodebId ?? signalSample?.nodeb_id ?? signalSample?.nodebId ?? signalSample?.NodeBId,
+          nodebId: marker.nodebId ?? marker.nodeb_id ?? signalSample?.nodebId ?? signalSample?.nodeb_id ?? signalSample?.NodeBId,
+          bcch: firstPresentValue(
+            marker.bcch,
+            signalSample?.bcch,
+            signalSample?.BCCH,
+            signalSample?.bcch_id,
+            signalSample?.bcchId,
+            marker.earfcn,
+            signalSample?.earfcn,
+            signalSample?.EARFCN,
+            signalSample?.Earfcn,
+          ),
           fillColor: thresholdColor || formatStatus(marker.resultStatus).color,
         };
       }),

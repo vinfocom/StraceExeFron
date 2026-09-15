@@ -1,3 +1,4 @@
+import { getTechnologyMetricValue, is2GTechnology } from "@/utils/technologyMetricLabels";
 // src/hooks/useNetworkSamples.js
 import { useState, useRef, useCallback, useEffect, startTransition } from 'react';
 import { toast } from 'react-toastify';
@@ -13,7 +14,6 @@ import {
   readIndexedDbCache,
   writeIndexedDbCache,
 } from '@/utils/indexedDbCache';
-import { buildHandoverTransitions } from '@/utils/handoverTransitions';
 
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -269,6 +269,67 @@ const parseLogEntry = (log, sessionId) => {
     "RXLEV",
   ]);
 
+  const parsedRxlev = parseNumFromKeys([
+    "rxlev",
+    "RxLev",
+    "RXLEV",
+    "rx_level",
+    "rxLevel",
+    "gsm_rxlev",
+    "GSM_RXLEV",
+  ]);
+  const parsedRxqual = parseNumFromKeys([
+    "rxqual",
+    "RxQual",
+    "RXQUAL",
+    "rx_qual",
+    "rxQual",
+    "gsm_rxqual",
+    "GSM_RXQUAL",
+  ]);
+  const parsedCqi = parseNumFromKeys(["cqi", "CQI", "Cqi", "lte_cqi", "nr_cqi"]);
+  const parsedRscp = parseNumFromKeys([
+    "rscp",
+    "RSCP",
+    "Rscp",
+    "wcdma_rscp",
+    "WCDMA_RSCP",
+    "umts_rscp",
+    "UMTS_RSCP",
+    "rscp_dbm",
+    "rscpDbm",
+  ]);
+  const parsedEcno = parseNumFromKeys([
+    "ecno",
+    "EcNo",
+    "ECNO",
+    "ec_no",
+    "ecNo",
+    "ecno_db",
+    "wcdma_ecno",
+    "WCDMA_ECNO",
+    "umts_ecno",
+    "UMTS_ECNO",
+  ]);
+  const parsedNrRsrp = parseNumFromKeys([
+    "nr_rsrp",
+    "NR_RSRP",
+    "nrRsrp",
+    "NRRSRP",
+  ]);
+  const parsedNrRsrq = parseNumFromKeys([
+    "nr_rsrq",
+    "NR_RSRQ",
+    "nrRsrq",
+    "NRRSRQ",
+  ]);
+  const parsedNrSinr = parseNumFromKeys([
+    "nr_sinr",
+    "NR_SINR",
+    "nrSinr",
+    "NRSINR",
+  ]);
+
   const wifiLog = log?.is_wifi === true || isWifiLog(log);
   const parsedRsrp = wifiLog ? null : normalizeSignalToDbm(parsedRsrpRaw);
   const parsedRssi = normalizeSignalToDbm(parsedRssiRaw);
@@ -340,6 +401,17 @@ const parseLogEntry = (log, sessionId) => {
     signal_label: wifiLog ? "RSSI" : "RSRP",
     rsrq: parseNumFromKeys(["rsrq", "RSRQ", "Rsrq", "lte_rsrq", "nr_rsrq"]),
     sinr: parseNumFromKeys(["sinr", "SINR", "Sinr", "snr", "SNR", "lte_sinr", "nr_sinr"]),
+    rxlev: parsedRxlev,
+    rxqual: parsedRxqual,
+    cqi: parsedCqi,
+    rscp: parsedRscp,
+    ecno: parsedEcno,
+    nr_rsrp: parsedNrRsrp,
+    nrRsrp: parsedNrRsrp,
+    nr_rsrq: parsedNrRsrq,
+    nrRsrq: parsedNrRsrq,
+    nr_sinr: parsedNrSinr,
+    nrSinr: parsedNrSinr,
     ci_db: parseNumFromKeys(["ci_db", "ciDb", "CI_DB", "ci", "CI", "c_i", "C_I"]),
     ci: parseNumFromKeys(["ci_db", "ciDb", "CI_DB", "ci", "CI", "c_i", "C_I"]),
     dl_tpt: dlThroughput,
@@ -382,12 +454,21 @@ const parseLogEntry = (log, sessionId) => {
     networkType: technology,
     network: log.network || technology,
     band,
-    pci: log.pci ?? log.Pci ?? log.PCI ?? '',
-    earfcn: log.earfcn ?? log.EARFCN ?? log.Earfcn ?? '',
+    pci: is2GTechnology(technology) ? getTechnologyMetricValue({ ...log, technology }, 'pci') ?? '' : log.pci ?? log.Pci ?? log.PCI ?? '',
+    earfcn: is2GTechnology(technology) ? getTechnologyMetricValue({ ...log, technology }, 'earfcn') ?? '' : log.earfcn ?? log.EARFCN ?? log.Earfcn ?? '',
     nrarfcn: log.nrarfcn ?? log.nr_arfcn ?? log.NRARFCN ?? '',
     arfcn: log.arfcn ?? log.ARFCN ?? '',
-    nodeb_id: log.nodeb_id || '',
-    cell_id: log.cell_id ?? log.cellId ?? '',
+    nodeb_id: log.nodeb_id ?? log.nodebId ?? log.nodebid ?? log.nodeb ?? log.NodeBId ?? log.NodeB ?? log.nodeB ?? '',
+    nodebId: log.nodeb_id ?? log.nodebId ?? log.nodebid ?? log.nodeb ?? log.NodeBId ?? log.NodeB ?? log.nodeB ?? '',
+    bcch: log.bcch ?? log.BCCH ?? log.bcch_id ?? log.bcchId ?? log.Bcch ?? log.bcch_number ?? '',
+    cell_id:
+      log.cell_id ??
+      log.cellId ??
+      log.CellId ??
+      log.CELL_ID ??
+      log['Cell ID'] ??
+      log['cell id'] ??
+      '',
     primary_cell_info_1:
       log.primary_cell_info_1 ?? log.primaryCellInfo1 ?? log.primary_cell_info ?? '',
     is_registered:
@@ -418,9 +499,6 @@ export const useNetworkSamples = (
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [progress, setProgress] = useState({ current: 0, total: 0, page: 0, totalPages: 0 });
-  const [technologyTransitions, setTechnologyTransitions] = useState([]);
-  const [bandTransitions, setBandTransitions] = useState([]);
-  const [pciTransitions, setPciTransitions] = useState([]);
 
   const abortControllerRef = useRef(null);
   const isFetchingRef = useRef(false);
@@ -591,7 +669,7 @@ export const useNetworkSamples = (
           hasMoreData = false;
         } else {
           currentPage++;
-          await delay(100);
+          await delay(0);
         }
       }
 
@@ -645,7 +723,9 @@ export const useNetworkSamples = (
           inpSummary: summaryData.io,
           tptVolume: summaryData.tpt,
         };
-        writeProjectSessionCache(cacheKey, cachePayload);
+        // Large sample datasets belong in IndexedDB. Avoid serializing every
+        // row only for the small localStorage cache to reject the payload.
+        if (finalLogs.length <= 500) writeProjectSessionCache(cacheKey, cachePayload);
         void writeIndexedDbCache(cacheKey, cachePayload);
       }
 
@@ -682,12 +762,6 @@ export const useNetworkSamples = (
     }
   }, [sessionIds, enabled, filterEnabled, polygons, maxRows, projectId]);
 
-  useEffect(() => {
-    const transitions = buildHandoverTransitions(locations || []);
-    setTechnologyTransitions(transitions.technologyTransitions);
-    setBandTransitions(transitions.bandTransitions);
-    setPciTransitions(transitions.pciTransitions);
-  }, [locations]);
   
   useEffect(() => {
     mountedRef.current = true;
@@ -714,8 +788,5 @@ export const useNetworkSamples = (
       lastFetchedKeyRef.current = null;
       fetchData(true);
     }, [fetchData]),
-    technologyTransitions,
-    bandTransitions,
-    pciTransitions,
   };
 };

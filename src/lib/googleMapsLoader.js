@@ -13,7 +13,7 @@ const mapId =
 export const GOOGLE_MAPS_LOADER_OPTIONS = {
   id: 'google-map-script',
   googleMapsApiKey: apiKey,
-  libraries: ['places', 'geometry', 'visualization', 'marker'],
+  libraries: ['places', 'geometry', 'elevation', 'visualization', 'marker'],
   ...(mapId ? { mapIds: [mapId] } : {}),
   version: 'weekly',
 };

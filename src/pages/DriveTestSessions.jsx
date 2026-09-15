@@ -110,6 +110,25 @@ const formatTimeOnlyValue = (dateString) => {
   return Number.isNaN(date.getTime()) ? "N/A" : date.toLocaleTimeString();
 };
 
+const toLocalDateFilterValue = (dateString) => {
+  if (!dateString) return "";
+  const date = new Date(dateString);
+  if (Number.isNaN(date.getTime())) return "";
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+};
+
+const toLocalTimeFilterValue = (dateString) => {
+  if (!dateString) return "";
+  const date = new Date(dateString);
+  if (Number.isNaN(date.getTime())) return "";
+  const hours = String(date.getHours()).padStart(2, "0");
+  const minutes = String(date.getMinutes()).padStart(2, "0");
+  return `${hours}:${minutes}`;
+};
+
 const matchesSelectedType = (session, selectedType) => {
   if (!selectedType || selectedType === "all") return true;
   return String(session?.type ?? "").toLowerCase() === selectedType.toLowerCase();
@@ -159,27 +178,19 @@ const matchesLocalSessionFilters = (
 
   const matchesStartDate =
     !columnFilters.startDate ||
-    formatDateOnlyValue(session?.start_time)
-      .toLowerCase()
-      .includes(columnFilters.startDate.toLowerCase());
+    toLocalDateFilterValue(session?.start_time) === columnFilters.startDate;
 
   const matchesStartTime =
     !columnFilters.startTime ||
-    formatTimeOnlyValue(session?.start_time)
-      .toLowerCase()
-      .includes(columnFilters.startTime.toLowerCase());
+    toLocalTimeFilterValue(session?.start_time) === columnFilters.startTime;
 
   const matchesEndDate =
     !columnFilters.endDate ||
-    formatDateOnlyValue(session?.end_time)
-      .toLowerCase()
-      .includes(columnFilters.endDate.toLowerCase());
+    toLocalDateFilterValue(session?.end_time) === columnFilters.endDate;
 
   const matchesEndTime =
     !columnFilters.endTime ||
-    formatTimeOnlyValue(session?.end_time)
-      .toLowerCase()
-      .includes(columnFilters.endTime.toLowerCase());
+    toLocalTimeFilterValue(session?.end_time) === columnFilters.endTime;
 
   const matchesStartLocation =
     !columnFilters.startLocation ||
@@ -453,34 +464,31 @@ const DriveTestSessionsPage = () => {
     }
   }, []);
 
-  const syncCompletedSessionDiagnostics = useCallback((sessionIds) => {
-    const completedSessionIds = [...new Set(
+  const syncSessionDiagnostics = useCallback((sessionIds) => {
+    const validSessionIds = [...new Set(
       (Array.isArray(sessionIds) ? sessionIds : [])
         .map((id) => Number(id))
-        .filter((id) => {
-          const session = sessionRecordsRef.current.get(id);
-          return Number.isFinite(id) && id > 0 && String(session?.end_time ?? "").trim() !== "";
-        }),
+        .filter((id) => Number.isFinite(id) && id > 0),
     )].sort((a, b) => a - b);
 
-    if (completedSessionIds.length === 0) return;
+    if (validSessionIds.length === 0) return;
 
-    const syncKey = completedSessionIds.join(",");
+    const syncKey = validSessionIds.join(",");
     if (diagnosticSyncInFlightRef.current.has(syncKey)) return;
 
     const syncPromise = l3EventApi
-      .syncNewSessionDiagnostics({ sessionIds: completedSessionIds })
+      .syncNewSessionDiagnostics({ sessionIds: validSessionIds })
       .then((response) => {
         const summary = response?.summary || response?.data?.summary;
         console.info("[DriveTestSessions] Background L3 sync completed", {
-          sessionIds: completedSessionIds,
+          sessionIds: validSessionIds,
           summary,
         });
       })
       .catch((error) => {
         // Background sync must never block opening the map or surface a noisy toast.
         console.warn("[DriveTestSessions] Background L3 sync failed", {
-          sessionIds: completedSessionIds,
+          sessionIds: validSessionIds,
           message: error?.message || String(error),
         });
       })
@@ -822,7 +830,7 @@ const DriveTestSessionsPage = () => {
   };
 
   const handleViewOnMap = (sessionId) => {
-    syncCompletedSessionDiagnostics([sessionId]);
+    syncSessionDiagnostics([sessionId]);
     navigate(`/unified-map?sessionId=${encodeURIComponent(String(sessionId))}&showSecondary=1`);
   };
 
@@ -831,7 +839,7 @@ const DriveTestSessionsPage = () => {
       toast.warning("Please select at least one session");
       return;
     }
-    syncCompletedSessionDiagnostics(selectedSessions);
+    syncSessionDiagnostics(selectedSessions);
     const sessionIdsParam = selectedSessions.join(",");
     navigate(`/unified-map?sessionId=${encodeURIComponent(sessionIdsParam)}&showSecondary=1`);
   };
@@ -1171,8 +1179,8 @@ const DriveTestSessionsPage = () => {
                 <TableHead className="p-2">
                   <div className="relative">
                     <Input
-                      type="text"
-                      placeholder="Filter date..."
+                      type="date"
+                      aria-label="Filter start date"
                       className="h-8 text-xs pr-7"
                       value={columnFilters.startDate}
                       onChange={(e) => updateColumnFilter("startDate", e.target.value)}
@@ -1195,8 +1203,9 @@ const DriveTestSessionsPage = () => {
                 <TableHead className="p-2">
                   <div className="relative">
                     <Input
-                      type="text"
-                      placeholder="Filter time..."
+                      type="time"
+                      step="60"
+                      aria-label="Filter start time"
                       className="h-8 text-xs pr-7"
                       value={columnFilters.startTime}
                       onChange={(e) => updateColumnFilter("startTime", e.target.value)}
@@ -1219,8 +1228,8 @@ const DriveTestSessionsPage = () => {
                 <TableHead className="p-2">
                   <div className="relative">
                     <Input
-                      type="text"
-                      placeholder="Filter date..."
+                      type="date"
+                      aria-label="Filter end date"
                       className="h-8 text-xs pr-7"
                       value={columnFilters.endDate}
                       onChange={(e) => updateColumnFilter("endDate", e.target.value)}
@@ -1243,8 +1252,9 @@ const DriveTestSessionsPage = () => {
                 <TableHead className="p-2">
                   <div className="relative">
                     <Input
-                      type="text"
-                      placeholder="Filter time..."
+                      type="time"
+                      step="60"
+                      aria-label="Filter end time"
                       className="h-8 text-xs pr-7"
                       value={columnFilters.endTime}
                       onChange={(e) => updateColumnFilter("endTime", e.target.value)}

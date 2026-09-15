@@ -310,7 +310,7 @@ const classifyDeltaQuality = (label = "", value = null) => {
   return "neutral";
 };
 
-const formatMetricLabel = (metric) => {
+const formatMetricLabel = (metric, metricLabels = {}) => {
   const normalized = String(metric || "").trim().toLowerCase();
   if (!normalized) return "Metric";
 
@@ -324,6 +324,7 @@ const formatMetricLabel = (metric) => {
     mos: "MOS",
   };
 
+  if (metricLabels[normalized] !== undefined) return metricLabels[normalized];
   if (labelMap[normalized]) return labelMap[normalized];
   return normalized.replace(/_/g, " ").toUpperCase();
 };
@@ -562,6 +563,7 @@ export const ConditionLogsTab = ({
   storedGridMetricMode = "avg",
   viewport = null,
   expanded = false,
+  metricLabels = {},
 }) => {
   const [showSectorSummary, setShowSectorSummary] = useState(false);
   const [showPoorGridHistogram, setShowPoorGridHistogram] = useState(false);
@@ -938,8 +940,8 @@ export const ConditionLogsTab = ({
   ]);
 
   const selectedMetricLabel = useMemo(
-    () => formatMetricLabel(selectedMetric),
-    [selectedMetric],
+    () => formatMetricLabel(selectedMetric, metricLabels),
+    [selectedMetric, metricLabels],
   );
   const average = (values = []) => {
     const finiteValues = (values || []).filter(Number.isFinite);
@@ -1252,7 +1254,7 @@ export const ConditionLogsTab = ({
 
     return [
       {
-        metric: "RSRP",
+        metric: metricLabels.rsrp ?? "RSRP",
         baseline: baselineRsrp,
         optimized: optimizedRsrp,
         delta:
@@ -1261,7 +1263,7 @@ export const ConditionLogsTab = ({
             : null,
       },
       {
-        metric: "RSRQ",
+        metric: metricLabels.rsrq ?? "RSRQ",
         baseline: baselineRsrq,
         optimized: optimizedRsrq,
         delta:
@@ -1270,7 +1272,7 @@ export const ConditionLogsTab = ({
             : null,
       },
     ];
-  }, [selectedCondition, lteGridEnabled, gridAnalysis, conditionBuckets]);
+  }, [selectedCondition, lteGridEnabled, gridAnalysis, conditionBuckets, metricLabels]);
 
   const cdfRsrpData = useMemo(() => {
     if (lteGridEnabled && gridAnalysis) {
@@ -1874,7 +1876,7 @@ export const ConditionLogsTab = ({
             icon={Grid3X3}
             label="Poor Grids"
             value={storedGridMetricSummary.poorGrids}
-            subValue="Delta < 0 (click for RSRP histogram)"
+            subValue={`Delta < 0 (click for ${metricLabels.rsrp || "RSRP"} histogram)`}
             color="orange"
           />
         </button>
@@ -1889,12 +1891,12 @@ export const ConditionLogsTab = ({
 
       {showPoorGridHistogram ? (
         <ChartContainer
-          title="Poor Grid RSRP Histogram"
-          subtitle="Baseline (green) vs Optimized (red) by RSRP threshold ranges"
+          title={`Poor Grid ${metricLabels.rsrp || "RSRP"} Histogram`}
+          subtitle={`Baseline (green) vs Optimized (red) by ${metricLabels.rsrp || "RSRP"} threshold ranges`}
           icon={BarChart3}
         >
           {poorGridRsrpHistogram.rows.length === 0 ? (
-            <EmptyState message="No poor-grid RSRP histogram data available" />
+            <EmptyState message={`No poor-grid ${metricLabels.rsrp || "RSRP"} histogram data available`} />
           ) : (
             <>
               <ResponsiveContainer width="100%" height={280}>

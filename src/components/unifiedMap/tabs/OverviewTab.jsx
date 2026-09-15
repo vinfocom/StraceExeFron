@@ -226,6 +226,7 @@ export const OverviewTab = ({
   const [isGeneratingPpt, setIsGeneratingPpt] = useState(false);
   const [isPptBandDialogOpen, setIsPptBandDialogOpen] = useState(false);
   const [lockedBand, setLockedBand] = useState("all");
+  const [isEarfcnWise, setIsEarfcnWise] = useState(true);
   const { user } = useAuth();
 
   const plottedExportLocations = useMemo(() => {
@@ -321,6 +322,7 @@ export const OverviewTab = ({
       region,
       user_id: Number.isFinite(numericUserId) ? numericUserId : 0,
       locked_bands: lockedBand === "all" ? [] : [lockedBand],
+      EarfcnMode: isEarfcnWise ? "with_earfcn_wise" : "without_earfcn_wise",
       ...(selectedSessionIds.length > 0 ? { session_ids: selectedSessionIds } : {}),
     };
 
@@ -366,7 +368,7 @@ export const OverviewTab = ({
     } finally {
       setIsGeneratingPpt(false);
     }
-  }, [isGeneratingPpt, lockedBand, projectId, sessionIds, user]);
+  }, [isEarfcnWise, isGeneratingPpt, lockedBand, projectId, sessionIds, user]);
 
   const handlePptButtonClick = useCallback(() => {
     if (isGeneratingPpt) return;
@@ -788,6 +790,21 @@ export const OverviewTab = ({
               <p className="text-xs text-slate-400">No individual bands were found; the report will use all bands.</p>
             )}
           </div>
+
+          <label className="flex cursor-pointer items-start gap-2.5 rounded-md border border-slate-700 bg-slate-800/60 p-3">
+            <input
+              type="checkbox"
+              checked={isEarfcnWise}
+              onChange={(event) => setIsEarfcnWise(event.target.checked)}
+              className="mt-0.5 h-4 w-4 accent-purple-500"
+            />
+            <span>
+              <span className="block text-sm font-medium text-slate-200">Generate EARFCN-wise report</span>
+              <span className="mt-0.5 block text-xs text-slate-400">
+                Checked: with_earfcn_wise. Unchecked: without_earfcn_wise.
+              </span>
+            </span>
+          </label>
 
           <DialogFooter className="flex justify-end gap-2">
             <button

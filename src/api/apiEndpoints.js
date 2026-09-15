@@ -1795,6 +1795,20 @@ export const mapViewApi = {
       params: { projectId, source },
     }),
 
+  getProjectBuildingClutterTiles: (
+    projectId,
+    { buildingPolygonId, limit = 50000 } = {},
+    config = {},
+  ) =>
+    api.get("/api/MapView/GetProjectBuildingClutterTiles", {
+      params: {
+        projectId,
+        ...(buildingPolygonId != null ? { buildingPolygonId } : {}),
+        limit,
+      },
+      ...config,
+    }),
+
   savePolygon: (payload) => api.post("/api/MapView/SavePolygon", payload),
 
   updateProjectPolygon: (payload) =>
@@ -2281,6 +2295,25 @@ const diagnosticScopeParams = ({ sessionId, sessionIds, uploadId, take } = {}) =
   ...(take ? { take } : {}),
 });
 
+const diagnosticSummaryScopeParams = ({ sessionId, sessionIds, uploadId, take } = {}) => {
+  if (Number(uploadId) > 0) return { uploadId: Number(uploadId), ...(take ? { take } : {}) };
+
+  const sessionCsv = toSessionIdCsv(sessionIds, sessionId);
+  const normalizedSessionIds = sessionCsv
+    .split(",")
+    .map((id) => Number(id.trim()))
+    .filter((id) => Number.isInteger(id) && id > 0);
+
+  if (normalizedSessionIds.length === 1) {
+    return { sessionId: normalizedSessionIds[0], ...(take ? { take } : {}) };
+  }
+
+  return {
+    ...(normalizedSessionIds.length ? { sessionIds: normalizedSessionIds.join(",") } : {}),
+    ...(take ? { take } : {}),
+  };
+};
+
 export const l3EventApi = {
   addSessionUpload: ({ projectId, sessionId, historyId, remarks, zipFile, dataType, l3File, eventFile }, onUploadProgress) => {
     const formData = new FormData();
@@ -2323,6 +2356,7 @@ export const l3EventApi = {
   getTabCounts: (scope) => api.get("/api/L3Event/GetDiagnosticTabCounts", { params: diagnosticScopeParams(scope) }),
   getMapRows: (scope) => api.get("/api/L3Event/GetDiagnosticMapRows", { params: diagnosticScopeParams(scope) }),
   getExcelRows: (scope) => api.get("/api/L3Event/GetDiagnosticExcelRows", { params: diagnosticScopeParams(scope) }),
+  getDiagnosticL3Summary: (scope) => api.get("/api/L3Event/GetDiagnosticL3Summary", { params: { ...diagnosticSummaryScopeParams(scope), includeRows: scope?.includeRows ?? true } }),
   getAnalyzerSummary: (scope) => api.get("/api/L3Event/GetDiagnosticAnalyzerSummary", { params: diagnosticScopeParams(scope) }),
   getCallSummary: (scope) => api.get("/api/L3Event/GetDiagnosticCallSummaryOnly", { params: diagnosticScopeParams(scope) }),
   getFullCallSummary: (scope) => api.get("/api/L3Event/GetDiagnosticCallSummary", { params: diagnosticScopeParams(scope) }),

@@ -1,3 +1,4 @@
+import { getTechnologyMetricValue } from "@/utils/technologyMetricLabels";
 import React, { useMemo, useState } from "react";
 import { OperatorComparisonChart } from "../charts/signal/OperatorComparisonChart";
 
@@ -12,6 +13,7 @@ export const OperatorComparisonTab = ({
   chartRefs,
   expanded = false,
   enableSiteToggle = false,
+  metricLabels = {},
 }) => {
   const [siteDetailsOpen, setSiteDetailsOpen] = useState(false);
   const siteSummary = useMemo(() => {
@@ -20,7 +22,7 @@ export const OperatorComparisonTab = ({
 
     for (const loc of Array.isArray(locations) ? locations : []) {
       const nodeb = toText(loc?.nodeb_id ?? loc?.nodebId ?? loc?.nodeb);
-      const pci = toText(loc?.pci ?? loc?.PCI ?? loc?.pci_or_psi);
+      const pci = toText(getTechnologyMetricValue(loc, "pci") ?? loc?.pci_or_psi);
       if (nodeb) nodebSet.add(nodeb);
       if (pci) pciSet.add(pci);
     }
@@ -43,6 +45,7 @@ export const OperatorComparisonTab = ({
         individualStatMode
         wrapMetricCharts={expanded}
         highContrastText
+        metricLabels={metricLabels}
       />
 
       {enableSiteToggle && (
@@ -54,7 +57,7 @@ export const OperatorComparisonTab = ({
           >
             <span className="text-sm font-semibold text-white">Site Details</span>
             <span className="text-xs text-white">
-              {siteDetailsOpen ? "Hide" : "Show"} ({siteSummary.nodebCount} NodeB, {siteSummary.pciCount} PCI)
+              {siteDetailsOpen ? "Hide" : "Show"} ({siteSummary.nodebCount} NodeB, {siteSummary.pciCount} {metricLabels.pci || "PCI"})
             </span>
           </button>
 
@@ -74,14 +77,14 @@ export const OperatorComparisonTab = ({
               </div>
 
               <div className="bg-slate-900/50 rounded p-2">
-                <div className="text-white mb-1 font-semibold">PCIs ({siteSummary.pciCount})</div>
+                <div className="text-white mb-1 font-semibold">{metricLabels.pci || "PCI"}s ({siteSummary.pciCount})</div>
                 <div className="max-h-40 overflow-y-auto space-y-1">
                   {siteSummary.pciList.length > 0 ? (
                     siteSummary.pciList.map((pci) => (
                       <div key={pci} className="text-white break-all">{pci}</div>
                     ))
                   ) : (
-                    <div className="text-white/70">No PCI values</div>
+                    <div className="text-white/70">No {metricLabels.pci || "PCI"} values</div>
                   )}
                 </div>
               </div>

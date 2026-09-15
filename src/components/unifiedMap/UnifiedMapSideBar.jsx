@@ -33,6 +33,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
+import { getMetricLabelsForLocations, getTechnologyMetricOptions } from "@/utils/technologyMetricLabels";
 
 const LTE_RECOMMENDATION_OPTIMIZED_DEFAULTS = Object.freeze({
   operator: "all",
@@ -709,6 +710,13 @@ const UnifiedMapSidebar = ({
   technologyTransitions,
   showPolygons,
   setShowPolygons,
+  showClutterTiles = false,
+  setShowClutterTiles,
+  clutterTilesAvailable = false,
+  clutterTileCount = 0,
+  clutterTileLoading = false,
+  clutterTileError = null,
+  clutterTilesHaveMore = false,
   polygonSource,
   setPolygonSource,
   buildingBorderEnabled = false,
@@ -804,6 +812,7 @@ const UnifiedMapSidebar = ({
   getCachedNetworkLogsForPrediction,
 }) => {
   const { user, refreshUser } = useAuth();
+  const canLoadClutterTiles = Number.isSafeInteger(Number(projectId)) && Number(projectId) > 0;
   const lteCountryCode = useMemo(
     () =>
       normalizeLteCountryCode(
@@ -948,6 +957,14 @@ const UnifiedMapSidebar = ({
     [enableDataToggle, showSessionNeighbors],
   );
 
+  const metricTechnology = useMemo(() => {
+    const technologies = dataFilters?.technologies?.length
+      ? dataFilters.technologies
+      : availableFilterOptions?.technologies || [];
+    const labels = getMetricLabelsForLocations(technologies.map((technology) => ({ technology })));
+    return labels.rsrp === "RxLev" ? "2G" : "";
+  }, [dataFilters?.technologies, availableFilterOptions?.technologies]);
+
   // Metric options
   const metricOptions = useMemo(
     () => {
@@ -973,11 +990,11 @@ const UnifiedMapSidebar = ({
         { value: "coverage_violation", label: "Coverage Violation" },
       ];
 
-      const baseOptions = !enableGrid
+      const baseOptions = getTechnologyMetricOptions(!enableGrid
         ? allOptions
         : allOptions.filter((option) =>
         GRID_VIEW_ALLOWED_METRICS.includes(option.value),
-      );
+      ), metricTechnology);
 
       if (!isSecondaryOnlyMode) return baseOptions;
 
@@ -989,7 +1006,7 @@ const UnifiedMapSidebar = ({
           disabled: !Boolean(secondaryMetricAvailability?.[option.value]),
         }));
     },
-    [enableGrid, isSecondaryOnlyMode, secondaryMetricAvailability],
+    [enableGrid, isSecondaryOnlyMode, secondaryMetricAvailability, metricTechnology],
   );
 
   useEffect(() => {
@@ -1042,7 +1059,7 @@ const UnifiedMapSidebar = ({
           { value: "provider", label: "Best Operator" },
           { value: "band", label: "Best Band" },
           { value: "technology", label: "Best Technology" },
-          { value: "earfcn", label: "Best EARFCN" },
+          { value: "earfcn", label: metricTechnology === "2G" ? "Best BCCH" : "Best EARFCN" },
           { value: "cell_id", label: "Best Cell ID" },
           { value: "nodebid", label: "Best NodeB ID" },
           { value: "pci", label: "Best Server" },
@@ -1054,13 +1071,13 @@ const UnifiedMapSidebar = ({
         { value: "provider", label: "By Provider" },
         { value: "band", label: "By Band" },
         { value: "technology", label: "By Technology" },
-        { value: "earfcn", label: "By EARFCN" },
+        { value: "earfcn", label: metricTechnology === "2G" ? "By BCCH" : "By EARFCN" },
         { value: "cell_id", label: "By Cell ID" },
         { value: "nodebid", label: "By NodeB ID" },
         { value: "mac_detail", label: "L3 detail" },
       ];
     },
-    [enableGrid],
+    [enableGrid, metricTechnology],
   );
 
   const handleColorByChange = useCallback(
@@ -1809,7 +1826,9 @@ const UnifiedMapSidebar = ({
   );
   const handleStoredGridTechnologyChange = useCallback(
     (nextTechnology) => {
-      const normalizedTechnology = String(nextTechnology || "ALL").trim().toUpperCase();
+      const normalizedTechnology = Array.isArray(nextTechnology)
+        ? nextTechnology
+        : String(nextTechnology || "ALL").trim().toUpperCase();
       setStoredGridTechnology?.(normalizedTechnology);
     },
     [
@@ -3525,6 +3544,31 @@ const UnifiedMapSidebar = ({
               useSwitch={true}
             />
 
+            <ToggleRow
+              label="Clutter Tiles"
+              description={
+                !clutterTilesAvailable
+                  ? "Temporarily unavailable"
+                  : !canLoadClutterTiles
+                  ? projectId
+                    ? "The selected project has an invalid ID"
+                    : "Select a project to load clutter tiles"
+                  : clutterTileLoading
+                    ? "Loading project clutter tiles..."
+                    : clutterTileError
+                      ? `Error: ${clutterTileError}`
+                      : clutterTilesHaveMore
+                        ? `${clutterTileCount.toLocaleString()} building matches loaded; API limit reached`
+                        : clutterTileCount > 0
+                          ? `${clutterTileCount.toLocaleString()} building matches loaded`
+                          : "Show clutter tiles intersecting project buildings"
+              }
+              checked={Boolean(showClutterTiles)}
+              onChange={setShowClutterTiles}
+              disabled={!clutterTilesAvailable || !canLoadClutterTiles}
+              useSwitch={true}
+            />
+
             {Boolean(deltaGridApiState?.gridVisible) && (
               <ToggleRow
                 label="Border"
@@ -3921,15 +3965,15 @@ const UnifiedMapSidebar = ({
                       disabled={!enableDataToggle}
                     />
 
-                    <SelectRow
+                    <MultiSelectRow
                       label="Technology"
-                      value={storedGridTechnology}
+                      values={dataFilters?.technologies || []}
                       onChange={handleStoredGridTechnologyChange}
                       options={[
-                        { value: "ALL", label: "All Technologies" },
+                        { value: "all", label: "All Technologies" },
                         ...([...new Set([
                           ...(availableFilterOptions?.technologies || []),
-                          ...(storedGridTechnology !== "ALL" ? [storedGridTechnology] : []),
+                          ...(dataFilters?.technologies || []),
                         ])].map((technology) => ({
                           value: technology,
                           label: technology,
@@ -3970,15 +4014,15 @@ const UnifiedMapSidebar = ({
                     )}
                   </div>
 
-                  <SelectRow
+                  <MultiSelectRow
                     label="Technology"
-                    value={storedGridTechnology}
+                    values={dataFilters?.technologies || []}
                     onChange={handleStoredGridTechnologyChange}
                     options={[
-                      { value: "ALL", label: "All Technologies" },
+                      { value: "all", label: "All Technologies" },
                       ...([...new Set([
                         ...(siteFilterOptions?.technologies || []),
-                        ...(storedGridTechnology !== "ALL" ? [storedGridTechnology] : []),
+                        ...(dataFilters?.technologies || []),
                       ])].map((technology) => ({
                         value: technology,
                         label: technology,
@@ -4637,7 +4681,7 @@ const UnifiedMapSidebar = ({
                     : normalizedStoredGridVersion === "delta"
                       ? "Delta"
                       : "Baseline"
-                }Prediction Grid`}
+                } Prediction Grid`}
                 description={
                   deltaGridApiState?.computing
                     ? "Computing grid..."
@@ -4663,16 +4707,16 @@ const UnifiedMapSidebar = ({
               />
               {Boolean(deltaGridApiState?.gridVisible) && (
                 <div className="pt-1 bg-slate-900/40 rounded-lg p-2 space-y-2">
-                  <SelectRow
+                  <MultiSelectRow
                     label="Technology"
-                    value={String(storedGridTechnology || "ALL").trim().toUpperCase()}
+                    values={dataFilters?.technologies || []}
                     onChange={handleStoredGridTechnologyChange}
                     options={[
-                      { value: "ALL", label: "All" },
+                      { value: "all", label: "All Technologies" },
                       ...([...new Set([
                         "4G",
                         "5G",
-                        ...(storedGridTechnology !== "ALL" ? [storedGridTechnology] : []),
+                        ...(dataFilters?.technologies || []),
                       ])].map((technology) => ({ value: technology, label: technology }))),
                     ]}
                     placeholder="Select technology"
