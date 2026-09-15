@@ -21,7 +21,6 @@ import {
 const TAKE = 50000;
 const VIEW_TABS = [
   { id: "summary", label: "Summary" },
-  { id: "technology", label: "Technology" },
   { id: "map", label: "Map View" },
   { id: "excel", label: "Excel View" },
   { id: "analyzer", label: "Analyzer" },
@@ -216,76 +215,6 @@ function normalizeSummary(summary, fallbackCalls = []) {
     unknown: valueOf(summary, "unknown"),
     calls,
   };
-}
-
-function buildTechnologySummary(rows = [], fallbackTechnologies = []) {
-  const technologies = new Map();
-  rows.forEach((row) => {
-    const name = String(valueOf(row, "technology", "Technology") || "").trim();
-    if (!name || /^(unknown|n\/?a|not available|null|undefined|-)$/i.test(name)) return;
-    const key = name.toLocaleLowerCase();
-    const technology = technologies.get(key) || { name, rows: 0, l3Rows: 0, eventRows: 0 };
-    technology.rows += 1;
-    const sourceType = String(valueOf(row, "sourceType", "type", "SourceType", "Type") || "").toLowerCase();
-    if (sourceType === "l3") technology.l3Rows += 1;
-    else if (sourceType === "event") technology.eventRows += 1;
-    technologies.set(key, technology);
-  });
-
-  if (!technologies.size) {
-    fallbackTechnologies.forEach((item) => {
-      const name = String(valueOf(item, "technology", "Technology") || "").trim();
-      if (!name || /^(unknown|n\/?a|not available|null|undefined|-)$/i.test(name)) return;
-      const rows = Number(valueOf(item, "rows", "count", "totalRows", "Rows") || 0);
-      if (rows <= 0) return;
-      const key = name.toLocaleLowerCase();
-      technologies.set(key, {
-        name,
-        rows,
-        l3Rows: Number(valueOf(item, "l3Rows", "L3Rows") || 0),
-        eventRows: Number(valueOf(item, "eventRows", "EventRows") || 0),
-      });
-    });
-  }
-
-  return [...technologies.values()].sort((left, right) => right.rows - left.rows || left.name.localeCompare(right.name));
-}
-
-function TechnologySummaryView({ technologies }) {
-  const totalRows = technologies.reduce((total, technology) => total + technology.rows, 0);
-  return (
-    <div className="h-full overflow-auto p-3">
-      <section className="rounded-lg border border-slate-700 bg-slate-900/70 p-4">
-        <div className="mb-4 flex flex-wrap items-end justify-between gap-2">
-          <div>
-            <h2 className="text-sm font-semibold text-white">Technology Summary</h2>
-            <p className="mt-1 text-[11px] text-slate-400">{totalRows.toLocaleString()} classified rows across {technologies.length} technologies.</p>
-          </div>
-          <span className="text-[11px] text-slate-500">Rows are grouped by the Technology field in the L3/Event response.</span>
-        </div>
-        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-          {technologies.map((technology) => {
-            const share = totalRows ? (technology.rows / totalRows) * 100 : 0;
-            return (
-              <article key={technology.name} className="rounded-lg border border-slate-700 bg-slate-950/70 p-3">
-                <div className="flex items-center justify-between gap-3">
-                  <h3 className="truncate text-sm font-semibold text-white" title={technology.name}>{technology.name}</h3>
-                  <span className="shrink-0 text-lg font-semibold text-cyan-300">{technology.rows.toLocaleString()}</span>
-                </div>
-                <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-slate-800">
-                  <div className="h-full rounded-full bg-cyan-500" style={{ width: `${share}%` }} />
-                </div>
-                <div className="mt-2 flex justify-between text-[11px] text-slate-400">
-                  <span>{share.toFixed(1)}% of classified rows</span>
-                  <span>L3 {technology.l3Rows.toLocaleString()} · Events {technology.eventRows.toLocaleString()}</span>
-                </div>
-              </article>
-            );
-          })}
-        </div>
-      </section>
-    </div>
-  );
 }
 
 const parseSessionIds = (value) => [...new Set(String(value || "")
@@ -771,34 +700,21 @@ function BackendAnalyzer({ sessionIds, analysisId, projectName, onBack }) {
   );
   const rsrpByRowId = useMemo(() => buildRsrpByRowId(mapFullAnalysis), [mapFullAnalysis]);
   const mapPoints = useMemo(() => buildMapPoints(mapSignalingRows, rsrpByRowId), [mapSignalingRows, rsrpByRowId]);
-  const technologySummary = useMemo(
-    () => buildTechnologySummary(timeline, summary.technologies),
-    [summary.technologies, timeline],
-  );
-  const visibleTabs = useMemo(
-    () => VIEW_TABS.filter((tab) => tab.id !== "technology" || technologySummary.length > 0),
-    [technologySummary.length],
-  );
   const rawRows = activeView === "events" ? eventMessages : l3Messages;
   const countForTab = useCallback((tabId) => {
     if (tabId === "summary") return enrichedSummary?.totalCalls ?? 0;
-    if (tabId === "technology") return technologySummary.reduce((total, item) => total + item.rows, 0);
     if (tabId === "map") return mapPoints.length;
     if (tabId === "excel") return signalingRows.length || counts.excel_view_count || 0;
     if (tabId === "analyzer") return protocolAnalysis?.stats?.totalProcedures ?? counts.analyzer_count ?? 0;
     if (tabId === "l3") return l3Messages.length || counts.l3_count || 0;
     if (tabId === "events") return eventMessages.length || counts.event_count || 0;
     return 0;
-  }, [counts.analyzer_count, counts.event_count, counts.excel_view_count, counts.l3_count, enrichedSummary?.totalCalls, eventMessages.length, l3Messages.length, mapPoints.length, protocolAnalysis?.stats?.totalProcedures, signalingRows.length, technologySummary]);
+  }, [counts.analyzer_count, counts.event_count, counts.excel_view_count, counts.l3_count, enrichedSummary?.totalCalls, eventMessages.length, l3Messages.length, mapPoints.length, protocolAnalysis?.stats?.totalProcedures, signalingRows.length]);
   const visibleRawRows = useMemo(() => {
     const needle = search.trim().toLowerCase();
     if (!needle) return rawRows;
     return rawRows.filter((row) => [row.timestampLabel, row.title, row.category, row.summary, row.rawMessage, row.sourceFile].filter(Boolean).join(" ").toLowerCase().includes(needle));
   }, [rawRows, search]);
-
-  useEffect(() => {
-    if (activeView === "technology" && !technologySummary.length) setActiveView("summary");
-  }, [activeView, technologySummary.length]);
 
   const downloadPdf = async (kind) => {
     try {
@@ -819,11 +735,10 @@ function BackendAnalyzer({ sessionIds, analysisId, projectName, onBack }) {
       <header className="l3-glass flex shrink-0 flex-wrap items-center gap-2 border-x-0 border-t-0 px-[clamp(0.5rem,1.2vw,1rem)] py-[clamp(0.5rem,1vw,0.75rem)]">
         <button type="button" onClick={onBack} className="inline-flex items-center gap-1 rounded border border-slate-600 px-2 py-1.5 text-xs hover:bg-slate-700"><ArrowLeft className="h-3.5 w-3.5" />L3 Session</button>
         <div className="mr-auto min-w-0"><div className="l3-ui-copy max-w-[min(52vw,36rem)] truncate font-semibold">{projectName}</div><div className="l3-meta-copy text-slate-400">{analysisId ? `L3 Session ID: ${analysisId}` : `Sessions: ${sessionIds.join(", ")}`}</div></div>
-        {visibleTabs.map((tab) => <button key={tab.id} type="button" onClick={() => setActiveView(tab.id)} className={`border px-2.5 py-1.5 text-xs ${activeView === tab.id ? "border-blue-500 bg-blue-600" : "border-slate-700 bg-slate-900 text-slate-300 hover:bg-slate-700"}`}>{tab.label} ({countForTab(tab.id).toLocaleString()})</button>)}
+        {VIEW_TABS.map((tab) => <button key={tab.id} type="button" onClick={() => setActiveView(tab.id)} className={`border px-2.5 py-1.5 text-xs ${activeView === tab.id ? "border-blue-500 bg-blue-600" : "border-slate-700 bg-slate-900 text-slate-300 hover:bg-slate-700"}`}>{tab.label} ({countForTab(tab.id).toLocaleString()})</button>)}
       </header>
       <main className="l3-analysis-main flex min-h-0 flex-1 flex-col overflow-hidden">
-        {activeView === "summary" && <div className="h-full overflow-auto p-3"><HomeCallSummary summary={enrichedSummary} /></div>}
-        {activeView === "technology" && <TechnologySummaryView technologies={technologySummary} />}
+        {activeView === "summary" && <div className="h-full overflow-auto p-3"><HomeCallSummary summary={enrichedSummary} timeline={timeline} /></div>}
         {activeView === "analyzer" && selectedCall && (
           <div className="shrink-0 flex items-center justify-between gap-2 border-b border-blue-500/30 bg-blue-500/10 px-2 py-1 text-xs">
             <span className="truncate text-blue-300">

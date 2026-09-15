@@ -1798,10 +1798,15 @@ const MapWithMultipleCircles = ({
     ? !externalPolygonsLoading
     : externalPolygonData.length > 0 || polygonsFetched;
 
+  const normalizedLocations = useMemo(
+    () => locations?.length
+      ? locations.map(normalizeRenderableLocation).filter(Boolean)
+      : EMPTY_ARRAY,
+    [locations],
+  );
+
   const locationsToRender = useMemo(() => {
-    if (!locations?.length) return EMPTY_ARRAY;
-    
-    let filtered = locations.map(normalizeRenderableLocation).filter(Boolean);
+    let filtered = normalizedLocations;
     if (!filtered.length) return EMPTY_ARRAY;
 
     if (filterInsidePolygons && enablePolygonFilter) {
@@ -1823,11 +1828,10 @@ const MapWithMultipleCircles = ({
 
     return filtered;
   }, [
-    locations,
+    normalizedLocations,
     enablePolygonFilter,
     filterInsidePolygons,
     legendFilter,
-    selectedMetric,
     enableGrid,
     activePolygonChecker,
     activePolygonsReady,
@@ -1973,11 +1977,11 @@ const MapWithMultipleCircles = ({
   ]);
 
   const spatialIndex = useMemo(() => {
-    if (locationsToRender.length <= 1000) return null;
+    if (!enableGrid || locationsToRender.length <= 1000) return null;
     const index = new SpatialHashGrid(0.001);
     index.build(locationsToRender);
     return index;
-  }, [locationsToRender]);
+  }, [enableGrid, locationsToRender]);
 
   useEffect(() => {
     const callback = onFilteredLocationsChangeRef.current;

@@ -14,7 +14,6 @@ import {
   readIndexedDbCache,
   writeIndexedDbCache,
 } from '@/utils/indexedDbCache';
-import { buildHandoverTransitions } from '@/utils/handoverTransitions';
 
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -500,9 +499,6 @@ export const useNetworkSamples = (
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [progress, setProgress] = useState({ current: 0, total: 0, page: 0, totalPages: 0 });
-  const [technologyTransitions, setTechnologyTransitions] = useState([]);
-  const [bandTransitions, setBandTransitions] = useState([]);
-  const [pciTransitions, setPciTransitions] = useState([]);
 
   const abortControllerRef = useRef(null);
   const isFetchingRef = useRef(false);
@@ -673,7 +669,7 @@ export const useNetworkSamples = (
           hasMoreData = false;
         } else {
           currentPage++;
-          await delay(100);
+          await delay(0);
         }
       }
 
@@ -727,7 +723,9 @@ export const useNetworkSamples = (
           inpSummary: summaryData.io,
           tptVolume: summaryData.tpt,
         };
-        writeProjectSessionCache(cacheKey, cachePayload);
+        // Large sample datasets belong in IndexedDB. Avoid serializing every
+        // row only for the small localStorage cache to reject the payload.
+        if (finalLogs.length <= 500) writeProjectSessionCache(cacheKey, cachePayload);
         void writeIndexedDbCache(cacheKey, cachePayload);
       }
 
@@ -764,12 +762,6 @@ export const useNetworkSamples = (
     }
   }, [sessionIds, enabled, filterEnabled, polygons, maxRows, projectId]);
 
-  useEffect(() => {
-    const transitions = buildHandoverTransitions(locations || []);
-    setTechnologyTransitions(transitions.technologyTransitions);
-    setBandTransitions(transitions.bandTransitions);
-    setPciTransitions(transitions.pciTransitions);
-  }, [locations]);
   
   useEffect(() => {
     mountedRef.current = true;
@@ -796,8 +788,5 @@ export const useNetworkSamples = (
       lastFetchedKeyRef.current = null;
       fetchData(true);
     }, [fetchData]),
-    technologyTransitions,
-    bandTransitions,
-    pciTransitions,
   };
 };

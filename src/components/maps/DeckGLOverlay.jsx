@@ -166,6 +166,7 @@ const DeckGLOverlay = ({
   const [viewportBounds, setViewportBounds] = useState(null);
   const [sampledPrimaryIndexes, setSampledPrimaryIndexes] = useState(() => new Uint32Array());
   const samplingWorkerRef = useRef(null);
+  const workerCoordinatesRef = useRef(null);
   const samplingRequestRef = useRef(0);
   const isCleanedUpRef = useRef(false);
   const attachedMapRef = useRef(null);
@@ -282,6 +283,7 @@ const DeckGLOverlay = ({
       { type: 'module' },
     );
     samplingWorkerRef.current = worker;
+    workerCoordinatesRef.current = null;
 
     worker.onmessage = ({ data }) => {
       if (data.requestId !== samplingRequestRef.current) return;
@@ -302,6 +304,15 @@ const DeckGLOverlay = ({
     };
   }, []);
 
+  const samplingCoordinates = useMemo(() => {
+    const coordinates = new Float64Array(locations.length * 2);
+    locations.forEach((loc, index) => {
+      coordinates[index * 2] = Number(loc?.lng ?? loc?.longitude ?? loc?.lon ?? loc?.Lng);
+      coordinates[index * 2 + 1] = Number(loc?.lat ?? loc?.latitude ?? loc?.Lat);
+    });
+    return coordinates;
+  }, [locations]);
+
   useEffect(() => {
     const requestId = samplingRequestRef.current + 1;
     samplingRequestRef.current = requestId;
@@ -310,12 +321,6 @@ const DeckGLOverlay = ({
       setSampledPrimaryIndexes(new Uint32Array());
       return;
     }
-
-    const coordinates = new Float64Array(locations.length * 2);
-    locations.forEach((loc, index) => {
-      coordinates[index * 2] = Number(loc?.lng ?? loc?.longitude ?? loc?.lon ?? loc?.Lng);
-      coordinates[index * 2 + 1] = Number(loc?.lat ?? loc?.latitude ?? loc?.Lat);
-    });
 
     const options = {
       requestId,
@@ -329,16 +334,21 @@ const DeckGLOverlay = ({
     const worker = samplingWorkerRef.current;
 
     if (worker) {
-      worker.postMessage(
-        { ...options, coordinatesBuffer: coordinates.buffer },
-        [coordinates.buffer],
-      );
+      // Transfer coordinates once per dataset; viewport updates reuse the
+      // worker's copy instead of rebuilding and transferring every log.
+      if (workerCoordinatesRef.current !== samplingCoordinates) {
+        const buffer = samplingCoordinates.slice().buffer;
+        worker.postMessage({ ...options, coordinatesBuffer: buffer }, [buffer]);
+        workerCoordinatesRef.current = samplingCoordinates;
+      } else {
+        worker.postMessage(options);
+      }
       return;
     }
 
     // Older browsers without Worker support retain the same behavior.
-    setSampledPrimaryIndexes(sampleLogIndices({ ...options, coordinates }));
-  }, [locations, showPrimaryLogs, viewportBounds, mapZoom, selectedIndex, primaryRenderLimit]);
+    setSampledPrimaryIndexes(sampleLogIndices({ ...options, coordinates: samplingCoordinates }));
+  }, [locations, samplingCoordinates, showPrimaryLogs, viewportBounds, mapZoom, selectedIndex, primaryRenderLimit]);
 
   const handlePrimaryClick = useCallback((info) => {
     if (!onClick || !info?.object) return;

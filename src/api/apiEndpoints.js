@@ -1795,6 +1795,20 @@ export const mapViewApi = {
       params: { projectId, source },
     }),
 
+  getProjectBuildingClutterTiles: (
+    projectId,
+    { buildingPolygonId, limit = 50000 } = {},
+    config = {},
+  ) =>
+    api.get("/api/MapView/GetProjectBuildingClutterTiles", {
+      params: {
+        projectId,
+        ...(buildingPolygonId != null ? { buildingPolygonId } : {}),
+        limit,
+      },
+      ...config,
+    }),
+
   savePolygon: (payload) => api.post("/api/MapView/SavePolygon", payload),
 
   updateProjectPolygon: (payload) =>

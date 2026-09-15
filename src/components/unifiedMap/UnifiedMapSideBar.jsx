@@ -710,6 +710,13 @@ const UnifiedMapSidebar = ({
   technologyTransitions,
   showPolygons,
   setShowPolygons,
+  showClutterTiles = false,
+  setShowClutterTiles,
+  clutterTilesAvailable = false,
+  clutterTileCount = 0,
+  clutterTileLoading = false,
+  clutterTileError = null,
+  clutterTilesHaveMore = false,
   polygonSource,
   setPolygonSource,
   buildingBorderEnabled = false,
@@ -805,6 +812,7 @@ const UnifiedMapSidebar = ({
   getCachedNetworkLogsForPrediction,
 }) => {
   const { user, refreshUser } = useAuth();
+  const canLoadClutterTiles = Number.isSafeInteger(Number(projectId)) && Number(projectId) > 0;
   const lteCountryCode = useMemo(
     () =>
       normalizeLteCountryCode(
@@ -3536,6 +3544,31 @@ const UnifiedMapSidebar = ({
               useSwitch={true}
             />
 
+            <ToggleRow
+              label="Clutter Tiles"
+              description={
+                !clutterTilesAvailable
+                  ? "Temporarily unavailable"
+                  : !canLoadClutterTiles
+                  ? projectId
+                    ? "The selected project has an invalid ID"
+                    : "Select a project to load clutter tiles"
+                  : clutterTileLoading
+                    ? "Loading project clutter tiles..."
+                    : clutterTileError
+                      ? `Error: ${clutterTileError}`
+                      : clutterTilesHaveMore
+                        ? `${clutterTileCount.toLocaleString()} building matches loaded; API limit reached`
+                        : clutterTileCount > 0
+                          ? `${clutterTileCount.toLocaleString()} building matches loaded`
+                          : "Show clutter tiles intersecting project buildings"
+              }
+              checked={Boolean(showClutterTiles)}
+              onChange={setShowClutterTiles}
+              disabled={!clutterTilesAvailable || !canLoadClutterTiles}
+              useSwitch={true}
+            />
+
             {Boolean(deltaGridApiState?.gridVisible) && (
               <ToggleRow
                 label="Border"
@@ -4648,7 +4681,7 @@ const UnifiedMapSidebar = ({
                     : normalizedStoredGridVersion === "delta"
                       ? "Delta"
                       : "Baseline"
-                }Prediction Grid`}
+                } Prediction Grid`}
                 description={
                   deltaGridApiState?.computing
                     ? "Computing grid..."

@@ -38,6 +38,7 @@ import InsightMarkers from "@/components/unifiedMap/InsightMarkers";
 import { extractInsightRows } from "@/components/unifiedMap/insightUtils";
 import AddSiteFormDialog from "@/components/unifiedMap/AddSiteFormDialog";
 import LtePredictionLocationLayer from "@/components/unifiedMap/LtePredictionLocationLayer";
+import ClutterTilesLayer from "@/components/unifiedMap/ClutterTilesLayer";
 import { normalizeBandName } from "@/utils/colorUtils";
 
 // Hooks
@@ -55,6 +56,7 @@ import { usePredictionData } from "@/hooks/usePredictionData";
 import { useSessionNeighbors } from "@/hooks/useSessionNeighbors";
 import { useSubSessionAnalytics } from "@/hooks/useSubSessionAnalytics";
 import { useProjectPolygons } from "@/hooks/useProjectPolygons";
+import { useProjectBuildingClutterTiles } from "@/hooks/useProjectBuildingClutterTiles";
 import { useAreaPolygons } from "@/hooks/useAreaPolygons";
 import { useUnifiedGridViewDataPair } from "@/hooks/useUnifiedGridViewData";
 
@@ -220,6 +222,7 @@ const DEFAULT_SITE_FILTERS = Object.freeze({
   pcis: [],
 });
 
+const CLUTTER_TILES_FEATURE_AVAILABLE = false;
 const SITE_CLUSTER_COLOR_PATTERN =
   /^(#(?:[0-9a-f]{3}|[0-9a-f]{4}|[0-9a-f]{6}|[0-9a-f]{8})|rgba?\([^)]{1,80}\)|hsla?\([^)]{1,80}\))$/i;
 
@@ -1866,6 +1869,8 @@ const UnifiedMapView = () => {
   const [selectedSubSessionTargets, setSelectedSubSessionTargets] = useState([]);
 
   const [showPolygons, setShowPolygons] = useState(false);
+  const [showClutterTiles, setShowClutterTiles] = useState(false);
+  const clutterTilesEnabled = CLUTTER_TILES_FEATURE_AVAILABLE && showClutterTiles;
   const [polygonSource, setPolygonSource] = useState("map");
   const [projectPolygonEditEnabled, setProjectPolygonEditEnabled] =
     useState(false);
@@ -2837,6 +2842,13 @@ const UnifiedMapView = () => {
     loading: polygonLoading,
     refetch: refetchPolygons,
   } = useProjectPolygons(projectId, shouldLoadProjectPolygons, polygonSource);
+
+  const {
+    tiles: clutterTiles,
+    loading: clutterTileLoading,
+    error: clutterTileError,
+    hasMore: clutterTilesHaveMore,
+  } = useProjectBuildingClutterTiles(projectId, clutterTilesEnabled);
 
   // âœ… 5. Use Area Polygons Hook
   const {
@@ -7546,6 +7558,13 @@ const UnifiedMapView = () => {
         onOpenMultiView={handleNavigateToMultiView}
         showPolygons={showPolygons}
         setShowPolygons={setShowPolygons}
+        showClutterTiles={clutterTilesEnabled}
+        setShowClutterTiles={setShowClutterTiles}
+        clutterTilesAvailable={CLUTTER_TILES_FEATURE_AVAILABLE}
+        clutterTileCount={clutterTiles.length}
+        clutterTileLoading={clutterTileLoading}
+        clutterTileError={clutterTileError}
+        clutterTilesHaveMore={clutterTilesHaveMore}
         polygonSource={polygonSource}
         setPolygonSource={setPolygonSource}
         buildingBorderEnabled={buildingBorderEnabled}
@@ -7814,6 +7833,14 @@ const UnifiedMapView = () => {
                 clearSignal={ui.drawClearSignal}
                 onDrawingsChange={handleDrawingsChange}
                 terrainEnabled={ui.basemapStyle === "terrain"}
+              />
+
+              <ClutterTilesLayer
+                enabled={clutterTilesEnabled}
+                tiles={clutterTiles}
+                loading={clutterTileLoading}
+                error={clutterTileError}
+                hasMore={clutterTilesHaveMore}
               />
 
               {/* LTE Prediction Layer â€” renders for prediction mode, LTE grid, or selected sites */}
