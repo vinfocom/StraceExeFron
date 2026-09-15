@@ -592,10 +592,19 @@ function UnifiedHeader({
       .map(Number)
       .filter((id) => Number.isInteger(id) && id > 0),
   )];
-  const handleOpenL3 = () => {
+  const handleOpenL3 = async () => {
     if (!l3SessionIds.length) return;
     const params = new URLSearchParams({ sessionIds: l3SessionIds.join(",") });
     if (effectiveProjectId) params.set("projectId", String(effectiveProjectId));
+    if (window.electronWindow?.openL3) {
+      try {
+        await window.electronWindow.openL3(params.toString());
+      } catch (error) {
+        console.error("Failed to open L3 analyzer:", error);
+        toast.error("Could not open the L3 analyzer window.");
+      }
+      return;
+    }
     const url = new URL(`/project-l3-events?${params}`, window.location.href);
     window.open(url.toString(), "_blank", "noopener,noreferrer");
   };
