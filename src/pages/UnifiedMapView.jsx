@@ -141,6 +141,78 @@ const getIndoorOutdoorBucket = (value) => {
   return formatIndoorOutdoorValue(value);
 };
 
+const TerrainElevationProfile = ({ drawing }) => {
+  const profile = Array.isArray(drawing?.elevationProfile)
+    ? drawing.elevationProfile
+    : [];
+  if (profile.length < 2) return null;
+
+  const width = 420;
+  const height = 148;
+  const pad = { top: 12, right: 14, bottom: 24, left: 48 };
+  const plotWidth = width - pad.left - pad.right;
+  const plotHeight = height - pad.top - pad.bottom;
+  const elevations = profile.map((point) => point.elevation);
+  const minElevation = Math.min(...elevations);
+  const maxElevation = Math.max(...elevations);
+  const elevationRange = Math.max(1, maxElevation - minElevation);
+  const totalDistance = Math.max(1, profile[profile.length - 1].distance);
+  const points = profile
+    .map((point) => {
+      const x = pad.left + (point.distance / totalDistance) * plotWidth;
+      const y = pad.top + ((maxElevation - point.elevation) / elevationRange) * plotHeight;
+      return `${x.toFixed(1)},${y.toFixed(1)}`;
+    })
+    .join(" ");
+  const horizontalLabel = totalDistance >= 1000
+    ? `${(totalDistance / 1000).toFixed(2)} km`
+    : `${Math.round(totalDistance)} m`;
+  const terrainDistance = Number(drawing?.terrainDistance);
+
+  return (
+    <section className="absolute bottom-4 right-4 z-[650] w-[min(440px,calc(100%-2rem))] rounded-xl border border-slate-700 bg-slate-950/95 p-3 text-white shadow-2xl backdrop-blur-sm">
+      <div className="mb-2 flex items-start justify-between gap-3">
+        <div>
+          <h2 className="text-sm font-semibold">Elevation profile</h2>
+          <p className="text-[11px] text-slate-400">Google Terrain · sampled along measured line</p>
+        </div>
+        <div className="text-right text-[11px] leading-5 text-slate-300">
+          <div>Terrain distance: <span className="font-semibold text-cyan-300">{Number.isFinite(terrainDistance) ? `${(terrainDistance / 1000).toFixed(2)} km` : "Calculating…"}</span></div>
+          <div>Horizontal: {horizontalLabel}</div>
+        </div>
+      </div>
+      <svg
+        viewBox={`0 0 ${width} ${height}`}
+        className="block w-full overflow-visible"
+        role="img"
+        aria-label={`Elevation profile from ${Math.round(minElevation)} to ${Math.round(maxElevation)} meters across ${horizontalLabel}`}
+      >
+        {[0, 0.5, 1].map((fraction) => {
+          const y = pad.top + fraction * plotHeight;
+          const value = maxElevation - fraction * elevationRange;
+          return (
+            <g key={fraction}>
+              <line x1={pad.left} y1={y} x2={width - pad.right} y2={y} stroke="#334155" strokeDasharray="3 4" />
+              <text x={pad.left - 7} y={y + 3.5} textAnchor="end" fill="#94a3b8" fontSize="10">{Math.round(value)}m</text>
+            </g>
+          );
+        })}
+        <line x1={pad.left} y1={height - pad.bottom} x2={width - pad.right} y2={height - pad.bottom} stroke="#64748b" />
+        <polyline points={points} fill="none" stroke="#38bdf8" strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round" />
+        <circle cx={pad.left} cy={Number(points.split(" ")[0].split(",")[1])} r="3.5" fill="#22c55e" />
+        <circle cx={width - pad.right} cy={Number(points.split(" ").at(-1).split(",")[1])} r="3.5" fill="#f97316" />
+        <text x={pad.left} y={height - 6} textAnchor="start" fill="#94a3b8" fontSize="10">0 km</text>
+        <text x={width - pad.right} y={height - 6} textAnchor="end" fill="#94a3b8" fontSize="10">{horizontalLabel}</text>
+      </svg>
+      <div className="mt-1 flex justify-between gap-2 text-[11px] text-slate-300">
+        <span>↑ Gain {Math.round(Number(drawing?.elevationGain) || 0)} m</span>
+        <span>↓ Loss {Math.round(Number(drawing?.elevationLoss) || 0)} m</span>
+        <span>{profile.length} samples</span>
+      </div>
+    </section>
+  );
+};
+
 const DEFAULT_SITE_FILTERS = Object.freeze({
   technologies: [],
   operators: [],
@@ -6401,6 +6473,14 @@ const UnifiedMapView = () => {
         elevationSamples: Number.isFinite(Number(drawing?.samples))
           ? Number(drawing.samples)
           : null,
+        elevationProfile: Array.isArray(drawing?.elevationProfile)
+          ? drawing.elevationProfile
+              .map((point) => ({
+                distance: Number(point?.distance),
+                elevation: Number(point?.elevation),
+              }))
+              .filter((point) => Number.isFinite(point.distance) && Number.isFinite(point.elevation))
+          : [],
         grid: grid
           ? {
             cells: Number.isFinite(gridCells) ? gridCells : 0,
@@ -7921,6 +8001,13 @@ const UnifiedMapView = () => {
               />
 
             </MapWithMultipleCircles>
+          )}
+          {ui.basemapStyle === "terrain" && (
+            <TerrainElevationProfile
+              drawing={[...(drawnShapeAnalytics || [])]
+                .reverse()
+                .find((item) => item?.type === "polyline" && item?.terrainMode && item?.elevationProfile?.length > 1)}
+            />
           )}
         </div>
       </div>

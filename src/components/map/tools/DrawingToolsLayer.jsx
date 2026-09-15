@@ -1214,6 +1214,15 @@ function DrawingToolsLayerComponent({
     let elevationLoss = 0;
     let minElevation = Infinity;
     let maxElevation = -Infinity;
+    let cumulativeDistance = 0;
+    const elevationProfile = [];
+
+    if (Number.isFinite(Number(results[0]?.elevation))) {
+      elevationProfile.push({
+        distance: 0,
+        elevation: Number(results[0].elevation),
+      });
+    }
 
     for (let index = 1; index < results.length; index += 1) {
       const previous = results[index - 1];
@@ -1230,6 +1239,11 @@ function DrawingToolsLayerComponent({
       terrainDistance += Math.sqrt(
         segmentHorizontal ** 2 + elevationDelta ** 2,
       );
+      cumulativeDistance += segmentHorizontal;
+      elevationProfile.push({
+        distance: cumulativeDistance,
+        elevation: currentElevation,
+      });
       if (elevationDelta > 0) elevationGain += elevationDelta;
       if (elevationDelta < 0) elevationLoss += Math.abs(elevationDelta);
       minElevation = Math.min(minElevation, previousElevation, currentElevation);
@@ -1245,6 +1259,7 @@ function DrawingToolsLayerComponent({
       minElevation,
       maxElevation,
       samples: results.length,
+      elevationProfile,
     };
   }, [terrainEnabled]);
 
