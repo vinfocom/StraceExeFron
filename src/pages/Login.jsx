@@ -11,7 +11,7 @@ import {
   getStoredRedirectTarget,
 } from "../utils/authSession";
 
-const APP_VERSION = "3.0.8";
+const APP_VERSION = "3.0.9";
 const TRANSITION_INTENT_KEY = "authTransitionIntent";
 const GENERIC_LOGIN_ERROR = "Something went wrong. Please try again.";
 const REMEMBERED_USER_ID_KEY = "sTracerRememberedUserId";
