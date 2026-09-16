@@ -12,6 +12,9 @@ const CLASS_COLORS = {
   water: [59, 130, 246],
   road: [148, 163, 184],
   urban: [168, 85, 247],
+  suburban: [139, 92, 246],
+  green: [34, 197, 94],
+  highway: [234, 179, 8],
   bareland: [217, 119, 6],
   bare: [217, 119, 6],
 };

@@ -2,12 +2,13 @@ import { useEffect, useState } from "react";
 import { mapViewApi } from "@/api/apiEndpoints";
 import { getClutterTilesPayload } from "@/utils/clutterTilesResponse";
 
-export const PROJECT_CLUTTER_TILE_LIMIT = 50000;
+export const PROJECT_CLUTTER_TILE_LIMIT = 5000;
 const MAX_ERROR_MESSAGE_LENGTH = 240;
 
 const emptyState = {
   requestKey: null,
   tiles: [],
+  buildingPolygons: [],
   loading: false,
   error: null,
   hasMore: false,
@@ -64,16 +65,23 @@ export const useProjectBuildingClutterTiles = (
     let active = true;
     setState({ ...emptyState, requestKey, loading: true });
 
-    mapViewApi
-      .getProjectBuildingClutterTiles(
-        numericProjectId,
-        {
-          buildingPolygonId: buildingIdProvided ? numericBuildingPolygonId : undefined,
-          limit: PROJECT_CLUTTER_TILE_LIMIT,
-        },
-      )
-      .then((response) => {
+    const loadPages = async () => {
+      const allRows = [];
+      const buildingPolygonsById = new Map();
+      let offset = 0;
+      let hasMore = true;
+
+      while (hasMore) {
+        const response = await mapViewApi.getProjectBuildingClutterTiles(
+          numericProjectId,
+          {
+            buildingPolygonId: buildingIdProvided ? numericBuildingPolygonId : undefined,
+            limit: PROJECT_CLUTTER_TILE_LIMIT,
+            offset,
+          },
+        );
         if (!active) return;
+
         const payload = getClutterTilesPayload(response);
         const status = Number(payload?.status ?? payload?.Status);
         const rows = payload?.data ?? payload?.Data;
@@ -84,28 +92,38 @@ export const useProjectBuildingClutterTiles = (
           throw new Error("The clutter tiles response has an invalid data field.");
         }
 
-        const limitedRows = rows.slice(0, PROJECT_CLUTTER_TILE_LIMIT);
-        const matchedCount = Number(payload?.matchedCount ?? payload?.MatchedCount);
-        const explicitHasMore = payload?.hasMore ?? payload?.HasMore;
-        const hasMore = rows.length > PROJECT_CLUTTER_TILE_LIMIT ||
-          (typeof explicitHasMore === "boolean"
-            ? explicitHasMore
-            : rows.length >= PROJECT_CLUTTER_TILE_LIMIT ||
-              (Number.isFinite(matchedCount) && matchedCount > rows.length));
+        allRows.push(...rows);
+        for (const polygon of payload?.buildingPolygons ?? payload?.BuildingPolygons ?? []) {
+          if (polygon?.buildingPolygonId != null) {
+            buildingPolygonsById.set(String(polygon.buildingPolygonId), polygon);
+          }
+        }
 
-        setState({
-          requestKey,
-          tiles: limitedRows,
-          loading: false,
-          error: null,
-          hasMore,
-        });
-      })
+        const nextOffset = Number(payload?.nextOffset ?? payload?.NextOffset);
+        hasMore = Boolean(payload?.hasMore ?? payload?.HasMore) && rows.length > 0;
+        offset = Number.isFinite(nextOffset) && nextOffset > offset
+          ? nextOffset
+          : offset + rows.length;
+      }
+
+      if (!active) return;
+      setState({
+        requestKey,
+        tiles: allRows,
+        buildingPolygons: [...buildingPolygonsById.values()],
+        loading: false,
+        error: null,
+        hasMore: false,
+      });
+    };
+
+    loadPages()
       .catch((requestError) => {
         if (!active || requestError?.isCancelled) return;
         setState({
           requestKey,
           tiles: [],
+          buildingPolygons: [],
           loading: false,
           error: getSafeErrorMessage(requestError),
           hasMore: false,
@@ -135,6 +153,7 @@ export const useProjectBuildingClutterTiles = (
 
   return {
     tiles: enabled && stateMatchesRequest ? state.tiles : [],
+    buildingPolygons: enabled && stateMatchesRequest ? state.buildingPolygons : [],
     loading: Boolean(enabled && validProjectId && validBuildingPolygonId &&
       (!stateMatchesRequest || state.loading)),
     error: immediateError || (stateMatchesRequest ? state.error : null),

@@ -1797,7 +1797,7 @@ export const mapViewApi = {
 
   getProjectBuildingClutterTiles: (
     projectId,
-    { buildingPolygonId, limit = 50000 } = {},
+    { buildingPolygonId, limit = 5000, offset = 0 } = {},
     config = {},
   ) =>
     api.get("/api/MapView/GetProjectBuildingClutterTiles", {
@@ -1805,6 +1805,7 @@ export const mapViewApi = {
         projectId,
         ...(buildingPolygonId != null ? { buildingPolygonId } : {}),
         limit,
+        offset,
       },
       ...config,
     }),

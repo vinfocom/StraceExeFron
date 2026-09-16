@@ -222,7 +222,7 @@ const DEFAULT_SITE_FILTERS = Object.freeze({
   pcis: [],
 });
 
-const CLUTTER_TILES_FEATURE_AVAILABLE = false;
+const CLUTTER_TILES_FEATURE_AVAILABLE = true;
 const SITE_CLUSTER_COLOR_PATTERN =
   /^(#(?:[0-9a-f]{3}|[0-9a-f]{4}|[0-9a-f]{6}|[0-9a-f]{8})|rgba?\([^)]{1,80}\)|hsla?\([^)]{1,80}\))$/i;
 
