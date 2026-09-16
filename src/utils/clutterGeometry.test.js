@@ -68,7 +68,7 @@ test("deduplicates tile/building intersections and keeps all building labels", (
   assert.equal(result.featureCollection.features.length, 1);
   assert.deepEqual(result.featureCollection.features[0].properties.buildingPolygonIds, ["25", "26"]);
   assert.deepEqual(result.featureCollection.features[0].properties.buildingPolygonNames, ["Building A", "Building B"]);
-  assert.deepEqual(result.classCounts, [["Building", 1]]);
+  assert.deepEqual(result.classCounts, [["Urban", 1]]);
 });
 
 test("skips invalid tile geometry and reports inconsistent duplicate tile geometry", () => {

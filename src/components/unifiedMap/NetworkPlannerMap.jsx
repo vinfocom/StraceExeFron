@@ -1,6 +1,7 @@
 // src/components/unifiedMap/NetworkPlannerMap.jsx
 
 import React, { useEffect, useMemo, useState, useCallback, useRef } from "react";
+import { getTechnologyFamily } from "@/utils/technologySelection";
 import { InfoWindowF, MarkerF, PolygonF, PolylineF } from "@react-google-maps/api";
 import {
   getProviderColor,
@@ -157,7 +158,7 @@ function getSiteFilterTechnology(site) {
     site?.technology ?? site?.Technology ?? site?.network ?? site?.Network ?? "",
     site?.band ?? site?.Band,
   );
-  return value && value !== "Unknown" ? value : "";
+  return value && value !== "Unknown" ? getTechnologyFamily(value) : "";
 }
 
 function getSiteFilterOperator(site) {

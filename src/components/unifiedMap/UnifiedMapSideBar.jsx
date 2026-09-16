@@ -34,6 +34,7 @@ import {
 } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
 import { getMetricLabelsForLocations, getTechnologyMetricOptions } from "@/utils/technologyMetricLabels";
+import { getTechnologyFamily } from "@/utils/technologySelection";
 
 const LTE_RECOMMENDATION_OPTIMIZED_DEFAULTS = Object.freeze({
   operator: "all",
@@ -3554,14 +3555,16 @@ const UnifiedMapSidebar = ({
                     ? "The selected project has an invalid ID"
                     : "Select a project to load clutter tiles"
                   : clutterTileLoading
-                    ? "Loading project clutter tiles..."
+                    ? clutterTileCount > 0
+                      ? `${clutterTileCount.toLocaleString()} clutter tiles shown; loading more...`
+                      : "Loading project clutter tiles..."
                     : clutterTileError
                       ? `Error: ${clutterTileError}`
                       : clutterTilesHaveMore
-                        ? `${clutterTileCount.toLocaleString()} building matches loaded; API limit reached`
+                        ? `${clutterTileCount.toLocaleString()} clutter tiles loaded; more available`
                         : clutterTileCount > 0
-                          ? `${clutterTileCount.toLocaleString()} building matches loaded`
-                          : "Show clutter tiles intersecting project buildings"
+                          ? `${clutterTileCount.toLocaleString()} clutter tiles loaded`
+                          : "Show classified clutter tiles across the project"
               }
               checked={Boolean(showClutterTiles)}
               onChange={setShowClutterTiles}
@@ -4016,14 +4019,14 @@ const UnifiedMapSidebar = ({
 
                   <MultiSelectRow
                     label="Technology"
-                    values={dataFilters?.technologies || []}
+                    values={siteFilters?.technologies || []}
                     onChange={handleStoredGridTechnologyChange}
                     options={[
                       { value: "all", label: "All Technologies" },
                       ...([...new Set([
                         ...(siteFilterOptions?.technologies || []),
-                        ...(dataFilters?.technologies || []),
-                      ])].map((technology) => ({
+                        ...(siteFilters?.technologies || []),
+                      ].map(getTechnologyFamily))].map((technology) => ({
                         value: technology,
                         label: technology,
                       }))),
@@ -4709,7 +4712,7 @@ const UnifiedMapSidebar = ({
                 <div className="pt-1 bg-slate-900/40 rounded-lg p-2 space-y-2">
                   <MultiSelectRow
                     label="Technology"
-                    values={dataFilters?.technologies || []}
+                    values={storedGridTechnology === "ALL" ? [] : storedGridTechnology.split(",")}
                     onChange={handleStoredGridTechnologyChange}
                     options={[
                       { value: "all", label: "All Technologies" },
@@ -4717,7 +4720,7 @@ const UnifiedMapSidebar = ({
                         "4G",
                         "5G",
                         ...(dataFilters?.technologies || []),
-                      ])].map((technology) => ({ value: technology, label: technology }))),
+                      ].map(getTechnologyFamily))].map((technology) => ({ value: technology, label: technology }))),
                     ]}
                     placeholder="Select technology"
                   />

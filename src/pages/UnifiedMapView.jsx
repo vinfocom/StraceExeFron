@@ -61,6 +61,7 @@ import { useAreaPolygons } from "@/hooks/useAreaPolygons";
 import { useUnifiedGridViewDataPair } from "@/hooks/useUnifiedGridViewData";
 
 // Utils
+import { getTechnologyFamily } from "@/utils/technologySelection";
 import {
   normalizeProviderName,
   normalizeTechName,
@@ -222,7 +223,7 @@ const DEFAULT_SITE_FILTERS = Object.freeze({
   pcis: [],
 });
 
-const CLUTTER_TILES_FEATURE_AVAILABLE = false;
+const CLUTTER_TILES_FEATURE_AVAILABLE = true;
 const SITE_CLUSTER_COLOR_PATTERN =
   /^(#(?:[0-9a-f]{3}|[0-9a-f]{4}|[0-9a-f]{6}|[0-9a-f]{8})|rgba?\([^)]{1,80}\)|hsla?\([^)]{1,80}\))$/i;
 
@@ -2053,10 +2054,11 @@ const UnifiedMapView = () => {
     const technologies = [...new Set(values
       .map((value) => String(value).trim().toUpperCase())
       .filter((value) => value && value !== "ALL"))].sort();
-    const technology = technologies.length ? technologies.join(",") : "ALL";
+    const families = [...new Set(technologies.map(getTechnologyFamily))].sort();
+    const technology = families.length ? families.join(",") : "ALL";
     setStoredGridTechnology(technology);
     setDataFilters((prev) => ({ ...prev, technologies }));
-    setSiteFilters((prev) => ({ ...prev, technologies }));
+    setSiteFilters((prev) => ({ ...prev, technologies: families }));
   }, []);
   const [deltaGridScope, setDeltaGridScope] = useState("selected");
   const [deltaGridApiState, setDeltaGridApiState] = useState({
@@ -3836,10 +3838,8 @@ const UnifiedMapView = () => {
     }
   }, [isStoredGridOverlayVisible]);
 
-  const mapGridEnabled = useMemo(
-    () => Boolean(enableGrid) && !isStoredGridOverlayVisible,
-    [enableGrid, isStoredGridOverlayVisible],
-  );
+  // Prediction overlays should preserve the user's log grid selection.
+  const mapGridEnabled = Boolean(enableGrid);
 
   const {
     locations: predictionLocations,

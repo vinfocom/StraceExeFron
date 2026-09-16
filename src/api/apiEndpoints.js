@@ -1797,14 +1797,15 @@ export const mapViewApi = {
 
   getProjectBuildingClutterTiles: (
     projectId,
-    { buildingPolygonId, limit = 50000 } = {},
+    { buildingPolygonId, limit = 5000, offset = 0 } = {},
     config = {},
   ) =>
-    api.get("/api/MapView/GetProjectBuildingClutterTiles", {
+    api.get("/api/MapView/GetProjectClutterTiles", {
       params: {
         projectId,
         ...(buildingPolygonId != null ? { buildingPolygonId } : {}),
         limit,
+        offset,
       },
       ...config,
     }),

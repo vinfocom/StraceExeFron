@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
 import { mapViewApi } from "@/api/apiEndpoints";
-import { getClutterTilesPayload } from "@/utils/clutterTilesResponse";
+import { loadClutterTiles, CLUTTER_PAGE_SIZE } from "@/utils/loadClutterTiles";
 
-export const PROJECT_CLUTTER_TILE_LIMIT = 50000;
+export const PROJECT_CLUTTER_TILE_LIMIT = CLUTTER_PAGE_SIZE;
 const MAX_ERROR_MESSAGE_LENGTH = 240;
 
 const emptyState = {
@@ -11,6 +11,8 @@ const emptyState = {
   loading: false,
   error: null,
   hasMore: false,
+  loadedMatches: 0,
+  loadedPages: 0,
 };
 
 const getSafeErrorMessage = (error) => {
@@ -62,58 +64,57 @@ export const useProjectBuildingClutterTiles = (
     }
 
     let active = true;
+    const controller = new AbortController();
     setState({ ...emptyState, requestKey, loading: true });
 
-    mapViewApi
-      .getProjectBuildingClutterTiles(
+    loadClutterTiles((page) => mapViewApi.getProjectBuildingClutterTiles(
         numericProjectId,
         {
           buildingPolygonId: buildingIdProvided ? numericBuildingPolygonId : undefined,
-          limit: PROJECT_CLUTTER_TILE_LIMIT,
+          ...page,
         },
-      )
-      .then((response) => {
+        { signal: controller.signal, dedupe: false },
+      ), {
+        signal: controller.signal,
+        onProgress: ({ tiles, hasMore, loadedMatches, pageNumber }) => {
+          if (!active) return;
+          setState({
+            requestKey,
+            tiles,
+            loading: hasMore,
+            error: null,
+            hasMore,
+            loadedMatches,
+            loadedPages: pageNumber,
+          });
+        },
+      })
+      .then((tiles) => {
         if (!active) return;
-        const payload = getClutterTilesPayload(response);
-        const status = Number(payload?.status ?? payload?.Status);
-        const rows = payload?.data ?? payload?.Data;
-        if (status !== 1) {
-          throw new Error(payload?.message ?? payload?.Message ?? "The clutter tiles request failed.");
-        }
-        if (!Array.isArray(rows)) {
-          throw new Error("The clutter tiles response has an invalid data field.");
-        }
 
-        const limitedRows = rows.slice(0, PROJECT_CLUTTER_TILE_LIMIT);
-        const matchedCount = Number(payload?.matchedCount ?? payload?.MatchedCount);
-        const explicitHasMore = payload?.hasMore ?? payload?.HasMore;
-        const hasMore = rows.length > PROJECT_CLUTTER_TILE_LIMIT ||
-          (typeof explicitHasMore === "boolean"
-            ? explicitHasMore
-            : rows.length >= PROJECT_CLUTTER_TILE_LIMIT ||
-              (Number.isFinite(matchedCount) && matchedCount > rows.length));
-
-        setState({
+        setState((previous) => ({
+          ...previous,
           requestKey,
-          tiles: limitedRows,
+          tiles,
           loading: false,
           error: null,
-          hasMore,
-        });
+          hasMore: false,
+        }));
       })
       .catch((requestError) => {
         if (!active || requestError?.isCancelled) return;
-        setState({
+        setState((previous) => ({
+          ...previous,
           requestKey,
-          tiles: [],
           loading: false,
           error: getSafeErrorMessage(requestError),
           hasMore: false,
-        });
+        }));
       });
 
     return () => {
       active = false;
+      controller.abort();
     };
   }, [
     buildingIdProvided,
@@ -139,5 +140,7 @@ export const useProjectBuildingClutterTiles = (
       (!stateMatchesRequest || state.loading)),
     error: immediateError || (stateMatchesRequest ? state.error : null),
     hasMore: Boolean(stateMatchesRequest && state.hasMore),
+    loadedMatches: stateMatchesRequest ? state.loadedMatches : 0,
+    loadedPages: stateMatchesRequest ? state.loadedPages : 0,
   };
 };

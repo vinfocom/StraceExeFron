@@ -1,29 +1,16 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
+import { Rnd } from "react-rnd";
 import { GoogleMapsOverlay } from "@deck.gl/google-maps";
 import { GeoJsonLayer } from "@deck.gl/layers";
 import { useGoogleMap } from "@react-google-maps/api";
-import { buildClutterFeatureCollection } from "@/utils/clutterGeometry";
+import { useClutterGeometry } from "@/hooks/useClutterGeometry";
+import {
+  CLUTTER_CLASS_DEFINITIONS,
+  getClutterClassColor,
+} from "@/utils/clutterClasses";
 
-const CLASS_COLORS = {
-  building: [239, 68, 68],
-  vegetation: [34, 197, 94],
-  forest: [22, 163, 74],
-  tree: [22, 163, 74],
-  water: [59, 130, 246],
-  road: [148, 163, 184],
-  urban: [168, 85, 247],
-  bareland: [217, 119, 6],
-  bare: [217, 119, 6],
-};
-const DEFAULT_CLASS_COLOR = [245, 158, 11];
-const MAX_LEGEND_CLASSES = 8;
 const HOVER_CARD_WIDTH = 288;
 const HOVER_CARD_HEIGHT = 150;
-
-const normalizeClassKey = (value) =>
-  String(value ?? "Unknown").trim().toLowerCase().replace(/[\s_-]+/g, "");
-
-const getClassRgb = (value) => CLASS_COLORS[normalizeClassKey(value)] || DEFAULT_CLASS_COLOR;
 
 const getDisplayValue = (value) => {
   if (value == null || value === "") return "-";
@@ -41,12 +28,36 @@ const ClutterTilesLayer = ({
   const overlayRef = useRef(null);
   const [hovered, setHovered] = useState(null);
   const [overlayError, setOverlayError] = useState(null);
+  const [hiddenClasses, setHiddenClasses] = useState(() => new Set());
   const {
     featureCollection,
     classCounts,
     invalidGeometryCount,
     conflictingGeometryCount,
-  } = useMemo(() => buildClutterFeatureCollection(tiles), [tiles]);
+    processing,
+    processingError,
+  } = useClutterGeometry(tiles, enabled);
+  const countByClass = useMemo(() => new Map(classCounts), [classCounts]);
+  const legendClasses = useMemo(() => {
+    const rows = CLUTTER_CLASS_DEFINITIONS.map(({ name }) => [name, countByClass.get(name) || 0]);
+    const unclassifiedCount = countByClass.get("Unclassified") || 0;
+    if (unclassifiedCount > 0) rows.push(["Unclassified", unclassifiedCount]);
+    return rows;
+  }, [countByClass]);
+  const visibleFeatureCollection = useMemo(() => ({
+    ...featureCollection,
+    features: featureCollection.features.filter(
+      (feature) => !hiddenClasses.has(feature?.properties?.clutterClass),
+    ),
+  }), [featureCollection, hiddenClasses]);
+  const toggleClass = (className) => {
+    setHiddenClasses((current) => {
+      const next = new Set(current);
+      if (next.has(className)) next.delete(className);
+      else next.add(className);
+      return next;
+    });
+  };
 
   useEffect(() => {
     if (!enabled || !map || !map.getDiv?.()) {
@@ -88,7 +99,7 @@ const ClutterTilesLayer = ({
 
   useEffect(() => {
     const overlay = overlayRef.current;
-    if (!enabled || !overlay || featureCollection.features.length === 0) {
+    if (!enabled || !overlay || visibleFeatureCollection.features.length === 0) {
       try {
         overlay?.setProps({ layers: [] });
       } catch {
@@ -101,17 +112,16 @@ const ClutterTilesLayer = ({
     try {
       const layer = new GeoJsonLayer({
         id: "project-clutter-tiles",
-        data: featureCollection,
+        data: visibleFeatureCollection,
         pickable: true,
-        autoHighlight: true,
-        highlightColor: [255, 255, 255, 210],
+        autoHighlight: false,
         filled: true,
-        stroked: true,
-        lineWidthUnits: "pixels",
-        lineWidthMinPixels: 1,
-        getFillColor: (feature) => [...getClassRgb(feature?.properties?.clutterClass), 105],
-        getLineColor: (feature) => [...getClassRgb(feature?.properties?.clutterClass), 205],
-        getLineWidth: 1,
+        stroked: false,
+        getFillColor: (feature) => [...getClutterClassColor(feature?.properties?.clutterClass), 150],
+        parameters: { depthTest: false },
+        transitions: {
+          getFillColor: 220,
+        },
         onHover: (info) => {
           if (!info?.object) {
             setHovered(null);
@@ -140,37 +150,54 @@ const ClutterTilesLayer = ({
         // Keep a broken overlay from affecting the rest of the map.
       }
     }
-  }, [enabled, featureCollection, map]);
+  }, [enabled, visibleFeatureCollection, map]);
 
   if (!enabled) return null;
 
   const hoveredProperties = hovered?.properties;
-  const legendClasses = classCounts.slice(0, MAX_LEGEND_CLASSES);
-  const additionalClassCount = Math.max(0, classCounts.length - legendClasses.length);
+  const visibleCount = visibleFeatureCollection.features.length;
 
   return (
     <>
-      <div className="pointer-events-none absolute right-3 top-3 z-[1100] max-w-[260px] rounded-lg border border-slate-600 bg-slate-950/90 p-2.5 text-[11px] text-slate-100 shadow-lg">
-        <div className="flex items-center justify-between gap-3">
-          <div className="font-semibold">Clutter tiles</div>
-          {!loading && !error && (
-            <div className="text-slate-400">
-              {featureCollection.features.length.toLocaleString()} tiles
+      <Rnd
+        default={{ x: 12, y: 12, width: 292, height: "auto" }}
+        bounds="parent"
+        enableResizing={false}
+        dragHandleClassName="clutter-legend-drag-handle"
+        cancel=".clutter-legend-control"
+        className="pointer-events-auto z-[1100]"
+      >
+      <div className="rounded-xl border border-slate-700/80 bg-slate-950/90 p-3 text-[11px] text-slate-100 shadow-2xl backdrop-blur-md">
+        <div className="clutter-legend-drag-handle flex cursor-move items-center justify-between gap-3 select-none">
+          <div>
+            <div className="font-semibold">Clutter classification</div>
+            <div className="text-[10px] text-slate-400">Drag to move · select classes to show</div>
+          </div>
+          {!error && !processingError && featureCollection.features.length > 0 && (
+            <div className="shrink-0 text-right text-slate-400">
+              <div>{visibleCount.toLocaleString()} shown</div>
+              <div className="text-[10px]">{featureCollection.features.length.toLocaleString()} total</div>
             </div>
           )}
         </div>
 
-        {loading && <div className="mt-1 text-slate-300">Loading clutter tiles...</div>}
+        {loading && (
+          <div className="mt-1 text-sky-300">
+            Loading more tiles… Results appear as each page arrives.
+          </div>
+        )}
+        {processing && <div className="mt-1 text-slate-300">Updating the map…</div>}
+        {processingError && <div className="mt-1 text-rose-300">{processingError}</div>}
         {error && <div className="mt-1 text-rose-300">{error}</div>}
         {overlayError && <div className="mt-1 text-rose-300">{overlayError}</div>}
-        {!loading && !error && featureCollection.features.length === 0 && (
+        {!loading && !processing && !error && !processingError && featureCollection.features.length === 0 && (
           <div className="mt-1 text-slate-300">
-            No clutter tiles overlap this project's buildings.
+            No classified clutter tiles are available for this project.
           </div>
         )}
         {hasMore && (
-          <div className="mt-1 text-amber-300">
-            The API limit was reached. Some tiles may be missing from this view.
+          <div className="mt-1 text-sky-300">
+            More tiles are being loaded.
           </div>
         )}
         {invalidGeometryCount > 0 && (
@@ -187,26 +214,38 @@ const ClutterTilesLayer = ({
         {legendClasses.length > 0 && (
           <div className="mt-2 space-y-1 border-t border-slate-700 pt-2">
             {legendClasses.map(([name, count]) => {
-              const [red, green, blue] = getClassRgb(name);
+              const [red, green, blue] = getClutterClassColor(name);
+              const selected = !hiddenClasses.has(name);
+              const percentage = featureCollection.features.length > 0
+                ? (count / featureCollection.features.length) * 100
+                : 0;
               return (
-                <div key={name} className="flex items-center justify-between gap-3">
+                <button
+                  key={name}
+                  type="button"
+                  aria-pressed={selected}
+                  onClick={() => toggleClass(name)}
+                  className={`clutter-legend-control flex w-full items-center justify-between gap-3 rounded-md px-1.5 py-1 text-left transition-colors hover:bg-slate-800/80 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-sky-400 ${
+                    selected ? "text-slate-100" : "text-slate-500"
+                  }`}
+                >
                   <span className="flex min-w-0 items-center gap-1.5 truncate">
                     <span
-                      className="h-2.5 w-2.5 shrink-0 rounded-sm"
+                      className={`h-2.5 w-2.5 shrink-0 rounded-sm ring-1 ring-white/15 ${selected ? "" : "opacity-25"}`}
                       style={{ backgroundColor: `rgb(${red} ${green} ${blue})` }}
                     />
-                    <span className="truncate">{name}</span>
+                    <span className={`truncate ${selected ? "" : "line-through"}`}>{name}</span>
                   </span>
-                  <span className="text-slate-400">{count.toLocaleString()}</span>
-                </div>
+                  <span className="text-slate-400">
+                    {count.toLocaleString()} · {percentage.toFixed(1)}%
+                  </span>
+                </button>
               );
             })}
-            {additionalClassCount > 0 && (
-              <div className="text-slate-400">+{additionalClassCount} more classes</div>
-            )}
           </div>
         )}
       </div>
+      </Rnd>
 
       {hoveredProperties && (
         <div
@@ -230,4 +269,4 @@ const ClutterTilesLayer = ({
   );
 };
 
-export default ClutterTilesLayer;
+export default memo(ClutterTilesLayer);

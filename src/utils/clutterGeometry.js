@@ -156,10 +156,13 @@ export const buildClutterFeatureCollection = (rows) => {
   const tilesById = new Map();
   const invalidTileIds = new Set();
   const conflictingGeometryIds = new Set();
+  const geometryCache = new Map();
 
   for (const [index, row] of (Array.isArray(rows) ? rows : []).entries()) {
     const identity = getTileIdentity(row, index);
-    const geometry = parseClutterWkt(row?.clutterPolygonWkt);
+    const wkt = row?.clutterPolygonWkt;
+    if (!geometryCache.has(wkt)) geometryCache.set(wkt, parseClutterWkt(wkt));
+    const geometry = geometryCache.get(wkt);
     if (!geometry) {
       invalidTileIds.add(identity);
       continue;
@@ -168,7 +171,7 @@ export const buildClutterFeatureCollection = (rows) => {
     invalidTileIds.delete(identity);
     const existing = tilesById.get(identity);
     if (existing) {
-      if (JSON.stringify(existing.geometry) !== JSON.stringify(geometry)) {
+      if (existing.geometry !== geometry && JSON.stringify(existing.geometry) !== JSON.stringify(geometry)) {
         conflictingGeometryIds.add(identity);
       }
       if (row?.buildingPolygonId != null) {
@@ -177,6 +180,8 @@ export const buildClutterFeatureCollection = (rows) => {
       if (row?.buildingPolygonName) {
         existing.properties.buildingPolygonNames.add(String(row.buildingPolygonName));
       }
+      for (const id of row?.buildingPolygonIds || []) existing.properties.buildingPolygonIds.add(String(id));
+      for (const name of row?.buildingPolygonNames || []) existing.properties.buildingPolygonNames.add(String(name));
       continue;
     }
 
@@ -185,14 +190,14 @@ export const buildClutterFeatureCollection = (rows) => {
       properties: {
         clutterTileId: row?.clutterTileId ?? null,
         gridId: row?.gridId ?? null,
-        clutterClass: row?.clutterClass || "Unknown",
+        clutterClass: normalizeClutterClass(row?.clutterClass, row?.landCoverClass),
         landCoverClass: row?.landCoverClass ?? null,
         resolutionM: row?.resolutionM ?? null,
         buildingPolygonIds: new Set(
-          row?.buildingPolygonId == null ? [] : [String(row.buildingPolygonId)],
+          [...(row?.buildingPolygonIds || []).map(String), ...(row?.buildingPolygonId == null ? [] : [String(row.buildingPolygonId)])],
         ),
         buildingPolygonNames: new Set(
-          row?.buildingPolygonName ? [String(row.buildingPolygonName)] : [],
+          [...(row?.buildingPolygonNames || []).map(String), ...(row?.buildingPolygonName ? [String(row.buildingPolygonName)] : [])],
         ),
       },
     });
@@ -217,8 +222,11 @@ export const buildClutterFeatureCollection = (rows) => {
 
   return {
     featureCollection: { type: "FeatureCollection", features },
-    classCounts: [...classCounts.entries()].sort((left, right) => left[0].localeCompare(right[0])),
+    classCounts: [...classCounts.entries()].sort(
+      (left, right) => getClutterClassOrder(left[0]) - getClutterClassOrder(right[0]),
+    ),
     invalidGeometryCount: [...invalidTileIds].filter((id) => !tilesById.has(id)).length,
     conflictingGeometryCount: conflictingGeometryIds.size,
   };
 };
+import { getClutterClassOrder, normalizeClutterClass } from "./clutterClasses.js";
