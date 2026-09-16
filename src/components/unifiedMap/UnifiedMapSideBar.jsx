@@ -3560,7 +3560,7 @@ const UnifiedMapSidebar = ({
                       : clutterTilesHaveMore
                         ? `${clutterTileCount.toLocaleString()} building matches loaded; API limit reached`
                         : clutterTileCount > 0
-                          ? `${clutterTileCount.toLocaleString()} building matches loaded`
+                          ? `${clutterTileCount.toLocaleString()} unique clutter tiles loaded`
                           : "Show clutter tiles intersecting project buildings"
               }
               checked={Boolean(showClutterTiles)}

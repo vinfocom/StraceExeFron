@@ -24,6 +24,13 @@ const getSafeErrorMessage = (error) => {
   return (message || "Could not load clutter tiles.").slice(0, MAX_ERROR_MESSAGE_LENGTH);
 };
 
+const getTileKey = (row, index) => {
+  const tileId = String(row?.clutterTileId ?? row?.gridId ?? "").trim();
+  if (tileId) return `tile:${tileId}`;
+  const wkt = typeof row?.clutterPolygonWkt === "string" ? row.clutterPolygonWkt.trim() : "";
+  return wkt ? `wkt:${wkt}` : `row:${index}`;
+};
+
 export const useProjectBuildingClutterTiles = (
   projectId,
   enabled,
@@ -66,7 +73,7 @@ export const useProjectBuildingClutterTiles = (
     setState({ ...emptyState, requestKey, loading: true });
 
     const loadPages = async () => {
-      const allRows = [];
+      const allRowsByTile = new Map();
       const buildingPolygonsById = new Map();
       let offset = 0;
       let hasMore = true;
@@ -92,12 +99,24 @@ export const useProjectBuildingClutterTiles = (
           throw new Error("The clutter tiles response has an invalid data field.");
         }
 
-        allRows.push(...rows);
+        rows.forEach((row, index) => {
+          const key = getTileKey(row, `${offset}:${index}`);
+          if (!allRowsByTile.has(key)) allRowsByTile.set(key, row);
+        });
         for (const polygon of payload?.buildingPolygons ?? payload?.BuildingPolygons ?? []) {
           if (polygon?.buildingPolygonId != null) {
             buildingPolygonsById.set(String(polygon.buildingPolygonId), polygon);
           }
         }
+
+        setState({
+          requestKey,
+          tiles: [...allRowsByTile.values()],
+          buildingPolygons: [...buildingPolygonsById.values()],
+          loading: true,
+          error: null,
+          hasMore: true,
+        });
 
         const nextOffset = Number(payload?.nextOffset ?? payload?.NextOffset);
         hasMore = Boolean(payload?.hasMore ?? payload?.HasMore) && rows.length > 0;
@@ -109,7 +128,7 @@ export const useProjectBuildingClutterTiles = (
       if (!active) return;
       setState({
         requestKey,
-        tiles: allRows,
+        tiles: [...allRowsByTile.values()],
         buildingPolygons: [...buildingPolygonsById.values()],
         loading: false,
         error: null,

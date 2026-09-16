@@ -159,6 +159,17 @@ export const buildClutterFeatureCollection = (rows) => {
 
   for (const [index, row] of (Array.isArray(rows) ? rows : []).entries()) {
     const identity = getTileIdentity(row, index);
+    const existing = tilesById.get(identity);
+    if (existing) {
+      if (row?.buildingPolygonId != null && existing.properties.buildingPolygonIds.size < 20) {
+        existing.properties.buildingPolygonIds.add(String(row.buildingPolygonId));
+      }
+      if (row?.buildingPolygonName && existing.properties.buildingPolygonNames.size < 20) {
+        existing.properties.buildingPolygonNames.add(String(row.buildingPolygonName));
+      }
+      continue;
+    }
+
     const geometry = parseClutterWkt(row?.clutterPolygonWkt);
     if (!geometry) {
       invalidTileIds.add(identity);
@@ -166,20 +177,6 @@ export const buildClutterFeatureCollection = (rows) => {
     }
 
     invalidTileIds.delete(identity);
-    const existing = tilesById.get(identity);
-    if (existing) {
-      if (JSON.stringify(existing.geometry) !== JSON.stringify(geometry)) {
-        conflictingGeometryIds.add(identity);
-      }
-      if (row?.buildingPolygonId != null) {
-        existing.properties.buildingPolygonIds.add(String(row.buildingPolygonId));
-      }
-      if (row?.buildingPolygonName) {
-        existing.properties.buildingPolygonNames.add(String(row.buildingPolygonName));
-      }
-      continue;
-    }
-
     tilesById.set(identity, {
       geometry,
       properties: {
