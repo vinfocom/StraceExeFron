@@ -398,7 +398,7 @@ function DiagnosticApiOverview({ summary, timeline = [] }) {
   const technologyIndexes = new Map();
   (Array.isArray(summary.technologies) ? summary.technologies : []).forEach((item) => {
     const name = String(item.technology ?? item.Technology ?? "").trim();
-    if (!name) return;
+    if (!name || /^unknown$/i.test(name)) return;
     const key = name.toLocaleLowerCase();
     const existingIndex = technologyIndexes.get(key);
     if (existingIndex !== undefined) {
