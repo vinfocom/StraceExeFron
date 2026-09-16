@@ -3563,8 +3563,13 @@ const UnifiedMapSidebar = ({
                       : clutterTilesHaveMore
                         ? `${clutterTileCount.toLocaleString()} clutter tiles loaded; more available`
                         : clutterTileCount > 0
+<<<<<<< HEAD
                           ? `${clutterTileCount.toLocaleString()} clutter tiles loaded`
                           : "Show classified clutter tiles across the project"
+=======
+                          ? `${clutterTileCount.toLocaleString()} unique clutter tiles loaded`
+                          : "Show clutter tiles intersecting project buildings"
+>>>>>>> a697de58d21f151349048b639198ba1d316d332d
               }
               checked={Boolean(showClutterTiles)}
               onChange={setShowClutterTiles}
