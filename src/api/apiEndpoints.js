@@ -1810,6 +1810,21 @@ export const mapViewApi = {
       ...config,
     }),
 
+  getProjectSavedSourceGeometries: (
+    projectId,
+    { layer = "all", limit = 5000, offset = 0 } = {},
+    config = {},
+  ) =>
+    api.get("/api/MapView/GetProjectSavedSourceGeometries", {
+      params: {
+        projectId,
+        layer,
+        limit,
+        offset,
+      },
+      ...config,
+    }),
+
   savePolygon: (payload) => api.post("/api/MapView/SavePolygon", payload),
 
   updateProjectPolygon: (payload) =>

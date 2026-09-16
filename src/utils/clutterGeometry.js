@@ -1,3 +1,5 @@
+import { getClutterClassOrder, normalizeClutterClass } from "./clutterClasses.js";
+
 const MAX_LONGITUDE = 180;
 const MAX_LATITUDE = 90;
 const MAX_WKT_LENGTH = 256 * 1024;
@@ -160,31 +162,15 @@ export const buildClutterFeatureCollection = (rows) => {
 
   for (const [index, row] of (Array.isArray(rows) ? rows : []).entries()) {
     const identity = getTileIdentity(row, index);
-<<<<<<< HEAD
     const wkt = row?.clutterPolygonWkt;
     if (!geometryCache.has(wkt)) geometryCache.set(wkt, parseClutterWkt(wkt));
     const geometry = geometryCache.get(wkt);
-=======
-    const existing = tilesById.get(identity);
-    if (existing) {
-      if (row?.buildingPolygonId != null && existing.properties.buildingPolygonIds.size < 20) {
-        existing.properties.buildingPolygonIds.add(String(row.buildingPolygonId));
-      }
-      if (row?.buildingPolygonName && existing.properties.buildingPolygonNames.size < 20) {
-        existing.properties.buildingPolygonNames.add(String(row.buildingPolygonName));
-      }
-      continue;
-    }
-
-    const geometry = parseClutterWkt(row?.clutterPolygonWkt);
->>>>>>> a697de58d21f151349048b639198ba1d316d332d
     if (!geometry) {
       invalidTileIds.add(identity);
       continue;
     }
 
     invalidTileIds.delete(identity);
-<<<<<<< HEAD
     const existing = tilesById.get(identity);
     if (existing) {
       if (existing.geometry !== geometry && JSON.stringify(existing.geometry) !== JSON.stringify(geometry)) {
@@ -201,8 +187,6 @@ export const buildClutterFeatureCollection = (rows) => {
       continue;
     }
 
-=======
->>>>>>> a697de58d21f151349048b639198ba1d316d332d
     tilesById.set(identity, {
       geometry,
       properties: {
@@ -247,4 +231,3 @@ export const buildClutterFeatureCollection = (rows) => {
     conflictingGeometryCount: conflictingGeometryIds.size,
   };
 };
-import { getClutterClassOrder, normalizeClutterClass } from "./clutterClasses.js";

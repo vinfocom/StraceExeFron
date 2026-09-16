@@ -2,11 +2,7 @@ import { useEffect, useState } from "react";
 import { mapViewApi } from "@/api/apiEndpoints";
 import { loadClutterTiles, CLUTTER_PAGE_SIZE } from "@/utils/loadClutterTiles";
 
-<<<<<<< HEAD
 export const PROJECT_CLUTTER_TILE_LIMIT = CLUTTER_PAGE_SIZE;
-=======
-export const PROJECT_CLUTTER_TILE_LIMIT = 5000;
->>>>>>> a697de58d21f151349048b639198ba1d316d332d
 const MAX_ERROR_MESSAGE_LENGTH = 240;
 
 const emptyState = {
@@ -28,13 +24,6 @@ const getSafeErrorMessage = (error) => {
     "Could not load clutter tiles.";
   const message = String(rawMessage).replace(/\s+/g, " ").trim();
   return (message || "Could not load clutter tiles.").slice(0, MAX_ERROR_MESSAGE_LENGTH);
-};
-
-const getTileKey = (row, index) => {
-  const tileId = String(row?.clutterTileId ?? row?.gridId ?? "").trim();
-  if (tileId) return `tile:${tileId}`;
-  const wkt = typeof row?.clutterPolygonWkt === "string" ? row.clutterPolygonWkt.trim() : "";
-  return wkt ? `wkt:${wkt}` : `row:${index}`;
 };
 
 export const useProjectBuildingClutterTiles = (
@@ -79,15 +68,16 @@ export const useProjectBuildingClutterTiles = (
     const controller = new AbortController();
     setState({ ...emptyState, requestKey, loading: true });
 
-<<<<<<< HEAD
-    loadClutterTiles((page) => mapViewApi.getProjectBuildingClutterTiles(
+    loadClutterTiles(
+      (page) => mapViewApi.getProjectBuildingClutterTiles(
         numericProjectId,
         {
           buildingPolygonId: buildingIdProvided ? numericBuildingPolygonId : undefined,
           ...page,
         },
         { signal: controller.signal, dedupe: false },
-      ), {
+      ),
+      {
         signal: controller.signal,
         onProgress: ({ tiles, hasMore, loadedMatches, pageNumber }) => {
           if (!active) return;
@@ -101,7 +91,8 @@ export const useProjectBuildingClutterTiles = (
             loadedPages: pageNumber,
           });
         },
-      })
+      },
+    )
       .then((tiles) => {
         if (!active) return;
 
@@ -114,83 +105,11 @@ export const useProjectBuildingClutterTiles = (
           hasMore: false,
         }));
       })
-=======
-    const loadPages = async () => {
-      const allRowsByTile = new Map();
-      const buildingPolygonsById = new Map();
-      let offset = 0;
-      let hasMore = true;
-
-      while (hasMore) {
-        const response = await mapViewApi.getProjectBuildingClutterTiles(
-          numericProjectId,
-          {
-            buildingPolygonId: buildingIdProvided ? numericBuildingPolygonId : undefined,
-            limit: PROJECT_CLUTTER_TILE_LIMIT,
-            offset,
-          },
-        );
-        if (!active) return;
-
-        const payload = getClutterTilesPayload(response);
-        const status = Number(payload?.status ?? payload?.Status);
-        const rows = payload?.data ?? payload?.Data;
-        if (status !== 1) {
-          throw new Error(payload?.message ?? payload?.Message ?? "The clutter tiles request failed.");
-        }
-        if (!Array.isArray(rows)) {
-          throw new Error("The clutter tiles response has an invalid data field.");
-        }
-
-        rows.forEach((row, index) => {
-          const key = getTileKey(row, `${offset}:${index}`);
-          if (!allRowsByTile.has(key)) allRowsByTile.set(key, row);
-        });
-        for (const polygon of payload?.buildingPolygons ?? payload?.BuildingPolygons ?? []) {
-          if (polygon?.buildingPolygonId != null) {
-            buildingPolygonsById.set(String(polygon.buildingPolygonId), polygon);
-          }
-        }
-
-        setState({
-          requestKey,
-          tiles: [...allRowsByTile.values()],
-          buildingPolygons: [...buildingPolygonsById.values()],
-          loading: true,
-          error: null,
-          hasMore: true,
-        });
-
-        const nextOffset = Number(payload?.nextOffset ?? payload?.NextOffset);
-        hasMore = Boolean(payload?.hasMore ?? payload?.HasMore) && rows.length > 0;
-        offset = Number.isFinite(nextOffset) && nextOffset > offset
-          ? nextOffset
-          : offset + rows.length;
-      }
-
-      if (!active) return;
-      setState({
-        requestKey,
-        tiles: [...allRowsByTile.values()],
-        buildingPolygons: [...buildingPolygonsById.values()],
-        loading: false,
-        error: null,
-        hasMore: false,
-      });
-    };
-
-    loadPages()
->>>>>>> a697de58d21f151349048b639198ba1d316d332d
       .catch((requestError) => {
         if (!active || requestError?.isCancelled) return;
         setState((previous) => ({
           ...previous,
           requestKey,
-<<<<<<< HEAD
-=======
-          tiles: [],
-          buildingPolygons: [],
->>>>>>> a697de58d21f151349048b639198ba1d316d332d
           loading: false,
           error: getSafeErrorMessage(requestError),
           hasMore: false,

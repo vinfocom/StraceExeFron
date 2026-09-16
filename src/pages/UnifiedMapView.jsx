@@ -39,6 +39,7 @@ import { extractInsightRows } from "@/components/unifiedMap/insightUtils";
 import AddSiteFormDialog from "@/components/unifiedMap/AddSiteFormDialog";
 import LtePredictionLocationLayer from "@/components/unifiedMap/LtePredictionLocationLayer";
 import ClutterTilesLayer from "@/components/unifiedMap/ClutterTilesLayer";
+import SavedSourceGeometryLayer from "@/components/unifiedMap/SavedSourceGeometryLayer";
 import { normalizeBandName } from "@/utils/colorUtils";
 
 // Hooks
@@ -57,6 +58,7 @@ import { useSessionNeighbors } from "@/hooks/useSessionNeighbors";
 import { useSubSessionAnalytics } from "@/hooks/useSubSessionAnalytics";
 import { useProjectPolygons } from "@/hooks/useProjectPolygons";
 import { useProjectBuildingClutterTiles } from "@/hooks/useProjectBuildingClutterTiles";
+import { useProjectSavedSourceGeometries } from "@/hooks/useProjectSavedSourceGeometries";
 import { useAreaPolygons } from "@/hooks/useAreaPolygons";
 import { useUnifiedGridViewDataPair } from "@/hooks/useUnifiedGridViewData";
 
@@ -1872,6 +1874,26 @@ const UnifiedMapView = () => {
   const [showPolygons, setShowPolygons] = useState(false);
   const [showClutterTiles, setShowClutterTiles] = useState(false);
   const clutterTilesEnabled = CLUTTER_TILES_FEATURE_AVAILABLE && showClutterTiles;
+  const [sourceGeometryLayers, setSourceGeometryLayers] = useState({
+    buildings: false,
+    roads: false,
+    highways: false,
+    railways: false,
+    water: false,
+  });
+  const sourceGeometryEnabled = useMemo(
+    () => Object.values(sourceGeometryLayers).some(Boolean),
+    [sourceGeometryLayers],
+  );
+  useEffect(() => {
+    setSourceGeometryLayers({
+      buildings: clutterTilesEnabled,
+      roads: clutterTilesEnabled,
+      highways: clutterTilesEnabled,
+      railways: clutterTilesEnabled,
+      water: clutterTilesEnabled,
+    });
+  }, [clutterTilesEnabled]);
   const [polygonSource, setPolygonSource] = useState("map");
   const [projectPolygonEditEnabled, setProjectPolygonEditEnabled] =
     useState(false);
@@ -2851,6 +2873,12 @@ const UnifiedMapView = () => {
     error: clutterTileError,
     hasMore: clutterTilesHaveMore,
   } = useProjectBuildingClutterTiles(projectId, clutterTilesEnabled);
+  const {
+    features: savedSourceGeometries,
+    loading: savedSourceGeometryLoading,
+    error: savedSourceGeometryError,
+    hasMore: savedSourceGeometryHasMore,
+  } = useProjectSavedSourceGeometries(projectId, sourceGeometryEnabled);
 
   // âœ… 5. Use Area Polygons Hook
   const {
@@ -7565,6 +7593,12 @@ const UnifiedMapView = () => {
         clutterTileLoading={clutterTileLoading}
         clutterTileError={clutterTileError}
         clutterTilesHaveMore={clutterTilesHaveMore}
+        sourceGeometryLayers={sourceGeometryLayers}
+        setSourceGeometryLayers={setSourceGeometryLayers}
+        sourceGeometryCount={savedSourceGeometries.length}
+        sourceGeometryLoading={savedSourceGeometryLoading}
+        sourceGeometryError={savedSourceGeometryError}
+        sourceGeometryHasMore={savedSourceGeometryHasMore}
         polygonSource={polygonSource}
         setPolygonSource={setPolygonSource}
         buildingBorderEnabled={buildingBorderEnabled}
@@ -7833,6 +7867,11 @@ const UnifiedMapView = () => {
                 clearSignal={ui.drawClearSignal}
                 onDrawingsChange={handleDrawingsChange}
                 terrainEnabled={ui.basemapStyle === "terrain"}
+              />
+
+              <SavedSourceGeometryLayer
+                features={savedSourceGeometries}
+                visibleLayers={sourceGeometryLayers}
               />
 
               <ClutterTilesLayer

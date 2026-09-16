@@ -718,6 +718,12 @@ const UnifiedMapSidebar = ({
   clutterTileLoading = false,
   clutterTileError = null,
   clutterTilesHaveMore = false,
+  sourceGeometryLayers = {},
+  setSourceGeometryLayers,
+  sourceGeometryCount = 0,
+  sourceGeometryLoading = false,
+  sourceGeometryError = null,
+  sourceGeometryHasMore = false,
   polygonSource,
   setPolygonSource,
   buildingBorderEnabled = false,
@@ -3563,19 +3569,59 @@ const UnifiedMapSidebar = ({
                       : clutterTilesHaveMore
                         ? `${clutterTileCount.toLocaleString()} clutter tiles loaded; more available`
                         : clutterTileCount > 0
-<<<<<<< HEAD
                           ? `${clutterTileCount.toLocaleString()} clutter tiles loaded`
                           : "Show classified clutter tiles across the project"
-=======
-                          ? `${clutterTileCount.toLocaleString()} unique clutter tiles loaded`
-                          : "Show clutter tiles intersecting project buildings"
->>>>>>> a697de58d21f151349048b639198ba1d316d332d
               }
               checked={Boolean(showClutterTiles)}
               onChange={setShowClutterTiles}
               disabled={!clutterTilesAvailable || !canLoadClutterTiles}
               useSwitch={true}
             />
+
+            <div className="rounded-lg border border-slate-700/60 bg-slate-900/40 p-2">
+              <div className="mb-1.5 flex items-center justify-between gap-2">
+                <span className="text-xs font-semibold text-slate-300">Real Source Layers</span>
+                <span className="text-[10px] text-slate-500">
+                  {sourceGeometryLoading
+                    ? sourceGeometryCount > 0
+                      ? `${sourceGeometryCount.toLocaleString()} loaded`
+                      : "Loading"
+                    : sourceGeometryError
+                      ? "Error"
+                      : sourceGeometryHasMore
+                        ? `${sourceGeometryCount.toLocaleString()}+`
+                        : sourceGeometryCount > 0
+                          ? sourceGeometryCount.toLocaleString()
+                          : ""}
+                </span>
+              </div>
+              {sourceGeometryError && (
+                <div className="mb-1.5 text-[11px] text-rose-300">
+                  {sourceGeometryError}
+                </div>
+              )}
+              {[
+                ["buildings", "Buildings"],
+                ["roads", "Roads"],
+                ["highways", "Highways"],
+                ["railways", "Railways"],
+                ["water", "Water"],
+              ].map(([key, label]) => (
+                <ToggleRow
+                  key={key}
+                  label={label}
+                  checked={Boolean(sourceGeometryLayers?.[key])}
+                  onChange={(checked) =>
+                    setSourceGeometryLayers?.((current) => ({
+                      ...(current || {}),
+                      [key]: checked,
+                    }))
+                  }
+                  disabled={!projectId}
+                  useSwitch={true}
+                />
+              ))}
+            </div>
 
             {Boolean(deltaGridApiState?.gridVisible) && (
               <ToggleRow

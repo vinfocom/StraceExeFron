@@ -9,29 +9,6 @@ import {
   getClutterClassColor,
 } from "@/utils/clutterClasses";
 
-<<<<<<< HEAD
-=======
-const CLASS_COLORS = {
-  building: [239, 68, 68],
-  vegetation: [34, 197, 94],
-  forest: [22, 163, 74],
-  tree: [22, 163, 74],
-  water: [59, 130, 246],
-  road: [148, 163, 184],
-  railway: [100, 116, 139],
-  urban: [168, 85, 247],
-  suburban: [139, 92, 246],
-  denseurban: [126, 34, 206],
-  rural: [132, 204, 22],
-  open: [163, 230, 53],
-  green: [34, 197, 94],
-  highway: [234, 179, 8],
-  bareland: [217, 119, 6],
-  bare: [217, 119, 6],
-};
-const DEFAULT_CLASS_COLOR = [245, 158, 11];
-const MAX_LEGEND_CLASSES = 8;
->>>>>>> a697de58d21f151349048b639198ba1d316d332d
 const HOVER_CARD_WIDTH = 288;
 const HOVER_CARD_HEIGHT = 150;
 
@@ -62,7 +39,9 @@ const ClutterTilesLayer = ({
   } = useClutterGeometry(tiles, enabled);
   const countByClass = useMemo(() => new Map(classCounts), [classCounts]);
   const legendClasses = useMemo(() => {
-    const rows = CLUTTER_CLASS_DEFINITIONS.map(({ name }) => [name, countByClass.get(name) || 0]);
+    const rows = CLUTTER_CLASS_DEFINITIONS
+      .filter(({ name }) => name !== "Water")
+      .map(({ name }) => [name, countByClass.get(name) || 0]);
     const unclassifiedCount = countByClass.get("Unclassified") || 0;
     if (unclassifiedCount > 0) rows.push(["Unclassified", unclassifiedCount]);
     return rows;
