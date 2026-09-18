@@ -37,6 +37,8 @@ import { useAuth } from "../../context/AuthContext";
 import Spinner from "../common/Spinner";
 import { upsertProjectInProjectsCache } from "@/utils/projectsCache";
 import { resolveCompanyId } from "@/utils/authSession";
+import { normalizeSiteUploadFile, getSiteUploadValidationMessage } from "@/utils/siteUpload";
+import SiteUploadValidationDialog from "@/components/common/SiteUploadValidationDialog";
 
 const DEFAULT_MIN_SAMPLES = 10;
 
@@ -407,6 +409,8 @@ export const ProjectForm = ({
   const [gridSize, setGridSize] = useState("100");
   const [logGridSize, setLogGridSize] = useState("20");
   const [siteFile, setSiteFile] = useState(null);
+  const [siteValidationMessage, setSiteValidationMessage] = useState("");
+  const [isValidatingSiteFile, setIsValidatingSiteFile] = useState(false);
 
   const [runPrediction, setRunPrediction] = useState(false);
   const [indoorMode, setIndoorMode] = useState("heuristic");
@@ -435,16 +439,30 @@ export const ProjectForm = ({
     }
   }, [selectedSessions]);
 
-  const handleFileChange = (e) => {
+  const handleFileChange = async (e) => {
     const file = e.target.files[0];
+    e.target.value = "";
+    setSiteFile(null);
+    setSiteValidationMessage("");
     if (file) {
       const ext = file.name.split(".").pop().toLowerCase();
       if (ext === "csv") {
-        setSiteFile(file);
-        toast.success(`File selected: ${file.name}`);
+        setIsValidatingSiteFile(true);
+        try {
+          const result = await normalizeSiteUploadFile(file);
+          if (!result.ok) {
+            setSiteValidationMessage(getSiteUploadValidationMessage(result));
+            return;
+          }
+          setSiteFile(file);
+          toast.success(`File selected: ${file.name}`);
+        } catch {
+          toast.error("Unable to read file. Please verify CSV format.");
+        } finally {
+          setIsValidatingSiteFile(false);
+        }
       } else {
         toast.error("Invalid file type. Only CSV is supported for site prediction upload");
-        e.target.value = null;
       }
     }
   };
@@ -534,6 +552,7 @@ export const ProjectForm = ({
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (isValidatingSiteFile || loading) return;
 
     const validationErrors = validateForm();
     if (validationErrors.length > 0) {
@@ -548,6 +567,16 @@ export const ProjectForm = ({
     const completedSteps = [];
 
     try {
+      // Validate before creating a project or making any upload request.
+      let uploadFile = siteFile;
+      if (siteFile) {
+        const result = await normalizeSiteUploadFile(siteFile);
+        if (!result.ok) {
+          setSiteValidationMessage(getSiteUploadValidationMessage(result));
+          return;
+        }
+        uploadFile = result.file;
+      }
       setCurrentStep("Creating project...");
 
       const projectPayload = {
@@ -652,17 +681,22 @@ export const ProjectForm = ({
         try {
           const formData = new FormData();
           formData.append("ProjectId", projectId.toString());
-          formData.append("File", siteFile);
+          formData.append("File", uploadFile);
 
           const uploadRes = await cellSiteApi.uploadSitePredictionCsv(formData);
 
           if (uploadRes.success || uploadRes.Status === 1) {
             const inserted = Number(uploadRes.Inserted ?? uploadRes.inserted ?? 0);
-            toast.success(
-              inserted > 0
-                ? `Site prediction saved (${inserted} rows)`
-                : "Site file processed"
-            );
+            const skipped = Number(uploadRes.Skipped ?? uploadRes.skipped ?? 0);
+            if (skipped > 0) {
+              toast.warn(`${inserted} rows uploaded; ${skipped} rows skipped. Please check the file for missing or invalid values.`, { autoClose: false });
+            } else {
+              toast.success(
+                inserted > 0
+                  ? `Site prediction saved (${inserted} rows)`
+                  : "Site file processed"
+              );
+            }
             completedSteps.push("site_uploaded");
           }
         } catch (err) {
@@ -776,6 +810,7 @@ export const ProjectForm = ({
 
   return (
     <Card className="shadow-lg border-gray-200">
+      <SiteUploadValidationDialog message={siteValidationMessage} onClose={() => setSiteValidationMessage("")} />
       <CardHeader className="pb-4">
         <CardTitle className="text-xl">Create New Project</CardTitle>
         <CardDescription className="text-gray-500">
@@ -895,6 +930,10 @@ export const ProjectForm = ({
             </summary>
 
             <div className="mt-2 p-4 bg-gray-50 rounded-lg border border-gray-200 space-y-3">
+              <p className="text-xs text-gray-600">
+                Band and cluster are mandatory for every site row. Use decimal degrees: latitude -90 to 90, longitude -180 to 180.
+              </p>
+              {isValidatingSiteFile && <p role="status" className="text-sm text-gray-600">Checking required fields...</p>}
               <div className="flex justify-end">
                 <Button
                   type="button"
@@ -914,7 +953,7 @@ export const ProjectForm = ({
                   type="file"
                   accept=".csv"
                   onChange={handleFileChange}
-                  disabled={loading}
+                  disabled={loading || isValidatingSiteFile}
                   className="file:mr-3 file:py-1.5 file:px-3 file:rounded-md file:border-0 file:text-xs file:font-medium file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"
                 />
               ) : (
@@ -952,7 +991,7 @@ export const ProjectForm = ({
           <div className="flex justify-end pt-3">
             <Button
               type="submit"
-              disabled={loading || !canSubmit || isLoadingPolygons}
+              disabled={loading || isValidatingSiteFile || !canSubmit || isLoadingPolygons}
               className="min-w-[180px] h-10 font-semibold"
             >
               {loading ? (

@@ -20,6 +20,8 @@ import {
 import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { mapViewApi } from "@/api/apiEndpoints";
 import { toast } from "react-toastify";
+import { normalizeSiteUploadFile, getSiteUploadValidationMessage } from "@/utils/siteUpload";
+import SiteUploadValidationDialog from "@/components/common/SiteUploadValidationDialog";
 import Spinner from "@/components/common/Spinner";
 import ProjectsDropdown from "../project/ProjectsDropdown";
 import DrawingControlsPanel from "../map/layout/DrawingControlsPanel";
@@ -51,44 +53,6 @@ import {
   MAP_ZOOM_LOCK_STORAGE_KEY,
   readInitialMapZoomLock,
 } from "@/utils/unifiedMapConfig";
-
-const UPLOAD_SITE_COLUMNS = [
-  "site",
-  "sector",
-  "cell_id",
-  "longitude",
-  "latitude",
-  "pci",
-  "azimuth",
-  "band",
-  "earfcn",
-  "cluster",
-  "technology",
-  "m_tilt",
-  "e_tilt",
-  "height",
-  "site_name",
-  "tac",
-  "bw",
-  "maximum_transmission_power_of_resource",
-  "real_transmit_power_of_resource",
-  "reference_signal_power",
-  "frequency",
-];
-
-const DEFAULT_SITE_COLUMN_VALUES = {
-  technology: "4G",
-  m_tilt: "0",
-  e_tilt: "0",
-  height: "30",
-  site_name: "",
-  tac: "",
-  bw: "",
-  maximum_transmission_power_of_resource: "",
-  real_transmit_power_of_resource: "",
-  reference_signal_power: "",
-  frequency: "",
-};
 
 const isTimeoutError = (error) => {
   const message = String(
@@ -132,388 +96,6 @@ const SelectRow = ({
     </Select>
   </div>
 );
-
-const SITE_COLUMN_ALIASES = {
-  site: [
-    "site",
-    "siteid",
-    "site_id",
-    "sitename",
-    "site_name",
-    "nodeb",
-    "enodeb",
-    "gnodeb",
-  ],
-  sector: ["sector", "sectorid", "sector_id", "sectorname", "sector_name"],
-  cell_id: [
-    "cell_id",
-    "cellid",
-    "cell",
-    "cellname",
-    "cell_name",
-    "cid",
-    "ecgi",
-  ],
-  longitude: ["longitude", "long", "lon", "lng", "x"],
-  latitude: ["latitude", "lat", "y"],
-  pci: ["pci", "physicalcellid", "physical_cell_id", "psc"],
-  azimuth: ["azimuth", "azimuthdeg", "azimuth_deg", "bearing", "direction"],
-  band: ["band", "frequencyband", "frequency_band", "freqband"],
-  earfcn: ["earfcn", "dl_earfcn", "arfcn", "uarfcn", "nrarfcn"],
-  cluster: ["cluster", "operator", "network", "provider", "circle"],
-  technology: ["technology", "tech", "rat", "networktype", "network_type"],
-  site_name: ["site_name", "sitename"],
-  tac: ["tac", "trackingareacode", "tracking_area_code"],
-  bw: ["bw", "bandwidth", "channelbandwidth", "channel_bandwidth"],
-  maximum_transmission_power_of_resource: [
-    "maximum_transmission_power_of_resource",
-    "maximumTransmissionPowerOfResource",
-    "tx_power",
-    "txPower",
-    "transmit power",
-    "transmit_power",
-  ],
-  real_transmit_power_of_resource: [
-    "real_transmit_power_of_resource",
-    "realTransmitPowerOfResource",
-    "real transmit power",
-    "real_transmit_power",
-  ],
-  reference_signal_power: [
-    "reference_signal_power",
-    "referenceSignalPower",
-    "rs_power",
-    "rsPower",
-  ],
-  frequency: ["frequency", "freq", "carrierfrequency", "carrier_frequency"],
-  m_tilt: ["m_tilt", "mtilt", "mechanicaltilt", "mechanical_tilt", "m-tilt"],
-  e_tilt: ["e_tilt", "etilt", "electricaltilt", "electrical_tilt", "e-tilt"],
-  height: ["height", "antennaheight", "antenna_height", "hgt"],
-};
-
-const normalizeHeaderToken = (value = "") =>
-  String(value)
-    .replace(/^\uFEFF/, "")
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9]/g, "");
-
-const parseCsvLine = (line = "") => {
-  const out = [];
-  let current = "";
-  let inQuotes = false;
-
-  for (let i = 0; i < line.length; i += 1) {
-    const ch = line[i];
-
-    if (ch === '"') {
-      if (inQuotes && line[i + 1] === '"') {
-        current += '"';
-        i += 1;
-      } else {
-        inQuotes = !inQuotes;
-      }
-      continue;
-    }
-
-    if (ch === "," && !inQuotes) {
-      out.push(current);
-      current = "";
-      continue;
-    }
-
-    current += ch;
-  }
-
-  out.push(current);
-  return out;
-};
-
-const toCsvField = (value = "") => {
-  const str = String(value ?? "");
-  if (!/[",\r\n]/.test(str)) return str;
-  return `"${str.replace(/"/g, '""')}"`;
-};
-
-const getNormalizedAliasMap = () => {
-  const normalizedAliasMap = new Map();
-  Object.entries(SITE_COLUMN_ALIASES).forEach(([canonical, aliases]) => {
-    aliases.forEach((alias) =>
-      normalizedAliasMap.set(normalizeHeaderToken(alias), canonical),
-    );
-  });
-  return normalizedAliasMap;
-};
-
-const normalizeBandValue = (value = "") => {
-  const raw = String(value ?? "").trim();
-  if (!raw) return "";
-  const match = raw.match(/^(?:band\s*)?([bBnN])?\s*[-_ ]*\s*(\d{1,3})$/);
-  if (!match) return raw;
-  const prefix = match[1];
-  const number = match[2];
-  if (prefix?.toLowerCase() === "n") return `n${number}`;
-  if (prefix?.toLowerCase() === "b") return `B${number}`;
-  return number;
-};
-
-const inferTechnology = (rawBand = "", rawEarfcn = "") => {
-  const band = String(rawBand ?? "")
-    .trim()
-    .toLowerCase();
-  if (band.startsWith("n") || band.includes("nr") || band === "5g") return "5G";
-
-  const earfcnNum = Number(String(rawEarfcn ?? "").trim());
-  if (Number.isFinite(earfcnNum) && earfcnNum >= 100000) return "5G";
-  return "4G";
-};
-
-const buildNormalizedSiteCsv = (headers, rows) => {
-  const normalizedAliasMap = getNormalizedAliasMap();
-  const headerIndexByCanonical = new Map();
-
-  headers.forEach((header, index) => {
-    const canonical =
-      normalizedAliasMap.get(normalizeHeaderToken(header)) ||
-      normalizeHeaderToken(header);
-    if (!canonical || headerIndexByCanonical.has(canonical)) return;
-    headerIndexByCanonical.set(canonical, index);
-  });
-
-  const missingColumns = UPLOAD_SITE_COLUMNS.filter(
-    (column) =>
-      !headerIndexByCanonical.has(column) &&
-      DEFAULT_SITE_COLUMN_VALUES[column] === undefined,
-  );
-
-  if (missingColumns.length > 0) {
-    return { ok: false, missingColumns };
-  }
-
-  const normalizedRows = rows
-    .map((rawRow) => {
-      const valueByCanonical = {};
-      UPLOAD_SITE_COLUMNS.forEach((column) => {
-        const idx = headerIndexByCanonical.get(column);
-        valueByCanonical[column] =
-          idx !== undefined ? String(rawRow[idx] ?? "").trim() : "";
-      });
-
-      if (!valueByCanonical.technology) {
-        valueByCanonical.technology = inferTechnology(
-          valueByCanonical.band,
-          valueByCanonical.earfcn,
-        );
-      }
-
-      valueByCanonical.band = normalizeBandValue(valueByCanonical.band);
-
-      Object.entries(DEFAULT_SITE_COLUMN_VALUES).forEach(
-        ([column, fallback]) => {
-          if (!valueByCanonical[column]) valueByCanonical[column] = fallback;
-        },
-      );
-
-      return UPLOAD_SITE_COLUMNS.map(
-        (column) => valueByCanonical[column] ?? "",
-      );
-    })
-    .filter((row) => row.some((cell) => String(cell).trim() !== ""));
-
-  return {
-    ok: true,
-    csv: [
-      UPLOAD_SITE_COLUMNS.map((column) => toCsvField(column)).join(","),
-      ...normalizedRows.map((row) =>
-        row.map((cell) => toCsvField(cell)).join(","),
-      ),
-    ].join("\n"),
-  };
-};
-
-const toCsvFile = (csvContent, originalFile) => {
-  const baseName = String(originalFile?.name || "site_upload")
-    .replace(/\.[^.]+$/, "")
-    .trim();
-  return new File([csvContent], `${baseName}_normalized.csv`, {
-    type: "text/csv",
-  });
-};
-
-const decodeXmlText = (value = "") =>
-  String(value)
-    .replace(/&amp;/g, "&")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/&quot;/g, '"')
-    .replace(/&apos;/g, "'");
-
-const getColumnIndexFromCellRef = (cellRef = "") => {
-  const letters = String(cellRef).match(/[A-Z]+/i)?.[0]?.toUpperCase();
-  if (!letters) return null;
-
-  let index = 0;
-  for (let i = 0; i < letters.length; i += 1) {
-    index = index * 26 + (letters.charCodeAt(i) - 64);
-  }
-  return index - 1;
-};
-
-const parseSimpleXlsxWorksheet = async (buffer) => {
-  const zipModule = await import("jszip");
-  const JSZip = zipModule?.default ?? zipModule;
-  const zip = await JSZip.loadAsync(buffer);
-
-  const sharedStringsFile = zip.file("xl/sharedStrings.xml");
-  const sharedStringsXml = sharedStringsFile
-    ? await sharedStringsFile.async("string")
-    : "";
-  const sharedStrings = Array.from(
-    sharedStringsXml.matchAll(/<(?:\w+:)?si[\s\S]*?<\/(?:\w+:)?si>/g),
-  ).map((match) =>
-    Array.from(
-      match[0].matchAll(/<(?:\w+:)?t[^>]*>([\s\S]*?)<\/(?:\w+:)?t>/g),
-    )
-      .map((textMatch) => decodeXmlText(textMatch[1]))
-      .join(""),
-  );
-
-  const worksheetFile =
-    zip.file("xl/worksheets/sheet1.xml") ||
-    zip.file(/xl\/worksheets\/sheet\d+\.xml$/i)?.[0];
-  if (!worksheetFile) return { headers: [], rows: [] };
-
-  const worksheetXml = await worksheetFile.async("string");
-  const parsedRows = [];
-  const rowMatches = worksheetXml.matchAll(
-    /<(?:\w+:)?row\b([^>]*)>([\s\S]*?)<\/(?:\w+:)?row>/g,
-  );
-
-  for (const rowMatch of rowMatches) {
-    const cells = [];
-    const cellMatches = rowMatch[2].matchAll(
-      /<(?:\w+:)?c\b([^>]*)>([\s\S]*?)<\/(?:\w+:)?c>/g,
-    );
-
-    for (const cellMatch of cellMatches) {
-      const attrs = cellMatch[1] || "";
-      const body = cellMatch[2] || "";
-      const cellRef = attrs.match(/\br="([^"]+)"/)?.[1] || "";
-      const columnIndex = getColumnIndexFromCellRef(cellRef);
-      if (columnIndex === null) continue;
-
-      const type = attrs.match(/\bt="([^"]+)"/)?.[1] || "";
-      const valueMatch = body.match(
-        /<(?:\w+:)?v[^>]*>([\s\S]*?)<\/(?:\w+:)?v>/,
-      );
-      const inlineMatch = body.match(
-        /<(?:\w+:)?is[^>]*>([\s\S]*?)<\/(?:\w+:)?is>/,
-      );
-      let value = "";
-
-      if (type === "s" && valueMatch) {
-        value = sharedStrings[Number(valueMatch[1])] || "";
-      } else if (type === "inlineStr" && inlineMatch) {
-        value = Array.from(
-          inlineMatch[1].matchAll(
-            /<(?:\w+:)?t[^>]*>([\s\S]*?)<\/(?:\w+:)?t>/g,
-          ),
-        )
-          .map((textMatch) => decodeXmlText(textMatch[1]))
-          .join("");
-      } else if (valueMatch) {
-        value = decodeXmlText(valueMatch[1]);
-      }
-
-      cells[columnIndex] = String(value).trim();
-    }
-
-    parsedRows.push(cells.map((cell) => cell ?? ""));
-  }
-
-  return {
-    headers: parsedRows[0] || [],
-    rows: parsedRows.slice(1),
-  };
-};
-
-const normalizeSiteUploadFile = async (file) => {
-  const fileName = String(file?.name || "").toLowerCase();
-  const fileType = String(file?.type || "").toLowerCase();
-
-  const isCsv = fileName.endsWith(".csv") || fileType.includes("csv");
-  const isXlsx =
-    fileName.endsWith(".xlsx") ||
-    fileType.includes("spreadsheetml") ||
-    fileType.includes("excel");
-
-  if (isCsv) {
-    const content = await file.text();
-    const lines = content.split(/\r?\n/);
-    const nonEmptyLines = lines.filter(
-      (line, idx) => idx === 0 || line.trim() !== "",
-    );
-    const headers = parseCsvLine(nonEmptyLines[0] || "");
-    const rows = nonEmptyLines.slice(1).map((line) => parseCsvLine(line));
-    const normalized = buildNormalizedSiteCsv(headers, rows);
-    if (!normalized.ok) return normalized;
-    return { ok: true, file: toCsvFile(normalized.csv, file) };
-  }
-
-  if (isXlsx) {
-    const buffer = await file.arrayBuffer();
-
-    let headers = [];
-    let rows = [];
-
-    try {
-      const excelModule = await import("exceljs");
-      const ExcelJS = excelModule?.default ?? excelModule;
-      const workbook = new ExcelJS.Workbook();
-      await workbook.xlsx.load(buffer);
-      const worksheet = workbook.worksheets?.[0];
-      if (!worksheet) return { ok: false, missingColumns: ["sheet"] };
-
-      const cellToString = (cellValue) => {
-        if (cellValue == null) return "";
-        if (typeof cellValue === "object") {
-          if (Array.isArray(cellValue.richText)) {
-            return cellValue.richText.map((part) => part?.text || "").join("");
-          }
-          if (cellValue.text != null) return String(cellValue.text);
-          if (cellValue.result != null) return String(cellValue.result);
-        }
-        return String(cellValue);
-      };
-
-      const headerRow = worksheet.getRow(1);
-      for (let col = 1; col <= headerRow.cellCount; col += 1) {
-        headers.push(cellToString(headerRow.getCell(col).value).trim());
-      }
-
-      for (let rowNo = 2; rowNo <= worksheet.rowCount; rowNo += 1) {
-        const row = worksheet.getRow(rowNo);
-        const rowValues = [];
-        for (let col = 1; col <= headers.length; col += 1) {
-          rowValues.push(cellToString(row.getCell(col).value).trim());
-        }
-        rows.push(rowValues);
-      }
-    } catch {
-      const parsedWorksheet = await parseSimpleXlsxWorksheet(buffer);
-      headers = parsedWorksheet.headers;
-      rows = parsedWorksheet.rows;
-    }
-
-    if (!headers.length) return { ok: false, missingColumns: ["sheet"] };
-
-    const normalized = buildNormalizedSiteCsv(headers, rows);
-    if (!normalized.ok) return normalized;
-    return { ok: true, file: toCsvFile(normalized.csv, file) };
-  }
-
-  return { ok: false, missingColumns: ["unsupported_file_type"] };
-};
 
 function UnifiedHeader({
   onBack,
@@ -611,6 +193,8 @@ function UnifiedHeader({
   const [selectedFile, setSelectedFile] = useState(null);
   const [activeQuickControl, setActiveQuickControl] = useState(null);
   const [openImportDialog, setOpenImportDialog] = useState(false);
+  const [siteValidationMessage, setSiteValidationMessage] = useState("");
+  const [isValidatingSiteFile, setIsValidatingSiteFile] = useState(false);
   const [mapZoomLocked, setMapZoomLockedState] = useState(
     readInitialMapZoomLock,
   );
@@ -635,8 +219,25 @@ function UnifiedHeader({
     );
   }, [mapZoomLocked]);
 
-  const handleFileChange = (e) => {
-    setSelectedFile(e.target.files[0]);
+  const handleFileChange = async (e) => {
+    const file = e.target.files[0];
+    e.target.value = "";
+    setSiteValidationMessage("");
+    setSelectedFile(null);
+    if (!file) return;
+    setIsValidatingSiteFile(true);
+    try {
+      const result = await normalizeSiteUploadFile(file);
+      if (!result.ok) {
+        setSiteValidationMessage(getSiteUploadValidationMessage(result));
+        return;
+      }
+      setSelectedFile(file);
+    } catch {
+      toast.error("Unable to read file. Please verify CSV/XLSX format.");
+    } finally {
+      setIsValidatingSiteFile(false);
+    }
   };
 
   const handleQuickUpload = async () => {
@@ -653,14 +254,7 @@ function UnifiedHeader({
     try {
       const normalizedCsv = await normalizeSiteUploadFile(selectedFile);
       if (!normalizedCsv.ok) {
-        const unsupported = normalizedCsv.missingColumns?.includes(
-          "unsupported_file_type",
-        );
-        toast.error(
-          unsupported
-            ? "Unsupported file type. Please upload CSV or XLSX."
-            : `Missing required columns: ${normalizedCsv.missingColumns.join(", ")}`,
-        );
+        setSiteValidationMessage(getSiteUploadValidationMessage(normalizedCsv));
         return;
       }
       uploadFile = normalizedCsv.file;
@@ -679,7 +273,13 @@ function UnifiedHeader({
     try {
       const resp = await mapViewApi.uploadSitePredictionCsv(formData);
       if (resp?.Status === 1 || resp?.status === 1) {
-        toast.success("File uploaded successfully!");
+        const inserted = resp.Inserted ?? resp.inserted;
+        const skipped = Number(resp.Skipped ?? resp.skipped ?? 0);
+        if (skipped > 0) {
+          toast.warn(`${inserted ?? 0} rows uploaded; ${skipped} rows skipped. Please check the file for missing or invalid values.`, { autoClose: false });
+        } else {
+          toast.success(inserted != null ? `File uploaded successfully! ${inserted} rows saved.` : "File uploaded successfully!");
+        }
         setSelectedFile(null);
         setOpenImportDialog(false);
       } else {
@@ -1441,12 +1041,15 @@ function UnifiedHeader({
       </div>
 
       <div className="flex min-w-0 shrink-0 items-center gap-2 sm:gap-3">
-        <Dialog open={openImportDialog} onOpenChange={setOpenImportDialog}>
-          <DialogContent className="sm:max-w-md bg-gray-800 text-white border-gray-700">
+        <Dialog open={openImportDialog && !siteValidationMessage} onOpenChange={setOpenImportDialog}>
+          <DialogContent title="Upload Site Prediction Data" className="sm:max-w-md text-white border-gray-700" style={{ background: "#1f2937" }}>
             <div className="p-6 text-center">
               <h2 className="text-lg font-semibold mb-4">
-                Quick Upload Session Data
+                Upload Site Prediction Data
               </h2>
+              <p className="mb-4 text-sm text-gray-400">
+                Band and cluster are mandatory for every row. Use decimal degrees: latitude -90 to 90, longitude -180 to 180.
+              </p>
               <div className="flex flex-col items-center gap-4">
                 <label className="w-full flex flex-col items-center px-4 py-6 bg-gray-700 rounded-lg border-2 border-dashed border-gray-500 cursor-pointer hover:border-blue-500 transition-colors">
                   <UploadCloud className="h-10 w-10 text-gray-400 mb-2" />
@@ -1457,21 +1060,24 @@ function UnifiedHeader({
                     type="file"
                     className="hidden"
                     onChange={handleFileChange}
+                    disabled={isUploading || isValidatingSiteFile}
                     accept=".csv,.xlsx,.xls"
                   />
                 </label>
 
                 <Button
                   onClick={handleQuickUpload}
-                  disabled={isUploading || !selectedFile}
+                  disabled={isUploading || isValidatingSiteFile || !selectedFile}
                   className="w-full bg-blue-600 hover:bg-blue-500"
                 >
-                  {isUploading ? <Spinner /> : "Upload Now"}
+                  {isValidatingSiteFile ? "Checking required fields..." : isUploading ? <Spinner /> : "Upload Now"}
                 </Button>
               </div>
             </div>
           </DialogContent>
         </Dialog>
+
+        <SiteUploadValidationDialog message={siteValidationMessage} onClose={() => setSiteValidationMessage("")} />
 
         <ProjectsDropdown currentProjectId={effectiveProjectId} />
 
