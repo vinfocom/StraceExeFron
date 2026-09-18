@@ -767,11 +767,13 @@ function IndoorPlaning() {
 
   const downloadReviewedDetectedExcel = async () => {
     if (!detectedPlan || detectedPlan.rooms.length === 0) return
-    await downloadWorkbook(createReviewedDetectedWorkbook(detectedPlan, selectedFloor), 'detected_floorplan_review.xlsx')
+    const workbook = await createReviewedDetectedWorkbook(detectedPlan, selectedFloor)
+    await downloadWorkbook(workbook, 'detected_floorplan_review.xlsx')
   }
 
   const downloadTemplate = async () => {
-    await downloadWorkbook(createStoryBuildingTemplateWorkbook(34), '34_story_building_template.xlsx')
+    const workbook = await createStoryBuildingTemplateWorkbook(34)
+    await downloadWorkbook(workbook, '34_story_building_template.xlsx')
   }
 
   const handleExcelUpload = async (event) => {

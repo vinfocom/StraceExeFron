@@ -1,6 +1,10 @@
-import ExcelJS from 'exceljs'
 import { MAX_SHEET_ROWS } from '../../config/indoor/floorPlannerConfig'
 import { floorSheetNumber, getFirst, getFloorIdentity, toNumber } from './floorPlan'
+
+const loadExcelJS = async () => {
+  const module = await import('exceljs')
+  return module.default || module
+}
 
 const parseJsonCell = (value) => {
   if (typeof value !== 'string') return null
@@ -93,7 +97,8 @@ export const downloadWorkbook = async (workbook, fileName) => {
   URL.revokeObjectURL(url)
 }
 
-export const createReviewedDetectedWorkbook = (detectedPlan, selectedFloor) => {
+export const createReviewedDetectedWorkbook = async (detectedPlan, selectedFloor) => {
+  const ExcelJS = await loadExcelJS()
   const wb = new ExcelJS.Workbook()
   addJsonWorksheet(wb, 'FloorMeta', [{ site_name: detectedPlan.siteName || 'Parsed Floorplan', floor_id: selectedFloor.id, floor_name: selectedFloor.name, unit: 'ft', wall_thickness: detectedPlan.wallThickness, ceiling_height: 10, origin_x: 0, origin_z: 0 }])
   addJsonWorksheet(
@@ -120,6 +125,7 @@ export const createReviewedDetectedWorkbook = (detectedPlan, selectedFloor) => {
 }
 
 export const parseBuildingWorkbook = async (buffer) => {
+  const ExcelJS = await loadExcelJS()
   const workbook = new ExcelJS.Workbook()
   await workbook.xlsx.load(buffer)
 
@@ -293,6 +299,7 @@ const latLonToMetersFromMinRef = (lat, lon, minLat, minLon) => {
 }
 
 export const parseLogsWorkbook = async (buffer, boundaryPolygon, selectedFloorId = 'level-1') => {
+  const ExcelJS = await loadExcelJS()
   const workbook = new ExcelJS.Workbook()
   await workbook.xlsx.load(buffer)
   const worksheet = workbook.getWorksheet('Logs') || workbook.worksheets[0]
