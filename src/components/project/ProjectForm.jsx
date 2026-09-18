@@ -393,6 +393,25 @@ const PredictionOptions = ({
   );
 };
 
+// Same normalization used by UnifiedMapSideBar - the ML buildings/generate
+// endpoint defaults to region="india" when no region is sent, so without
+// this every project (regardless of actual country) silently generated its
+// buildings/clutter against the wrong regional database.
+const normalizeProjectCountryCode = (value) => {
+  const raw = String(value || "").trim().toUpperCase();
+  if (!raw) return "";
+  if (["TAIWAN", "TWN"].includes(raw)) return "TW";
+  if (["INDIA", "IND"].includes(raw)) return "IN";
+  return raw;
+};
+
+const getProjectRegionFromCountryCode = (value) => {
+  const normalized = normalizeProjectCountryCode(value);
+  if (normalized === "TW") return "taiwan";
+  if (normalized === "IN") return "india";
+  return "";
+};
+
 export const ProjectForm = ({
   polygons,
   loading: parentLoading,
@@ -400,6 +419,10 @@ export const ProjectForm = ({
   onPolygonDeleted,
 }) => {
   const { user } = useAuth();
+  const userCountryCode = normalizeProjectCountryCode(
+    user?.country_code ?? user?.countryCode ?? user?.country ?? user?.source_db ?? user?.sourceDb
+  );
+  const userRegion = getProjectRegionFromCountryCode(userCountryCode);
   const [projectName, setProjectName] = useState("");
   const [selectedPolygon, setSelectedPolygon] = useState(null);
   const [selectedPolygonData, setSelectedPolygonData] = useState(null);
@@ -601,6 +624,8 @@ export const ProjectForm = ({
             WKT: selectedPolygonData.wkt,
             Name: selectedPolygonData.label || projectName.trim(),
             project_id: projectId,
+            ...(userRegion ? { region: userRegion } : {}),
+            ...(userCountryCode ? { country_code: userCountryCode } : {}),
           };
 
           const buildingRes = await buildingApi.generateBuildings(
