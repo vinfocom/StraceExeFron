@@ -50,16 +50,8 @@ export default defineConfig({
             return "vendor-capture";
           }
 
-          if (id.includes("@deck.gl") || id.includes("deck.gl") || id.includes("@loaders.gl")) {
-            return "vendor-map";
-          }
-
           if (id.includes("@react-google-maps") || id.includes("@googlemaps")) {
             return "vendor-googlemaps";
-          }
-
-          if (id.includes("recharts") || id.includes("@mui/x-charts")) {
-            return "vendor-charts";
           }
 
           if (id.includes("@mui/") || id.includes("@emotion/")) {

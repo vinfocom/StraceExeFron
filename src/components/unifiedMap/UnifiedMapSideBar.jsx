@@ -3623,7 +3623,7 @@ const UnifiedMapSidebar = ({
               ))}
             </div>
 
-            {Boolean(deltaGridApiState?.gridVisible) && (
+            {Boolean(deltaGridApiState?.gridVisible) && ( 
               <ToggleRow
                 label="Border"
                 description="Color building edges from the stored grid under each edge"
