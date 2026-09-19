@@ -52,7 +52,7 @@ import { exportAnalytics } from "@/utils/exportService";
 import { TABS } from "@/utils/constants";
 import { FEATURE_KEYS, hasFeatureAccess } from "@/utils/featureAccess";
 import { getMetricLabelsForLocations, getTechnologyDisplayLog } from "@/utils/technologyMetricLabels";
-import { adminApi, homeApi, reportApi } from "@/api/apiEndpoints";
+import { adminApi, homeApi, reportApi, newPdfReportApi } from "@/api/apiEndpoints";
 import { useAuth } from "@/hooks/useAuth";
 
 const OverviewTab = lazy(() =>
@@ -1348,6 +1348,36 @@ function UnifiedDetailLogs({
   const [activeTab, setActiveTab] = useState(activeTabExternal || "overview");
   const [isGeneratingReport, setIsGeneratingReport] = useState(false);
   const isGeneratingReportRef = useRef(false);
+  const [isPdfOptionsDialogOpen, setIsPdfOptionsDialogOpen] = useState(false);
+  const [pdfReportType, setPdfReportType] = useState("combined"); // "combined" | "per_technology"
+  const [pdfMapViewType, setPdfMapViewType] = useState("raw"); // "grid" | "raw" -- only meaningful when the project has a polygon (canEnableGridView)
+  const [selectedPdfTechnologies, setSelectedPdfTechnologies] = useState([]);
+
+  // Every distinct `network`/`technology` value actually present in this
+  // project's own data, in the exact form the backend's `network` column
+  // stores it (e.g. "4G", "4G (LTE Anchor - NSA)", "5G NSA") -- shown as
+  // individual checkboxes so the user picks exact variants themselves
+  // rather than the app guessing which variants belong to which generation.
+  const availablePdfTechnologies = useMemo(() => {
+    const set = new Set();
+    (locations || []).forEach((loc) => {
+      const tech = String(loc?.technology || loc?.networkType || loc?.network || "").trim();
+      if (tech) set.add(tech);
+    });
+    return Array.from(set).sort();
+  }, [locations]);
+
+  const openPdfOptionsDialog = () => {
+    setSelectedPdfTechnologies(availablePdfTechnologies);
+    setPdfMapViewType(canEnableGridView ? "grid" : "raw");
+    setIsPdfOptionsDialogOpen(true);
+  };
+
+  const togglePdfTechnology = (tech) => {
+    setSelectedPdfTechnologies((prev) =>
+      prev.includes(tech) ? prev.filter((t) => t !== tech) : [...prev, tech],
+    );
+  };
 
   const { user, refreshUser } = useAuth();
   useEffect(() => {
@@ -1915,14 +1945,23 @@ function UnifiedDetailLogs({
       return;
     }
 
+    const isPerTechnology = pdfReportType === "per_technology";
+    // "Combined" keeps calling the existing, unchanged production report
+    // (tools/report_engine) exactly as before. "Per Technology" calls the
+    // new tools/New_pdf_report module -- same generate/status/download
+    // shape (newPdfReportApi mirrors reportApi), separate report_id/output
+    // namespace on the backend so the two never collide.
+    const apiClient = isPerTechnology ? newPdfReportApi : reportApi;
+
     const REPORT_POLL_INTERVAL_MS = 5000;
     const REPORT_TIMEOUT_MS = 60 * 60 * 1000; // 60 minutes for heavy report generation
     const MAX_TRANSIENT_STATUS_ERRORS = 24; // keep polling for up to ~2 minutes of server misses
 
     isGeneratingReportRef.current = true;
     setIsGeneratingReport(true);
+    setIsPdfOptionsDialogOpen(false);
     toast.info("Report generation started", { autoClose: 2000 });
-    
+
     const toastId = toast.loading("Processing report request...");
 
     try {
@@ -1932,11 +1971,17 @@ function UnifiedDetailLogs({
         userCountryCode === "IN" ? "india" :
         "";
 
-      const genResponse = await reportApi.generateReport({
+      const genResponse = await apiClient.generateReport({
         project_id: projectId,
         user_id: user.id,
         ...(userCountryCode ? { country_code: userCountryCode, countryCode: userCountryCode } : {}),
         ...(reportRegion ? { region: reportRegion } : {}),
+        // Only the new "Per Technology" module reads these -- the old
+        // Combined report doesn't accept them and stays exactly as it was.
+        ...(isPerTechnology ? {
+          technologies: selectedPdfTechnologies,
+          map_view_type: pdfMapViewType,
+        } : {}),
       });
 
       const reportId = genResponse?.report_id;
@@ -1949,7 +1994,7 @@ function UnifiedDetailLogs({
 
         while (Date.now() < deadline) {
           try {
-            statusResponse = await reportApi.getReportStatus(reportId);
+            statusResponse = await apiClient.getReportStatus(reportId);
             transientStatusErrors = 0;
           } catch (statusError) {
             transientStatusErrors += 1;
@@ -1989,39 +2034,39 @@ function UnifiedDetailLogs({
           throw new Error("Report generation timed out. The report may still finish in the backend. Please try again in a minute.");
         }
 
-        const checkResponse = await reportApi.downloadReport(reportId);
+        const checkResponse = await apiClient.downloadReport(reportId);
 
         downloadPdfBlob(
           checkResponse instanceof Blob ? checkResponse : new Blob([checkResponse], { type: "application/pdf" }),
-          `Report_${projectId}_${new Date().toISOString().split('T')[0]}.pdf`,
+          `Report_${projectId}${isPerTechnology ? "_PerTechnology" : ""}_${new Date().toISOString().split('T')[0]}.pdf`,
         );
 
-        toast.update(toastId, { 
-          render: "Report downloaded successfully!", 
-          type: "success", 
-          isLoading: false, 
+        toast.update(toastId, {
+          render: "Report downloaded successfully!",
+          type: "success",
+          isLoading: false,
           autoClose: 3000,
           closeButton: true
         });
 
       } else {
          console.error("Unexpected API response:", genResponse);
-         toast.update(toastId, { 
-           render: "Failed to start generation - no report ID returned", 
-           type: "error", 
+         toast.update(toastId, {
+           render: "Failed to start generation - no report ID returned",
+           type: "error",
            isLoading: false,
-           autoClose: 5000 
+           autoClose: 5000
          });
          setIsGeneratingReport(false);
       }
 
     } catch (error) {
       console.error("Report generation error:", error);
-      toast.update(toastId, { 
-        render: error.message || error, 
-        type: "error", 
+      toast.update(toastId, {
+        render: error.message || error,
+        type: "error",
         isLoading: false,
-        autoClose: 5000 
+        autoClose: 5000
       });
     } finally {
       isGeneratingReportRef.current = false;
@@ -2085,11 +2130,11 @@ function UnifiedDetailLogs({
         <div className="flex items-center gap-2" onMouseDown={(e) => e.stopPropagation()}>
           {canGenerateReport && (
             <button
-              onClick={handleGenerateReport}
+              onClick={openPdfOptionsDialog}
               disabled={isGeneratingReport || !locations?.length}
               className={`
                 flex items-center gap-2 px-3 py-1.5 rounded-lg font-medium text-sm
-                transition-all duration-200 
+                transition-all duration-200
                 ${!isGeneratingReport && locations?.length
                   ? "bg-gradient-to-r from-blue-600 to-cyan-600 hover:from-blue-500 hover:to-cyan-500 text-white shadow-lg hover:shadow-blue-500/25"
                   : "bg-slate-700 text-slate-400 cursor-not-allowed"
@@ -2110,6 +2155,139 @@ function UnifiedDetailLogs({
               )}
             </button>
           )}
+
+          <Dialog open={isPdfOptionsDialogOpen} onOpenChange={setIsPdfOptionsDialogOpen}>
+            <DialogContent
+              title="PDF Report Options"
+              className="max-w-md border border-slate-700 bg-slate-900 text-slate-100"
+              style={{
+                background: "#0f172a",
+                color: "#e2e8f0",
+                border: "1px solid #334155",
+                width: "100%",
+                maxWidth: "28rem",
+              }}
+            >
+              <DialogHeader>
+                <DialogTitle>PDF Report Options</DialogTitle>
+                <DialogDescription style={{ color: "#94a3b8" }}>
+                  Choose how the PDF report should be generated.
+                </DialogDescription>
+              </DialogHeader>
+
+              <div className="space-y-5 py-2">
+                <div>
+                  <p className="mb-2 text-sm font-medium text-slate-200">Report Type</p>
+                  <div className="grid grid-cols-2 gap-3">
+                    {[
+                      { value: "combined", label: "Combined" },
+                      { value: "per_technology", label: "Per Technology" },
+                    ].map(({ value, label }) => {
+                      const isSelected = pdfReportType === value;
+                      return (
+                        <button
+                          key={value}
+                          type="button"
+                          aria-pressed={isSelected}
+                          onClick={() => setPdfReportType(value)}
+                          disabled={isGeneratingReport}
+                          className={`rounded-lg border px-3 py-3 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-60 ${
+                            isSelected
+                              ? "border-sky-400 bg-sky-500/20 text-sky-200"
+                              : "border-slate-600 bg-slate-800 text-slate-300 hover:bg-slate-700"
+                          }`}
+                        >
+                          {label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {pdfReportType === "per_technology" && (
+                  <>
+                    <div>
+                      <p className="mb-2 text-sm font-medium text-slate-200">Technologies</p>
+                      {availablePdfTechnologies.length === 0 ? (
+                        <p className="text-xs text-slate-400">No technology data available for this project.</p>
+                      ) : (
+                        <div className="max-h-40 space-y-1 overflow-y-auto rounded-lg border border-slate-700 bg-slate-800/70 p-2">
+                          {availablePdfTechnologies.map((tech) => (
+                            <label
+                              key={tech}
+                              htmlFor={`pdf-tech-${tech}`}
+                              className="flex cursor-pointer items-center gap-3 rounded px-2 py-1.5 hover:bg-slate-700/60"
+                            >
+                              <Checkbox
+                                id={`pdf-tech-${tech}`}
+                                checked={selectedPdfTechnologies.includes(tech)}
+                                onCheckedChange={() => togglePdfTechnology(tech)}
+                                disabled={isGeneratingReport}
+                                className="border-slate-400 data-[state=checked]:bg-sky-500"
+                              />
+                              <span className="text-sm text-slate-200">{tech}</span>
+                            </label>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+
+                    {canEnableGridView && (
+                      <div>
+                        <p className="mb-2 text-sm font-medium text-slate-200">Map View</p>
+                        <div className="grid grid-cols-2 gap-3">
+                          {[
+                            { value: "grid", label: "Grid" },
+                            { value: "raw", label: "Raw" },
+                          ].map(({ value, label }) => {
+                            const isSelected = pdfMapViewType === value;
+                            return (
+                              <button
+                                key={value}
+                                type="button"
+                                aria-pressed={isSelected}
+                                onClick={() => setPdfMapViewType(value)}
+                                disabled={isGeneratingReport}
+                                className={`rounded-lg border px-3 py-3 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-60 ${
+                                  isSelected
+                                    ? "border-sky-400 bg-sky-500/20 text-sky-200"
+                                    : "border-slate-600 bg-slate-800 text-slate-300 hover:bg-slate-700"
+                                }`}
+                              >
+                                {label}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
+
+              <DialogFooter className="flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setIsPdfOptionsDialogOpen(false)}
+                  disabled={isGeneratingReport}
+                  className="rounded-lg border border-slate-600 px-3 py-1.5 text-sm text-slate-300 transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={handleGenerateReport}
+                  disabled={
+                    isGeneratingReport ||
+                    (pdfReportType === "per_technology" && selectedPdfTechnologies.length === 0)
+                  }
+                  className="rounded-lg bg-sky-600 px-4 py-1.5 text-sm font-medium text-white transition hover:bg-sky-500 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {isGeneratingReport ? "Generating..." : "Generate"}
+                </button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
 
           <ExportDropdown
             locations={exportLocations}

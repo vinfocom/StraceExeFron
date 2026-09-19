@@ -1316,6 +1316,21 @@ export const reportApi = {
     }),
 };
 
+// "Per Technology" report (tools/New_pdf_report on the Python side) -- same
+// generate/status/download shape as reportApi above, separate report_id/
+// output namespace on the backend so the two report types never collide.
+export const newPdfReportApi = {
+  generateReport: (payload) =>
+    pythonApi.post("/api/new-pdf-report/generate", payload, { timeout: 600000 }),
+  getReportStatus: (reportId) =>
+    pythonApi.get(`/api/new-pdf-report/status/${reportId}`, { timeout: 120000 }),
+  downloadReport: (reportId) =>
+    pythonApi.get(`/api/new-pdf-report/download/${reportId}`, {
+      responseType: 'blob',
+      timeout: 600000,
+    }),
+};
+
 export const pptReportApi = {
   generate: (payload) =>
     pythonApi.post("/api/ppt-report/generate", payload, { timeout: 30 * 60 * 1000 }),
