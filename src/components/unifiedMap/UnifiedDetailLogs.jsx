@@ -1351,6 +1351,7 @@ function UnifiedDetailLogs({
   const [isPdfOptionsDialogOpen, setIsPdfOptionsDialogOpen] = useState(false);
   const [pdfReportType, setPdfReportType] = useState("combined"); // "combined" | "per_technology"
   const [pdfMapViewType, setPdfMapViewType] = useState("raw"); // "grid" | "raw" -- only meaningful when the project has a polygon (canEnableGridView)
+  const [pdfAggregation, setPdfAggregation] = useState("median"); // "max" | "mean" | "min" | "median" -- how samples in a grid cell collapse to one value (Grid view only)
   const [selectedPdfTechnologies, setSelectedPdfTechnologies] = useState([]);
 
   // Every distinct `network`/`technology` value actually present in this
@@ -1370,6 +1371,7 @@ function UnifiedDetailLogs({
   const openPdfOptionsDialog = () => {
     setSelectedPdfTechnologies(availablePdfTechnologies);
     setPdfMapViewType(canEnableGridView ? "grid" : "raw");
+    setPdfAggregation("median");
     setIsPdfOptionsDialogOpen(true);
   };
 
@@ -1981,6 +1983,7 @@ function UnifiedDetailLogs({
         ...(isPerTechnology ? {
           technologies: selectedPdfTechnologies,
           map_view_type: pdfMapViewType,
+          ...(canEnableGridView && pdfMapViewType === "grid" ? { aggregation: pdfAggregation } : {}),
         } : {}),
       });
 
@@ -2247,6 +2250,38 @@ function UnifiedDetailLogs({
                                 type="button"
                                 aria-pressed={isSelected}
                                 onClick={() => setPdfMapViewType(value)}
+                                disabled={isGeneratingReport}
+                                className={`rounded-lg border px-3 py-3 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-60 ${
+                                  isSelected
+                                    ? "border-sky-400 bg-sky-500/20 text-sky-200"
+                                    : "border-slate-600 bg-slate-800 text-slate-300 hover:bg-slate-700"
+                                }`}
+                              >
+                                {label}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+
+                    {canEnableGridView && pdfMapViewType === "grid" && (
+                      <div>
+                        <p className="mb-2 text-sm font-medium text-slate-200">Grid Aggregation</p>
+                        <div className="grid grid-cols-4 gap-3">
+                          {[
+                            { value: "max", label: "Max" },
+                            { value: "mean", label: "Mean" },
+                            { value: "min", label: "Min" },
+                            { value: "median", label: "Median" },
+                          ].map(({ value, label }) => {
+                            const isSelected = pdfAggregation === value;
+                            return (
+                              <button
+                                key={value}
+                                type="button"
+                                aria-pressed={isSelected}
+                                onClick={() => setPdfAggregation(value)}
                                 disabled={isGeneratingReport}
                                 className={`rounded-lg border px-3 py-3 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-60 ${
                                   isSelected
