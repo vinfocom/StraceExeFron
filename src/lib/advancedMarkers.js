@@ -96,6 +96,24 @@ export const createAdvancedMarkerContent = ({ icon, label, clickable = true } = 
   return content;
 };
 
+// Lightweight dot for high-volume markers (e.g. sessions): one plain div instead of
+// a PinElement (shadow-DOM-heavy) per marker.
+export const createDotMarkerContent = ({ color = "#2563eb", size = 14, clickable = true } = {}) => {
+  const dot = document.createElement("div");
+  Object.assign(dot.style, {
+    width: `${size}px`,
+    height: `${size}px`,
+    boxSizing: "border-box",
+    borderRadius: "50%",
+    background: color,
+    border: "2px solid #ffffff",
+    boxShadow: "0 1px 3px rgba(15, 23, 42, 0.5)",
+    pointerEvents: clickable ? "auto" : "none",
+  });
+  dot.setAttribute("aria-hidden", "true");
+  return dot;
+};
+
 export const createAdvancedMarker = ({
   map,
   position,
@@ -105,6 +123,7 @@ export const createAdvancedMarker = ({
   clickable = true,
   icon,
   label,
+  content,
 } = {}) => {
   const AdvancedMarkerElement = getAdvancedMarkerElement();
   if (!AdvancedMarkerElement) return null;
@@ -116,9 +135,9 @@ export const createAdvancedMarker = ({
     ...(Number.isFinite(zIndex) ? { zIndex } : {}),
     gmpDraggable: Boolean(draggable),
     gmpClickable: Boolean(clickable),
-    ...(icon?.url ? { anchorTop: "-50%" } : icon ? { anchorTop: "-50%" } : {}),
+    ...(icon || content ? { anchorTop: "-50%" } : {}),
   });
-  marker.append(createAdvancedMarkerContent({ icon, label, clickable }));
+  marker.append(content || createAdvancedMarkerContent({ icon, label, clickable }));
   return marker;
 };
 
@@ -178,19 +197,48 @@ export const getAdvancedMarkerLatLngEvent = (marker) => {
   };
 };
 
+export const isSatelliteMapType = (mapTypeId) => mapTypeId === "satellite" || mapTypeId === "hybrid";
+
+const getLabelTheme = (marker) => {
+  const mapTypeId = marker?.map?.getMapTypeId?.();
+  return isSatelliteMapType(mapTypeId)
+    ? { color: "#f8fafc", textShadow: "0 0 3px rgba(0,0,0,0.9), 0 1px 3px rgba(0,0,0,0.8)" }
+    : { color: "#0f172a", textShadow: "0 0 3px rgba(255,255,255,0.95), 0 1px 2px rgba(255,255,255,0.9)" };
+};
+
+// Re-applies black text on map/terrain and light text on satellite/hybrid.
+export const refreshAdvancedMarkerLabelTheme = (marker) => {
+  const label = marker?.__labelElement;
+  if (label) Object.assign(label.style, getLabelTheme(marker));
+};
+
 export const setAdvancedMarkerLabel = (marker, text, style = {}) => {
   if (!marker) return;
   let label = marker.__labelElement;
   if (!label) {
     label = document.createElement("div");
-    label.style.color = "#111827";
-    label.style.fontSize = "20px";
+    label.style.fontSize = "14px";
     label.style.fontWeight = "700";
     label.style.whiteSpace = "nowrap";
-    label.style.transform = "translate(-50%, -100%)";
+    label.style.pointerEvents = "none";
+    // Absolutely positioned so the marker box is 0x0 and the anchor is exactly the position.
+    label.style.position = "absolute";
+    label.style.left = "0";
+    label.style.top = "0";
+    label.style.padding = "0 2px";
     marker.append(label);
     marker.__labelElement = label;
   }
   label.textContent = String(text ?? "");
-  Object.assign(label.style, style);
+  Object.assign(label.style, getLabelTheme(marker), style);
+  orientAdvancedMarkerLabel(marker, marker.__labelAngle || 0);
+};
+
+// Rotates a label so it runs parallel to a line, sitting just above it.
+export const orientAdvancedMarkerLabel = (marker, angleDeg = 0, offsetPx = 10) => {
+  const label = marker?.__labelElement;
+  if (!label) return;
+  marker.__labelAngle = angleDeg;
+  label.style.transformOrigin = "center";
+  label.style.transform = `translate(-50%, -50%) rotate(${angleDeg}deg) translateY(${-offsetPx}px)`;
 };

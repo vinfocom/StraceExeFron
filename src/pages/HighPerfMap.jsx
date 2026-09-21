@@ -541,10 +541,15 @@ export default function HighPerfMap() {
     }
   }, []);
 
+  // `map` is read through a ref so the map instance becoming available doesn't
+  // trigger a second full paginated sessions fetch (onMapLoad fits late-arriving sessions).
+  const mapRef = useRef(null);
+  mapRef.current = map;
+
   useEffect(() => {
     if (!isLoaded) return;
-    if (!activeFilters) fetchAllSessions(map);
-  }, [isLoaded, activeFilters, fetchAllSessions, map]);
+    if (!activeFilters) fetchAllSessions(mapRef.current);
+  }, [isLoaded, activeFilters, fetchAllSessions]);
 
   const fetchLogsFromApi = useCallback(async (dateFilters) => {
     setLogsLoading(true);
@@ -769,7 +774,8 @@ export default function HighPerfMap() {
     }
   }, [activeFilters, applyLocalFilters, fetchSecondaryLogsFromApi, neighbourLogs]);
 
-  const handleSessionMarkerClick = async (session) => {
+  // Must be referentially stable: SessionsLayer rebuilds every marker when this changes.
+  const handleSessionMarkerClick = useCallback(async (session) => {
     const clickedSessionId =
       session?.id ??
       session?.session_id ??
@@ -800,7 +806,7 @@ export default function HighPerfMap() {
     } finally {
       setIsLoading(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
     const loadPolygons = async () => {
@@ -1139,6 +1145,7 @@ const rectCoords = [
     maxCells={1500}
     onDrawingsChange={() => {}}
     colorizeCells={ui.colorizeCells}
+    showSegmentLabels={Boolean(ui.showSegmentLabels)}
   />
 )}
         </MapWithMultipleCircles>

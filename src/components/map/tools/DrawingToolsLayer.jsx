@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useCallback, useState, memo } from "react";
 import { toast } from "react-toastify";
-import { createAdvancedMarker, getAdvancedMarkerLatLngEvent, setAdvancedMarkerLabel } from "@/lib/advancedMarkers";
+import { createAdvancedMarker, getAdvancedMarkerLatLngEvent, isSatelliteMapType, orientAdvancedMarkerLabel, refreshAdvancedMarkerLabelTheme, setAdvancedMarkerLabel } from "@/lib/advancedMarkers";
 
 // --- Helper Functions (Same as before, collapsed for brevity) ---
 function toLatLng(item) {
@@ -989,28 +989,43 @@ function serializeOverlay(type, overlay) {
   return { type };
 }
 
+// Screen-space angle of a segment (Web Mercator is conformal, so this is zoom-independent),
+// flipped when needed so text along the line is never upside down.
+function getScreenAngleDeg(a, b) {
+  const mercY = (latDeg) => Math.log(Math.tan(Math.PI / 4 + (latDeg * Math.PI) / 360));
+  const dx = ((b.lng() - a.lng()) * Math.PI) / 180;
+  const dy = -(mercY(b.lat()) - mercY(a.lat()));
+  if (!Number.isFinite(dx) || !Number.isFinite(dy) || (dx === 0 && dy === 0)) return 0;
+  let deg = (Math.atan2(dy, dx) * 180) / Math.PI;
+  if (deg > 90) deg -= 180;
+  else if (deg < -90) deg += 180;
+  return deg;
+}
+
 function getPolylineDetails(polyline) {
   const gm = window.google.maps;
   const path = polyline.getPath?.();
-  if (!path) return { length: 0, center: null };
+  if (!path) return { length: 0, center: null, angle: 0 };
   const len = gm.geometry.spherical.computeLength(path);
   const points = path.getArray();
-  if (points.length < 2) return { length: 0, center: points[0] };
+  if (points.length < 2) return { length: 0, center: points[0], angle: 0 };
 
   let dist = 0;
   const targetDist = len / 2;
   let mid = points[0];
+  let angle = 0;
 
   for (let i = 0; i < points.length - 1; i++) {
     const segLen = gm.geometry.spherical.computeDistanceBetween(points[i], points[i+1]);
     if (dist + segLen >= targetDist) {
       const fraction = (targetDist - dist) / segLen;
       mid = gm.geometry.spherical.interpolate(points[i], points[i+1], fraction);
+      angle = getScreenAngleDeg(points[i], points[i+1]);
       break;
     }
     dist += segLen;
   }
-  return { length: len, center: mid };
+  return { length: len, center: mid, angle };
 }
 
 const clampOpacity = (value, fallback = 0.35) => {
@@ -1019,29 +1034,93 @@ const clampOpacity = (value, fallback = 0.35) => {
   return Math.max(0, Math.min(1, parsed));
 };
 
-const getShapeOptions = (type, polygonOpacity, polygonFillOpacity) => {
-  const baseAreaOptions = {
-    clickable: true,
-    editable: true,
-    draggable: true,
-    strokeWeight: 2,
-    strokeColor: "#1d4ed8",
-    strokeOpacity: polygonOpacity,
-    fillColor: "#1d4ed8",
-    fillOpacity: polygonFillOpacity,
-  };
+// One color per tool family: blue = areas, orange = measurement lines, teal = log selection.
+// Satellite imagery gets brighter, slightly thicker strokes so they stay visible.
+const SHAPE_COLORS = {
+  area: { light: "#2563eb", satellite: "#60a5fa" },
+  line: { light: "#ea580c", satellite: "#fb923c" },
+  select: { light: "#0f766e", satellite: "#2dd4bf" },
+};
+const getShapeColor = (kind, satellite) => SHAPE_COLORS[kind][satellite ? "satellite" : "light"];
+
+const getShapeOptions = (type, polygonOpacity, polygonFillOpacity, satellite = false) => {
+  const strokeWeight = satellite ? 3 : 2;
 
   if (type === "polyline") {
     return {
       clickable: true,
-      editable: true,
+      editable: false,
       draggable: true,
-      strokeWeight: 2,
-      strokeColor: "#0057d9",
+      strokeWeight,
+      strokeColor: getShapeColor("line", satellite),
     };
   }
 
-  return baseAreaOptions;
+  return {
+    clickable: true,
+    editable: false,
+    draggable: true,
+    strokeWeight,
+    strokeColor: getShapeColor("area", satellite),
+    strokeOpacity: polygonOpacity,
+    fillColor: getShapeColor("area", satellite),
+    fillOpacity: polygonFillOpacity,
+  };
+};
+
+const fmtLength = (m) => (m >= 1000 ? `${(m / 1000).toFixed(2)} km` : `${Math.round(m)} m`);
+const fmtArea = (m2) =>
+  m2 >= 1e6 ? `${(m2 / 1e6).toFixed(2)} km²` : m2 >= 1e4 ? `${(m2 / 1e4).toFixed(2)} ha` : `${Math.round(m2)} m²`;
+
+const createLabelMarker = (map, position) => {
+  const AdvancedMarkerElement = window.google?.maps?.marker?.AdvancedMarkerElement;
+  return AdvancedMarkerElement ? new AdvancedMarkerElement({ map, position, zIndex: 1000 }) : null;
+};
+
+// Pill used for the live readout that follows the cursor while drawing.
+const getLivePillStyle = (satellite) => ({
+  fontSize: "12px",
+  fontWeight: "600",
+  padding: "3px 9px",
+  borderRadius: "999px",
+  color: satellite ? "#f8fafc" : "#0f172a",
+  background: satellite ? "rgba(15, 23, 42, 0.85)" : "rgba(255, 255, 255, 0.95)",
+  border: satellite ? "1px solid rgba(255,255,255,0.25)" : "1px solid rgba(15,23,42,0.15)",
+  boxShadow: "0 1px 4px rgba(0,0,0,0.3)",
+  textShadow: "none",
+});
+
+const setLiveLabel = (marker, position, text, satellite) => {
+  if (!marker) return;
+  marker.position = position;
+  setAdvancedMarkerLabel(marker, text, getLivePillStyle(satellite));
+  orientAdvancedMarkerLabel(marker, 0, -22);
+};
+
+const getAreaMeasureInfo = (type, overlay) => {
+  const gm = window.google.maps;
+  const spherical = gm.geometry.spherical;
+  if (type === "circle") {
+    const r = overlay.getRadius?.() ?? 0;
+    return { center: overlay.getCenter(), text: `r ${fmtLength(r)} · ${fmtArea(Math.PI * r * r)}` };
+  }
+  let points;
+  if (type === "rectangle") {
+    const b = overlay.getBounds?.();
+    if (!b) return null;
+    const ne = b.getNorthEast();
+    const sw = b.getSouthWest();
+    points = [sw, new gm.LatLng(ne.lat(), sw.lng()), ne, new gm.LatLng(sw.lat(), ne.lng())];
+  } else {
+    points = overlay.getPath?.()?.getArray?.() || [];
+  }
+  if (points.length < 3) return null;
+  const bounds = new gm.LatLngBounds();
+  points.forEach((pt) => bounds.extend(pt));
+  return {
+    center: bounds.getCenter(),
+    text: `${fmtArea(spherical.computeArea(points))} · P ${fmtLength(spherical.computeLength([...points, points[0]]))}`,
+  };
 };
 
 const createBoundsFromLatLngs = (a, b) => {
@@ -1083,12 +1162,12 @@ const getVertexMarkerIcon = (type, isFirst = false) => {
   const color = type === "polyline" ? "#ea580c" : "#1d4ed8";
   return {
     path: gm.SymbolPath.CIRCLE,
-    scale: isFirst ? 6 : 5,
+    scale: isFirst ? 3.6 : 3,
     fillColor: color,
     fillOpacity: 1,
     strokeColor: "#ffffff",
     strokeOpacity: 1,
-    strokeWeight: 2,
+    strokeWeight: 1.2,
   };
 };
 
@@ -1176,8 +1255,10 @@ function DrawingToolsLayerComponent({
   logPolygonOffsetMeters = 50,
   onUIChange,
   terrainEnabled = false,
+  showSegmentLabels = false,
 }) {
   const [activeDraft, setActiveDraft] = useState(null);
+  const [isSatellite, setIsSatellite] = useState(() => isSatelliteMapType(map?.getMapTypeId?.()));
   const activeDrawingRef = useRef(null);
   const logsRef = useRef(logs);
   const shapesRef = useRef([]);
@@ -1188,6 +1269,11 @@ function DrawingToolsLayerComponent({
   const registerCompletedShapeRef = useRef(null);
   const finishActiveDrawingRef = useRef(null);
   const cancelActiveDrawingRef = useRef(null);
+  const undoActiveDrawingRef = useRef(null);
+  const isSatelliteRef = useRef(isSatellite);
+  isSatelliteRef.current = isSatellite;
+  const showSegmentLabelsRef = useRef(showSegmentLabels);
+  showSegmentLabelsRef.current = showSegmentLabels;
   const shapeModeRef = useRef(shapeMode);
   const resolvedPolygonOpacity = clampOpacity(polygonOpacity);
   const resolvedPolygonFillOpacity =
@@ -1382,12 +1468,13 @@ function DrawingToolsLayerComponent({
       window.google.maps.event.removeListener(listener),
     );
     clearVertexMarkers(active.vertexMarkers);
+    if (active.liveLabel) active.liveLabel.map = null;
 
     if (completeIfPossible && active.overlay && pointCount >= minPoints) {
       if (active.points) active.overlay.setPath(active.points);
       active.overlay.setOptions?.({
         clickable: true,
-        editable: true,
+        editable: false,
         draggable: true,
         ...(active.finalOptions || {}),
       });
@@ -1420,12 +1507,64 @@ function DrawingToolsLayerComponent({
     const isMeasurementTool = type === "polyline";
     const entry = reAnalyzeShapeRef.current?.(shapeObj);
     const listeners = [];
+    // Polygons/polylines are edited through the small custom vertex dots. Google's native
+    // edit handles (large white circles) are only shown for the one selected rectangle/circle.
+    if (type === "rectangle" || type === "circle") {
+      listeners.push(
+        window.google.maps.event.addListener(overlay, "click", () => {
+          shapesRef.current.forEach((s) => {
+            if (s.type === "rectangle" || s.type === "circle") {
+              s.overlay.setOptions?.({ editable: s === shapeObj });
+            }
+          });
+        }),
+      );
+    }
     const update = () => {
       window.clearTimeout(shapeObj.analysisTimer);
       shapeObj.analysisTimer = window.setTimeout(
         () => reAnalyzeShapeRef.current?.(shapeObj),
         180,
       );
+    };
+    const isAreaShape = type === "polygon" || type === "rectangle" || type === "circle";
+    const updateMeasureLabel = () => {
+      if (!isAreaShape) return;
+      const info = getAreaMeasureInfo(type, overlay);
+      if (!info) return;
+      shapeObj.labelMarker = shapeObj.labelMarker || createLabelMarker(map, info.center);
+      if (!shapeObj.labelMarker) return;
+      shapeObj.labelMarker.position = info.center;
+      setAdvancedMarkerLabel(shapeObj.labelMarker, info.text, { fontSize: "13px" });
+      orientAdvancedMarkerLabel(shapeObj.labelMarker, 0, 0);
+    };
+    // Optional per-segment lengths, only at street-level zoom so they never clutter the map.
+    const rebuildSegmentLabels = () => {
+      (shapeObj.segmentLabels || []).forEach((m) => { m.map = null; });
+      shapeObj.segmentLabels = [];
+      if (type !== "polygon" && type !== "polyline") return;
+      if (!showSegmentLabelsRef.current || (map.getZoom?.() ?? 0) < 15) return;
+      const pts = overlay.getPath?.()?.getArray?.() || [];
+      const segCount = type === "polygon" ? pts.length : pts.length - 1;
+      if (segCount < 1 || segCount > 60 || (type === "polyline" && segCount === 1)) return;
+      const spherical = window.google.maps.geometry.spherical;
+      for (let i = 0; i < segCount; i += 1) {
+        const a = pts[i];
+        const b = pts[(i + 1) % pts.length];
+        const marker = createLabelMarker(map, spherical.interpolate(a, b, 0.5));
+        if (!marker) continue;
+        setAdvancedMarkerLabel(marker, fmtLength(spherical.computeDistanceBetween(a, b)), {
+          fontSize: "11px",
+          fontWeight: "600",
+        });
+        orientAdvancedMarkerLabel(marker, getScreenAngleDeg(a, b), -9);
+        shapeObj.segmentLabels.push(marker);
+      }
+    };
+    shapeObj.rebuildSegmentLabels = rebuildSegmentLabels;
+    const refreshLabels = () => {
+      updateMeasureLabel();
+      rebuildSegmentLabels();
     };
     const rebuildVertexMarkers = () => {
       if (shapeObj.suppressVertexMarkers) return;
@@ -1453,7 +1592,7 @@ function DrawingToolsLayerComponent({
 
     if (type === "polyline") {
       const updateDistanceLabel = () => {
-        const { length, center } = getPolylineDetails(overlay);
+        const { length, center, angle } = getPolylineDetails(overlay);
         const displayedLength = terrainEnabled && shapeObj.terrainDistance
           ? shapeObj.terrainDistance
           : length;
@@ -1469,45 +1608,74 @@ function DrawingToolsLayerComponent({
           shapeObj.labelMarker.position = center;
         }
         setAdvancedMarkerLabel(shapeObj.labelMarker, text);
+        orientAdvancedMarkerLabel(shapeObj.labelMarker, angle);
       };
       const path = overlay.getPath?.();
       if (path) {
         listeners.push(window.google.maps.event.addListener(path, "set_at", () => {
           updateDistanceLabel();
           syncVertexMarkerPositions(shapeObj.vertexMarkers, path);
+          rebuildSegmentLabels();
           update();
         }));
         ["insert_at", "remove_at"].forEach((ev) =>
           listeners.push(window.google.maps.event.addListener(path, ev, () => {
             updateDistanceLabel();
             rebuildVertexMarkers();
+            rebuildSegmentLabels();
             update();
+          })),
+        );
+        ["drag", "dragend"].forEach((ev) =>
+          listeners.push(window.google.maps.event.addListener(overlay, ev, () => {
+            updateDistanceLabel();
+            syncVertexMarkerPositions(shapeObj.vertexMarkers, path);
+            if (ev === "dragend") rebuildSegmentLabels();
           })),
         );
         updateDistanceLabel();
         rebuildVertexMarkers();
+        rebuildSegmentLabels();
       }
     } else if (type === "polygon") {
       const path = overlay.getPath?.();
       if (path) {
         listeners.push(window.google.maps.event.addListener(path, "set_at", () => {
           syncVertexMarkerPositions(shapeObj.vertexMarkers, path);
+          refreshLabels();
           update();
         }));
         ["insert_at", "remove_at"].forEach((ev) =>
           listeners.push(window.google.maps.event.addListener(path, ev, () => {
             rebuildVertexMarkers();
+            refreshLabels();
             update();
           })),
         );
+        ["drag", "dragend"].forEach((ev) =>
+          listeners.push(window.google.maps.event.addListener(overlay, ev, () => {
+            syncVertexMarkerPositions(shapeObj.vertexMarkers, path);
+            updateMeasureLabel();
+            if (ev === "dragend") rebuildSegmentLabels();
+          })),
+        );
         rebuildVertexMarkers();
+        refreshLabels();
       }
     } else if (type === "rectangle") {
-      listeners.push(window.google.maps.event.addListener(overlay, "bounds_changed", update));
+      listeners.push(window.google.maps.event.addListener(overlay, "bounds_changed", () => {
+        updateMeasureLabel();
+        update();
+      }));
+      updateMeasureLabel();
     } else if (type === "circle") {
       ["radius_changed", "center_changed"].forEach((ev) =>
-        listeners.push(window.google.maps.event.addListener(overlay, ev, update)),
+        listeners.push(window.google.maps.event.addListener(overlay, ev, () => {
+          updateMeasureLabel();
+          update();
+        })),
       );
+      updateMeasureLabel();
     }
 
     shapeObj.listeners = listeners;
@@ -1568,6 +1736,7 @@ function DrawingToolsLayerComponent({
       type,
       resolvedPolygonOpacity,
       resolvedPolygonFillOpacity,
+      isSatelliteRef.current,
     );
 
     const finishPathShape = () => {
@@ -1601,23 +1770,45 @@ function DrawingToolsLayerComponent({
             "polygon",
             resolvedPolygonOpacity,
             resolvedPolygonFillOpacity,
+            isSatelliteRef.current,
           ),
           clickable: true,
-          editable: true,
+          editable: false,
           draggable: true,
         });
         active.overlay.setMap(null);
       } else {
         finalOverlay = active.overlay;
         finalOverlay.setPath(points);
-        finalOverlay.setOptions({ clickable: true, editable: true, draggable: true });
+        finalOverlay.setOptions({ clickable: true, editable: false, draggable: true });
       }
       cleanupActiveDrawing(true);
       registerCompletedShape(active.type, finalOverlay);
     };
 
     finishActiveDrawingRef.current = finishPathShape;
-    cancelActiveDrawingRef.current = () => cleanupActiveDrawing();
+    cancelActiveDrawingRef.current = () => {
+      cleanupActiveDrawing();
+      callbacksRef.current.onUIChange?.({ drawEnabled: false, shapeMode: null });
+    };
+
+    // Shortcuts: Esc cancels, Enter finishes, Backspace / Ctrl+Z removes the last point.
+    listeners.push(
+      gm.event.addDomListener(window, "keydown", (e) => {
+        const tag = e.target?.tagName;
+        if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || e.target?.isContentEditable) return;
+        if (e.key === "Escape") {
+          cancelActiveDrawingRef.current?.();
+        } else if (e.key === "Enter") {
+          finishActiveDrawingRef.current?.();
+        } else if (e.key === "Backspace" || e.key === "Delete" || ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z")) {
+          if (undoActiveDrawingRef.current) {
+            e.preventDefault();
+            undoActiveDrawingRef.current();
+          }
+        }
+      }),
+    );
 
     if (type === "log-polygon") {
       activeDrawingRef.current = { type, overlay: null, listeners };
@@ -1684,7 +1875,7 @@ function DrawingToolsLayerComponent({
             resolvedPolygonFillOpacity,
           ),
           clickable: true,
-          editable: true,
+          editable: false,
           draggable: true,
         });
 
@@ -1709,9 +1900,9 @@ function DrawingToolsLayerComponent({
             map,
             bounds: createBoundsFromLatLngs(startPoint, startPoint),
             strokeWeight: 1.5,
-            strokeColor: "#0f766e",
+            strokeColor: getShapeColor("select", isSatelliteRef.current),
             strokeOpacity: 0.9,
-            fillColor: "#14b8a6",
+            fillColor: getShapeColor("select", isSatelliteRef.current),
             fillOpacity: 0.08,
             clickable: false,
             editable: false,
@@ -1749,8 +1940,8 @@ function DrawingToolsLayerComponent({
       // its closing edge, making it look like a finished polygon after two points.
       const previewOptions =
         type === "polygon"
-          ? { strokeWeight: 2, strokeColor: "#1d4ed8", strokeOpacity: resolvedPolygonOpacity }
-          : { strokeWeight: 2, strokeColor: "#0057d9" };
+          ? { strokeWeight: isSatelliteRef.current ? 3 : 2, strokeColor: getShapeColor("area", isSatelliteRef.current), strokeOpacity: resolvedPolygonOpacity }
+          : { strokeWeight: isSatelliteRef.current ? 3 : 2, strokeColor: getShapeColor("line", isSatelliteRef.current) };
       const overlay = new gm.Polyline({
         map,
         path: [],
@@ -1770,7 +1961,7 @@ function DrawingToolsLayerComponent({
         finalOptions: type === "polygon" ? { fillOpacity: resolvedPolygonFillOpacity } : null,
         listeners,
       };
-      setActiveDraft({ type, pointCount: 0, canFinish: false });
+      setActiveDraft({ type, pointCount: 0, canFinish: false, canUndo: false });
 
       const addDraftVertexMarker = (position, index) => {
         const markerEntry = createVertexMarker({
@@ -1796,6 +1987,41 @@ function DrawingToolsLayerComponent({
         activeDrawingRef.current?.vertexMarkers?.push(markerEntry);
       };
 
+      const minPathPoints = type === "polygon" ? 3 : 2;
+      let hotIndex = -1;
+      const setHotVertex = (index) => {
+        if (index === hotIndex) return;
+        const markers = activeDrawingRef.current?.vertexMarkers || [];
+        const setScale = (i, on) => {
+          const el = markers[i]?.marker?.content;
+          if (!el) return;
+          el.style.transition = "transform 120ms ease-out";
+          el.style.transform = on ? "scale(2)" : "";
+        };
+        if (hotIndex >= 0) setScale(hotIndex, false);
+        if (index >= 0) setScale(index, true);
+        hotIndex = index;
+      };
+
+      undoActiveDrawingRef.current = () => {
+        if (activeDrawingRef.current?.overlay !== overlay || committedPoints.length === 0) return;
+        setHotVertex(-1);
+        committedPoints.pop();
+        const last = activeDrawingRef.current.vertexMarkers.pop();
+        if (last) clearVertexMarkers([last]);
+        overlay.setPath(committedPoints);
+        if (committedPoints.length === 0 && activeDrawingRef.current.liveLabel) {
+          activeDrawingRef.current.liveLabel.map = null;
+          activeDrawingRef.current.liveLabel = null;
+        }
+        setActiveDraft({
+          type,
+          pointCount: committedPoints.length,
+          canFinish: committedPoints.length >= minPathPoints,
+          canUndo: committedPoints.length > 0,
+        });
+      };
+
       listeners.push(
         gm.event.addListener(map, "click", (event) => {
           if (!event.latLng) {
@@ -1804,6 +2030,7 @@ function DrawingToolsLayerComponent({
           if (activeDrawingRef.current?.overlay !== overlay) {
             return;
           }
+          setHotVertex(-1);
           if (type === "polygon") {
             if (isClosingVertex(committedPoints, event.latLng)) {
               finishPathShape();
@@ -1833,7 +2060,8 @@ function DrawingToolsLayerComponent({
           setActiveDraft({
             type,
             pointCount: committedPoints.length,
-            canFinish: committedPoints.length >= (type === "polygon" ? 3 : 2),
+            canFinish: committedPoints.length >= minPathPoints,
+            canUndo: true,
           });
         }),
       );
@@ -1843,6 +2071,26 @@ function DrawingToolsLayerComponent({
           if (!event.latLng || activeDrawingRef.current?.overlay !== overlay) return;
           if (committedPoints.length === 0) return;
           overlay.setPath([...committedPoints, event.latLng]);
+
+          // Highlight the vertex that a click would close/finish on.
+          const closing = type === "polygon"
+            ? committedPoints.length >= 3 && isClosingVertex(committedPoints, event.latLng)
+            : committedPoints.length >= 2 && isEndingPolyline(committedPoints, event.latLng);
+          setHotVertex(closing ? (type === "polygon" ? 0 : committedPoints.length - 1) : -1);
+
+          // Live readout: running total and current segment (plus area for polygons).
+          const spherical = gm.geometry?.spherical;
+          const active = activeDrawingRef.current;
+          if (!spherical || !active) return;
+          const segment = spherical.computeDistanceBetween(committedPoints[committedPoints.length - 1], event.latLng);
+          const total = spherical.computeLength(committedPoints) + segment;
+          let text = `${fmtLength(total)} (+${fmtLength(segment)})`;
+          if (type === "polygon" && committedPoints.length >= 2) {
+            text = `${fmtArea(spherical.computeArea([...committedPoints, event.latLng]))} · ${text}`;
+          }
+          if (closing) text = type === "polygon" ? "Click to close shape" : "Click to finish line";
+          active.liveLabel = active.liveLabel || createLabelMarker(map, event.latLng);
+          setLiveLabel(active.liveLabel, event.latLng, text, isSatelliteRef.current);
         }),
       );
 
@@ -1861,8 +2109,8 @@ function DrawingToolsLayerComponent({
 
       toast.info(
         type === "polygon"
-          ? "Click points on the map. Click the first point, double-click, or right-click to finish."
-          : "Click line points. Click the last point, double-click, or right-click to finish.",
+          ? "Click points on the map. Click the first point, double-click, Enter or right-click to finish. Backspace undoes."
+          : "Click line points. Click the last point, double-click, Enter or right-click to finish. Backspace undoes.",
         { position: "bottom-right", autoClose: 2500 },
       );
     } else if (type === "rectangle" || type === "circle") {
@@ -1870,7 +2118,14 @@ function DrawingToolsLayerComponent({
       let overlay = null;
       let hasDragged = false;
 
+      let liveLabel = null;
+      const removeLiveLabel = () => {
+        if (liveLabel) liveLabel.map = null;
+        liveLabel = null;
+      };
+
       const resetDragShape = () => {
+        removeLiveLabel();
         overlay?.setMap(null);
         overlay = null;
         startPoint = null;
@@ -1886,7 +2141,7 @@ function DrawingToolsLayerComponent({
         }
 
         const completedOverlay = overlay;
-        completedOverlay.setOptions({ clickable: true, editable: true, draggable: true });
+        completedOverlay.setOptions({ clickable: true, editable: false, draggable: true });
         overlay = null;
         startPoint = null;
         hasDragged = false;
@@ -1921,7 +2176,8 @@ function DrawingToolsLayerComponent({
             });
           }
 
-          activeDrawingRef.current = { type, overlay, listeners };
+          liveLabel = createLabelMarker(map, startPoint);
+          activeDrawingRef.current = { type, overlay, listeners, liveLabel };
         }),
       );
 
@@ -1935,10 +2191,19 @@ function DrawingToolsLayerComponent({
           if (distance > 1) hasDragged = true;
 
           if (type === "rectangle") {
-            overlay.setBounds(createBoundsFromLatLngs(startPoint, event.latLng));
+            const bounds = createBoundsFromLatLngs(startPoint, event.latLng);
+            overlay.setBounds(bounds);
+            if (gm.geometry?.spherical) {
+              const ne = bounds.getNorthEast();
+              const sw = bounds.getSouthWest();
+              const w = gm.geometry.spherical.computeDistanceBetween(sw, new gm.LatLng(sw.lat(), ne.lng()));
+              const h = gm.geometry.spherical.computeDistanceBetween(sw, new gm.LatLng(ne.lat(), sw.lng()));
+              setLiveLabel(liveLabel, event.latLng, `${fmtLength(w)} × ${fmtLength(h)}`, isSatelliteRef.current);
+            }
           } else {
             const radius = gm.geometry?.spherical ? distance : 1;
             overlay.setRadius(Math.max(radius, 1));
+            setLiveLabel(liveLabel, event.latLng, `r ${fmtLength(radius)}`, isSatelliteRef.current);
           }
         }),
       );
@@ -1960,6 +2225,7 @@ function DrawingToolsLayerComponent({
     return () => {
       finishActiveDrawingRef.current = null;
       cancelActiveDrawingRef.current = null;
+      undoActiveDrawingRef.current = null;
       cleanupActiveDrawing(false);
     };
   }, [
@@ -2041,6 +2307,7 @@ function DrawingToolsLayerComponent({
       s.overlay?.setMap(null);
       s.gridOverlays?.forEach(r => r.setMap(null));
       if (s.labelMarker) s.labelMarker.map = null;
+      (s.segmentLabels || []).forEach((m) => { m.map = null; });
       clearVertexMarkers(s.vertexMarkers);
     });
     shapesRef.current = [];
@@ -2056,6 +2323,50 @@ function DrawingToolsLayerComponent({
     }
   }, [logs, sessions, selectedMetric, thresholds, pixelateRect, cellSizeMeters, colorizeCells, reAnalyzeShape]);
 
+  // Recolor existing shapes when the basemap switches between map and satellite.
+  useEffect(() => {
+    shapesRef.current.forEach((s) => {
+      if (s.type === "polyline") {
+        s.overlay.setOptions?.({ strokeColor: getShapeColor("line", isSatellite), strokeWeight: isSatellite ? 3 : 2 });
+      } else if (s.type === "polygon" || s.type === "rectangle" || s.type === "circle") {
+        const color = getShapeColor("area", isSatellite);
+        s.overlay.setOptions?.({ strokeColor: color, fillColor: color, strokeWeight: isSatellite ? 3 : 2 });
+      }
+    });
+  }, [isSatellite]);
+
+  // Segment labels follow the toggle and only render at street-level zoom.
+  useEffect(() => {
+    const refresh = () => shapesRef.current.forEach((s) => s.rebuildSegmentLabels?.());
+    refresh();
+    if (!map?.addListener) return undefined;
+    const listener = map.addListener("idle", refresh);
+    return () => listener.remove();
+  }, [map, showSegmentLabels]);
+
+  // Clicking empty map deselects rectangle/circle so their native edit handles disappear.
+  useEffect(() => {
+    if (!map?.addListener) return undefined;
+    const listener = map.addListener("click", () => {
+      shapesRef.current.forEach((s) => {
+        if (s.type === "rectangle" || s.type === "circle") s.overlay.setOptions?.({ editable: false });
+      });
+    });
+    return () => listener.remove();
+  }, [map]);
+
+  // Keep text readable on the current basemap: black on map, light on satellite.
+  useEffect(() => {
+    if (!map?.addListener) return undefined;
+    const sync = () => {
+      setIsSatellite(isSatelliteMapType(map.getMapTypeId?.()));
+      shapesRef.current.forEach((s) => refreshAdvancedMarkerLabelTheme(s.labelMarker));
+    };
+    sync();
+    const listener = map.addListener("maptypeid_changed", sync);
+    return () => listener.remove();
+  }, [map]);
+
   if (!activeDraft || !enabled || !shapeMode) return null;
 
   const draftLabel =
@@ -2063,24 +2374,44 @@ function DrawingToolsLayerComponent({
       ? `${activeDraft.pointCount} point${activeDraft.pointCount === 1 ? "" : "s"}`
       : `${activeDraft.pointCount} segment point${activeDraft.pointCount === 1 ? "" : "s"}`;
 
+  const barTone = isSatellite
+    ? "border-white/15 bg-slate-900/80 text-slate-100"
+    : "border-slate-200 bg-white/95 text-slate-900";
+  const cancelTone = isSatellite
+    ? "border-white/25 text-slate-100 hover:bg-white/10"
+    : "border-slate-300 text-slate-800 hover:bg-slate-100";
+
   return (
-    <div className="absolute bottom-4 left-1/2 z-[700] -translate-x-1/2 rounded-md border border-slate-200 bg-white/95 px-3 py-2 shadow-lg backdrop-blur-sm">
-      <div className="flex items-center gap-2 text-xs text-slate-700">
-        <span className="font-medium capitalize">{activeDraft.type}</span>
-        <span className="text-slate-400">|</span>
-        <span>{draftLabel}</span>
+    <div className={`absolute bottom-4 left-1/2 z-[700] -translate-x-1/2 rounded-full border px-4 py-2 shadow-xl backdrop-blur-md ${barTone}`}>
+      <div className="flex items-center gap-2.5 text-xs">
+        <span className="h-2 w-2 animate-pulse rounded-full bg-blue-500" />
+        <span className="font-semibold capitalize">{activeDraft.type}</span>
+        <span className="opacity-40">|</span>
+        <span className="opacity-80">{draftLabel}</span>
+        <span className="hidden text-[10px] opacity-60 md:inline">Backspace undo · Enter finish · Esc cancel</span>
+        {undoActiveDrawingRef.current && (
+          <button
+            type="button"
+            disabled={!activeDraft.canUndo}
+            onClick={() => undoActiveDrawingRef.current?.()}
+            title="Undo last point (Backspace)"
+            className={`ml-1 rounded-full border px-3 py-1 font-medium transition disabled:cursor-not-allowed disabled:opacity-40 ${cancelTone}`}
+          >
+            Undo
+          </button>
+        )}
         <button
           type="button"
           disabled={!activeDraft.canFinish}
           onClick={() => finishActiveDrawingRef.current?.()}
-          className="ml-2 rounded bg-blue-600 px-2.5 py-1 font-medium text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-slate-300"
+          className="ml-1 rounded-full bg-blue-600 px-3 py-1 font-medium text-white transition hover:bg-blue-500 disabled:cursor-not-allowed disabled:bg-slate-400/60"
         >
           Finish
         </button>
         <button
           type="button"
           onClick={() => cancelActiveDrawingRef.current?.()}
-          className="rounded border border-slate-300 px-2.5 py-1 font-medium text-slate-700 transition hover:bg-slate-100"
+          className={`rounded-full border px-3 py-1 font-medium transition ${cancelTone}`}
         >
           Cancel
         </button>

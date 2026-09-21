@@ -1,12 +1,16 @@
 // src/components/map/overlays/SessionsLayer.jsx
 import React, { useEffect, useRef } from "react";
 import { MarkerClusterer } from "@googlemaps/markerclusterer";
-import { ADVANCED_MARKER_CLUSTER_RENDERER, createAdvancedMarker } from "@/lib/advancedMarkers";
+import { ADVANCED_MARKER_CLUSTER_RENDERER, createAdvancedMarker, createDotMarkerContent } from "@/lib/advancedMarkers";
 
 // Fast imperative sessions markers
 export default function SessionsLayer({ map, sessions, onClick, cluster = true }) {
   const clustererRef = useRef(null);
   const markersRef = useRef([]);
+  // Keep the latest handler without making it an effect dependency, so a new
+  // callback identity never tears down and rebuilds every marker.
+  const onClickRef = useRef(onClick);
+  onClickRef.current = onClick;
 
   useEffect(() => {
     if (!map) return;
@@ -45,9 +49,10 @@ export default function SessionsLayer({ map, sessions, onClick, cluster = true }
           position,
           title,
           clickable: true,
+          content: createDotMarkerContent(),
         });
         if (!marker) return null;
-        const handleClick = () => onClick?.(s);
+        const handleClick = () => onClickRef.current?.(s);
         marker.addEventListener("gmp-click", handleClick);
         marker.__sessionClickHandler = handleClick;
         return marker;
@@ -76,7 +81,7 @@ export default function SessionsLayer({ map, sessions, onClick, cluster = true }
       });
       markersRef.current = [];
     };
-  }, [map, sessions, onClick, cluster]);
+  }, [map, sessions, cluster]);
 
   return null;
 }

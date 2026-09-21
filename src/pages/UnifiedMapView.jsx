@@ -7953,6 +7953,7 @@ const UnifiedMapView = () => {
                 cellSizeMeters={ui.drawCellSizeMeters}
                 logPolygonOffsetMeters={ui.drawLogPolygonOffsetMeters}
                 colorizeCells={ui.colorizeCells}
+                showSegmentLabels={Boolean(ui.showSegmentLabels)}
                 polygonOpacity={DRAWN_POLYGON_OPACITY}
                 polygonFillOpacity={DRAWN_POLYGON_FILL_OPACITY}
                 shapeMode={ui.shapeMode}

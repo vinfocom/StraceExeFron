@@ -18,23 +18,26 @@ import { useMapContext } from "@/context/MapContext";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 
-const ToolButton = ({ icon: Icon, active, onClick, title, variant = "ghost" }) => (
-  <button
-    onClick={(e) => { e.stopPropagation(); onClick(e); }}
-    title={title}
-    className={`
-      p-2 rounded-full transition-all duration-200 flex items-center justify-center flex-shrink-0
-      ${active 
-        ? "bg-blue-100 text-blue-700 shadow-sm ring-1 ring-blue-200" 
-        : variant === "destructive" 
-          ? "hover:bg-red-50 text-gray-600 hover:text-red-600" 
-          : "hover:bg-slate-100 text-gray-700"
-      }
-    `}
-  >
-    <Icon size={18} strokeWidth={active ? 2.5 : 2} />
-  </button>
-);
+const ToolButton = ({ icon: Icon, active, onClick, title, variant = "ghost", dark = false }) => {
+  const idle = variant === "destructive"
+    ? dark ? "text-red-300 hover:bg-red-500/20 hover:text-red-200" : "text-slate-700 hover:bg-red-50 hover:text-red-600"
+    : dark ? "text-slate-100 hover:bg-white/15" : "text-slate-800 hover:bg-slate-100";
+  const on = dark
+    ? "bg-blue-500/30 text-blue-200 ring-1 ring-blue-300/50"
+    : "bg-blue-100 text-blue-700 ring-1 ring-blue-200";
+  return (
+    <button
+      type="button"
+      onClick={(e) => { e.stopPropagation(); onClick(e); }}
+      title={title}
+      aria-label={title}
+      aria-pressed={Boolean(active)}
+      className={`flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full transition-colors duration-150 ${active ? on : idle}`}
+    >
+      <Icon size={18} strokeWidth={active ? 2.5 : 2} />
+    </button>
+  );
+};
 
 const DrawingControlsPanel = memo(function DrawingControlsPanel({
   ui: propUi,
@@ -118,6 +121,11 @@ const DrawingControlsPanel = memo(function DrawingControlsPanel({
     onUIChange?.({ [key]: value });
   }, [onUIChange]);
 
+  // Black text on map/terrain, light text on satellite/hybrid.
+  const dark = ["satellite", "hybrid"].includes(safeUi.basemapStyle);
+  const plainBtn = dark ? "text-slate-100 hover:bg-white/15" : "text-slate-800 hover:bg-slate-100";
+  const divider = <div className={`mx-1 h-5 w-px flex-shrink-0 ${dark ? "bg-white/25" : "bg-slate-300"}`} />;
+
   const positionClasses = {
     "top-right": "absolute top-3 right-16",
     "top-left": "absolute top-4 left-4",
@@ -135,14 +143,13 @@ const DrawingControlsPanel = memo(function DrawingControlsPanel({
       
       <div
         className={`
-          relative backdrop-blur-md shadow-xl border border-white/20 ring-1 ring-black/5
-          transition-all duration-500 ease-out
+          relative backdrop-blur-md shadow-xl border
+          transition-all duration-300 ease-out
           flex items-center overflow-hidden
+          ${dark ? "border-white/15 bg-slate-900/80" : "border-slate-200 bg-white/95"}
           ${isExpanded 
-            ? `${isCompactViewport
-                ? "w-full rounded-2xl bg-white/95 p-1.5"
-                : "rounded-full bg-white/95 p-1.5"}`
-            : "h-11 w-11 cursor-pointer rounded-full bg-slate-700/95 hover:bg-slate-600/95"
+            ? `${isCompactViewport ? "w-full rounded-2xl p-1.5" : "rounded-full p-1.5"}`
+            : `h-11 w-11 cursor-pointer rounded-full ${dark ? "hover:bg-slate-800/90" : "hover:bg-slate-100"}`
           }
         `}
         onClick={!isExpanded ? () => setIsExpanded(true) : undefined}
@@ -158,7 +165,7 @@ const DrawingControlsPanel = memo(function DrawingControlsPanel({
             }
           `}
         >
-          <PenTool size={20} className="text-white" />
+          <PenTool size={20} className={dark ? "text-slate-100" : "text-slate-800"} />
         </div>
 
         {/* TOOLBAR CONTENT (Visible when expanded) */}
@@ -175,74 +182,82 @@ const DrawingControlsPanel = memo(function DrawingControlsPanel({
             {/* Close Button (kept first so it's always reachable) */}
             <button
               onClick={(e) => { e.stopPropagation(); setIsExpanded(false); }}
-              className="p-2 rounded-full hover:bg-slate-100 text-slate-400 hover:text-slate-700 transition-colors flex-shrink-0"
+              className={`flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full transition-colors ${plainBtn}`}
               title="Close Toolbar"
+              aria-label="Close Toolbar"
             >
               <X size={18} />
             </button>
 
-            <div className="w-px h-5 bg-gray-300 mx-1 flex-shrink-0" />
+            {divider}
 
             {/* Cursor / Select */}
             <ToolButton 
+              dark={dark}
               icon={MousePointer2} 
               title="Cursor / Pan (Escape Drawing)"
               active={!safeUi.drawEnabled}
               onClick={deactivateTool}
             />
             
-            <div className="w-px h-5 bg-gray-200 mx-1 flex-shrink-0" />
+            {divider}
 
             {/* Drawing Tools */}
             <ToolButton 
+              dark={dark}
               icon={Hexagon} 
-              title="Draw Polygon"
+              title="Draw Polygon (area, blue)"
               active={safeUi.drawEnabled && safeUi.shapeMode === "polygon"}
               onClick={() => activateTool("polygon")}
             />
             <ToolButton 
+              dark={dark}
               icon={Square} 
-              title="Draw Rectangle"
+              title="Draw Rectangle (area, blue)"
               active={safeUi.drawEnabled && safeUi.shapeMode === "rectangle"}
               onClick={() => activateTool("rectangle")}
             />
             <ToolButton 
+              dark={dark}
               icon={Circle} 
-              title="Draw Circle"
+              title="Draw Circle (area, blue)"
               active={safeUi.drawEnabled && safeUi.shapeMode === "circle"}
               onClick={() => activateTool("circle")}
             />
             <ToolButton 
+              dark={dark}
               icon={Ruler} 
-              title="Draw Line / Measure Distance"
+              title="Draw Line / Measure Distance (orange)"
               active={safeUi.drawEnabled && safeUi.shapeMode === "polyline"}
               onClick={() => activateTool("polyline")}
             />
             <ToolButton
+              dark={dark}
               icon={Crosshair}
-              title="Select Logs and Draw Offset Route Polygon"
+              title="Select Logs and Draw Offset Route Polygon (teal)"
               active={safeUi.drawEnabled && safeUi.shapeMode === "log-polygon"}
               onClick={() => activateTool("log-polygon")}
             />
 
-            <div className="w-px h-5 bg-gray-200 mx-1 flex-shrink-0" />
+            {divider}
 
             {/* Settings Popover */}
             <Popover>
               <PopoverTrigger asChild>
                 <button 
                   onClick={(e) => e.stopPropagation()}
-                  className={`
-                    p-2 rounded-full hover:bg-slate-100 transition-colors flex-shrink-0
-                    ${safeUi.drawPixelateRect ? 'text-blue-600' : 'text-gray-700'}
-                  `}
+                  title="Analysis Settings"
+                  aria-label="Analysis Settings"
+                  className={`flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full transition-colors ${
+                    safeUi.drawPixelateRect ? (dark ? "bg-blue-500/30 text-blue-200" : "bg-blue-100 text-blue-700") : plainBtn
+                  }`}
                 >
                   <Settings2 size={18} />
                 </button>
               </PopoverTrigger>
               <PopoverContent className="w-64 p-3" align="end">
                 <div className="space-y-3">
-                    <h4 className="font-medium text-sm text-gray-900 border-b pb-2">Analysis Settings</h4>
+                    <h4 className="font-medium text-sm text-slate-900 border-b pb-2">Analysis Settings</h4>
                     
                     <label className="flex items-center gap-2 cursor-pointer">
                       <input
@@ -252,34 +267,44 @@ const DrawingControlsPanel = memo(function DrawingControlsPanel({
                         disabled={safeUi.shapeMode === "polyline"}
                         className="rounded text-blue-600 focus:ring-blue-500"
                       />
-                      <span className="text-sm text-gray-700">Pixelate Grid Analysis</span>
+                      <span className="text-sm text-slate-900">Pixelate Grid Analysis</span>
                     </label>
 
                     <div className="flex items-center gap-2">
-                      <span className="text-xs text-gray-600 w-16">Fill Gap:</span>
+                      <span className="text-xs text-slate-800 w-20">Fill Gap:</span>
                       <input
                         type="number"
                         min={5}
                         step={5}
                         value={safeUi.drawCellSizeMeters}
                         onChange={(e) => updateSetting('drawCellSizeMeters', Number(e.target.value))}
-                        className="flex-1 border rounded px-2 py-1 text-xs"
+                        className="flex-1 rounded border border-slate-300 bg-white px-2 py-1 text-xs text-slate-900 focus:border-blue-500 focus:outline-none"
                       />
-                      <span className="text-xs text-gray-500">m</span>
+                      <span className="text-xs text-slate-700">m</span>
                     </div>
 
                     <div className="flex items-center gap-2">
-                      <span className="text-xs text-gray-600 w-16">Route Offset:</span>
+                      <span className="text-xs text-slate-800 w-20">Route Offset:</span>
                       <input
                         type="number"
                         min={1}
                         step={5}
                         value={safeUi.drawLogPolygonOffsetMeters}
                         onChange={(e) => updateSetting('drawLogPolygonOffsetMeters', Number(e.target.value))}
-                        className="flex-1 border rounded px-2 py-1 text-xs"
+                        className="flex-1 rounded border border-slate-300 bg-white px-2 py-1 text-xs text-slate-900 focus:border-blue-500 focus:outline-none"
                       />
-                      <span className="text-xs text-gray-500">m</span>
+                      <span className="text-xs text-slate-700">m</span>
                     </div>
+
+                    <label className="flex items-center gap-2 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={Boolean(safeUi.showSegmentLabels)}
+                        onChange={(e) => updateSetting('showSegmentLabels', e.target.checked)}
+                        className="rounded text-blue-600 focus:ring-blue-500"
+                      />
+                      <span className="text-sm text-slate-900">Segment lengths (zoom 15+)</span>
+                    </label>
 
                     {safeUi.drawPixelateRect && (
                       <div className="pl-6 space-y-2">
@@ -290,7 +315,7 @@ const DrawingControlsPanel = memo(function DrawingControlsPanel({
                             onChange={(e) => updateSetting('colorizeCells', e.target.checked)}
                             className="rounded text-blue-600"
                           />
-                          <span className="text-xs text-gray-600">Colorize by Metric</span>
+                          <span className="text-xs text-slate-800">Colorize by Metric</span>
                         </label>
                       </div>
                     )}
@@ -299,6 +324,7 @@ const DrawingControlsPanel = memo(function DrawingControlsPanel({
             </Popover>
 
             <ToolButton
+              dark={dark}
               icon={PaintBucket}
               title="Fill latest drawing with generated logs"
               active={false}
@@ -310,8 +336,9 @@ const DrawingControlsPanel = memo(function DrawingControlsPanel({
               <PopoverTrigger asChild>
                 <button 
                   onClick={(e) => e.stopPropagation()}
-                  className="p-2 rounded-full hover:bg-slate-100 text-gray-700 transition-colors flex-shrink-0" 
+                  className={`flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full transition-colors ${plainBtn}`}
                   title="Export Data"
+                  aria-label="Export Data"
                 >
                     <Download size={18} />
                 </button>
@@ -328,9 +355,10 @@ const DrawingControlsPanel = memo(function DrawingControlsPanel({
               </PopoverContent>
             </Popover>
 
-            <div className="w-px h-5 bg-gray-200 mx-1 flex-shrink-0" />
+            {divider}
 
             <ToolButton 
+              dark={dark}
               icon={Trash2} 
               title="Clear All Drawings"
               variant="destructive"
