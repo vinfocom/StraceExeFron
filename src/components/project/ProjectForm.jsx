@@ -17,7 +17,6 @@ import {
   ChevronUp,
   Trash2,
 } from "lucide-react";
-import { Alert, AlertDescription } from "@/components/ui/alert";
 import {
   Card,
   CardContent,
@@ -587,6 +586,7 @@ export const ProjectForm = ({
     let projectId = null;
     let projectData = null;
     let predictionResult = null;
+    let buildingProcessingToastId = null;
     const completedSteps = [];
 
     try {
@@ -647,6 +647,9 @@ export const ProjectForm = ({
 
       if (selectedPolygonData?.wkt) {
         setCurrentStep("Generating buildings...");
+        buildingProcessingToastId = toast.loading(
+          "Processing building and cluster data..."
+        );
 
         try {
           const buildingPayload = {
@@ -662,12 +665,19 @@ export const ProjectForm = ({
           );
 
           if (buildingRes.Status === 1 || buildingRes.success) {
+            toast.dismiss(buildingProcessingToastId);
+            buildingProcessingToastId = null;
             toast.success(
               `Generated ${buildingRes.Stats?.extracted || 0} buildings`
             );
             completedSteps.push("buildings_generated");
+          } else {
+            toast.dismiss(buildingProcessingToastId);
+            buildingProcessingToastId = null;
           }
         } catch (err) {
+          toast.dismiss(buildingProcessingToastId);
+          buildingProcessingToastId = null;
           toast.warn("Building generation skipped");
         }
 
@@ -808,6 +818,11 @@ export const ProjectForm = ({
         });
       }
     } catch (err) {
+      if (buildingProcessingToastId) {
+        toast.dismiss(buildingProcessingToastId);
+        buildingProcessingToastId = null;
+      }
+
       let errorMessage = "Failed to create project";
       if (err.response?.data?.Message) {
         errorMessage = err.response.data.Message;
@@ -819,6 +834,9 @@ export const ProjectForm = ({
 
       toast.error(errorMessage, { autoClose: 8000 });
     } finally {
+      if (buildingProcessingToastId) {
+        toast.dismiss(buildingProcessingToastId);
+      }
       setLoading(false);
       setCurrentStep("");
     }
@@ -1021,7 +1039,7 @@ export const ProjectForm = ({
             >
               {loading ? (
                 <>
-                  <Spinner className="mr-2 h-4 w-4" />
+                  <Spinner className="mr-2 h-6 w-6" />
                   Processing...
                 </>
               ) : (
