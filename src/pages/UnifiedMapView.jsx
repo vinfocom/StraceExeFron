@@ -1827,6 +1827,7 @@ const UnifiedMapView = () => {
     const param = searchParams.get("project_id") ?? searchParams.get("project");
     return param ? Number(param) : null;
   }, [searchParams]);
+  const hasOpenProject = Number.isSafeInteger(projectId) && projectId > 0;
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -1873,7 +1874,8 @@ const UnifiedMapView = () => {
 
   const [showPolygons, setShowPolygons] = useState(false);
   const [showClutterTiles, setShowClutterTiles] = useState(false);
-  const clutterTilesEnabled = CLUTTER_TILES_FEATURE_AVAILABLE && showClutterTiles;
+  const clutterTilesEnabled =
+    CLUTTER_TILES_FEATURE_AVAILABLE && hasOpenProject && showClutterTiles;
   const [sourceGeometryLayers, setSourceGeometryLayers] = useState({
     buildings: false,
     roads: false,

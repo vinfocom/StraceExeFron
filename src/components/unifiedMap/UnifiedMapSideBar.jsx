@@ -3559,7 +3559,7 @@ const UnifiedMapSidebar = ({
                   : !canLoadClutterTiles
                   ? projectId
                     ? "The selected project has an invalid ID"
-                    : "Select a project to load clutter tiles"
+                    : "Open a project to enable clutter tiles"
                   : clutterTileLoading
                     ? clutterTileCount > 0
                       ? `${clutterTileCount.toLocaleString()} clutter tiles shown; loading more...`

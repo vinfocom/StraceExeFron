@@ -226,7 +226,8 @@ export const OverviewTab = ({
   const [isGeneratingPpt, setIsGeneratingPpt] = useState(false);
   const [isPptBandDialogOpen, setIsPptBandDialogOpen] = useState(false);
   const [lockedBand, setLockedBand] = useState("all");
-  const [isEarfcnWise, setIsEarfcnWise] = useState(true);
+  const [pptTemplate, setPptTemplate] = useState("");
+  const [pptTechnologies, setPptTechnologies] = useState([]);
   const { user } = useAuth();
 
   const plottedExportLocations = useMemo(() => {
@@ -267,6 +268,16 @@ export const OverviewTab = ({
       setLockedBand("all");
     }
   }, [lockedBand, pptBandOptions]);
+
+  const pptTechnologyOptions = ["2G", "3G", "4G", "5G"];
+
+  const togglePptTechnology = useCallback((technology) => {
+    setPptTechnologies((current) =>
+      current.includes(technology)
+        ? current.filter((item) => item !== technology)
+        : [...current, technology],
+    );
+  }, []);
 
   const handleDownloadKml = useCallback(() => {
     try {
@@ -309,20 +320,26 @@ export const OverviewTab = ({
 
     if (isGeneratingPpt) return;
 
+    if (!pptTemplate) {
+      toast.error("Select a PPT template first.");
+      return;
+    }
+
+    if (pptTemplate === "stracer" && pptTechnologies.length === 0) {
+      toast.error("Select at least one technology for the Stracer template.");
+      return;
+    }
+
     const region = resolveUserRegion(user) || "india";
-    const numericUserId = Number(
-      user?.id ?? user?.user_id ?? user?.userId ?? user?.UserId ?? 0,
-    );
     const selectedSessionIds = sessionIds
       .map((id) => Number(id))
       .filter((id) => Number.isFinite(id) && id > 0);
     const payload = {
       project_id: numericProjectId,
       country_code: region,
-      region,
-      user_id: Number.isFinite(numericUserId) ? numericUserId : 0,
-      locked_bands: lockedBand === "all" ? [] : [lockedBand],
-      EarfcnMode: isEarfcnWise ? "with_earfcn_wise" : "without_earfcn_wise",
+      locked_bands: lockedBand,
+      template: pptTemplate,
+      technology: pptTechnologies,
       ...(selectedSessionIds.length > 0 ? { session_ids: selectedSessionIds } : {}),
     };
 
@@ -368,11 +385,13 @@ export const OverviewTab = ({
     } finally {
       setIsGeneratingPpt(false);
     }
-  }, [isEarfcnWise, isGeneratingPpt, lockedBand, projectId, sessionIds, user]);
+  }, [isGeneratingPpt, lockedBand, projectId, pptTechnologies, pptTemplate, sessionIds, user]);
 
   const handlePptButtonClick = useCallback(() => {
     if (isGeneratingPpt) return;
     setLockedBand("all");
+    setPptTemplate("");
+    setPptTechnologies([]);
     setIsPptBandDialogOpen(true);
   }, [isGeneratingPpt]);
 
@@ -753,7 +772,7 @@ export const OverviewTab = ({
 
       <Dialog open={isPptBandDialogOpen} onOpenChange={setIsPptBandDialogOpen}>
         <DialogContent
-          title="Select locked bands"
+          title="Configure PPT report"
           style={{
             width: "min(28rem, calc(100vw - 2rem))",
             background: "#0f172a",
@@ -762,49 +781,78 @@ export const OverviewTab = ({
           }}
         >
           <DialogHeader>
-            <DialogTitle style={{ color: "#f8fafc" }}>Select locked bands</DialogTitle>
+            <DialogTitle style={{ color: "#f8fafc" }}>Configure PPT report</DialogTitle>
             <DialogDescription style={{ color: "#94a3b8" }}>
-              Choose which band should be locked in the PowerPoint report.
+              Select a template and provide the filters for the PowerPoint report.
             </DialogDescription>
           </DialogHeader>
 
           <div className="space-y-2">
-            <label htmlFor="ppt-locked-bands" className="text-sm font-medium text-slate-200">
-              locked_bands
-            </label>
-            <select
-              id="ppt-locked-bands"
-              aria-label="locked_bands"
-              value={lockedBand}
-              onChange={(event) => setLockedBand(event.target.value)}
-              className="h-10 w-full rounded-md border border-slate-600 bg-slate-800 px-3 text-sm text-slate-100 outline-none focus:border-purple-400 focus:ring-2 focus:ring-purple-500/30"
-            >
-              <option value="all">All bands</option>
-              {pptBandOptions.map((band) => (
-                <option key={band} value={band}>
-                  {band}
-                </option>
+            <span className="text-sm font-medium text-slate-200">Template</span>
+            <div className="grid grid-cols-2 gap-2">
+              {["stracer", "taiwan"].map((template) => (
+                <button
+                  key={template}
+                  type="button"
+                  onClick={() => setPptTemplate(template)}
+                  className={`rounded-md border px-3 py-2 text-sm font-medium capitalize transition ${
+                    pptTemplate === template
+                      ? "border-purple-400 bg-purple-600/30 text-purple-100"
+                      : "border-slate-600 bg-slate-800 text-slate-300 hover:bg-slate-700"
+                  }`}
+                >
+                  {template}
+                </button>
               ))}
-            </select>
-            {pptBandOptions.length === 0 && (
-              <p className="text-xs text-slate-400">No individual bands were found; the report will use all bands.</p>
-            )}
+            </div>
           </div>
 
-          <label className="flex cursor-pointer items-start gap-2.5 rounded-md border border-slate-700 bg-slate-800/60 p-3">
-            <input
-              type="checkbox"
-              checked={isEarfcnWise}
-              onChange={(event) => setIsEarfcnWise(event.target.checked)}
-              className="mt-0.5 h-4 w-4 accent-purple-500"
-            />
-            <span>
-              <span className="block text-sm font-medium text-slate-200">Generate EARFCN-wise report</span>
-              <span className="mt-0.5 block text-xs text-slate-400">
-                Checked: with_earfcn_wise. Unchecked: without_earfcn_wise.
-              </span>
-            </span>
-          </label>
+          {pptTemplate === "taiwan" && (
+            <div className="space-y-2">
+              <label htmlFor="ppt-locked-bands" className="text-sm font-medium text-slate-200">
+                Band
+              </label>
+              <select
+                id="ppt-locked-bands"
+                aria-label="locked_bands"
+                value={lockedBand}
+                onChange={(event) => setLockedBand(event.target.value)}
+                className="h-10 w-full rounded-md border border-slate-600 bg-slate-800 px-3 text-sm text-slate-100 outline-none focus:border-purple-400 focus:ring-2 focus:ring-purple-500/30"
+              >
+                <option value="all">All bands</option>
+                {pptBandOptions.map((band) => (
+                  <option key={band} value={band}>
+                    {band}
+                  </option>
+                ))}
+              </select>
+              {pptBandOptions.length === 0 && (
+                <p className="text-xs text-slate-400">No individual bands were found; the report will use all bands.</p>
+              )}
+            </div>
+          )}
+
+          {pptTemplate === "stracer" && (
+            <fieldset className="space-y-2">
+              <legend className="text-sm font-medium text-slate-200">Technology</legend>
+              <div className="grid grid-cols-2 gap-2">
+                {pptTechnologyOptions.map((technology) => (
+                  <label
+                    key={technology}
+                    className="flex cursor-pointer items-center gap-2 rounded-md border border-slate-700 bg-slate-800/60 px-3 py-2 text-sm text-slate-200"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={pptTechnologies.includes(technology)}
+                      onChange={() => togglePptTechnology(technology)}
+                      className="h-4 w-4 accent-purple-500"
+                    />
+                    {technology}
+                  </label>
+                ))}
+              </div>
+            </fieldset>
+          )}
 
           <DialogFooter className="flex justify-end gap-2">
             <button
@@ -817,7 +865,7 @@ export const OverviewTab = ({
             <button
               type="button"
               onClick={handlePptDownload}
-              disabled={isGeneratingPpt}
+              disabled={isGeneratingPpt || !pptTemplate}
               className="rounded-md bg-purple-600 px-3 py-2 text-sm font-medium text-white transition hover:bg-purple-500 disabled:cursor-wait disabled:opacity-60"
             >
               Generate PPT
