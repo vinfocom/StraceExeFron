@@ -2,6 +2,7 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { toast } from 'react-toastify';
 import { mapViewApi } from '@/api/apiEndpoints';
+import { isCancelledError } from '@/api/apiService';
 import { parseWKTToPolygons, computeBbox } from '@/utils/wkt.js';
 import {
   makeProjectCacheKey,
@@ -13,15 +14,17 @@ import {
 
 
 
+const EMPTY_POLYGONS = [];
 export const useProjectPolygons = (projectId, showPolygons, polygonSource) => {
-  const [polygons, setPolygons] = useState([]);
+  const [polygons, setPolygons] = useState(EMPTY_POLYGONS);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const abortControllerRef = useRef(null);
+  const requestIdRef = useRef(0);
 
   const fetchData = useCallback(async (forceRefresh = false) => {
     if (!projectId || !showPolygons) {
-      setPolygons([]);
+      setPolygons((prev) => prev.length ? EMPTY_POLYGONS : prev);
       return;
     }
 
@@ -40,14 +43,16 @@ export const useProjectPolygons = (projectId, showPolygons, polygonSource) => {
     }
 
     if (abortControllerRef.current) abortControllerRef.current.abort();
-    abortControllerRef.current = new AbortController();
+    const requestId = ++requestIdRef.current;
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
 
     setLoading(true);
     setError(null);
 
     try {
       const res = await mapViewApi.getProjectPolygonsV2(projectId, polygonSource, {
-        signal: abortControllerRef.current.signal,
+        signal: controller.signal,
       });
 
       const sourceRequested =
@@ -64,18 +69,20 @@ export const useProjectPolygons = (projectId, showPolygons, polygonSource) => {
         if (!wkt) return [];
         const rawArea = item.Area ?? item.area;
         const parsedArea = rawArea == null ? null : Number(rawArea);
+        const itemId = item.Id ?? item.id;
 
         return parseWKTToPolygons(wkt).map((p, k) => ({
-          id: item.Id || item.id,
-          name: item.Name || item.name || `Polygon ${item.Id}`,
+          id: itemId,
+          name: item.Name || item.name || `Polygon ${itemId}`,
           source: polygonSource,
-          uid: `${polygonSource}-${item.Id}-${k}`,
+          uid: `${polygonSource}-${itemId}-${k}`,
           paths: p.paths,
           bbox: computeBbox(p.paths[0]),
           area: Number.isFinite(parsedArea) ? parsedArea : null,
         }));
       });
 
+      if (requestId !== requestIdRef.current) return;
       setPolygons(parsed);
       writeProjectSessionCache(cacheKey, parsed);
       if (
@@ -85,22 +92,24 @@ export const useProjectPolygons = (projectId, showPolygons, polygonSource) => {
       ) {
         toast.info('No building found.');
       }
-      if (parsed.length) toast.success(`${parsed.length} polygon(s) loaded`);
     } catch (err) {
-      if (err.name === "AbortError") return;
+      if (isCancelledError(err)) return;
+      if (requestId !== requestIdRef.current) return;
       setError(err.message);
-      setPolygons([]);
+      setPolygons((prev) => prev.length ? EMPTY_POLYGONS : prev);
     } finally {
-      setLoading(false);
+      if (requestId === requestIdRef.current) setLoading(false);
     }
   }, [projectId, showPolygons, polygonSource]);
 
   useEffect(() => {
     fetchData(false);
     return () => {
+      requestIdRef.current += 1;
       if (abortControllerRef.current) abortControllerRef.current.abort();
     };
   }, [fetchData]);
 
-  return { polygons, loading, error, refetch: () => fetchData(true) };
+  const refetch = useCallback(() => fetchData(true), [fetchData]);
+  return { polygons, loading, error, refetch };
 };

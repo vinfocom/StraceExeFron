@@ -7,8 +7,9 @@ import DeckGLOverlay from "@/components/maps/DeckGLOverlay";
 import { Zap, Layers, Radio, Square, Circle } from "lucide-react";
 // import TechHandoverMarkers from "../unifiedMap/TechHandoverMarkers";
 import useColorForLog from "@/hooks/useColorForLog";
-import { getMetricValueFromLog, getPciColor, getEarfcnColor } from "@/utils/metrics";
+import { getMetricValueFromLog, getMacDetailValueFromLog, getPciColor, getEarfcnColor } from "@/utils/metrics";
 import { normalizeProviderName, normalizeTechName, normalizeBandName, getLogColor, getRegisteredColor, generateColorFromHash, resolveMacDetailMetricKey } from "@/utils/colorUtils";
+import { DEBUG_L3, traceL3Effect } from "@/utils/l3Debug";
 
 const DEFAULT_CENTER = { lat: 28.64453086, lng: 77.37324242 };
 const isElectronRuntime =
@@ -769,6 +770,7 @@ const generateGridCellsOptimized = (
 ) => {
   if (!polygonData?.length || !locations?.length) return [];
   const categoryGridMetric = String(metric || "").trim().toLowerCase();
+  const isMacDetailGridMetric = String(colorBy || "").toLowerCase() === "mac_detail";
   const isBestOperatorMetric = categoryGridMetric === "best_operator";
   const isBestTechnologyMetric = categoryGridMetric === "best_technology";
   const isBestPciMetric = categoryGridMetric === "best_pci";
@@ -955,6 +957,7 @@ const generateGridCellsOptimized = (
         const technologyCountBuckets = new Map();
         const pciCountBuckets = new Map();
         const cellIdCountBuckets = new Map();
+        const macDetailCountBuckets = new Map();
         let validCount = 0;
         for (const idx of cellLocationIndices) {
           const log = locations[idx];
@@ -962,6 +965,12 @@ const generateGridCellsOptimized = (
           const technology = resolveTechnologyName(log);
           const pci = resolvePciValue(log);
           const cellId = resolveCellId(log);
+          if (isMacDetailGridMetric) {
+            const rawL3Value = getMacDetailValueFromLog(log, metric);
+            const category = String(rawL3Value ?? "").trim();
+            if (category) macDetailCountBuckets.set(category, (macDetailCountBuckets.get(category) || 0) + 1);
+            continue;
+          }
 
           if (provider && provider !== "Unknown") {
             providerCountBuckets.set(provider, (providerCountBuckets.get(provider) || 0) + 1);
@@ -1017,7 +1026,12 @@ const generateGridCellsOptimized = (
           }
         }
         
-        if (isCategoryGridMetric) {
+        if (isMacDetailGridMetric && macDetailCountBuckets.size > 0) {
+          const ranked = Array.from(macDetailCountBuckets.entries()).sort((a, b) => b[1] - a[1]);
+          aggregatedValue = ranked[0][0];
+          bestByColor = { label: metric, name: ranked[0][0], count: ranked[0][1] };
+          fillColor = getMetricColor?.(ranked[0][0], "mac_detail") || "#808080";
+        } else if (isCategoryGridMetric) {
           if (isBestOperatorMetric && providerCountBuckets.size > 0) {
             const rankedProviders = Array.from(providerCountBuckets.entries()).sort(
               (a, b) => b[1] - a[1],
@@ -1533,6 +1547,13 @@ const MapWithMultipleCircles = ({
   primaryRenderLimit = null,
   overlapDrawOrder = "original",
 }) => {
+  // L3DEBUG-START
+  const l3MapRenderCountRef = useRef(0);
+  if (DEBUG_L3) {
+    l3MapRenderCountRef.current += 1;
+    console.debug("[L3DEBUG] MapWithMultipleCircles render", l3MapRenderCountRef.current);
+  }
+  // L3DEBUG-END
   const { 
     getMetricColor: getMetricColorFromHook, 
     getThresholdInfo, 
@@ -1544,7 +1565,7 @@ const MapWithMultipleCircles = ({
   const [map, setMap] = useState(null);
   const [hoveredCell, setHoveredCell] = useState(null);
   const [hoveredCellTooltipPos, setHoveredCellTooltipPos] = useState(null);
-  const [polygonData, setPolygonData] = useState([]);
+  const [polygonData, setPolygonData] = useState(EMPTY_ARRAY);
   const [polygonsFetched, setPolygonsFetched] = useState(false);
   const [fetchError, setFetchError] = useState(null);
   const boundaryPolygonListenersRef = useRef(new Map());
@@ -1561,6 +1582,8 @@ const MapWithMultipleCircles = ({
   const onMarkerClickRef = useRef(onMarkerClick);
   const onNeighborClickRef = useRef(onNeighborClick);
   const onGridLegendLocationsChangeRef = useRef(onGridLegendLocationsChange);
+  const lastGridStatsEmissionRef = useRef(null);
+  const lastGridLegendSignatureRef = useRef(null);
 
   useEffect(() => { onMarkerClickRef.current = onMarkerClick; }, [onMarkerClick]);
   useEffect(() => { onNeighborClickRef.current = onNeighborClick; }, [onNeighborClick]);
@@ -1612,7 +1635,10 @@ const MapWithMultipleCircles = ({
       return getOverridableEarfcnColor(value);
     }
 
-    if (['provider', 'technology', 'band', 'operator', 'cell_id', 'mac_detail'].includes(typeKey)) {
+    if (typeKey === "mac_detail") {
+      return getLogColor(typeKey, value, "#a8a6a2", selectedMetric);
+    }
+    if (['provider', 'technology', 'band', 'operator', 'cell_id'].includes(typeKey)) {
         return getLogColor(typeKey, value);
     }
 
@@ -1635,15 +1661,24 @@ const MapWithMultipleCircles = ({
     }
     
     return "#808080";
-  }, [thresholds, thresholdsReady, getMetricColorFromHook, categoryColorVersion, metricColorOverrides]);
+  }, [thresholds, thresholdsReady, getMetricColorFromHook, categoryColorVersion, metricColorOverrides, selectedMetric]);
 
 
   // Fetch polygons
   useEffect(() => {
+    // L3DEBUG-START
+    traceL3Effect("MapWithMultipleCircles polygon-fetch effect", {
+      projectId,
+      polygonSource,
+      enablePolygonFilter,
+      filterPolygons,
+      externalPolygonsLoading,
+    });
+    // L3DEBUG-END
     const hasExternalPolygonControl = Array.isArray(filterPolygons);
 
     if (hasExternalPolygonControl) {
-      setPolygonData([]);
+      setPolygonData((previous) => previous.length > 0 ? EMPTY_ARRAY : previous);
       setPolygonsFetched(!externalPolygonsLoading);
       setFetchError(null);
       return;
@@ -1651,7 +1686,7 @@ const MapWithMultipleCircles = ({
 
     const fetchPolygons = async () => {
       if (!projectId || !enablePolygonFilter) {
-        setPolygonData([]);
+        setPolygonData((previous) => previous.length > 0 ? EMPTY_ARRAY : previous);
         setPolygonsFetched(true);
         return;
       }
@@ -1681,7 +1716,7 @@ const MapWithMultipleCircles = ({
         setPolygonsFetched(true);
         setFetchError(null);
       } catch (err) {
-        setPolygonData([]);
+        setPolygonData((previous) => previous.length > 0 ? EMPTY_ARRAY : previous);
         setPolygonsFetched(true);
         setFetchError(err.message);
       }
@@ -2083,27 +2118,65 @@ const MapWithMultipleCircles = ({
   }, [areaData, enableGrid, visibleGridCells, resolveColor, selectedMetric]);
 
   useEffect(() => {
+    // L3DEBUG-START
+    traceL3Effect("MapWithMultipleCircles grid-stats effect", {
+      enableGrid,
+      visibleGridCells,
+      onGridCellsStatsChange,
+    });
+    // L3DEBUG-END
     if (typeof onGridCellsStatsChange !== "function") return;
+    let nextStats = { total: 0, populated: 0 };
     if (!enableGrid) {
-      onGridCellsStatsChange({ total: 0, populated: 0 });
-      return;
+      const previousEmission = lastGridStatsEmissionRef.current;
+      if (
+        previousEmission?.enabled === false &&
+        previousEmission.callback === onGridCellsStatsChange
+      ) return;
+    } else {
+      const populated = visibleGridCells.reduce(
+        (acc, cell) => acc + (cell.count > 0 ? 1 : 0),
+        0,
+      );
+      nextStats = { total: visibleGridCells.length, populated };
+      const previousEmission = lastGridStatsEmissionRef.current;
+      if (
+        previousEmission?.enabled === true &&
+        previousEmission.callback === onGridCellsStatsChange &&
+        previousEmission.total === nextStats.total &&
+        previousEmission.populated === nextStats.populated
+      ) return;
     }
-    const populated = visibleGridCells.reduce(
-      (acc, cell) => acc + (cell.count > 0 ? 1 : 0),
-      0,
-    );
-    onGridCellsStatsChange({ total: visibleGridCells.length, populated });
+    lastGridStatsEmissionRef.current = {
+      enabled: enableGrid,
+      callback: onGridCellsStatsChange,
+      ...nextStats,
+    };
+    onGridCellsStatsChange(nextStats);
   }, [enableGrid, visibleGridCells, onGridCellsStatsChange]);
 
   useEffect(() => {
+    // L3DEBUG-START
+    traceL3Effect("MapWithMultipleCircles grid-legend-locations effect", {
+      enableGrid,
+      gridCells,
+      selectedMetric,
+      colorBy,
+    });
+    // L3DEBUG-END
     const callback = onGridLegendLocationsChangeRef.current;
     if (typeof callback !== "function") return;
     if (!enableGrid) {
-      callback(EMPTY_ARRAY);
+      if (lastGridLegendSignatureRef.current !== "disabled") {
+        lastGridLegendSignatureRef.current = "disabled";
+        callback(EMPTY_ARRAY);
+      }
       return;
     }
 
-    const metricKey = String(selectedMetric || "rsrp").trim().toLowerCase();
+    const metricKey = colorBy === "mac_detail"
+      ? String(selectedMetric || "")
+      : String(selectedMetric || "rsrp").trim().toLowerCase();
     const categoryKey = String(colorBy || "").trim().toLowerCase();
     // Keep every range available in the legend while filtering map visibility.
     const rows = gridCells
@@ -2167,19 +2240,32 @@ const MapWithMultipleCircles = ({
             row.pci = pci;
             row.best_pci = pci;
           }
+        } else if (categoryKey === "mac_detail") {
+          row.extra_fields = { [metricKey]: categoryName ?? metricValue };
         }
 
         return row;
       });
 
+    const signature = JSON.stringify([
+      "enabled",
+      metricKey,
+      categoryKey,
+      rows.map((row) => [row.id, row.metric_value ?? row.value]),
+    ]);
+    if (lastGridLegendSignatureRef.current === signature) return;
+    lastGridLegendSignatureRef.current = signature;
     callback(rows);
   }, [enableGrid, gridCells, selectedMetric, colorBy]);
 
   const getPrimaryColor = useCallback((loc) => {
     if (colorBy && colorBy !== 'metric') {
-        if (colorBy === 'mac_detail' && resolveMacDetailMetricKey(selectedMetric)) {
-          const numValue = getMetricValueFromLog(loc, selectedMetric);
-          return resolveColor(numValue, selectedMetric);
+        if (colorBy === 'mac_detail') {
+          const rawValue = getMacDetailValueFromLog(loc, selectedMetric);
+          const bucketKey = resolveMacDetailMetricKey(selectedMetric);
+          return bucketKey
+            ? resolveColor(Number(rawValue), bucketKey)
+            : resolveColor(String(rawValue ?? "").trim(), "mac_detail");
         }
         const value = getLegendCategoryKeyFromLog(loc, colorBy, selectedMetric);
         return resolveColor(value, colorBy);
@@ -2202,9 +2288,12 @@ const MapWithMultipleCircles = ({
 
   const getNeighborColor = useCallback((neighbor) => {
     if (colorBy && colorBy !== 'metric') {
-        if (colorBy === 'mac_detail' && resolveMacDetailMetricKey(selectedMetric)) {
-          const numValue = getMetricValueFromLog(neighbor, selectedMetric);
-          return resolveColor(numValue, selectedMetric);
+        if (colorBy === 'mac_detail') {
+          const rawValue = getMacDetailValueFromLog(neighbor, selectedMetric);
+          const bucketKey = resolveMacDetailMetricKey(selectedMetric);
+          return bucketKey
+            ? resolveColor(Number(rawValue), bucketKey)
+            : resolveColor(String(rawValue ?? "").trim(), "mac_detail");
         }
         const value = getLegendCategoryKeyFromLog(neighbor, colorBy, selectedMetric);
         return resolveColor(value, colorBy);

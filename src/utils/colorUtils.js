@@ -25,7 +25,7 @@ export const resolveMacDetailMetricKey = (fieldName) => {
   if (name.endsWith("pct") && (name.includes("qpsk") || name.includes("qam"))) {
     return "mac_modulation_pct";
   }
-  if (/(^|_)tx(_|$)/.test(name)) return "mac_tx_power";
+  if (/(^|_)(tx_power|transmit_power)(_|$)/.test(name)) return "mac_tx_power";
 
   return null;
 };
@@ -451,11 +451,14 @@ export const applyTechnologyColorSettings = (settings = {}) => {
   });
 };
 
-export const getLogColor = (colorBy, value, defaultColor = "#a8a6a2") => {
+export const getLogColor = (colorBy, value, defaultColor = "#a8a6a2", fieldName) => {
   if (!colorBy || !value) {
     return defaultColor;
   }
 
+  const cacheKey = colorBy === "mac_detail" && fieldName
+    ? `mac_detail:${fieldName}`
+    : colorBy;
   const scheme = COLOR_SCHEMES[colorBy];
   if (!scheme) {
     return defaultColor;
@@ -487,8 +490,8 @@ export const getLogColor = (colorBy, value, defaultColor = "#a8a6a2") => {
   }
 
   // 1. Check if color has been explicitly overridden/cached by the user FIRST
-  if (dynamicColorCache[colorBy] && dynamicColorCache[colorBy][normalizedValue]) {
-    return dynamicColorCache[colorBy][normalizedValue];
+  if (dynamicColorCache[cacheKey] && dynamicColorCache[cacheKey][normalizedValue]) {
+    return dynamicColorCache[cacheKey][normalizedValue];
   }
 
   // 2. Fallback to predefined Scheme EXACT match
@@ -506,11 +509,14 @@ export const getLogColor = (colorBy, value, defaultColor = "#a8a6a2") => {
   }
 
   // 4. Generate dynamic hash color if completely unknown
-  if (!dynamicColorCache[colorBy][normalizedValue]) {
-    dynamicColorCache[colorBy][normalizedValue] = generateColorFromHash(normalizedValue);
+  if (!dynamicColorCache[cacheKey]) dynamicColorCache[cacheKey] = {};
+  if (!dynamicColorCache[cacheKey][normalizedValue]) {
+    const entries = Object.keys(dynamicColorCache[cacheKey]);
+    if (entries.length >= 500) delete dynamicColorCache[cacheKey][entries[0]];
+    dynamicColorCache[cacheKey][normalizedValue] = generateColorFromHash(`${cacheKey}:${normalizedValue}`);
   }
 
-  return dynamicColorCache[colorBy][normalizedValue];
+  return dynamicColorCache[cacheKey][normalizedValue];
 };
 
 export const getProviderColor = (provider) => {
@@ -542,14 +548,18 @@ export const clearDynamicColorCache = () => {
   dynamicColorCache.mac_detail = {};
 };
 
-export const registerColor = (colorBy, value, color) => {
-  if (dynamicColorCache[colorBy]) {
-    dynamicColorCache[colorBy][value] = color;
+export const registerColor = (colorBy, value, color, fieldName) => {
+  const cacheKey = colorBy === "mac_detail" && fieldName ? `mac_detail:${fieldName}` : colorBy;
+  if (!dynamicColorCache[cacheKey]) dynamicColorCache[cacheKey] = {};
+  if (Object.keys(dynamicColorCache[cacheKey]).length >= 500) {
+    delete dynamicColorCache[cacheKey][Object.keys(dynamicColorCache[cacheKey])[0]];
   }
+  dynamicColorCache[cacheKey][value] = color;
 };
 
-export const getRegisteredColor = (colorBy, value) => {
-  const cache = dynamicColorCache[colorBy];
+export const getRegisteredColor = (colorBy, value, fieldName) => {
+  const cacheKey = colorBy === "mac_detail" && fieldName ? `mac_detail:${fieldName}` : colorBy;
+  const cache = dynamicColorCache[cacheKey];
   if (!cache) return null;
 
   let normalizedValue = String(value ?? "").trim();
@@ -561,8 +571,9 @@ export const getRegisteredColor = (colorBy, value) => {
   return cache[normalizedValue] || null;
 };
 
-export const getAllRegisteredColors = (colorBy) => {
+export const getAllRegisteredColors = (colorBy, fieldName) => {
   const predefined = COLOR_SCHEMES[colorBy] || {};
-  const dynamic = dynamicColorCache[colorBy] || {};
+  const cacheKey = colorBy === "mac_detail" && fieldName ? `mac_detail:${fieldName}` : colorBy;
+  const dynamic = dynamicColorCache[cacheKey] || {};
   return { ...predefined, ...dynamic };
 };
