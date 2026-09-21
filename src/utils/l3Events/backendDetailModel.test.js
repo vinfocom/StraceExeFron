@@ -2,21 +2,42 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { buildBackendDetailModel, createBackendL3Loader } from "./backendDetailModel.js";
 
-test("initial load includes rows and every tab reuses the stored response", async () => {
+test("summary excludes rows; detail tabs share one later request", async () => {
   const requests = [];
   const response = { summaryVersion: 1, rows: [{ id: "l3-1" }] };
-  const load = createBackendL3Loader(async scope => { requests.push(scope); return response; });
+  const compact = { summaryVersion: 1, totalRows: 1, rows: [] };
+  const load = createBackendL3Loader(async scope => { requests.push(scope); return scope.includeRows ? response : compact; });
   const scope = { uploadId: 42, take: 50000 };
   const initial = load(scope);
   assert.equal(load({ ...scope }), initial, "effect replay shares the pending request");
-  assert.equal(await initial, response);
-  for (const tab of ["excel", "analyzer", "map", "summary", "excel"]) {
-    assert.equal(await load(scope), response, `${tab} reuses initial response`);
+  assert.equal(await initial, compact);
+  assert.deepEqual(requests, [{ ...scope, includeRows: false }]);
+  const detail = load({ ...scope, includeRows: true });
+  assert.equal(load({ ...scope, includeRows: true }), detail, "detail tabs share the pending request");
+  for (const tab of ["excel", "analyzer", "map", "excel"]) {
+    assert.equal(await load({ ...scope, includeRows: true }), response, `${tab} reuses details`);
   }
-  assert.deepEqual(requests, [{ ...scope, includeRows: true }]);
+  assert.equal(await load(scope), compact, "returning to summary keeps its result");
+  assert.deepEqual(requests, [{ ...scope, includeRows: false }, { ...scope, includeRows: true }]);
   await load({ ...scope, uploadId: 43 });
-  assert.equal(requests.length, 2, "another upload gets its own data");
-  assert.equal(requests[1].uploadId, 43);
+  assert.equal(requests.length, 3, "another upload gets its own data");
+  assert.equal(requests[2].uploadId, 43);
+});
+
+test("detail failure can retry without discarding the successful summary", async () => {
+  let details = 0;
+  const summary = { rows: [], totalRows: 1 };
+  const load = createBackendL3Loader(async scope => {
+    if (!scope.includeRows) return summary;
+    if (++details === 1) throw new Error("temporary error");
+    return { rows: [{ id: "l3-1" }] };
+  });
+  const scope = { uploadId: 42 };
+  const initial = load(scope);
+  await initial;
+  await assert.rejects(load({ ...scope, includeRows: true }), /temporary error/);
+  assert.equal(load(scope), initial);
+  assert.equal((await load({ ...scope, includeRows: true })).rows.length, 1);
 });
 
 test("failed initial requests can be retried without caching the error", async () => {

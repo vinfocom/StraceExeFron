@@ -1,20 +1,22 @@
 import { buildProtocolAnalysis } from "./protocolAnalyzer.js";
 import { buildUnifiedSignalingRows } from "./signalingModel.js";
 
-// Owned by one open analyzer. Reuse the initial request, including during
-// React's development effect replay; never reuse another upload's response.
+// Keep summary and on-demand detail requests separate, deduplicating effect
+// replays and tab changes within one open analyzer.
 export function createBackendL3Loader(fetchSummary) {
   let current = null;
   return (scope) => {
-    const key = JSON.stringify(scope);
-    if (current?.key === key) return current.promise;
-    const entry = { key, promise: null };
-    entry.promise = Promise.resolve().then(() => fetchSummary({ ...scope, includeRows: true })).catch((error) => {
-      if (current === entry) current = null;
+    const { includeRows = false, ...selection } = scope;
+    const key = JSON.stringify(selection);
+    if (current?.key !== key) current = { key, requests: new Map() };
+    const entry = current;
+    if (entry.requests.has(includeRows)) return entry.requests.get(includeRows);
+    const promise = Promise.resolve().then(() => fetchSummary({ ...selection, includeRows })).catch((error) => {
+      entry.requests.delete(includeRows);
       throw error;
     });
-    current = entry;
-    return entry.promise;
+    entry.requests.set(includeRows, promise);
+    return promise;
   };
 }
 
