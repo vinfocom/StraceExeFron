@@ -20,6 +20,7 @@ import { l3EventApi, mapViewApi, gridAnalyticsApi, sitePredictionApi } from "../
 import Spinner from "../components/common/Spinner";
 import MapWithMultipleCircles from "@/components/unifiedMap/MapwithMultipleCircle";
 import {
+  GOOGLE_MAP_ID,
   GOOGLE_MAPS_LOADER_OPTIONS,
   getGoogleMapsConfigError,
   getGoogleMapsErrorMessage,
@@ -6090,6 +6091,7 @@ const UnifiedMapView = () => {
   const mapOptions = useMemo(
     () => ({
       mapTypeId: ui.basemapStyle,
+      mapId: GOOGLE_MAP_ID,
       disableDefaultUI: false,
       streetViewControl: false,
       zoomControl: false,

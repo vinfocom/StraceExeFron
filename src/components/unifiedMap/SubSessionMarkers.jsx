@@ -1,13 +1,19 @@
 import { getLogTechnology, normalizeMetricTechnology, getTechnologySignalRows, getTechnologyMetricValue } from "@/utils/technologyMetricLabels";
-import React, { memo, useEffect, useMemo, useState } from "react";
+import React, { memo, useEffect, useMemo, useRef, useState } from "react";
+import { MarkerClusterer } from "@googlemaps/markerclusterer";
 import {
   FLOAT_PANE,
   InfoWindowF,
-  MarkerF,
   OverlayViewF,
   PolylineF,
+  useGoogleMap,
 } from "@react-google-maps/api";
 import { getColorForMetric } from "@/utils/metrics";
+import {
+  ADVANCED_MARKER_CLUSTER_RENDERER,
+  createAdvancedMarker,
+  createAdvancedMarkerContent,
+} from "@/lib/advancedMarkers";
 
 const formatMetric = (value, suffix = "") => {
   if (value == null || value === "" || !Number.isFinite(Number(value))) return "N/A";
@@ -189,6 +195,18 @@ const getSubSessionMarkerPath = (subSessionType, statusRaw) => {
   return DIAMOND_PATH;
 };
 
+const getSubSessionMarkerIcon = (marker, isHighlighted) => ({
+  path: getSubSessionMarkerPath(
+    marker.subSessionType,
+    marker.resultStatusRaw ?? marker.resultStatus,
+  ),
+  fillColor: marker.fillColor,
+  fillOpacity: 1,
+  strokeColor: isHighlighted ? marker.fillColor : "#ffffff",
+  strokeWeight: isHighlighted ? 4 : 2.5,
+  scale: isHighlighted ? 1.35 : 1.1,
+});
+
 
 
 const SubSessionTooltip = ({ marker }) => {
@@ -227,8 +245,12 @@ const SubSessionMarkers = ({
   selectedMarkerIds = [],
   onMarkerSelect,
 }) => {
+  const map = useGoogleMap();
   const [internalSelectedMarkerId, setInternalSelectedMarkerId] = useState(null);
   const [hoveredMarkerId, setHoveredMarkerId] = useState(null);
+  const markerLayerRef = useRef({ clusterer: null, records: [] });
+  const onMarkerSelectRef = useRef(onMarkerSelect);
+  onMarkerSelectRef.current = onMarkerSelect;
   const activeMarkerId = selectedMarkerId ?? internalSelectedMarkerId;
   const highlightedMarkerIdSet = useMemo(() => {
     const values = Array.isArray(selectedMarkerIds) ? selectedMarkerIds : [];
@@ -370,6 +392,86 @@ const SubSessionMarkers = ({
     [enrichedMarkers, hoveredMarkerId],
   );
 
+  useEffect(() => {
+    if (!show || !map || enrichedMarkers.length === 0) return undefined;
+
+    const records = enrichedMarkers
+      .map((marker, index) => {
+        const position = marker.position ?? marker.start;
+        const lat = Number(position?.lat);
+        const lng = Number(position?.lng);
+        if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+
+        const markerKey = `${marker.id ?? "sub"}-${marker.sessionId ?? "na"}-${marker.subSessionId ?? "na"}-${index}`;
+        const advancedMarker = createAdvancedMarker({
+          map: null,
+          position: { lat, lng },
+          title: `Sub-session ${marker.subSessionId ?? marker.id ?? ""}`,
+          clickable: true,
+          icon: getSubSessionMarkerIcon(
+            marker,
+            highlightedMarkerIdSet.has(String(marker.id ?? "").trim()),
+          ),
+          zIndex: highlightedMarkerIdSet.has(String(marker.id ?? "").trim()) ? 1000 : undefined,
+        });
+        if (!advancedMarker) return null;
+
+        const handleClick = () => {
+          setInternalSelectedMarkerId(marker.id);
+          onMarkerSelectRef.current?.(marker);
+        };
+        const handleMouseOver = () => setHoveredMarkerId(marker.id);
+        const handleMouseOut = () => {
+          setHoveredMarkerId((current) => (current === marker.id ? null : current));
+        };
+        advancedMarker.addEventListener("gmp-click", handleClick);
+        advancedMarker.addEventListener("mouseover", handleMouseOver);
+        advancedMarker.addEventListener("mouseout", handleMouseOut);
+
+        return {
+          key: markerKey,
+          data: marker,
+          marker: advancedMarker,
+          listeners: [
+            ["gmp-click", handleClick],
+            ["mouseover", handleMouseOver],
+            ["mouseout", handleMouseOut],
+          ],
+        };
+      })
+      .filter(Boolean);
+
+    const clusterer = new MarkerClusterer({
+      markers: records.map((record) => record.marker),
+      map,
+      renderer: ADVANCED_MARKER_CLUSTER_RENDERER,
+      onClusterClick: null,
+    });
+    markerLayerRef.current = { clusterer, records };
+
+    return () => {
+      clusterer.clearMarkers();
+      records.forEach(({ marker, listeners }) => {
+        listeners.forEach(([eventName, listener]) => marker.removeEventListener(eventName, listener));
+        marker.map = null;
+      });
+      if (markerLayerRef.current.clusterer === clusterer) {
+        markerLayerRef.current = { clusterer: null, records: [] };
+      }
+    };
+  }, [map, show, enrichedMarkers]);
+
+  useEffect(() => {
+    markerLayerRef.current.records.forEach(({ data, marker }) => {
+      const highlighted = highlightedMarkerIdSet.has(String(data.id ?? "").trim());
+      marker.replaceChildren(createAdvancedMarkerContent({
+        icon: getSubSessionMarkerIcon(data, highlighted),
+        clickable: true,
+      }));
+      marker.zIndex = highlighted ? 1000 : undefined;
+    });
+  }, [enrichedMarkers, highlightedMarkerIdSet]);
+
   if (!show || !Array.isArray(markers) || markers.length === 0) {
     return null;
   }
@@ -414,44 +516,6 @@ const SubSessionMarkers = ({
           </div>
         </OverlayViewF>
       )}
-
-      {enrichedMarkers.map((marker, index) => (
-        (() => {
-          const markerKey = String(marker.id ?? "");
-          const isHighlighted = highlightedMarkerIdSet.has(markerKey);
-
-          return (
-            <MarkerF
-              key={`${marker.id ?? "sub"}-${marker.sessionId ?? "na"}-${marker.subSessionId ?? "na"}-${index}`}
-              position={marker.position}
-              icon={{
-                path: getSubSessionMarkerPath(
-                  marker.subSessionType,
-                  marker.resultStatusRaw ?? marker.resultStatus,
-                ),
-                fillColor: marker.fillColor,
-                fillOpacity: 1,
-                strokeColor: isHighlighted ? marker.fillColor : "#f7f8f8",
-                strokeWeight: isHighlighted ? 5 : 2,
-                scale: isHighlighted ? 1.28 : 1,
-              }}
-              zIndex={isHighlighted ? 1000 : undefined}
-              onClick={() => {
-                setInternalSelectedMarkerId(marker.id);
-                if (typeof onMarkerSelect === "function") {
-                  onMarkerSelect(marker);
-                }
-              }}
-              onMouseOver={() => {
-                setHoveredMarkerId(marker.id);
-              }}
-              onMouseOut={() => {
-                setHoveredMarkerId((current) => (current === marker.id ? null : current));
-              }}
-            />
-          );
-        })()
-      ))}
 
       {activeSelectedMarker && (
         <InfoWindowF

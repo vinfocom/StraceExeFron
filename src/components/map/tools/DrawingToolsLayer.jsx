@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useCallback, useState, memo } from "react";
 import { toast } from "react-toastify";
+import { createAdvancedMarker, getAdvancedMarkerLatLngEvent, setAdvancedMarkerLabel } from "@/lib/advancedMarkers";
 
 // --- Helper Functions (Same as before, collapsed for brevity) ---
 function toLatLng(item) {
@@ -1104,31 +1105,35 @@ const createVertexMarker = ({
 }) => {
   const gm = window.google.maps;
   const isFirst = index === 0;
-  const marker = new gm.Marker({
+  const marker = createAdvancedMarker({
     map,
     position,
-    clickable: true,
-    cursor: draggable ? "grab" : "pointer",
     draggable,
     icon: getVertexMarkerIcon(type, isFirst),
-    optimized: false,
     title: title || "Vertex",
     zIndex: 3000 + index,
   });
+  if (!marker) return null;
+  marker.style.cursor = draggable ? "grab" : "pointer";
   const listeners = [];
+  const listen = (eventName, callback) => {
+    const handler = (event) => callback(event);
+    marker.addEventListener(eventName, handler);
+    listeners.push(() => marker.removeEventListener(eventName, handler));
+  };
 
   if (onClick) {
-    listeners.push(gm.event.addListener(marker, "click", (event) => onClick(event, index)));
+    listen("gmp-click", (event) => onClick(getAdvancedMarkerLatLngEvent(marker, event), index));
   }
   if (onDrag) {
-    listeners.push(gm.event.addListener(marker, "drag", (event) => onDrag(event, index)));
+    listen("gmp-drag", (event) => onDrag(getAdvancedMarkerLatLngEvent(marker, event), index));
   }
   if (onDragEnd) {
-    listeners.push(gm.event.addListener(marker, "dragend", (event) => onDragEnd(event, index)));
+    listen("gmp-dragend", (event) => onDragEnd(getAdvancedMarkerLatLngEvent(marker, event), index));
   }
   if (draggable) {
-    listeners.push(gm.event.addListener(marker, "dragstart", () => marker.setOptions({ cursor: "grabbing" })));
-    listeners.push(gm.event.addListener(marker, "dragend", () => marker.setOptions({ cursor: "grab" })));
+    listen("gmp-dragstart", () => { marker.style.cursor = "grabbing"; });
+    listen("gmp-dragend", () => { marker.style.cursor = "grab"; });
   }
 
   return { marker, listeners };
@@ -1136,8 +1141,8 @@ const createVertexMarker = ({
 
 const clearVertexMarkers = (vertexMarkers = []) => {
   vertexMarkers.forEach(({ marker, listeners = [] }) => {
-    listeners.forEach((listener) => window.google.maps.event.removeListener(listener));
-    marker?.setMap(null);
+    listeners.forEach((removeListener) => removeListener?.());
+    if (marker) marker.map = null;
   });
 };
 
@@ -1145,7 +1150,7 @@ const syncVertexMarkerPositions = (vertexMarkers = [], path) => {
   if (!path) return;
   vertexMarkers.forEach(({ marker }, index) => {
     const position = path.getAt?.(index);
-    if (position) marker?.setPosition(position);
+    if (position && marker) marker.position = position;
   });
 };
 
@@ -1280,11 +1285,10 @@ function DrawingToolsLayerComponent({
       callbacksRef.current.onDrawingsChange?.([...collectedDrawingRef.current]);
       callbacksRef.current.onSummary?.(updatedEntry);
       if (shapeObj.labelMarker) {
-        const label = shapeObj.labelMarker.getLabel?.() || {};
         const text = metrics.terrainDistance >= 1000
           ? `${metrics.terrainLengthInKm} km terrain`
           : `${Math.round(metrics.terrainDistance)} m terrain`;
-        shapeObj.labelMarker.setLabel({ ...label, text });
+        setAdvancedMarkerLabel(shapeObj.labelMarker, text);
       }
     } catch (error) {
       if (shapeObj.terrainRequestId === requestId) {
@@ -1444,7 +1448,7 @@ function DrawingToolsLayerComponent({
             path.setAt(markerIndex, event.latLng);
           },
         }),
-      );
+      ).filter(Boolean);
     };
 
     if (type === "polyline") {
@@ -1457,28 +1461,14 @@ function DrawingToolsLayerComponent({
           ? `${(displayedLength / 1000).toFixed(2)} km${terrainEnabled && shapeObj.terrainDistance ? " terrain" : ""}`
           : `${Math.round(displayedLength)} m${terrainEnabled && shapeObj.terrainDistance ? " terrain" : ""}`;
         if (!shapeObj.labelMarker) {
-          shapeObj.labelMarker = new window.google.maps.Marker({
-            map,
-            position: center,
-            icon: {
-              url: "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==",
-              scaledSize: new window.google.maps.Size(1, 1),
-              anchor: new window.google.maps.Point(0, 0),
-              labelOrigin: new window.google.maps.Point(0, -14),
-            },
-            label: {
-              text,
-              color: "#111827",
-              fontWeight: "700",
-              fontSize: "20px",
-            },
-            zIndex: 1000,
-          });
+          const AdvancedMarkerElement = window.google?.maps?.marker?.AdvancedMarkerElement;
+          shapeObj.labelMarker = AdvancedMarkerElement
+            ? new AdvancedMarkerElement({ map, position: center, zIndex: 1000 })
+            : null;
         } else {
-          shapeObj.labelMarker.setPosition(center);
-          const lbl = shapeObj.labelMarker.getLabel();
-          shapeObj.labelMarker.setLabel({ ...lbl, text });
+          shapeObj.labelMarker.position = center;
         }
+        setAdvancedMarkerLabel(shapeObj.labelMarker, text);
       };
       const path = overlay.getPath?.();
       if (path) {
@@ -1543,11 +1533,10 @@ function DrawingToolsLayerComponent({
       shapesRef.current.forEach((shapeObj) => {
         if (shapeObj.type !== "polyline" || !shapeObj.labelMarker) return;
         const { length } = getPolylineDetails(shapeObj.overlay);
-        const label = shapeObj.labelMarker.getLabel?.() || {};
-        shapeObj.labelMarker.setLabel({
-          ...label,
-          text: length >= 1000 ? `${(length / 1000).toFixed(2)} km` : `${Math.round(length)} m`,
-        });
+        setAdvancedMarkerLabel(
+          shapeObj.labelMarker,
+          length >= 1000 ? `${(length / 1000).toFixed(2)} km` : `${Math.round(length)} m`,
+        );
       });
       return;
     }
@@ -2051,7 +2040,7 @@ function DrawingToolsLayerComponent({
       s.listeners?.forEach(l => window.google.maps.event.removeListener(l));
       s.overlay?.setMap(null);
       s.gridOverlays?.forEach(r => r.setMap(null));
-      s.labelMarker?.setMap(null);
+      if (s.labelMarker) s.labelMarker.map = null;
       clearVertexMarkers(s.vertexMarkers);
     });
     shapesRef.current = [];

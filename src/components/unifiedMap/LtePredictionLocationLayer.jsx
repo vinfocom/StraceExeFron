@@ -898,7 +898,7 @@ const LtePredictionLocationLayer = ({
 
     if (!overlayRef.current) {
       overlayRef.current = new GoogleMapsOverlay({
-        interleaved: true,
+        interleaved: false,
         glOptions: { preserveDrawingBuffer: false },
       });
     }

@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { GoogleMap, MarkerF, useJsApiLoader } from "@react-google-maps/api";
+import { GoogleMap, useJsApiLoader } from "@react-google-maps/api";
+import AdvancedMarker from "@/components/map/AdvancedMarker";
 import { GoogleMapsOverlay } from "@deck.gl/google-maps";
 import { PathLayer, ScatterplotLayer } from "@deck.gl/layers";
 import { RefreshCw, Wifi, WifiOff } from "lucide-react";
@@ -9,6 +10,7 @@ import { toast } from "react-toastify";
 import { mapViewApi } from "../api/apiEndpoints";
 import { connectNetworkLogRealtime } from "../api/networkLogRealtime";
 import {
+  GOOGLE_MAP_ID,
   GOOGLE_MAPS_LOADER_OPTIONS,
   getGoogleMapsConfigError,
   getGoogleMapsErrorMessage,
@@ -272,7 +274,7 @@ export default function RealtimeNetworkMap() {
 
     if (!deckOverlayRef.current) {
       deckOverlayRef.current = new GoogleMapsOverlay({
-        interleaved: true,
+        interleaved: false,
         glOptions: { preserveDrawingBuffer: false },
       });
     }
@@ -453,11 +455,12 @@ export default function RealtimeNetworkMap() {
               clickableIcons: false,
               zoomControl: false,
               isFractionalZoomEnabled: true,
+              mapId: GOOGLE_MAP_ID,
             }}
           >
-            {points[0] && <MarkerF position={{ lat: points[0].lat, lng: points[0].lng }} label="S" />}
+            {points[0] && <AdvancedMarker position={{ lat: points[0].lat, lng: points[0].lng }} label="S" />}
             {points.length > 1 && (
-              <MarkerF
+              <AdvancedMarker
                 position={{ lat: points[points.length - 1].lat, lng: points[points.length - 1].lng }}
                 label="E"
               />

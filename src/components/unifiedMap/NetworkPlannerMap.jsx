@@ -2,7 +2,8 @@
 
 import React, { useEffect, useMemo, useState, useCallback, useRef } from "react";
 import { getTechnologyFamily } from "@/utils/technologySelection";
-import { InfoWindowF, MarkerF, PolygonF, PolylineF } from "@react-google-maps/api";
+import { InfoWindowF, PolygonF, PolylineF } from "@react-google-maps/api";
+import AdvancedMarker from "@/components/map/AdvancedMarker";
 import {
   getProviderColor,
   getBandColor,
@@ -4598,7 +4599,7 @@ const NetworkPlannerMap = ({
           ).toFixed(6)}-${index}`;
 
           return (
-            <MarkerF
+            <AdvancedMarker
               key={key}
               position={{ lat: Number(point.lat), lng: Number(point.lng) }}
               clickable={false}
@@ -4639,7 +4640,7 @@ const NetworkPlannerMap = ({
           const increased = mark.direction > 0;
           const arrowColor = increased ? "#dc2626" : "#2563eb";
           return (
-            <MarkerF
+            <AdvancedMarker
               key={`tilt-delta-${mark.key}-${index}`}
               position={{ lat: mark.lat, lng: mark.lng }}
               title={mark.tooltip}
@@ -4686,7 +4687,7 @@ const NetworkPlannerMap = ({
         ).toFixed(6)}-${Number(point.lng).toFixed(6)}-${index}`;
 
         return (
-          <MarkerF
+          <AdvancedMarker
             key={pointKey}
             position={{ lat: Number(point.lat), lng: Number(point.lng) }}
             clickable={false}
@@ -4771,7 +4772,7 @@ const NetworkPlannerMap = ({
             />
 
             {sectorLabelText && (
-              <MarkerF
+              <AdvancedMarker
                 position={labelPos}
                 clickable={false}
                 icon={{
@@ -4977,7 +4978,7 @@ const NetworkPlannerMap = ({
             )}
 
             {dragMode && pendingMovePosition && (
-              <MarkerF
+              <AdvancedMarker
                 position={pendingMovePosition}
                 draggable
                 zIndex={5000}
