@@ -36,6 +36,12 @@ import { Input } from "@/components/ui/input";
 import { getMetricLabelsForLocations, getTechnologyMetricOptions } from "@/utils/technologyMetricLabels";
 import { getTechnologyFamily } from "@/utils/technologySelection";
 
+// L3DEBUG-START
+const DEBUG_L3 =
+  import.meta.env.DEV &&
+  localStorage.getItem("debugL3") === "1";
+// L3DEBUG-END
+
 const LTE_RECOMMENDATION_OPTIMIZED_DEFAULTS = Object.freeze({
   operator: "all",
   radiusMeters: 500,
@@ -819,6 +825,14 @@ const UnifiedMapSidebar = ({
   getCachedNetworkLogsForPrediction,
 }) => {
   const { user, refreshUser } = useAuth();
+  // L3DEBUG-START
+  const l3DebugRenderCountRef = useRef(0);
+  const logL3ParentEffect = (effectName, values, nextValue) => {
+    if (DEBUG_L3) {
+      console.debug("[L3DEBUG]", effectName, { values, nextValue });
+    }
+  };
+  // L3DEBUG-END
   const canLoadClutterTiles = Number.isSafeInteger(Number(projectId)) && Number(projectId) > 0;
   const lteCountryCode = useMemo(
     () =>
@@ -1016,19 +1030,6 @@ const UnifiedMapSidebar = ({
     [enableGrid, isSecondaryOnlyMode, secondaryMetricAvailability, metricTechnology],
   );
 
-  useEffect(() => {
-    if (!isSecondaryOnlyMode) return;
-
-    const currentMetric = String(metric || "").trim().toLowerCase();
-    const currentOption = metricOptions.find((option) => option.value === currentMetric);
-    if (currentOption && !currentOption.disabled) return;
-
-    const fallbackMetric = metricOptions.find((option) => !option.disabled)?.value;
-    if (fallbackMetric) {
-      setMetric?.(fallbackMetric);
-    }
-  }, [isSecondaryOnlyMode, metric, metricOptions, setMetric]);
-
   const macDetailMetricOptions = useMemo(
     () =>
       (accumulatedFilterOptions.macDetailFields || []).map((field) => ({
@@ -1038,25 +1039,62 @@ const UnifiedMapSidebar = ({
     [accumulatedFilterOptions.macDetailFields],
   );
 
+  // L3DEBUG-START
+  if (DEBUG_L3) {
+    l3DebugRenderCountRef.current += 1;
+    console.debug("[L3DEBUG] Sidebar render", {
+      render: l3DebugRenderCountRef.current,
+      colorBy,
+      metric,
+      showSessionNeighbors,
+      isSecondaryOnlyMode,
+      macDetailMetricOptionsLength: macDetailMetricOptions.length,
+      metricOptionsLength: metricOptions.length,
+    });
+  }
+  // L3DEBUG-END
+
   useEffect(() => {
-    if (colorBy !== "mac_detail") return;
-    if (macDetailMetricOptions.length === 0) return;
+    let nextMetric;
+    let effectName;
 
-    const hasCurrentField = macDetailMetricOptions.some((option) => option.value === metric);
-    if (hasCurrentField) return;
-
-    setMetric?.(macDetailMetricOptions[0].value);
-  }, [colorBy, metric, macDetailMetricOptions, setMetric]);
-
-  useEffect(() => {
-    if (colorBy === "mac_detail") return;
-    if (metricOptions.some((option) => option.value === metric)) return;
-
-    const fallbackMetric = metricOptions.find((option) => !option.disabled)?.value;
-    if (fallbackMetric) {
-      setMetric?.(fallbackMetric);
+    if (colorBy === "mac_detail") {
+      effectName = "metric validity: L3 detail";
+      if (macDetailMetricOptions.length === 0) return;
+      if (macDetailMetricOptions.some((option) => option.value === metric)) return;
+      nextMetric = macDetailMetricOptions[0].value;
+    } else if (isSecondaryOnlyMode) {
+      effectName = "metric validity: secondary-only";
+      const currentMetric = String(metric || "").trim().toLowerCase();
+      const currentOption = metricOptions.find((option) => option.value === currentMetric);
+      if (currentOption && !currentOption.disabled) return;
+      nextMetric = metricOptions.find((option) => !option.disabled)?.value;
+    } else {
+      effectName = "metric validity: standard";
+      if (metricOptions.some((option) => option.value === metric)) return;
+      nextMetric = metricOptions.find((option) => !option.disabled)?.value;
     }
-  }, [colorBy, metric, metricOptions, setMetric]);
+
+    if (nextMetric && nextMetric !== metric) {
+      // L3DEBUG-START
+      logL3ParentEffect(effectName, {
+        colorBy,
+        metric,
+        isSecondaryOnlyMode,
+        macDetailMetricOptionsLength: macDetailMetricOptions.length,
+        metricOptionsLength: metricOptions.length,
+      }, nextMetric);
+      // L3DEBUG-END
+      setMetric?.(nextMetric);
+    }
+  }, [
+    colorBy,
+    isSecondaryOnlyMode,
+    macDetailMetricOptions,
+    metric,
+    metricOptions,
+    setMetric,
+  ]);
 
   const colorOptions = useMemo(
     () => {
@@ -1090,20 +1128,20 @@ const UnifiedMapSidebar = ({
   const handleColorByChange = useCallback(
     (value) => {
       const nextColorBy = value === "metric" ? null : value;
-      setColorBy?.(nextColorBy);
+      const currentL3Fields = availableFilterOptions?.macDetailFields;
 
-      if (nextColorBy === "mac_detail") {
-        setShowSessionNeighbors?.(false);
+      if (
+        nextColorBy === "mac_detail" &&
+        (!Array.isArray(currentL3Fields) || currentL3Fields.length === 0)
+      ) {
+        toast.info("No L3 messages are available for the selected data.");
+        return;
       }
-    },
-    [setColorBy, setShowSessionNeighbors],
-  );
 
-  useEffect(() => {
-    if (colorBy === "mac_detail" && showSessionNeighbors) {
-      setShowSessionNeighbors?.(false);
-    }
-  }, [colorBy, showSessionNeighbors, setShowSessionNeighbors]);
+      setColorBy?.(nextColorBy);
+    },
+    [availableFilterOptions?.macDetailFields, setColorBy],
+  );
 
   // Filter handlers
   const updateDataFilter = useCallback(
@@ -1188,6 +1226,12 @@ const UnifiedMapSidebar = ({
 
   useEffect(() => {
     if (!hasValidProjectId && enableSiteToggle) {
+      // L3DEBUG-START
+      logL3ParentEffect("disable site toggle without project", {
+        hasValidProjectId,
+        enableSiteToggle,
+      }, false);
+      // L3DEBUG-END
       setEnableSiteToggle?.(false);
     }
   }, [enableSiteToggle, hasValidProjectId, setEnableSiteToggle]);
@@ -1298,6 +1342,13 @@ const UnifiedMapSidebar = ({
     const next = Number(clampedPciThreshold);
     if (!Number.isFinite(next)) return;
     if (!Number.isFinite(current) || Math.abs(next - current) > 0.0001) {
+      // L3DEBUG-START
+      logL3ParentEffect("clamp PCI threshold", {
+        pciThreshold,
+        clampedPciThreshold,
+        supportsSessionFilters,
+      }, next);
+      // L3DEBUG-END
       setPciThreshold(next);
     }
   }, [
@@ -1396,6 +1447,9 @@ const UnifiedMapSidebar = ({
 
   useEffect(() => {
     if (dataToggle !== "sample") {
+      // L3DEBUG-START
+      logL3ParentEffect("force sample data mode", { dataToggle }, "sample");
+      // L3DEBUG-END
       setDataToggle?.("sample");
     }
   }, [dataToggle, setDataToggle]);
@@ -1404,9 +1458,21 @@ const UnifiedMapSidebar = ({
     const normalizedMetric = String(metric || "").trim().toLowerCase();
     if (normalizedMetric === "dominance") {
       if (dominanceThreshold === null) {
+        // L3DEBUG-START
+        logL3ParentEffect("enable dominance threshold", {
+          metric,
+          dominanceThreshold,
+        }, 6);
+        // L3DEBUG-END
         setDominanceThreshold?.(6);
       }
       if (coverageViolationThreshold !== null) {
+        // L3DEBUG-START
+        logL3ParentEffect("clear coverage threshold for dominance", {
+          metric,
+          coverageViolationThreshold,
+        }, null);
+        // L3DEBUG-END
         setCoverageViolationThreshold?.(null);
       }
       return;
@@ -1414,18 +1480,42 @@ const UnifiedMapSidebar = ({
 
     if (normalizedMetric === "coverage_violation") {
       if (coverageViolationThreshold === null) {
+        // L3DEBUG-START
+        logL3ParentEffect("enable coverage violation threshold", {
+          metric,
+          coverageViolationThreshold,
+        }, -10);
+        // L3DEBUG-END
         setCoverageViolationThreshold?.(-10);
       }
       if (dominanceThreshold !== null) {
+        // L3DEBUG-START
+        logL3ParentEffect("clear dominance threshold for coverage violation", {
+          metric,
+          dominanceThreshold,
+        }, null);
+        // L3DEBUG-END
         setDominanceThreshold?.(null);
       }
       return;
     }
 
     if (dominanceThreshold !== null) {
+      // L3DEBUG-START
+      logL3ParentEffect("clear dominance threshold", {
+        metric,
+        dominanceThreshold,
+      }, null);
+      // L3DEBUG-END
       setDominanceThreshold?.(null);
     }
     if (coverageViolationThreshold !== null) {
+      // L3DEBUG-START
+      logL3ParentEffect("clear coverage threshold", {
+        metric,
+        coverageViolationThreshold,
+      }, null);
+      // L3DEBUG-END
       setCoverageViolationThreshold?.(null);
     }
   }, [
@@ -1667,11 +1757,12 @@ const UnifiedMapSidebar = ({
   }, [ltePredictionOperator, ltePredictionOperatorOptions]);
 
   useEffect(() => {
-    setLteOptimisedSelectedOperators((prev) =>
-      prev.filter((value) =>
+    setLteOptimisedSelectedOperators((prev) => {
+      const next = prev.filter((value) =>
         lteOptimisedOperatorOptions.some((opt) => opt.value === value),
-      ),
-    );
+      );
+      return next.length === prev.length ? prev : next;
+    });
   }, [lteOptimisedOperatorOptions]);
 
   useEffect(() => {
@@ -2232,6 +2323,13 @@ const UnifiedMapSidebar = ({
 
     if (validScenarioIds.length === 0) {
       if (Number.isFinite(currentScenarioId) && currentScenarioId > 0) {
+        // L3DEBUG-START
+        logL3ParentEffect("clear invalid stored-grid scenario", {
+          normalizedStoredGridVersion,
+          storedGridScenarioId,
+          validScenarioIds,
+        }, null);
+        // L3DEBUG-END
         setStoredGridScenarioId?.(null);
       }
       return;
@@ -2242,7 +2340,15 @@ const UnifiedMapSidebar = ({
       currentScenarioId <= 0 ||
       !validScenarioIds.includes(currentScenarioId)
     ) {
-      setStoredGridScenarioId?.(Math.max(...validScenarioIds));
+      const nextScenarioId = Math.max(...validScenarioIds);
+      // L3DEBUG-START
+      logL3ParentEffect("select valid stored-grid scenario", {
+        normalizedStoredGridVersion,
+        storedGridScenarioId,
+        validScenarioIds,
+      }, nextScenarioId);
+      // L3DEBUG-END
+      setStoredGridScenarioId?.(nextScenarioId);
     }
   }, [
     getStoredGridPublicScenarioId,
@@ -3275,6 +3381,12 @@ const UnifiedMapSidebar = ({
     const available = new Set(appFilterOptions);
     const nextApps = selectedApps.filter((app) => available.has(app));
     if (nextApps.length === selectedApps.length) return;
+    // L3DEBUG-START
+    logL3ParentEffect("remove unavailable app filters", {
+      selectedApps,
+      appFilterOptions,
+    }, nextApps);
+    // L3DEBUG-END
     setDataFilters?.((prev) => ({
       ...prev,
       apps: nextApps,

@@ -1244,6 +1244,7 @@ export default function MapLegend({
   const bodyRef = useRef(null);
   const contentRef = useRef(null);
   const hasManualResizeRef = useRef(false);
+  const lastAutoHeightRef = useRef(null);
   const pointerStartRef = useRef(null);
   const dragSuppressToggleRef = useRef(false);
   const resizeSuppressToggleRef = useRef(false);
@@ -1275,9 +1276,20 @@ export default function MapLegend({
 
   const clampCurrentPosition = useCallback(
     () =>
-      setLegendPosition((position) =>
-        clampLegendPosition(position, visibleLegendSize, getContainerBounds()),
-      ),
+      setLegendPosition((position) => {
+        const nextPosition = clampLegendPosition(
+          position,
+          visibleLegendSize,
+          getContainerBounds(),
+        );
+        if (
+          nextPosition.x === position.x &&
+          nextPosition.y === position.y
+        ) {
+          return position;
+        }
+        return nextPosition;
+      }),
     [visibleLegendSize, getContainerBounds],
   );
 
@@ -1491,16 +1503,27 @@ export default function MapLegend({
 
     const headerHeight = headerRef.current?.offsetHeight || 0;
     const bodyHeight = contentRef.current?.scrollHeight || 0;
-    const nextHeight = Math.max(
+    const measuredHeight = Math.max(
       MIN_LEGEND_HEIGHT,
       Math.min(maxLegendHeight, Math.ceil(headerHeight + bodyHeight + 8)),
     );
+    const nextHeight = Number.isFinite(measuredHeight)
+      ? measuredHeight
+      : MIN_LEGEND_HEIGHT;
+
+    if (
+      lastAutoHeightRef.current === nextHeight &&
+      Number(legendSize.height) === nextHeight
+    ) {
+      return;
+    }
+    lastAutoHeightRef.current = nextHeight;
 
     setLegendSize((prev) => {
       if (Math.abs((Number(prev.height) || 0) - nextHeight) < 1) return prev;
       return { ...prev, height: nextHeight };
     });
-  }, [collapsed, content, maxLegendHeight, title]);
+  }, [collapsed, content, legendSize.height, maxLegendHeight, title]);
 
   if (!content) return null;
 

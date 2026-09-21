@@ -91,10 +91,8 @@ import {
   DRAWN_POLYGON_OPACITY,
   EMPTY_LIST,
   EMPTY_POLYGONS,
-  GRID_ONLY_METRICS,
   GRID_POLYGON_FILL_OPACITY,
   GRID_POLYGON_STROKE_OPACITY,
-  GRID_VIEW_SUPPORTED_METRICS,
   MAP_ZOOM_LOCK_EVENT,
   MAP_ZOOM_LOCK_STORAGE_KEY,
   METRIC_CONFIG,
@@ -110,6 +108,12 @@ import {
   toFiniteNumber,
   toSessionCsv,
 } from "@/utils/unifiedMapConfig";
+
+// L3DEBUG-START
+const DEBUG_L3 =
+  import.meta.env.DEV &&
+  localStorage.getItem("debugL3") === "1";
+// L3DEBUG-END
 
 const UnifiedMapSidebar = lazy(
   () => import("@/components/unifiedMap/UnifiedMapSideBar.jsx"),
@@ -1840,18 +1844,62 @@ const UnifiedMapView = () => {
   const [insights, setInsights] = useState([]);
   const [insightsLoading, setInsightsLoading] = useState(false);
   const [selectedMetric, setSelectedMetricState] = useState("rsrp");
-  const setSelectedMetric = useCallback((nextMetric) => {
-    setSelectedMetricState((prevMetric) => {
-      const resolvedMetric =
-        typeof nextMetric === "function" ? nextMetric(prevMetric) : nextMetric;
-      return normalizeMetric(resolvedMetric);
-    });
-  }, []);
   const [viewport, setViewport] = useState(null);
   const [mapZoom, setMapZoom] = useState(DEFAULT_MAP_ZOOM);
   const [mapCenterFallback, setMapCenterFallback] = useState(DEFAULT_CENTER);
   const [isZoomLocked, setIsZoomLocked] = useState(readInitialMapZoomLock);
-  const [colorBy, setColorBy] = useState(null);
+  const [colorBy, setColorByState] = useState(null);
+  // L3DEBUG-START
+  const l3SetterDebugRef = useRef({});
+  const logL3SetterCallRef = useRef(null);
+  logL3SetterCallRef.current = (name, oldValue, newValue) => {
+    if (!DEBUG_L3) return;
+    const now = Date.now();
+    const state = l3SetterDebugRef.current[name] || {
+      timestamps: [],
+      traced: false,
+    };
+    if (state.traced) return;
+    state.timestamps = state.timestamps.filter((timestamp) => now - timestamp < 1000);
+    state.timestamps.push(now);
+    l3SetterDebugRef.current[name] = state;
+    console.debug("[L3DEBUG]", name, { oldValue, newValue });
+    if (state.timestamps.length > 10) {
+      state.traced = true;
+      console.trace("[L3DEBUG] setter exceeded 10 calls in 1 second:", name);
+    }
+  };
+  // L3DEBUG-END
+
+  const selectedMetricRef = useRef(selectedMetric);
+  selectedMetricRef.current = selectedMetric;
+  const setSelectedMetric = useCallback((nextMetric) => {
+    const oldMetric = selectedMetricRef.current;
+    const resolvedMetric =
+      typeof nextMetric === "function" ? nextMetric(oldMetric) : nextMetric;
+    const nextValue =
+      colorBy === "mac_detail"
+        ? String(resolvedMetric ?? "").trim()
+        : normalizeMetric(resolvedMetric);
+    selectedMetricRef.current = nextValue;
+    // L3DEBUG-START
+    logL3SetterCallRef.current?.("setMetric", oldMetric, nextValue);
+    // L3DEBUG-END
+    setSelectedMetricState(nextValue);
+  }, [colorBy]);
+
+  const colorByRef = useRef(colorBy);
+  colorByRef.current = colorBy;
+  const setColorBy = useCallback((nextColorBy) => {
+    const oldValue = colorByRef.current;
+    const nextValue =
+      typeof nextColorBy === "function" ? nextColorBy(oldValue) : nextColorBy;
+    colorByRef.current = nextValue;
+    // L3DEBUG-START
+    logL3SetterCallRef.current?.("setColorBy", oldValue, nextValue);
+    // L3DEBUG-END
+    setColorByState(nextValue);
+  }, []);
   const [highlightedLogs, setHighlightedLogs] = useState(null);
 
   const [enableDataToggle, setEnableDataToggle] = useState(true);
@@ -1984,7 +2032,21 @@ const UnifiedMapView = () => {
   const [neighborSquareSize, setNeighborSquareSize] = useState(12);
   const [triangleScaleMultiplier, setTriangleScaleMultiplier] = useState(1);
   const [defaultSiteBeamwidth, setDefaultSiteBeamwidth] = useState(30);
-  const [showSessionNeighbors, setShowSessionNeighbors] = useState(false);
+  const [showSessionNeighbors, setShowSessionNeighborsState] = useState(false);
+  const showSessionNeighborsRef = useRef(showSessionNeighbors);
+  showSessionNeighborsRef.current = showSessionNeighbors;
+  const setShowSessionNeighbors = useCallback((nextVisibility) => {
+    const oldValue = showSessionNeighborsRef.current;
+    const nextValue =
+      typeof nextVisibility === "function"
+        ? nextVisibility(oldValue)
+        : nextVisibility;
+    showSessionNeighborsRef.current = nextValue;
+    // L3DEBUG-START
+    logL3SetterCallRef.current?.("setShowSessionNeighbors", oldValue, nextValue);
+    // L3DEBUG-END
+    setShowSessionNeighborsState(nextValue);
+  }, []);
   const siteLegendColorMode = useMemo(() => {
     const labelField = String(siteLabelField || "").trim().toLowerCase();
     if (["pci", "band", "technology"].includes(labelField)) return labelField;
@@ -2192,21 +2254,6 @@ const UnifiedMapView = () => {
   }, [enableDataToggle]);
 
   useEffect(() => {
-    const normalizedMetric = String(selectedMetric || "").trim().toLowerCase();
-    if (!enableGrid) {
-      if (GRID_ONLY_METRICS.includes(normalizedMetric)) {
-        setSelectedMetric("rsrp");
-      }
-      return;
-    }
-
-    if (!GRID_VIEW_SUPPORTED_METRICS.includes(normalizedMetric)) {
-      setSelectedMetric("rsrp");
-    }
-
-  }, [enableGrid, selectedMetric, colorBy, setSelectedMetric]);
-
-  useEffect(() => {
     if (!showSubSession) {
       setSelectedSubSessionTarget(null);
     }
@@ -2337,6 +2384,7 @@ const UnifiedMapView = () => {
   }, [projectId]);
 
   useEffect(() => {
+    if (colorBy === "mac_detail") return;
     setSelectedMetric((currentMetric) => {
       if (!isSampleMode) {
         if (
@@ -2364,6 +2412,7 @@ const UnifiedMapView = () => {
     isSampleMode,
     dominanceThreshold,
     coverageViolationThreshold,
+    colorBy,
   ]);
 
   const [dominanceSettings, setDominanceSettings] = useState({
@@ -6942,16 +6991,20 @@ const UnifiedMapView = () => {
   ]);
 
   useEffect(() => {
+    if (colorBy === "mac_detail" && showSessionNeighbors) {
+      setShowSessionNeighbors(false);
+      return;
+    }
     if (!sessionNeighborLoading && !neighborLogsAvailable && showSessionNeighbors) {
       setShowSessionNeighbors(false);
     }
-  }, [neighborLogsAvailable, sessionNeighborLoading, showSessionNeighbors]);
+  }, [colorBy, neighborLogsAvailable, sessionNeighborLoading, showSessionNeighbors]);
 
   useEffect(() => {
-    if (autoShowSessionNeighbors && neighborLogsAvailable) {
+    if (colorBy !== "mac_detail" && autoShowSessionNeighbors && neighborLogsAvailable) {
       setShowSessionNeighbors(true);
     }
-  }, [autoShowSessionNeighbors, neighborLogsAvailable]);
+  }, [autoShowSessionNeighbors, colorBy, neighborLogsAvailable]);
 
   useEffect(() => {
     setOpacity(buildingsVisible ? 0 : 0.8);
