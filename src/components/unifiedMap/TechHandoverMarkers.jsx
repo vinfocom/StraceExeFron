@@ -436,6 +436,7 @@ const HandoverClusterLayer = memo(({ transitions = [], type, onClick }) => {
     clustererRef.current = new MarkerClusterer({
       markers,
       map,
+      algorithmOptions: { maxZoom: 19 },
       renderer: ADVANCED_MARKER_CLUSTER_RENDERER,
       onClusterClick: null,
     });
