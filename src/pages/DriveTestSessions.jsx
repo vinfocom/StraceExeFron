@@ -856,12 +856,7 @@ const DriveTestSessionsPage = () => {
 
     setDownloadingSessionId(sessionId);
     try {
-      const fileExists = await sessionDownloadApi.checkUploadedLogs(sessionId);
-      if (!fileExists) {
-        toast.error("No file found");
-        return;
-      }
-
+      // The endpoint is rate-limited; avoid a redundant HEAD probe before downloading.
       window.location.assign(downloadUrl);
     } catch (error) {
       console.error("Session log download check failed:", error);

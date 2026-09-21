@@ -171,7 +171,10 @@ export const sessionDownloadApi = {
     const url = sessionDownloadApi.getUploadedLogsUrl(sessionId);
     if (!url) return false;
 
-    const response = await fetch(url, { method: "HEAD" });
+    const response = await fetch(url, {
+      method: "HEAD",
+      credentials: "include",
+    });
     return response.ok;
   },
 };
