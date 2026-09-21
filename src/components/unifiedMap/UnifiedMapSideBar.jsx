@@ -35,12 +35,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { getMetricLabelsForLocations, getTechnologyMetricOptions } from "@/utils/technologyMetricLabels";
 import { getTechnologyFamily } from "@/utils/technologySelection";
-
-// L3DEBUG-START
-const DEBUG_L3 =
-  import.meta.env.DEV &&
-  localStorage.getItem("debugL3") === "1";
-// L3DEBUG-END
+import { DEBUG_L3 } from "@/utils/l3Debug";
 
 const LTE_RECOMMENDATION_OPTIMIZED_DEFAULTS = Object.freeze({
   operator: "all",
@@ -873,13 +868,14 @@ const UnifiedMapSidebar = ({
   });
 
   useEffect(() => {
+    const current = availableFilterOptions || {};
     setAccumulatedFilterOptions({
-      providers: [],
-      bands: [],
-      technologies: [],
-      cellIds: [],
-      apps: [],
-      macDetailFields: []
+      providers: current.providers || [],
+      bands: current.bands || [],
+      technologies: current.technologies || [],
+      cellIds: current.cellIds || [],
+      apps: current.apps || [],
+      macDetailFields: current.macDetailFields || [],
     });
   }, [projectId, sessionIds]);
 
@@ -1055,46 +1051,17 @@ const UnifiedMapSidebar = ({
   // L3DEBUG-END
 
   useEffect(() => {
-    let nextMetric;
-    let effectName;
-
-    if (colorBy === "mac_detail") {
-      effectName = "metric validity: L3 detail";
-      if (macDetailMetricOptions.length === 0) return;
-      if (macDetailMetricOptions.some((option) => option.value === metric)) return;
-      nextMetric = macDetailMetricOptions[0].value;
-    } else if (isSecondaryOnlyMode) {
-      effectName = "metric validity: secondary-only";
-      const currentMetric = String(metric || "").trim().toLowerCase();
-      const currentOption = metricOptions.find((option) => option.value === currentMetric);
-      if (currentOption && !currentOption.disabled) return;
-      nextMetric = metricOptions.find((option) => !option.disabled)?.value;
-    } else {
-      effectName = "metric validity: standard";
-      if (metricOptions.some((option) => option.value === metric)) return;
-      nextMetric = metricOptions.find((option) => !option.disabled)?.value;
-    }
-
-    if (nextMetric && nextMetric !== metric) {
+    if (colorBy === "mac_detail" && macDetailMetricOptions.length === 0) {
       // L3DEBUG-START
-      logL3ParentEffect(effectName, {
+      logL3ParentEffect("reset empty L3 color mode", {
         colorBy,
         metric,
-        isSecondaryOnlyMode,
         macDetailMetricOptionsLength: macDetailMetricOptions.length,
-        metricOptionsLength: metricOptions.length,
-      }, nextMetric);
+      }, null);
       // L3DEBUG-END
-      setMetric?.(nextMetric);
+      setColorBy?.(null);
     }
-  }, [
-    colorBy,
-    isSecondaryOnlyMode,
-    macDetailMetricOptions,
-    metric,
-    metricOptions,
-    setMetric,
-  ]);
+  }, [colorBy, macDetailMetricOptions, metric, setColorBy]);
 
   const colorOptions = useMemo(
     () => {
@@ -1128,19 +1095,31 @@ const UnifiedMapSidebar = ({
   const handleColorByChange = useCallback(
     (value) => {
       const nextColorBy = value === "metric" ? null : value;
-      const currentL3Fields = availableFilterOptions?.macDetailFields;
+      const currentL3Fields = accumulatedFilterOptions.macDetailFields;
 
       if (
         nextColorBy === "mac_detail" &&
-        (!Array.isArray(currentL3Fields) || currentL3Fields.length === 0)
+          (!Array.isArray(currentL3Fields) || currentL3Fields.length === 0)
       ) {
         toast.info("No L3 messages are available for the selected data.");
         return;
       }
 
+      if (nextColorBy === "mac_detail") {
+        const exactCurrentMetric = String(metric ?? "");
+        if (!currentL3Fields.includes(exactCurrentMetric)) {
+          const nextMetric = currentL3Fields[0];
+          logL3ParentEffect("select L3 metric with color mode", {
+            colorBy,
+            metric,
+            currentL3Fields,
+          }, nextMetric);
+          setMetric?.(nextMetric);
+        }
+      }
       setColorBy?.(nextColorBy);
     },
-    [availableFilterOptions?.macDetailFields, setColorBy],
+    [accumulatedFilterOptions.macDetailFields, colorBy, metric, setColorBy, setMetric],
   );
 
   // Filter handlers

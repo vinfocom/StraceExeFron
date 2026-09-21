@@ -82,6 +82,8 @@ import {
   writeProjectsListCache,
 } from "@/utils/projectsCache";
 import { createZoomStepControl } from "@/utils/mapZoomStepControl";
+import { DEBUG_L3, traceL3Event, traceL3Effect } from "@/utils/l3Debug";
+import { getMacDetailValueFromLog } from "@/utils/metrics";
 import {
   DEFAULT_CENTER,
   DEFAULT_COVERAGE_FILTERS,
@@ -108,12 +110,6 @@ import {
   toFiniteNumber,
   toSessionCsv,
 } from "@/utils/unifiedMapConfig";
-
-// L3DEBUG-START
-const DEBUG_L3 =
-  import.meta.env.DEV &&
-  localStorage.getItem("debugL3") === "1";
-// L3DEBUG-END
 
 const UnifiedMapSidebar = lazy(
   () => import("@/components/unifiedMap/UnifiedMapSideBar.jsx"),
@@ -1825,6 +1821,13 @@ HandoverLegend.displayName = "HandoverLegend";
 // --- Main Component ---
 
 const UnifiedMapView = () => {
+  // L3DEBUG-START
+  const l3MapViewRenderCountRef = useRef(0);
+  if (DEBUG_L3) {
+    l3MapViewRenderCountRef.current += 1;
+    console.debug("[L3DEBUG] MapView render", l3MapViewRenderCountRef.current);
+  }
+  // L3DEBUG-END
   // ... (State hooks remain exactly the same) ...
   const [searchParams, setSearchParams] = useSearchParams();
   const projectId = useMemo(() => {
@@ -1849,6 +1852,8 @@ const UnifiedMapView = () => {
   const [mapCenterFallback, setMapCenterFallback] = useState(DEFAULT_CENTER);
   const [isZoomLocked, setIsZoomLocked] = useState(readInitialMapZoomLock);
   const [colorBy, setColorByState] = useState(null);
+  const colorByRef = useRef(colorBy);
+  colorByRef.current = colorBy;
   // L3DEBUG-START
   const l3SetterDebugRef = useRef({});
   const logL3SetterCallRef = useRef(null);
@@ -1878,18 +1883,15 @@ const UnifiedMapView = () => {
     const resolvedMetric =
       typeof nextMetric === "function" ? nextMetric(oldMetric) : nextMetric;
     const nextValue =
-      colorBy === "mac_detail"
-        ? String(resolvedMetric ?? "").trim()
+      colorByRef.current === "mac_detail"
+        ? String(resolvedMetric ?? "")
         : normalizeMetric(resolvedMetric);
     selectedMetricRef.current = nextValue;
     // L3DEBUG-START
     logL3SetterCallRef.current?.("setMetric", oldMetric, nextValue);
     // L3DEBUG-END
     setSelectedMetricState(nextValue);
-  }, [colorBy]);
-
-  const colorByRef = useRef(colorBy);
-  colorByRef.current = colorBy;
+  }, []);
   const setColorBy = useCallback((nextColorBy) => {
     const oldValue = colorByRef.current;
     const nextValue =
@@ -2081,8 +2083,42 @@ const UnifiedMapView = () => {
   const [enableGrid, setEnableGrid] = useState(false);
   const [gridSizeMeters, setGridSizeMeters] = useState(25);
   const [logGridSaving, setLogGridSaving] = useState(false);
-  const [gridCellStats, setGridCellStats] = useState({ total: 0, populated: 0 });
-  const [renderedGridLegendLogs, setRenderedGridLegendLogs] = useState(EMPTY_LIST);
+  const [gridCellStats, setGridCellStatsState] = useState({ total: 0, populated: 0 });
+  const setGridCellStats = useCallback((nextStats) => {
+    // L3DEBUG-START
+    traceL3Event("MapView setGridCellStats callback", {
+      total: nextStats?.total,
+      populated: nextStats?.populated,
+    });
+    // L3DEBUG-END
+    setGridCellStatsState((previous) =>
+      previous?.total === nextStats?.total &&
+      previous?.populated === nextStats?.populated
+        ? previous
+        : nextStats,
+    );
+  }, []);
+  const [renderedGridLegendLogs, setRenderedGridLegendLogsState] = useState(EMPTY_LIST);
+  const setRenderedGridLegendLogs = useCallback((nextLogs) => {
+    // L3DEBUG-START
+    traceL3Event("MapView setRenderedGridLegendLogs callback", {
+      length: Array.isArray(nextLogs) ? nextLogs.length : null,
+      firstId: Array.isArray(nextLogs) ? nextLogs[0]?.id : undefined,
+    });
+    // L3DEBUG-END
+    setRenderedGridLegendLogsState((previous) => {
+      if (!Array.isArray(previous) || !Array.isArray(nextLogs)) {
+        return previous === nextLogs ? previous : nextLogs;
+      }
+      if (previous.length !== nextLogs.length) return nextLogs;
+      const isSame = previous.every((row, index) =>
+        row?.id === nextLogs[index]?.id &&
+        (row?.metric_value ?? row?.value) ===
+          (nextLogs[index]?.metric_value ?? nextLogs[index]?.value),
+      );
+      return isSame ? previous : nextLogs;
+    });
+  }, []);
   const [lteGridEnabled, setLteGridEnabled] = useState(false);
   const [lteGridSizeMeters, setLteGridSizeMeters] = useState(50);
   const [lteGridAggregationMethod, setLteGridAggregationMethod] =
@@ -4116,9 +4152,8 @@ const UnifiedMapView = () => {
     }
   }, [projectId, sitePredictionScenarioId]);
 
-  const siteData = rawSiteData || [];
+  const siteData = rawSiteData || EMPTY_LIST;
   const {
-    allNeighbors: rawAllNeighbors,
     stats: neighborStats,
     loading: neighborLoading,
     refetch: refetchNeighbors,
@@ -4127,7 +4162,6 @@ const UnifiedMapView = () => {
     enabled: showNeighbors,
   });
 
-  const allNeighbors = rawAllNeighbors || [];
 
   // Effect hooks for distance and IO â€” each with active guards to prevent stale state updates
   useEffect(() => {
@@ -4620,7 +4654,9 @@ const UnifiedMapView = () => {
     const excludedMetricValue = Number.parseFloat(dataFilters?.excludedMetricValue);
     if (Number.isFinite(excludedMetricValue)) {
       result = result.filter(
-        (loc) => getMetricValueFromLog(loc, selectedMetric) !== excludedMetricValue,
+        (loc) => Number(colorBy === "mac_detail"
+          ? getMacDetailValueFromLog(loc, selectedMetric)
+          : getMetricValueFromLog(loc, selectedMetric)) !== excludedMetricValue,
       );
     }
     if (isSampleMode && pciThreshold > 0) {

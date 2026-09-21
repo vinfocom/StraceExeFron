@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import { getMetricValueFromLog } from "@/utils/metrics";
+import { getMetricValueFromLog, getMacDetailValueFromLog } from "@/utils/metrics";
 import {
   normalizeBandName,
   normalizeProviderName,
@@ -281,11 +281,13 @@ export const useUnifiedGridViewData = ({
     const safeGridSizeMeters = Math.max(5, Number(gridSizeMeters) || 20);
     const cellHeight = safeGridSizeMeters * latDegPerMeter;
     const cellWidth = safeGridSizeMeters * lngDegPerMeter;
-    const selectedMetricKey = String(selectedMetric || "rsrp").trim().toLowerCase();
+    const normalizedColorBy = String(colorBy || "metric").trim().toLowerCase();
+    const selectedMetricKey = normalizedColorBy === "mac_detail"
+      ? String(selectedMetric || "")
+      : String(selectedMetric || "rsrp").trim().toLowerCase();
     const normalizedAggregationMethod = String(aggregationMethod || "mean")
       .trim()
       .toLowerCase();
-    const normalizedColorBy = String(colorBy || "metric").trim().toLowerCase();
     const useCategoryColor = CATEGORY_COLOR_MODES.has(normalizedColorBy);
     const lowerIsBetterMetrics = new Set([
       "latency",
@@ -380,7 +382,9 @@ export const useUnifiedGridViewData = ({
       );
 
       const selectedMetricValue = toFiniteNumber(
-        getMetricValueFromLog(loc, selectedMetricKey),
+        normalizedColorBy === "mac_detail"
+          ? getMacDetailValueFromLog(loc, selectedMetricKey)
+          : getMetricValueFromLog(loc, selectedMetricKey),
       );
       if (selectedMetricValue !== null) {
         const providerName = resolveProviderName(loc);

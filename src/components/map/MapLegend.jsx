@@ -27,6 +27,7 @@ import {
   resolveMacDetailMetricKey,
 } from "@/utils/colorUtils";
 import { useSettingsDialog } from "@/context/SettingsDialogContext";
+import { DEBUG_L3, traceL3Effect } from "@/utils/l3Debug";
 
 const MAP_COLOR_PRESETS = [
   "#facc15",
@@ -332,14 +333,14 @@ const ColorSchemeLegend = ({ colorBy, logs, activeFilter, onFilterChange, macDet
       .map(([key]) => [
         key,
         colorOverrides[key] ||
-        getRegisteredColor(colorBy, key) ||
+        getRegisteredColor(colorBy, key, macDetailField) ||
         (colorBy === "pci"
           ? getMetricPciColor(key)
           : colorBy === "earfcn"
           ? getEarfcnColor(key)
           : colorBy === "technology"
           ? getLogColor(colorBy, key)
-          : scheme[key] || getLogColor(colorBy, key)),
+          : scheme[key] || getLogColor(colorBy, key, "#a8a6a2", macDetailField)),
       ]);
 
     return { counts: tempCounts, total: logs?.length || 0, usedEntries: used };
@@ -353,6 +354,9 @@ const ColorSchemeLegend = ({ colorBy, logs, activeFilter, onFilterChange, macDet
       onFilterChange,
     );
   };
+
+  const visibleEntries = usedEntries.slice(0, 50);
+  const overflowCount = Math.max(0, usedEntries.length - visibleEntries.length);
 
   const handleColorChange = (key, color) => {
     if (!/^#[0-9a-f]{6}$/i.test(color)) return;
@@ -384,7 +388,7 @@ const ColorSchemeLegend = ({ colorBy, logs, activeFilter, onFilterChange, macDet
   return (
     <div className="flex flex-col">
       <div className="max-h-64 overflow-y-auto space-y-px custom-scrollbar">
-        {usedEntries.map(([key, color]) => {
+        {visibleEntries.map(([key, color]) => {
           const isActive = hasLegendFilter(activeFilter, {
             type: "category",
             value: key,
@@ -442,6 +446,11 @@ const ColorSchemeLegend = ({ colorBy, logs, activeFilter, onFilterChange, macDet
             </div>
           );
         })}
+        {overflowCount > 0 && (
+          <div className="px-2 py-1 text-xs text-gray-400">
+            Other ({overflowCount} values)
+          </div>
+        )}
       </div>
       <LegendFooter total={total} />
     </div>
@@ -1238,6 +1247,13 @@ export default function MapLegend({
   onFilterChange = () => {},
   className, // Added className prop
 }) {
+  // L3DEBUG-START
+  const l3LegendRenderCountRef = useRef(0);
+  if (DEBUG_L3) {
+    l3LegendRenderCountRef.current += 1;
+    console.debug("[L3DEBUG] MapLegend render", l3LegendRenderCountRef.current);
+  }
+  // L3DEBUG-END
   const { openSettings: openSettingsDialog } = useSettingsDialog();
   const containerRef = useRef(null);
   const headerRef = useRef(null);
@@ -1498,32 +1514,43 @@ export default function MapLegend({
     };
   }, [colorBy, selectedMetric, thresholds, logs, activeFilter, onFilterChange]);
 
-  useLayoutEffect(() => {
+  useEffect(() => {
+    // L3DEBUG-START
+    traceL3Effect("MapLegend size layout effect", {
+      collapsed,
+      maxLegendHeight,
+      title,
+    });
+    // L3DEBUG-END
     if (collapsed || hasManualResizeRef.current) return;
 
-    const headerHeight = headerRef.current?.offsetHeight || 0;
-    const bodyHeight = contentRef.current?.scrollHeight || 0;
-    const measuredHeight = Math.max(
-      MIN_LEGEND_HEIGHT,
-      Math.min(maxLegendHeight, Math.ceil(headerHeight + bodyHeight + 8)),
-    );
-    const nextHeight = Number.isFinite(measuredHeight)
-      ? measuredHeight
-      : MIN_LEGEND_HEIGHT;
-
-    if (
-      lastAutoHeightRef.current === nextHeight &&
-      Number(legendSize.height) === nextHeight
-    ) {
-      return;
-    }
-    lastAutoHeightRef.current = nextHeight;
-
-    setLegendSize((prev) => {
-      if (Math.abs((Number(prev.height) || 0) - nextHeight) < 1) return prev;
-      return { ...prev, height: nextHeight };
-    });
-  }, [collapsed, content, legendSize.height, maxLegendHeight, title]);
+    let frame = 0;
+    const measure = () => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => {
+        if (collapsed || hasManualResizeRef.current) return;
+        const headerHeight = headerRef.current?.offsetHeight || 0;
+        const bodyHeight = contentRef.current?.scrollHeight || 0;
+        const measured = Math.max(MIN_LEGEND_HEIGHT,
+          Math.min(maxLegendHeight, Math.ceil(headerHeight + bodyHeight + 8)));
+        const nextHeight = Number.isFinite(measured) ? measured : MIN_LEGEND_HEIGHT;
+        if (lastAutoHeightRef.current != null && Math.abs(lastAutoHeightRef.current - nextHeight) < 1) return;
+        lastAutoHeightRef.current = nextHeight;
+        setLegendSize((prev) => Math.abs((Number(prev.height) || 0) - nextHeight) < 1
+          ? prev : { ...prev, height: nextHeight });
+      });
+    };
+    measure();
+    const observer = typeof ResizeObserver !== "undefined" && contentRef.current
+      ? new ResizeObserver(measure)
+      : null;
+    if (observer && contentRef.current) observer.observe(contentRef.current);
+    if (observer && headerRef.current) observer.observe(headerRef.current);
+    return () => {
+      observer?.disconnect();
+      cancelAnimationFrame(frame);
+    };
+  }, [collapsed, maxLegendHeight, title]);
 
   if (!content) return null;
 

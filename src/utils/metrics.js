@@ -488,6 +488,27 @@ export const resolveMetricConfig = (key) => {
   };
 };
 
+// L3 extra_fields are keyed by the exact API field name; never fuzzy-match them
+// against core metrics (e.g. nr_dl_pci must not become the top-level pci).
+export const getMacDetailValueFromLog = (log, field) => {
+  if (!log?.extra_fields || typeof field !== "string" || !field) return null;
+  const value = log.extra_fields[field];
+  return value === undefined || value === null || value === "" ? null : value;
+};
+
+const macDetailFieldKinds = new Map();
+export const getMacDetailFieldKind = (field, resolveBucketKey, sampleValue) => {
+  if (!macDetailFieldKinds.has(field)) {
+    const numeric = sampleValue !== null && sampleValue !== undefined &&
+      sampleValue !== "" && Number.isFinite(Number(sampleValue));
+    macDetailFieldKinds.set(
+      field,
+      resolveBucketKey(field) ? "bucketed-numeric" : numeric ? "numeric-unbucketed" : "categorical",
+    );
+  }
+  return macDetailFieldKinds.get(field);
+};
+
 export const getMetricValueFromLog = (log, metric) => {
   if (!log) return NaN;
 

@@ -1,6 +1,7 @@
 // src/hooks/useAreaPolygons.js
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { areaBreakdownApi } from '@/api/apiEndpoints';
+import { isCancelledError } from '@/api/apiService';
 import { parseWKTToPolygons, computeBbox } from '@/utils/wkt.js';
 import {
   makeProjectCacheKey,
@@ -8,15 +9,17 @@ import {
   writeProjectSessionCache,
 } from '@/utils/projectSessionCache';
 
+const EMPTY_POLYGONS = [];
 export const useAreaPolygons = (projectId, areaEnabled) => {
-  const [polygons, setPolygons] = useState([]);
+  const [polygons, setPolygons] = useState(EMPTY_POLYGONS);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const abortControllerRef = useRef(null);
+  const requestIdRef = useRef(0);
 
   const fetchData = useCallback(async (forceRefresh = false) => {
     if (!projectId || !areaEnabled) {
-      setPolygons([]);
+      setPolygons((prev) => prev.length ? EMPTY_POLYGONS : prev);
       return;
     }
 
@@ -34,14 +37,16 @@ export const useAreaPolygons = (projectId, areaEnabled) => {
     }
 
     if (abortControllerRef.current) abortControllerRef.current.abort();
-    abortControllerRef.current = new AbortController();
+    const requestId = ++requestIdRef.current;
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
 
     setLoading(true);
     setError(null);
 
     try {
       const res = await areaBreakdownApi.getAreaPolygons(projectId, {
-        signal: abortControllerRef.current.signal,
+        signal: controller.signal,
       });
 
       // Navigate to the correct path in your response: res.data.ai_zones
@@ -51,36 +56,42 @@ export const useAreaPolygons = (projectId, areaEnabled) => {
         // Use the 'geometry' field as shown in your console log
         const wkt = item.geometry; 
         if (!wkt) return [];
+        const itemData = Object.fromEntries(
+          Object.entries(item).filter(([key]) => key !== "geometry"),
+        );
 
         return parseWKTToPolygons(wkt).map((p, k) => ({
+          ...itemData,
           id: item.id || item.Id,
-          name: item.project_name || `Zone ${item.id}`,
-          uid: `area-${item.id}-${k}`,
+          name: item.project_name || `Zone ${item.id ?? item.Id}`,
+          uid: `area-${item.id ?? item.Id}-${k}`,
           paths: p.paths,
           bbox: computeBbox(p.paths[0]),
-          // Include the rest of the item data (created_at, project_id, etc.)
-          ...item 
         }));
       });
 
+      if (requestId !== requestIdRef.current) return;
       setPolygons(parsed);
       writeProjectSessionCache(cacheKey, parsed);
     } catch (err) {
-      if (err.name === "AbortError") return;
+      if (isCancelledError(err)) return;
+      if (requestId !== requestIdRef.current) return;
       console.error("Area Polygons Fetch Error:", err);
       setError(err.message);
-      setPolygons([]);
+      setPolygons((prev) => prev.length ? EMPTY_POLYGONS : prev);
     } finally {
-      setLoading(false);
+      if (requestId === requestIdRef.current) setLoading(false);
     }
   }, [projectId, areaEnabled]);
 
   useEffect(() => {
     fetchData(false);
     return () => {
+      requestIdRef.current += 1;
       if (abortControllerRef.current) abortControllerRef.current.abort();
     };
   }, [fetchData]);
 
-  return { areaData: polygons, loading, error, refetch: () => fetchData(true) };
+  const refetch = useCallback(() => fetchData(true), [fetchData]);
+  return { areaData: polygons, loading, error, refetch };
 };
