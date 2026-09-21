@@ -616,6 +616,8 @@ function BackendAnalyzer({ sessionIds, analysisId, projectName, onBack }) {
   const [counts, setCounts] = useState({});
   const [timeline, setTimeline] = useState([]);
   const [detailsLoaded, setDetailsLoaded] = useState(false);
+  const [detailsError, setDetailsError] = useState("");
+  const [detailsRetry, setDetailsRetry] = useState(0);
   const [loadResponse] = useState(() => createBackendL3Loader(l3EventApi.getDiagnosticL3Summary));
   const [summary, setSummary] = useState(normalizeSummary(null));
   const [l3Messages, setL3Messages] = useState([]);
@@ -632,12 +634,6 @@ function BackendAnalyzer({ sessionIds, analysisId, projectName, onBack }) {
       if (cancelled) return;
       const payload = unwrapDiagnosticSummary(response);
       if (payload?.summaryVersion !== 1) throw new Error("The backend must be updated to support Summary metrics.");
-      if (!Array.isArray(payload.rows)) throw new Error("Invalid diagnostic response: timeline rows are missing.");
-      const rows = diagnosticRowsFromResponse(response).map((row) => normalizeTimelineRow(row));
-      setTimeline(rows);
-      setL3Messages(rows.filter((row) => row.type === "l3"));
-      setEventMessages(rows.filter((row) => row.type === "event"));
-      setDetailsLoaded(true);
       setSummary(normalizeSummary(payload));
       setCounts({
         excel_view_count: payload.totalRows ?? 0,
@@ -654,7 +650,26 @@ function BackendAnalyzer({ sessionIds, analysisId, projectName, onBack }) {
     return () => { cancelled = true; };
   }, [scope, loadResponse]);
 
-  // The initial response supplies every tab. Tab changes only select stored data.
+  useEffect(() => {
+    if (loading || error || activeView === "summary" || detailsLoaded) return;
+    let cancelled = false;
+    setDetailsError("");
+    loadResponse({ ...scope, includeRows: true }).then((response) => {
+      if (cancelled) return;
+      const payload = unwrapDiagnosticSummary(response);
+      if (!Array.isArray(payload?.rows)) throw new Error("Invalid diagnostic response: timeline rows are missing.");
+      const rows = diagnosticRowsFromResponse(response).map(row => normalizeTimelineRow(row));
+      setTimeline(rows);
+      setL3Messages(rows.filter((row) => row.type === "l3"));
+      setEventMessages(rows.filter((row) => row.type === "event"));
+      setDetailsLoaded(true);
+    }).catch((requestError) => {
+      if (!cancelled) setDetailsError(requestError?.response?.data?.message || requestError?.message || "Failed to load detailed logs.");
+    });
+    return () => { cancelled = true; };
+  }, [activeView, detailsLoaded, detailsRetry, error, loading, loadResponse, scope]);
+
+  // Details are requested once when a detail tab is opened and reused by all tabs.
   const detailModel = useMemo(() => detailsLoaded ? buildBackendDetailModel(timeline, summary.calls) : null, [detailsLoaded, timeline, summary.calls]);
   const protocolTimeline = useMemo(() => {
     if (!selectedCall) return timeline;
@@ -673,17 +688,17 @@ function BackendAnalyzer({ sessionIds, analysisId, projectName, onBack }) {
   );
   const signalingRows = detailModel?.signalingRows;
   const rsrpByRowId = useMemo(() => fullAnalysis ? buildRsrpByRowId(fullAnalysis) : new Map(), [fullAnalysis]);
-  const mapPoints = useMemo(() => signalingRows ? buildMapPoints(signalingRows, rsrpByRowId) : [], [signalingRows, rsrpByRowId]);
+  const mapPoints = useMemo(() => activeView === "map" && signalingRows ? buildMapPoints(signalingRows, rsrpByRowId) : [], [activeView, signalingRows, rsrpByRowId]);
   const rawRows = activeView === "events" ? eventMessages : l3Messages;
   const countForTab = useCallback((tabId) => {
     if (tabId === "summary") return enrichedSummary?.totalCalls ?? 0;
-    if (tabId === "map") return detailsLoaded ? mapPoints.length : null;
+    if (tabId === "map") return detailsLoaded && activeView === "map" ? mapPoints.length : null;
     if (tabId === "excel") return signalingRows?.length ?? counts.excel_view_count ?? 0;
     if (tabId === "analyzer") return fullAnalysis?.stats?.totalProcedures ?? null;
     if (tabId === "l3") return l3Messages.length || counts.l3_count || 0;
     if (tabId === "events") return eventMessages.length || counts.event_count || 0;
     return 0;
-  }, [detailsLoaded, counts.event_count, counts.excel_view_count, counts.l3_count, enrichedSummary?.totalCalls, eventMessages.length, l3Messages.length, mapPoints.length, fullAnalysis?.stats?.totalProcedures, signalingRows?.length]);
+  }, [activeView, detailsLoaded, counts.event_count, counts.excel_view_count, counts.l3_count, enrichedSummary?.totalCalls, eventMessages.length, l3Messages.length, mapPoints.length, fullAnalysis?.stats?.totalProcedures, signalingRows?.length]);
   const visibleRawRows = useMemo(() => {
     const needle = search.trim().toLowerCase();
     if (!needle) return rawRows;
@@ -712,6 +727,9 @@ function BackendAnalyzer({ sessionIds, analysisId, projectName, onBack }) {
         {VIEW_TABS.map((tab) => <button key={tab.id} type="button" onClick={() => setActiveView(tab.id)} className={`border px-2.5 py-1.5 text-xs ${activeView === tab.id ? "border-blue-500 bg-blue-600" : "border-slate-700 bg-slate-900 text-slate-300 hover:bg-slate-700"}`}>{tab.label}{countForTab(tab.id) != null ? ` (${countForTab(tab.id).toLocaleString()})` : ""}</button>)}
       </header>
       <main className="l3-analysis-main flex min-h-0 flex-1 flex-col overflow-hidden">
+        {activeView !== "summary" && !detailsLoaded && (detailsError
+          ? <div className="p-4 text-red-300">{detailsError}<button type="button" onClick={() => setDetailsRetry(value => value + 1)} className="ml-3 rounded border border-slate-600 px-3 py-1 text-white">Retry</button></div>
+          : <div className="flex items-center justify-center p-8 text-blue-300"><Loader2 className="mr-2 h-5 w-5 animate-spin" />Loading detailed logs...</div>)}
         {activeView === "summary" && <div className="h-full overflow-auto p-3"><HomeCallSummary summary={enrichedSummary} timeline={timeline} /></div>}
         {detailsLoaded && activeView === "analyzer" && selectedCall && (
           <div className="shrink-0 flex items-center justify-between gap-2 border-b border-blue-500/30 bg-blue-500/10 px-2 py-1 text-xs">

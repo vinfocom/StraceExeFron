@@ -521,7 +521,7 @@ export const useNetworkSamples = (
     });
 
 
-    if (!forceRefresh && fetchKey === lastFetchedKeyRef.current && locations.length > 0) return;
+    if (!forceRefresh && fetchKey === lastFetchedKeyRef.current) return;
     if (!sessionIds?.length || !enabled) {
       if (abortControllerRef.current) abortControllerRef.current.abort();
       isFetchingRef.current = false;
