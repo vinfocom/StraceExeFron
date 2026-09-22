@@ -1312,6 +1312,7 @@ function UnifiedDetailLogs({
   n78NeighborStats = null,
   n78NeighborLoading = false,
   dataFilters = DEFAULT_DATA_FILTERS,
+  availableTechnologies,
   onFilteredDataChange,
   showSubSession = false,
   subSessionData = [],
@@ -2437,6 +2438,8 @@ function UnifiedDetailLogs({
               sessionIds={sessionIds}
               projectId={projectId}
               availableBands={availableBands}
+              availableTechnologies={availableTechnologies}
+              selectedTechnologies={dataFilters?.technologies}
               gridViewEnabled={gridViewEnabled}
               gridViewSummary={gridViewSummary}
               metricLabels={metricLabels}

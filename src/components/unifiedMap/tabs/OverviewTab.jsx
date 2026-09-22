@@ -216,6 +216,8 @@ export const OverviewTab = ({
   sessionIds: sessionIdsProp = [],
   projectId = null,
   availableBands = [],
+  availableTechnologies,
+  selectedTechnologies,
   gridViewEnabled = false,
   gridViewSummary = null,
 }) => {
@@ -269,7 +271,21 @@ export const OverviewTab = ({
     }
   }, [lockedBand, pptBandOptions]);
 
-  const pptTechnologyOptions = ["2G", "3G", "4G", "5G"];
+  // Match the sidebar's log technology choices, including active selections.
+  const pptTechnologyOptions = useMemo(
+    () => [...new Set([
+      ...(availableTechnologies || []),
+      ...(selectedTechnologies || []),
+    ])],
+    [availableTechnologies, selectedTechnologies],
+  );
+
+  useEffect(() => {
+    setPptTechnologies((current) => {
+      const next = current.filter((technology) => pptTechnologyOptions.includes(technology));
+      return next.length === current.length ? current : next;
+    });
+  }, [pptTechnologyOptions]);
 
   const togglePptTechnology = useCallback((technology) => {
     setPptTechnologies((current) =>
@@ -839,6 +855,9 @@ export const OverviewTab = ({
           {pptTemplate === "stracer" && (
             <fieldset className="space-y-2">
               <legend className="text-sm font-medium text-slate-200">Technology</legend>
+              {pptTechnologyOptions.length === 0 && (
+                <p className="text-xs text-slate-400">No technologies are available for the current map data.</p>
+              )}
               <div className="grid grid-cols-2 gap-2">
                 {pptTechnologyOptions.map((technology) => (
                   <label
@@ -869,7 +888,7 @@ export const OverviewTab = ({
             <button
               type="button"
               onClick={handlePptDownload}
-              disabled={isGeneratingPpt || !pptTemplate}
+              disabled={isGeneratingPpt || !pptTemplate || (pptTemplate === "stracer" && pptTechnologies.length === 0)}
               className="rounded-md bg-purple-600 px-3 py-2 text-sm font-medium text-white transition hover:bg-purple-500 disabled:cursor-wait disabled:opacity-60"
             >
               Generate PPT

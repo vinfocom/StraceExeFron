@@ -7565,6 +7565,7 @@ const UnifiedMapView = () => {
             pciHandover={pciHandover}
             dataFilters={dataFilters}
             availableBands={availableFilterOptions?.bands || []}
+            availableTechnologies={availableFilterOptions?.technologies}
             bestNetworkEnabled={bestNetworkEnabled}
             bestNetworkStats={bestNetworkStats}
             onClose={handleCloseAnalytics}
