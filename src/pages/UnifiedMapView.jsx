@@ -1843,7 +1843,7 @@ const UnifiedMapView = () => {
   const [showAnalytics, setShowAnalytics] = useState(false);
   const mapSnapshotContainerRef = useRef(null);
   const [analyticsActiveTab, setAnalyticsActiveTab] = useState("overview");
-  const [showInsights, setShowInsights] = useState(false);
+  const [showInsights, setShowInsights] = useState(true);
   const [insights, setInsights] = useState([]);
   const [insightsLoading, setInsightsLoading] = useState(false);
   const [selectedMetric, setSelectedMetricState] = useState("rsrp");
@@ -2860,7 +2860,6 @@ const UnifiedMapView = () => {
     if (requestedSessionIds.length === 0) {
       setInsights([]);
       setInsightsLoading(false);
-      toast.info("No insights found", { toastId: "unified-map-no-insights" });
       return undefined;
     }
 
