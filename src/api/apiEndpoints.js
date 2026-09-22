@@ -1349,6 +1349,8 @@ export const newPdfReportApi = {
 export const pptReportApi = {
   generate: (payload) =>
     pythonApi.post("/api/ppt-report/generate", payload, { timeout: 30 * 60 * 1000 }),
+  getStatus: (reportId) =>
+    pythonApi.get(`/api/ppt-report/status/${encodeURIComponent(reportId)}`, { timeout: 120000 }),
   healthCheck: () =>
     pythonApi.get("/api/ppt-report/health", { timeout: 120000 }),
   getDownloadUrl: (downloadUrl, projectId) => {

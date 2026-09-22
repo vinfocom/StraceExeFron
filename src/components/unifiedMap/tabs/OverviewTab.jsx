@@ -369,19 +369,35 @@ export const OverviewTab = ({
 
     try {
       const response = await pptReportApi.generate(payload);
-      const status = String(response?.status || "").toLowerCase();
+      let reportResponse = response;
+      let status = String(reportResponse?.status || "").toLowerCase();
+      if (status === "processing" && reportResponse?.report_id) {
+        const startedAt = Date.now();
+        const maxWaitMs = 30 * 60 * 1000;
+        while (Date.now() - startedAt < maxWaitMs) {
+          await new Promise((resolve) => setTimeout(resolve, 2000));
+          reportResponse = await pptReportApi.getStatus(reportResponse.report_id);
+          status = String(reportResponse?.status || "").toLowerCase();
+          if (status === "ready" || status === "failed") break;
+        }
+        if (status !== "ready") {
+          throw new Error(
+            reportResponse?.error || reportResponse?.message || "The PPT report could not be generated.",
+          );
+        }
+      }
       const downloadUrl = pptReportApi.getDownloadUrl(
-        response?.download_url,
+        reportResponse?.download_url,
         numericProjectId,
       );
 
-      if (status && status !== "success") {
-        throw new Error(response?.message || "The PPT report could not be generated.");
+      if (status && !["success", "ready"].includes(status)) {
+        throw new Error(reportResponse?.message || "The PPT report could not be generated.");
       }
 
       const link = document.createElement("a");
       link.href = downloadUrl;
-      link.download = response?.output_file || `Mobility_DT_Project_${numericProjectId}.pptx`;
+      link.download = reportResponse?.output_file || `Mobility_DT_Project_${numericProjectId}.pptx`;
       link.target = "_blank";
       link.rel = "noopener noreferrer";
       document.body.appendChild(link);
