@@ -2,8 +2,10 @@ import { getLogTechnology, getTechnologyMetricLabels, getTechnologyMetricValue, 
 // src/components/MapWithMultipleCircles.jsx
 import React, { useCallback, useMemo, useState, useEffect, useRef } from "react";
 import { GoogleMap, PolygonF, InfoWindow } from "@react-google-maps/api";
+import { GOOGLE_MAP_ID } from "@/lib/googleMapsLoader";
 import { mapViewApi } from "@/api/apiEndpoints";
 import DeckGLOverlay from "@/components/maps/DeckGLOverlay";
+import PrimaryLogTooltip from "./PrimaryLogTooltip";
 import { Zap, Layers, Radio, Square, Circle } from "lucide-react";
 // import TechHandoverMarkers from "../unifiedMap/TechHandoverMarkers";
 import useColorForLog from "@/hooks/useColorForLog";
@@ -1332,20 +1334,27 @@ const formatDeltaValue = (value) => {
   return Number.isFinite(number) ? `${number.toFixed(1)} dB` : "N/A";
 };
 
-const PrimaryLogInfoWindow = React.memo(({ log, onClose, resolveColor, selectedMetric }) => {
+const getNetworkLogField = (log, ...keys) => {
+  const value = keys.map((key) => log?.[key]).find((candidate) =>
+    candidate !== null && candidate !== undefined && String(candidate).trim() !== "",
+  );
+  return value ?? null;
+};
+
+const PrimaryLogInfoWindow = React.memo(({ log, resolveColor, selectedMetric, colorBy }) => {
   if (!log) return null;
   const selectedMetricKey = String(selectedMetric || "").trim().toLowerCase();
-  const selectedCellId = String(log?.cell_id ?? log?.cellId ?? log?.CellId ?? "").trim();
+  const selectedCellId = String(getNetworkLogField(log, "cell_id", "cellId", "CellId", "CELL_ID") ?? "").trim();
   const metricValue =
     selectedMetricKey === "cell_id"
       ? selectedCellId
-      : getMetricValueFromLog(log, selectedMetric);
+      : colorBy === "mac_detail"
+        ? getMacDetailValueFromLog(log, selectedMetric)
+        : getMetricValueFromLog(log, selectedMetric);
   const metricColor =
     selectedMetricKey === "cell_id"
       ? resolveColor(selectedCellId || "Unknown", "cell_id")
-      : resolveColor(metricValue, selectedMetric);
-  const dlValue = getThroughputValue(log, "dl");
-  const ulValue = getThroughputValue(log, "ul");
+      : resolveColor(metricValue, colorBy === "mac_detail" ? "mac_detail" : selectedMetric);
   const isWifiLog =
     log?.is_wifi === true ||
     ["wifi", "wi-fi"].includes(
@@ -1353,30 +1362,42 @@ const PrimaryLogInfoWindow = React.memo(({ log, onClose, resolveColor, selectedM
     );
   const labels = getTechnologyMetricLabels(getLogTechnology(log));
   const cellChannel = getTechnologyMetricValue(log, "pci");
-  const signalLabel = isWifiLog ? "RSSI" : labels.rsrp;
   const signalValue = isWifiLog ? (log.rssi ?? log.signal_value ?? log.rsrp) : log.rsrp;
   const ciValue = getMetricValueFromLog(log, "ci_db");
   const logTypeLabel = isWifiLog ? "Wi-Fi Log" : "Network Log";
   const overlapLogs = Array.isArray(log.__overlapLogs) ? log.__overlapLogs : [];
-  const hiddenOverlapCount = Math.max(0, overlapLogs.length - 1);
-  const overlapPreview = overlapLogs.slice(0, 6);
+  const selectedLogId = String(getLogDisplayId(log, -1));
+  const primaryOverlapIndex = Math.max(0, overlapLogs.findIndex((item) =>
+    item === log || String(getLogDisplayId(item, -2)) === selectedLogId,
+  ));
+  const otherOverlapLogs = overlapLogs.filter((_, index) => index !== primaryOverlapIndex);
+  const overlapCount = otherOverlapLogs.length;
+  const overlapPreview = otherOverlapLogs.slice(0, 4);
+  const provider = getNetworkLogField(log, "provider", "operator", "network_operator", "networkOperator");
+  const band = getNetworkLogField(log, "band", "primaryBand", "band_name", "Band");
+  const technology = getNetworkLogField(log, "technology", "networkType", "network", "rat");
+  const pci = getNetworkLogField(log, "pci", "PCI", "Pci", "physical_cell_id", "physicalCellId", "best_pci") ?? cellChannel;
+  const nodebId = getNetworkLogField(log, "nodebid", "nodeb_id", "nodebId", "node_b_id", "NodeBID", "NodeBId");
   const coverageViolationNeighbors = Array.isArray(log.coverageViolationNeighbors)
     ? log.coverageViolationNeighbors
     : [];
   const coverageViolationPreview = coverageViolationNeighbors.slice(0, 6);
 
   return (
-    <InfoWindow
-      position={{ lat: log.lat, lng: log.lng }}
-      onCloseClick={onClose}
-      options={{ pixelOffset: new window.google.maps.Size(0, -15), maxWidth: 320 }}
-    >
-      <div className="p-2 min-w-[260px] font-sans text-gray-800">
-        <div className="flex items-center gap-2 pb-2 mb-2 border-b border-gray-200">
-          <Circle className="w-4 h-4" style={{ color: metricColor }} fill={metricColor} />
-          <span className="font-bold text-sm">{logTypeLabel}</span>
+      <div className="max-h-[55vh] w-[240px] max-w-full overflow-y-auto break-words p-1.5 font-sans text-gray-800">
+        <div className="flex items-center gap-2 pb-1 mb-1 border-b border-gray-200">
+          <Circle className="w-3.5 h-3.5" style={{ color: metricColor }} fill={metricColor} />
+          <span className="font-bold text-xs">{logTypeLabel}</span>
         </div>
-        <div className="space-y-1.5">
+        <div className="space-y-0.5">
+          <div className="flex justify-between gap-3 rounded bg-blue-50 px-1.5 py-0.5 text-[11px]">
+            <span className="text-gray-600 text-sm font-bold">{selectedMetric || "KPI"}</span>
+            <span className="font-bold " >
+              {metricValue !== null && metricValue !== undefined && Number.isFinite(Number(metricValue))
+                ? Number(metricValue).toLocaleString(undefined, { maximumFractionDigits: 3 })
+                : String(metricValue ?? "N/A")}
+            </span>
+          </div>
           {isWifiLog ? (
             <>
               {log.provider && <div className="flex justify-between text-xs"><span className="text-gray-500">SSID</span><span className="font-medium">{log.ssid || log.provider}</span></div>}
@@ -1385,23 +1406,17 @@ const PrimaryLogInfoWindow = React.memo(({ log, onClose, resolveColor, selectedM
             </>
           ) : (
             <>
-              {log.provider && <div className="flex justify-between text-xs"><span className="text-gray-500">Provider</span><span className="font-medium">{log.provider}</span></div>}
-              {log.technology && <div className="flex justify-between text-xs"><span className="text-gray-500">Technology</span><span className="font-medium">{log.technology}</span></div>}
-              {log.band && <div className="flex justify-between text-xs"><span className="text-gray-500">Band</span><span className="font-semibold text-blue-600">{log.band}</span></div>}
-              {getTechnologySignalRows(log).map(({ key, label, value, unit }) => value != null && (
-                <div key={key} className="flex justify-between text-xs items-center">
-                  <span className="text-gray-500">{label}</span>
-                  <span className="font-medium" style={{ color: resolveColor(value, key) }}>{Number(value).toFixed(1)}{unit ? ` ${unit}` : ""}</span>
-                </div>
-              ))}
+              <div className="flex justify-between text-xs"><span className="text-gray-500">Provider</span><span className="font-medium">{provider ?? "N/A"}</span></div>
+              <div className="flex justify-between text-xs"><span className="text-gray-500">Technology</span><span className="font-medium">{technology ?? "N/A"}</span></div>
+              <div className="flex justify-between text-xs"><span className="text-gray-500">Band</span><span className="font-semibold text-blue-600">{band ?? "N/A"}</span></div>
+
               {Number.isFinite(ciValue) && <div className="flex justify-between text-xs items-center"><span className="text-gray-500">C/I</span><span className="font-medium" style={{ color: resolveColor(ciValue, 'ci_db') }}>{ciValue?.toFixed?.(1)} dB</span></div>}
-              {cellChannel != null && <div className="flex justify-between text-xs"><span className="text-gray-500">{labels.pci}</span><span className="font-medium">{cellChannel}</span></div>}
-              {log.cell_id && <div className="flex justify-between text-xs"><span className="text-gray-500">Cell ID</span><span className="font-medium">{log.cell_id}</span></div>}
-              {log.nodeb_id && <div className="flex justify-between text-xs"><span className="text-gray-500">NodeB</span><span className="font-medium">{log.nodeb_id}</span></div>}
+              <div className="flex justify-between text-xs"><span className="text-gray-500">{labels.pci}</span><span className="font-medium">{pci ?? "N/A"}</span></div>
+              <div className="flex justify-between text-xs"><span className="text-gray-500">Cell ID</span><span className="font-medium">{selectedCellId || "N/A"}</span></div>
+              <div className="flex justify-between text-xs"><span className="text-gray-500">NodeB ID</span><span className="font-medium">{nodebId ?? "N/A"}</span></div>
             </>
           )}
-          {dlValue !== null && <div className="flex justify-between text-xs"><span className="text-gray-500">DL Throughput</span><span className="font-medium">{dlValue.toFixed(2)} Mbps</span></div>}
-          {ulValue !== null && <div className="flex justify-between text-xs"><span className="text-gray-500">UL Throughput</span><span className="font-medium">{ulValue.toFixed(2)} Mbps</span></div>}
+
         </div>
         {selectedMetricKey === "coverage_violation" && coverageViolationPreview.length > 0 && (
           <div className="mt-2 rounded-md border border-amber-200 bg-amber-50 px-2 py-1.5">
@@ -1437,49 +1452,52 @@ const PrimaryLogInfoWindow = React.memo(({ log, onClose, resolveColor, selectedM
             </div>
           </div>
         )}
-        {hiddenOverlapCount > 0 && (
-          <div className="mt-2 rounded-md border border-amber-200 bg-amber-50 px-2 py-1.5">
+        {(
+          <div className="mt-2 rounded-md border border-amber-200 bg-amber-50 p-0.5">
             <div className="mb-1 flex items-center justify-between text-[11px] font-semibold text-amber-800">
-              <span>{overlapLogs.length.toLocaleString()} logs overlap here</span>
-              <span>+{hiddenOverlapCount.toLocaleString()} behind</span>
+              <span>Overlap info</span>
+              <span>{overlapCount.toLocaleString()} other log{overlapCount === 1 ? "" : "s"}</span>
             </div>
-            <div className="max-h-28 overflow-y-auto space-y-1">
+            {overlapCount > 0 ? <div className="max-h-24 overflow-y-auto space-y-1">
               {overlapPreview.map((item, index) => {
-                const itemCellId = String(item?.cell_id ?? item?.cellId ?? item?.CellId ?? "").trim();
+                const itemCellId = String(getNetworkLogField(item, "cell_id", "cellId", "CellId", "CELL_ID") ?? "").trim();
                 const value =
                   selectedMetricKey === "cell_id"
                     ? itemCellId
-                    : getMetricValueFromLog(item, selectedMetric);
+                    : colorBy === "mac_detail"
+                      ? getMacDetailValueFromLog(item, selectedMetric)
+                      : getMetricValueFromLog(item, selectedMetric);
                 const itemColor =
                   selectedMetricKey === "cell_id"
                     ? resolveColor(itemCellId || "Unknown", "cell_id")
-                    : resolveColor(value, selectedMetric);
-                const pciValue = getMetricValueFromLog(item, "pci");
-                const pciLabel = Number.isFinite(pciValue)
-                  ? Math.round(pciValue)
-                  : (item.pci ?? item.PCI ?? item.Pci ?? item.best_pci ?? "-");
-                const itemRsrp = Number(item?.rsrp ?? item?.RSRP);
+                    : resolveColor(value, colorBy === "mac_detail" ? "mac_detail" : selectedMetric);
+                const pciLabel = getNetworkLogField(item, "pci", "PCI", "Pci", "physical_cell_id", "physicalCellId", "best_pci") ?? "N/A";
+                const itemProvider = getNetworkLogField(item, "provider", "operator", "network_operator", "networkOperator");
+                const itemBand = getNetworkLogField(item, "band", "primaryBand", "band_name", "Band");
+                const itemTechnology = getNetworkLogField(item, "technology", "networkType", "network", "rat");
+                const itemNodeb = getNetworkLogField(item, "nodebid", "nodeb_id", "nodebId", "node_b_id", "NodeBID", "NodeBId");
                 return (
-                  <div key={`${getLogDisplayId(item, index)}-${index}`} className="grid grid-cols-[10px_1fr_auto] items-center gap-1 text-[10px] text-slate-700">
-                    <span className="h-2 w-2 rounded-full" style={{ backgroundColor: itemColor }} />
-                    <span className="truncate">PCI/BCCH {pciLabel}</span>
-                    <span className="font-semibold">
-                      {Number.isFinite(itemRsrp) ? `${itemRsrp.toFixed(1)} dBm` : "RSRP N/A"}
-                    </span>
+                  <div key={`${getLogDisplayId(item, index)}-${index}`} className="rounded bg-white/80 p-1.5 text-[10px] text-slate-700">
+                    <div className="flex justify-between gap-2 font-semibold">
+                      <span className="truncate">{itemProvider ?? "Provider N/A"} · {itemTechnology ?? "Technology N/A"} · {itemBand ?? "Band N/A"}</span>
+                      <span style={{ color: itemColor }}>{selectedMetric}: {value == null ? "N/A" : String(value)}</span>
+                    </div>
+                    <div className="mt-0.5 flex flex-wrap gap-x-3 gap-y-0.5 text-slate-500">
+                      <span>PCI {pciLabel}</span><span>Cell {itemCellId || "N/A"}</span><span>NodeB {itemNodeb ?? "N/A"}</span>
+                    </div>
                   </div>
                 );
               })}
-              {overlapLogs.length > overlapPreview.length && (
+              {overlapCount > overlapPreview.length && (
                 <div className="text-[10px] text-amber-700">
-                  {overlapLogs.length - overlapPreview.length} more hidden at this point
+                  {overlapCount - overlapPreview.length} more hidden at this point
                 </div>
               )}
-            </div>
+            </div> : <div className="text-[10px] text-slate-600">No other network logs at this location.</div>}
           </div>
         )}
         <div className="mt-2 pt-2 border-t border-gray-100"><div className="text-[10px] text-gray-400 font-mono text-center">📍 {log.lat.toFixed(6)}, {log.lng.toFixed(6)}</div></div>
       </div>
-    </InfoWindow>
   );
 });
 PrimaryLogInfoWindow.displayName = 'PrimaryLogInfoWindow';
@@ -1570,7 +1588,7 @@ const MapWithMultipleCircles = ({
   const [fetchError, setFetchError] = useState(null);
   const boundaryPolygonListenersRef = useRef(new Map());
   const [selectedNeighbor, setSelectedNeighbor] = useState(null);
-  const [selectedLog, setSelectedLog] = useState(null);
+  const primaryLogTooltipRef = useRef(null);
   const [selectedImageLog, setSelectedImageLog] = useState(null);
   const [selectedImageLoadFailed, setSelectedImageLoadFailed] = useState(false);
   const [categoryColorVersion, setCategoryColorVersion] = useState(0);
@@ -1881,12 +1899,8 @@ const MapWithMultipleCircles = ({
   }, [activePolygonData, enableGrid, locationsToRender]);
 
   const handleHover = useCallback((info) => {
-    if (info.object) {
-      onMarkerHover?.(info.object);
-    } else {
-      onMarkerHover?.(null);
-    }
-  }, [onMarkerHover]);
+    primaryLogTooltipRef.current?.update(info);
+  }, []);
 
   // Process and filter neighbor data by polygon AND Legend
   const processedNeighbors = useMemo(() => {
@@ -2386,23 +2400,26 @@ const MapWithMultipleCircles = ({
     return Math.max(safeMin, Math.min(80, safeBase));
   }, [neighborSquareSize, neighborMinSquareSize]);
 
-  const handlePrimaryClick = useCallback((index, loc) => {
+  const getPrimaryLogDetails = useCallback((loc) => {
     const overlapLogs = orderedLocationsToRender.filter((candidate) =>
       areLogsStacked(candidate, loc),
     );
-    setSelectedLog({
+    return {
       ...loc,
       __overlapLogs: overlapLogs.length > 1 ? overlapLogs : [],
-    });
+    };
+  }, [orderedLocationsToRender]);
+
+  const handlePrimaryClick = useCallback((index, loc) => {
     setSelectedNeighbor(null);
     setSelectedImageLog(null);
     setSelectedImageLoadFailed(false);
     onMarkerClickRef.current?.(index, loc);
-  }, [orderedLocationsToRender]);
+  }, []);
 
   const handleNeighborClick = useCallback((neighbor) => {
     setSelectedNeighbor(neighbor);
-    setSelectedLog(null);
+    primaryLogTooltipRef.current?.clear();
     setSelectedImageLog(null);
     setSelectedImageLoadFailed(false);
     onNeighborClickRef.current?.(neighbor);
@@ -2447,7 +2464,7 @@ const MapWithMultipleCircles = ({
   const handleImageLogClick = useCallback((log) => {
     setSelectedImageLog(log);
     setSelectedImageLoadFailed(false);
-    setSelectedLog(null);
+    primaryLogTooltipRef.current?.clear();
     setSelectedNeighbor(null);
   }, []);
 
@@ -2474,7 +2491,12 @@ const MapWithMultipleCircles = ({
   }, []);
 
   const googleMapOptions = useMemo(
-    () => ({ ...options, gestureHandling: 'greedy', disableDefaultUI: false }),
+    () => ({
+      ...options,
+      mapId: options?.mapId || GOOGLE_MAP_ID,
+      gestureHandling: 'greedy',
+      disableDefaultUI: false,
+    }),
     [options],
   );
 
@@ -2578,7 +2600,6 @@ const MapWithMultipleCircles = ({
         )}
 
         {selectedNeighbor && <NeighborInfoWindow neighbor={selectedNeighbor} onClose={() => setSelectedNeighbor(null)} resolveColor={resolveColor} selectedMetric={selectedMetric} />}
-        {selectedLog && <PrimaryLogInfoWindow log={selectedLog} onClose={() => setSelectedLog(null)} resolveColor={resolveColor} selectedMetric={selectedMetric} />}
         {selectedImageLog && (
           <InfoWindow
             position={{ lat: selectedImageLog.lat, lng: selectedImageLog.lng }}
@@ -2653,6 +2674,20 @@ const MapWithMultipleCircles = ({
 
         {children}
       </GoogleMap>
+
+      {map && shouldRenderDeckOverlay && showPoints && !disableDeckInteractions && (
+        <PrimaryLogTooltip
+          ref={primaryLogTooltipRef}
+          map={map}
+          containerRef={mapContainerRef}
+          Content={PrimaryLogInfoWindow}
+          getLogDetails={getPrimaryLogDetails}
+          onLogChange={onMarkerHover}
+          resolveColor={resolveColor}
+          selectedMetric={selectedMetric}
+          colorBy={colorBy}
+        />
+      )}
 
       {isLoadingPolygons && (
         <div className="absolute top-16 left-1/2 transform -translate-x-1/2 bg-blue-500 text-white px-4 py-2 rounded-lg shadow-lg z-20 text-sm">

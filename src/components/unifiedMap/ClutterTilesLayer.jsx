@@ -70,7 +70,7 @@ const ClutterTilesLayer = ({
     let overlay = null;
     try {
       overlay = new GoogleMapsOverlay({
-        interleaved: true,
+        interleaved: false,
         glOptions: { preserveDrawingBuffer: false },
       });
       overlay.setMap(map);

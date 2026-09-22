@@ -8,13 +8,15 @@ const mapId =
   (typeof import.meta !== 'undefined' &&
     import.meta.env &&
     import.meta.env.VITE_GOOGLE_MAPS_MAP_ID) ||
-  '';
+  '5e49cd40d6e8c2f7f896f084';
+
+export const GOOGLE_MAP_ID = mapId;
 
 export const GOOGLE_MAPS_LOADER_OPTIONS = {
   id: 'google-map-script',
   googleMapsApiKey: apiKey,
   libraries: ['places', 'geometry', 'elevation', 'visualization', 'marker'],
-  ...(mapId ? { mapIds: [mapId] } : {}),
+  mapIds: [mapId],
   version: 'weekly',
 };
 

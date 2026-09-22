@@ -331,12 +331,16 @@ export const OverviewTab = ({
     }
 
     const region = resolveUserRegion(user) || "india";
+    const numericUserId = Number(
+      user?.id ?? user?.user_id ?? user?.userId ?? user?.UserId ?? 0,
+    );
     const selectedSessionIds = sessionIds
       .map((id) => Number(id))
       .filter((id) => Number.isFinite(id) && id > 0);
     const payload = {
       project_id: numericProjectId,
       country_code: region,
+      user_id: Number.isFinite(numericUserId) ? numericUserId : 0,
       locked_bands: lockedBand,
       template: pptTemplate,
       technology: pptTechnologies,

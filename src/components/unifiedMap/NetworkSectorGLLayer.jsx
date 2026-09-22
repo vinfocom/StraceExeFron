@@ -2,7 +2,7 @@
 // GPU (deck.gl) renderer for the bulk cell-site sector triangles + site markers
 // drawn by NetworkPlannerMap.jsx. Mirrors the GoogleMapsOverlay lifecycle used by
 // DeckGLOverlay.jsx / LtePredictionLocationLayer.jsx elsewhere in this codebase —
-// individual <PolygonF>/<MarkerF> overlays per sector don't scale past a few
+// individual polygon or marker overlays per sector don't scale past a few
 // thousand DOM nodes, so the bulk (non-selected) sectors/sites are drawn as
 // WebGL layers instead. The single currently-selected sector (which needs an
 // InfoWindow + draggable "move" handle) is intentionally excluded from this

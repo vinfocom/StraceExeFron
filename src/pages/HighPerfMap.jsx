@@ -48,6 +48,7 @@ import {
   resolveSelectedTechnologyBucket,
 } from "@/utils/thresholdBuckets";
 import {
+  GOOGLE_MAP_ID,
   GOOGLE_MAPS_LOADER_OPTIONS,
   getGoogleMapsConfigError,
   getGoogleMapsErrorMessage,
@@ -55,7 +56,7 @@ import {
 import { applyTechnologyColorSettings, normalizeBandName, normalizeProviderName, normalizeTechName } from "@/utils/colorUtils";
 import { COLOR_SCHEMES } from "@/utils/metrics";
 
-const MAP_ID = "5e49cd40d6e8c2f7f896f084";
+const MAP_ID = GOOGLE_MAP_ID;
 const DEFAULT_CENTER = { lat: 28.6139, lng: 77.209 };
 
 const toYmdLocal = (d) => {
@@ -217,36 +218,7 @@ const coordinatesToWktPolygon = (coords) => {
   return `POLYGON((${pointsString}, ${firstPointString}))`;
 };
 
-const MAP_STYLES = {
-  default: null,
-  clean: [
-    { featureType: "poi", stylers: [{ visibility: "off" }] },
-    { featureType: "transit", stylers: [{ visibility: "off" }] },
-    { featureType: "road", elementType: "labels.icon", stylers: [{ visibility: "off" }] },
-    { elementType: "labels.text.stroke", stylers: [{ visibility: "off" }] },
-    { elementType: "labels.text.fill", stylers: [{ color: "#6b7280" }] },
-  ],
-  night: [
-    { elementType: "geometry", stylers: [{ color: "#242f3e" }] },
-    { elementType: "labels.text.stroke", stylers: [{ color: "#242f3e" }] },
-    { elementType: "labels.text.fill", stylers: [{ color: "#746855" }] },
-    { featureType: "administrative.locality", elementType: "labels.text.fill", stylers: [{ color: "#d59563" }] },
-    { featureType: "poi", elementType: "labels.text.fill", stylers: [{ color: "#d59563" }] },
-    { featureType: "poi.park", elementType: "geometry", stylers: [{ color: "#263c3f" }] },
-    { featureType: "poi.park", elementType: "labels.text.fill", stylers: [{ color: "#6b9a76" }] },
-    { featureType: "road", elementType: "geometry", stylers: [{ color: "#38414e" }] },
-    { featureType: "road", elementType: "geometry.stroke", stylers: [{ color: "#212a37" }] },
-    { featureType: "road", elementType: "labels.text.fill", stylers: [{ color: "#9ca5b3" }] },
-    { featureType: "road.highway", elementType: "geometry", stylers: [{ color: "#746855" }] },
-    { featureType: "road.highway", elementType: "geometry.stroke", stylers: [{ color: "#1f2835" }] },
-    { featureType: "road.highway", elementType: "labels.text.fill", stylers: [{ color: "#f3d19c" }] },
-    { featureType: "transit", elementType: "geometry", stylers: [{ color: "#2f3948" }] },
-    { featureType: "transit.station", elementType: "labels.text.fill", stylers: [{ color: "#d59563" }] },
-    { featureType: "water", elementType: "geometry", stylers: [{ color: "#17263c" }] },
-    { featureType: "water", elementType: "labels.text.fill", stylers: [{ color: "#515c6d" }] },
-    { featureType: "water", elementType: "labels.text.stroke", stylers: [{ color: "#17263c" }] },
-  ],
-};
+const CUSTOM_MAP_STYLE_KEYS = new Set(["default", "clean", "night"]);
 
 const formatArea = (areaInMeters) => {
   if (!areaInMeters || areaInMeters < 1) return "N/A";
@@ -569,10 +541,15 @@ export default function HighPerfMap() {
     }
   }, []);
 
+  // `map` is read through a ref so the map instance becoming available doesn't
+  // trigger a second full paginated sessions fetch (onMapLoad fits late-arriving sessions).
+  const mapRef = useRef(null);
+  mapRef.current = map;
+
   useEffect(() => {
     if (!isLoaded) return;
-    if (!activeFilters) fetchAllSessions(map);
-  }, [isLoaded, activeFilters, fetchAllSessions, map]);
+    if (!activeFilters) fetchAllSessions(mapRef.current);
+  }, [isLoaded, activeFilters, fetchAllSessions]);
 
   const fetchLogsFromApi = useCallback(async (dateFilters) => {
     setLogsLoading(true);
@@ -797,7 +774,8 @@ export default function HighPerfMap() {
     }
   }, [activeFilters, applyLocalFilters, fetchSecondaryLogsFromApi, neighbourLogs]);
 
-  const handleSessionMarkerClick = async (session) => {
+  // Must be referentially stable: SessionsLayer rebuilds every marker when this changes.
+  const handleSessionMarkerClick = useCallback(async (session) => {
     const clickedSessionId =
       session?.id ??
       session?.session_id ??
@@ -828,7 +806,7 @@ export default function HighPerfMap() {
     } finally {
       setIsLoading(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
     const loadPolygons = async () => {
@@ -1038,15 +1016,19 @@ const rectCoords = [
   const mapOptions = useMemo(() => {
     const standardMapTypes = ["roadmap", "satellite", "hybrid", "terrain"];
     const styleKey = ui.basemapStyle || "roadmap";
-    const options = { disableDefaultUI: false, zoomControl: true, gestureHandling: "greedy" };
+    const options = {
+      disableDefaultUI: false,
+      zoomControl: true,
+      gestureHandling: "greedy",
+      mapId: MAP_ID,
+    };
     if (standardMapTypes.includes(styleKey)) {
-      options.mapId = MAP_ID;
       options.mapTypeId = styleKey;
-    } else if (MAP_STYLES[styleKey]) {
+    } else if (CUSTOM_MAP_STYLE_KEYS.has(styleKey)) {
       options.mapTypeId = "roadmap";
-      options.styles = MAP_STYLES[styleKey];
+      // Advanced Markers require a map ID, so styling is configured on that
+      // ID in Google Cloud rather than with inline JSON styles.
     } else {
-      options.mapId = MAP_ID;
       options.mapTypeId = "roadmap";
     }
     return options;
@@ -1163,6 +1145,7 @@ const rectCoords = [
     maxCells={1500}
     onDrawingsChange={() => {}}
     colorizeCells={ui.colorizeCells}
+    showSegmentLabels={Boolean(ui.showSegmentLabels)}
   />
 )}
         </MapWithMultipleCircles>

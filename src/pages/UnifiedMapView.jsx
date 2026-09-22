@@ -20,6 +20,7 @@ import { l3EventApi, mapViewApi, gridAnalyticsApi, sitePredictionApi } from "../
 import Spinner from "../components/common/Spinner";
 import MapWithMultipleCircles from "@/components/unifiedMap/MapwithMultipleCircle";
 import {
+  GOOGLE_MAP_ID,
   GOOGLE_MAPS_LOADER_OPTIONS,
   getGoogleMapsConfigError,
   getGoogleMapsErrorMessage,
@@ -6089,6 +6090,7 @@ const UnifiedMapView = () => {
   const mapOptions = useMemo(
     () => ({
       mapTypeId: ui.basemapStyle,
+      mapId: GOOGLE_MAP_ID,
       disableDefaultUI: false,
       streetViewControl: false,
       zoomControl: false,
@@ -7950,6 +7952,7 @@ const UnifiedMapView = () => {
                 cellSizeMeters={ui.drawCellSizeMeters}
                 logPolygonOffsetMeters={ui.drawLogPolygonOffsetMeters}
                 colorizeCells={ui.colorizeCells}
+                showSegmentLabels={Boolean(ui.showSegmentLabels)}
                 polygonOpacity={DRAWN_POLYGON_OPACITY}
                 polygonFillOpacity={DRAWN_POLYGON_FILL_OPACITY}
                 shapeMode={ui.shapeMode}

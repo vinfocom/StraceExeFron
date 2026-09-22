@@ -2,6 +2,7 @@
 import React, { useMemo, memo, useState, useCallback, useEffect, useRef } from "react";
 import { MarkerClusterer } from "@googlemaps/markerclusterer";
 import { OverlayView, Polyline, useGoogleMap } from "@react-google-maps/api";
+import { ADVANCED_MARKER_CLUSTER_RENDERER, createAdvancedMarker } from "@/lib/advancedMarkers";
 import { ArrowRightLeft, Hand, Download } from "lucide-react";
 import { COLOR_SCHEMES, normalizeTechName, getBandColor } from "@/utils/colorUtils";
 import {
@@ -404,7 +405,9 @@ const HandoverClusterLayer = memo(({ transitions = [], type, onClick }) => {
 
     clustererRef.current?.clearMarkers?.();
     listenersRef.current.forEach((listener) => listener?.remove?.());
-    markersRef.current.forEach((marker) => marker?.setMap?.(null));
+    markersRef.current.forEach((marker) => {
+      if (marker) marker.map = null;
+    });
     listenersRef.current = [];
     markersRef.current = [];
 
@@ -415,24 +418,35 @@ const HandoverClusterLayer = memo(({ transitions = [], type, onClick }) => {
         const lng = Number(transition?._renderLng ?? transition?.lng);
         if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
 
-        const marker = new window.google.maps.Marker({
+        const marker = createAdvancedMarker({
+          map: null,
           position: { lat, lng },
           title: `${type} change: ${transition?.from ?? ""} -> ${transition?.to ?? ""}`,
           icon: createMarkerIcon(getMarkerColor(transition, type), label),
-          optimized: true,
         });
-        listenersRef.current.push(marker.addListener("click", () => onClick?.(transition)));
+        if (!marker) return null;
+        const handleClick = () => onClick?.(transition);
+        marker.addEventListener("gmp-click", handleClick);
+        listenersRef.current.push({ remove: () => marker.removeEventListener("gmp-click", handleClick) });
         return marker;
       })
       .filter(Boolean);
 
     markersRef.current = markers;
-    clustererRef.current = new MarkerClusterer({ markers, map });
+    clustererRef.current = new MarkerClusterer({
+      markers,
+      map,
+      algorithmOptions: { maxZoom: 19 },
+      renderer: ADVANCED_MARKER_CLUSTER_RENDERER,
+      onClusterClick: null,
+    });
 
     return () => {
       clustererRef.current?.clearMarkers?.();
       listenersRef.current.forEach((listener) => listener?.remove?.());
-      markersRef.current.forEach((marker) => marker?.setMap?.(null));
+      markersRef.current.forEach((marker) => {
+        if (marker) marker.map = null;
+      });
       clustererRef.current = null;
       listenersRef.current = [];
       markersRef.current = [];

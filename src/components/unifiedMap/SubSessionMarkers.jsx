@@ -1,11 +1,11 @@
 import { getLogTechnology, normalizeMetricTechnology, getTechnologySignalRows, getTechnologyMetricValue } from "@/utils/technologyMetricLabels";
-import React, { memo, useEffect, useMemo, useState } from "react";
+import React, { memo, useEffect, useMemo, useRef, useState } from "react";
 import {
   FLOAT_PANE,
   InfoWindowF,
-  MarkerF,
   OverlayViewF,
   PolylineF,
+  useGoogleMap,
 } from "@react-google-maps/api";
 import { getColorForMetric } from "@/utils/metrics";
 
@@ -57,6 +57,44 @@ const disableOverlayPointerEvents = (overlay) => {
 const toBucketKey = (lat, lng) =>
   `${Number(lat).toFixed(NETWORK_LOG_BUCKET_PRECISION)}|${Number(lng).toFixed(NETWORK_LOG_BUCKET_PRECISION)}`;
 
+const readLatLng = (position) => ({
+  lat: Number(typeof position?.lat === "function" ? position.lat() : position?.lat),
+  lng: Number(typeof position?.lng === "function" ? position.lng() : position?.lng),
+});
+
+const readPaddedMapViewport = (map) => {
+  const bounds = map?.getBounds?.();
+  const northEast = bounds?.getNorthEast?.();
+  const southWest = bounds?.getSouthWest?.();
+  if (!northEast || !southWest) return null;
+
+  const north = northEast.lat();
+  const east = northEast.lng();
+  const south = southWest.lat();
+  const west = southWest.lng();
+  const latPadding = Math.max(0, north - south) * 0.2;
+  const longitudeSpan = east >= west ? east - west : east + 360 - west;
+  const longitudePadding = longitudeSpan * 0.2;
+  const coversAllLongitudes = longitudeSpan + longitudePadding * 2 >= 360;
+  const wrapLongitude = (longitude) => ((longitude + 180) % 360 + 360) % 360 - 180;
+
+  return {
+    north: Math.min(90, north + latPadding),
+    south: Math.max(-90, south - latPadding),
+    east: coversAllLongitudes ? 180 : wrapLongitude(east + longitudePadding),
+    west: coversAllLongitudes ? -180 : wrapLongitude(west - longitudePadding),
+  };
+};
+
+const isInsideViewport = (position, viewport) => {
+  const { lat, lng } = readLatLng(position);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return false;
+  const insideLongitude = viewport.west <= viewport.east
+    ? lng >= viewport.west && lng <= viewport.east
+    : lng >= viewport.west || lng <= viewport.east;
+  return lat >= viewport.south && lat <= viewport.north && insideLongitude;
+};
+
 const getDistanceMeters = (start, end) => {
   if (!start || !end) return Number.POSITIVE_INFINITY;
 
@@ -76,8 +114,7 @@ const getDistanceMeters = (start, end) => {
 const findNearestNetworkSample = (position, bucketedLogs, matchesSample) => {
   if (!position || !bucketedLogs) return null;
 
-  const centerLat = Number(position.lat);
-  const centerLng = Number(position.lng);
+  const { lat: centerLat, lng: centerLng } = readLatLng(position);
   if (!Number.isFinite(centerLat) || !Number.isFinite(centerLng)) return null;
 
   const candidates = [];
@@ -143,10 +180,6 @@ const formatStatus = (statusRaw) => {
   };
 };
 
-const DIAMOND_PATH = "M 0,-10 10,0 0,10 -10,0 z";
-const HEXAGON_PATH = "M 0,-10 8.66,-5 8.66,5 0,10 -8.66,5 -8.66,-5 z";
-const CROSS_PATH = "M -9,-7 -7,-9 0,-2 7,-9 9,-7 2,0 9,7 7,9 0,2 -7,9 -9,7 -2,0 z";
-
 const formatSubSessionType = (subSessionType) => {
   const value = String(subSessionType ?? "").trim();
   if (value === "1") return "PS";
@@ -181,12 +214,190 @@ const hasNetworkSignalMetric = (sample) => [
   sample?.EcNo,
 ].some((value) => toMetric(value) != null);
 
-const getSubSessionMarkerPath = (subSessionType, statusRaw) => {
-  if (getNormalizedStatus(statusRaw) === "failed") return CROSS_PATH;
+const enrichMarkerDetails = (marker, bucketedNetworkLogs, thresholds) => {
+  if (!marker) return null;
 
-  const value = String(subSessionType ?? "").trim();
-  if (value === "2") return HEXAGON_PATH;
-  return DIAMOND_PATH;
+  const position = marker.start ?? marker.position;
+  const matchedSample = findNearestNetworkSample(
+    position,
+    bucketedNetworkLogs,
+    (sample) => sample.dlThroughput != null,
+  );
+  const signalSample = findNearestNetworkSample(position, bucketedNetworkLogs, hasNetworkSignalMetric);
+  const dlThroughput = toMetric(
+    marker.dlThroughput ?? marker.dl_tpt ?? marker.dl_thpt ??
+      matchedSample?.dlThroughput ?? matchedSample?.dl_tpt ?? matchedSample?.dl_thpt,
+  );
+  const isPsMarker = String(marker.subSessionType ?? "").trim() === "1";
+  const thresholdColor = isPsMarker && dlThroughput != null
+    ? getColorForMetric("dl_thpt", dlThroughput, thresholds)
+    : null;
+  const cellId = firstPresentValue(
+    marker.cell_id, marker.cellId, signalSample?.cell_id, signalSample?.cellId,
+    signalSample?.CellId, signalSample?.CELL_ID,
+  );
+
+  return {
+    ...marker,
+    dlThroughput,
+    technology: normalizeMarkerTechnology(
+      marker.technology ?? marker.networkType ?? marker.network ??
+        signalSample?.technology ?? signalSample?.networkType ?? signalSample?.network,
+    ),
+    rsrp: toMetric(marker.rsrp ?? signalSample?.rsrp ?? signalSample?.RSRP),
+    rsrq: toMetric(marker.rsrq ?? signalSample?.rsrq ?? signalSample?.RSRQ),
+    sinr: toMetric(marker.sinr ?? signalSample?.sinr ?? signalSample?.SINR),
+    rxlev: toMetric(marker.rxlev ?? signalSample?.rxlev ?? signalSample?.RxLev ?? signalSample?.RXLEV),
+    rxqual: toMetric(marker.rxqual ?? signalSample?.rxqual ?? signalSample?.RxQual ?? signalSample?.RXQUAL),
+    cqi: toMetric(marker.cqi ?? signalSample?.cqi ?? signalSample?.CQI),
+    rscp: toMetric(marker.rscp ?? signalSample?.rscp ?? signalSample?.RSCP),
+    ecno: toMetric(marker.ecno ?? signalSample?.ecno ?? signalSample?.EcNo ?? signalSample?.ECNO),
+    nrRsrp: toMetric(marker.nrRsrp ?? signalSample?.nrRsrp ?? signalSample?.nr_rsrp ?? signalSample?.NR_RSRP ?? signalSample?.rsrp ?? signalSample?.RSRP),
+    nrRsrq: toMetric(marker.nrRsrq ?? signalSample?.nrRsrq ?? signalSample?.nr_rsrq ?? signalSample?.NR_RSRQ ?? signalSample?.rsrq ?? signalSample?.RSRQ),
+    nrSinr: toMetric(marker.nrSinr ?? signalSample?.nrSinr ?? signalSample?.nr_sinr ?? signalSample?.NR_SINR),
+    ci: cellId ?? marker.ci ?? signalSample?.ci ?? signalSample?.CI ?? signalSample?.ci_db ?? signalSample?.ciDb,
+    ci_db: marker.ci_db ?? signalSample?.ci_db ?? signalSample?.ciDb ?? signalSample?.CI_DB,
+    cell_id: cellId,
+    nodeb_id: marker.nodeb_id ?? marker.nodebId ?? signalSample?.nodeb_id ?? signalSample?.nodebId ?? signalSample?.NodeBId,
+    nodebId: marker.nodebId ?? marker.nodeb_id ?? signalSample?.nodebId ?? signalSample?.nodeb_id ?? signalSample?.NodeBId,
+    bcch: firstPresentValue(
+      marker.bcch, signalSample?.bcch, signalSample?.BCCH, signalSample?.bcch_id,
+      signalSample?.bcchId, marker.earfcn, signalSample?.earfcn, signalSample?.EARFCN,
+      signalSample?.Earfcn,
+    ),
+    fillColor: thresholdColor || formatStatus(marker.resultStatus).color,
+  };
+};
+
+const toDeckColor = (value) => {
+  const color = String(value ?? "").trim();
+  const hex = color.match(/^#([\da-f]{3}|[\da-f]{6})$/i)?.[1];
+  if (hex) {
+    const expanded = hex.length === 3 ? [...hex].map((part) => `${part}${part}`).join("") : hex;
+    return [
+      Number.parseInt(expanded.slice(0, 2), 16),
+      Number.parseInt(expanded.slice(2, 4), 16),
+      Number.parseInt(expanded.slice(4, 6), 16),
+      235,
+    ];
+  }
+  const rgb = color.match(/^rgba?\(([^)]+)\)$/i)?.[1];
+  if (rgb) {
+    const channels = rgb.split(",").slice(0, 3).map((channel) => Number.parseFloat(channel));
+    if (channels.length === 3 && channels.every(Number.isFinite)) return [...channels, 235];
+  }
+  return [34, 197, 94, 235];
+};
+
+const buildDeckPointGroups = (markers, zoom, highlightedIds) => {
+  const safeZoom = Math.max(0, Math.min(21, Number(zoom) || 0));
+  const worldSize = 256 * 2 ** safeZoom;
+  const cellSize = 52;
+  const groups = new Map();
+
+  markers.forEach((marker) => {
+    const position = marker.position ?? marker.start;
+    const { lat, lng } = readLatLng(position);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
+
+    const clampedLat = Math.max(-85.0511, Math.min(85.0511, lat));
+    const sinLat = Math.sin((clampedLat * Math.PI) / 180);
+    const worldX = ((lng + 180) / 360) * worldSize;
+    const worldY = (0.5 - Math.log((1 + sinLat) / (1 - sinLat)) / (4 * Math.PI)) * worldSize;
+    const key = safeZoom >= 19
+      ? `location-${lat.toFixed(5)}:${lng.toFixed(5)}`
+      : `${Math.floor(worldX / cellSize)}:${Math.floor(worldY / cellSize)}`;
+    let group = groups.get(key);
+    if (!group) {
+      group = { markers: [], latTotal: 0, lngTotal: 0 };
+      groups.set(key, group);
+    }
+    group.markers.push(marker);
+    group.latTotal += lat;
+    group.lngTotal += lng;
+  });
+
+  return Array.from(groups.values(), (group) => {
+    const count = group.markers.length;
+    const marker = group.markers[0];
+    const selected = group.markers.some((item) => highlightedIds.has(String(item.id ?? "").trim()));
+    return {
+      position: [group.lngTotal / count, group.latTotal / count],
+      markers: group.markers,
+      count,
+      selected,
+      isCluster: count > 1,
+      fillColor: count > 1 ? [37, 99, 235, 245] : toDeckColor(marker.fillColor),
+      radius: count > 1 ? Math.min(18, 10 + Math.log2(count)) : selected ? 7 : 5.5,
+    };
+  });
+};
+
+const createSubSessionDeckLayers = ({ ScatterplotLayer, TextLayer }, points, onClick, onHover) => {
+  const smoothEase = (value) => value * value * (3 - 2 * value);
+  const scatterplot = new ScatterplotLayer({
+    id: "sub-session-points",
+    data: points,
+    pickable: true,
+    autoHighlight: true,
+    highlightColor: [255, 255, 255, 180],
+    stroked: true,
+    filled: true,
+    opacity: 0.96,
+    radiusUnits: "pixels",
+    radiusMinPixels: 4,
+    radiusMaxPixels: 18,
+    lineWidthUnits: "pixels",
+    lineWidthMinPixels: 1,
+    getPosition: (point) => point.position,
+    getRadius: (point) => point.radius,
+    getFillColor: (point) => point.fillColor,
+    getLineColor: (point) => point.selected ? [250, 204, 21, 255] : [255, 255, 255, 235],
+    getLineWidth: (point) => point.selected ? 2.5 : 1.25,
+    transitions: {
+      getPosition: { duration: 180, easing: smoothEase },
+      getRadius: { duration: 180, easing: smoothEase, enter: () => 0 },
+      getFillColor: {
+        duration: 180,
+        easing: smoothEase,
+        enter: (color) => [color[0], color[1], color[2], 0],
+      },
+      getLineColor: { duration: 180, easing: smoothEase },
+      getLineWidth: { duration: 180, easing: smoothEase },
+    },
+    onClick: ({ object }) => {
+      if (!object) return false;
+      onClick?.(object);
+      return true;
+    },
+    onHover: ({ object }) => onHover?.(object),
+  });
+  const countLabels = new TextLayer({
+    id: "sub-session-cluster-counts",
+    data: points.filter((point) => point.isCluster),
+    pickable: false,
+    billboard: true,
+    sizeUnits: "pixels",
+    getPosition: (point) => point.position,
+    getText: (point) => String(point.count),
+    getSize: 12,
+    getColor: [255, 255, 255, 255],
+    getTextAnchor: "middle",
+    getAlignmentBaseline: "center",
+    fontFamily: "system-ui, sans-serif",
+    outlineWidth: 2,
+    outlineColor: [30, 64, 175, 255],
+    transitions: {
+      getPosition: { duration: 150, easing: smoothEase },
+      getColor: {
+        duration: 150,
+        easing: smoothEase,
+        enter: (color) => [color[0], color[1], color[2], 0],
+      },
+      getSize: { duration: 150, easing: smoothEase, enter: () => 0 },
+    },
+  });
+  return [scatterplot, countLabels];
 };
 
 
@@ -227,13 +438,29 @@ const SubSessionMarkers = ({
   selectedMarkerIds = [],
   onMarkerSelect,
 }) => {
+  const map = useGoogleMap();
   const [internalSelectedMarkerId, setInternalSelectedMarkerId] = useState(null);
   const [hoveredMarkerId, setHoveredMarkerId] = useState(null);
+  const [viewport, setViewport] = useState(null);
+  const [mapZoom, setMapZoom] = useState(0);
+  const deckRef = useRef({ overlay: null, classes: null });
+  const deckInputRef = useRef({ points: [] });
+  const refreshDeckRef = useRef(null);
+  const deckClickRef = useRef(null);
+  const deckHoverRef = useRef(null);
+  const duplicateCycleRef = useRef(new Map());
+  const onMarkerSelectRef = useRef(onMarkerSelect);
+  onMarkerSelectRef.current = onMarkerSelect;
   const activeMarkerId = selectedMarkerId ?? internalSelectedMarkerId;
+  const hasMarkers = Array.isArray(markers) && markers.length > 0;
+  const highlightedMarkerIdsKey = (Array.isArray(selectedMarkerIds) ? selectedMarkerIds : [])
+    .map((value) => String(value ?? "").trim())
+    .filter(Boolean)
+    .sort()
+    .join("\u0000");
   const highlightedMarkerIdSet = useMemo(() => {
-    const values = Array.isArray(selectedMarkerIds) ? selectedMarkerIds : [];
-    return new Set(values.map((value) => String(value ?? "").trim()).filter(Boolean));
-  }, [selectedMarkerIds]);
+    return new Set(highlightedMarkerIdsKey ? highlightedMarkerIdsKey.split("\u0000") : []);
+  }, [highlightedMarkerIdsKey]);
 
   useEffect(() => {
     if (!show) {
@@ -241,6 +468,45 @@ const SubSessionMarkers = ({
       setHoveredMarkerId(null);
     }
   }, [show]);
+
+  useEffect(() => {
+    if (!show || !map) {
+      setViewport(null);
+      return undefined;
+    }
+
+    const updateViewport = () => {
+      const nextViewport = readPaddedMapViewport(map);
+      const nextZoom = Number(map.getZoom?.());
+      if (Number.isFinite(nextZoom)) {
+        setMapZoom((current) => (current === nextZoom ? current : nextZoom));
+      }
+      if (!nextViewport) return;
+      setViewport((current) => {
+        if (
+          current &&
+          current.north === nextViewport.north &&
+          current.south === nextViewport.south &&
+          current.east === nextViewport.east &&
+          current.west === nextViewport.west
+        ) {
+          return current;
+        }
+        return nextViewport;
+      });
+    };
+
+    updateViewport();
+    const listener = map.addListener?.("idle", updateViewport);
+    return () => listener?.remove?.();
+  }, [map, show]);
+
+  const visibleMarkers = useMemo(() => {
+    if (!viewport) return [];
+    return (Array.isArray(markers) ? markers : []).filter((marker) =>
+      isInsideViewport(marker.position ?? marker.start, viewport),
+    );
+  }, [markers, viewport]);
 
   useEffect(() => {
     if (!Array.isArray(markers) || markers.length === 0) {
@@ -254,19 +520,20 @@ const SubSessionMarkers = ({
       setInternalSelectedMarkerId(null);
     }
 
-    const hoveredExists = markers.some((item) => item.id === hoveredMarkerId);
+    const hoveredExists = visibleMarkers.some((item) => item.id === hoveredMarkerId);
     if (!hoveredExists) {
       setHoveredMarkerId(null);
     }
-  }, [markers, activeMarkerId, hoveredMarkerId]);
+  }, [markers, visibleMarkers, activeMarkerId, hoveredMarkerId]);
 
   const bucketedNetworkLogs = useMemo(() => {
-    if (!Array.isArray(networkLogData) || networkLogData.length === 0) return new Map();
+    if (!viewport || !Array.isArray(networkLogData) || networkLogData.length === 0) return new Map();
 
     return networkLogData.reduce((accumulator, log) => {
       const lat = Number(log?.lat ?? log?.latitude);
       const lng = Number(log?.lng ?? log?.longitude ?? log?.lon);
       if (!Number.isFinite(lat) || !Number.isFinite(lng)) return accumulator;
+      if (!isInsideViewport({ lat, lng }, viewport)) return accumulator;
       if (String(log?.log_type ?? log?.connection_type ?? "").toLowerCase() === "wifi") {
         return accumulator;
       }
@@ -281,94 +548,154 @@ const SubSessionMarkers = ({
       accumulator.set(key, current);
       return accumulator;
     }, new Map());
-  }, [networkLogData]);
+  }, [networkLogData, viewport]);
 
-  const enrichedMarkers = useMemo(
-    () =>
-      (Array.isArray(markers) ? markers : []).map((marker) => {
-        const position = marker.start ?? marker.position;
-        const matchedSample = findNearestNetworkSample(
-          position, bucketedNetworkLogs, (sample) => sample.dlThroughput != null,
-        );
-        const signalSample = findNearestNetworkSample(
-          position, bucketedNetworkLogs,
-          hasNetworkSignalMetric,
-        );
-        const dlThroughput = toMetric(
-          marker.dlThroughput ??
-            marker.dl_tpt ??
-            marker.dl_thpt ??
-            matchedSample?.dlThroughput ??
-            matchedSample?.dl_tpt ??
-            matchedSample?.dl_thpt,
-        );
-        const isPsMarker = String(marker.subSessionType ?? "").trim() === "1";
-        const thresholdColor =
-          isPsMarker && dlThroughput != null
-            ? getColorForMetric("dl_thpt", dlThroughput, thresholds)
-            : null;
-        const cellId = firstPresentValue(
-          marker.cell_id,
-          marker.cellId,
-          signalSample?.cell_id,
-          signalSample?.cellId,
-          signalSample?.CellId,
-          signalSample?.CELL_ID,
-        );
-
-        return {
-          ...marker,
-          dlThroughput,
-          technology: normalizeMarkerTechnology(
-            marker.technology ??
-              marker.networkType ??
-              marker.network ??
-              signalSample?.technology ??
-              signalSample?.networkType ??
-              signalSample?.network,
-          ),
-          rsrp: toMetric(marker.rsrp ?? signalSample?.rsrp ?? signalSample?.RSRP),
-          rsrq: toMetric(marker.rsrq ?? signalSample?.rsrq ?? signalSample?.RSRQ),
-          sinr: toMetric(marker.sinr ?? signalSample?.sinr ?? signalSample?.SINR),
-          rxlev: toMetric(marker.rxlev ?? signalSample?.rxlev ?? signalSample?.RxLev ?? signalSample?.RXLEV),
-          rxqual: toMetric(marker.rxqual ?? signalSample?.rxqual ?? signalSample?.RxQual ?? signalSample?.RXQUAL),
-          cqi: toMetric(marker.cqi ?? signalSample?.cqi ?? signalSample?.CQI),
-          rscp: toMetric(marker.rscp ?? signalSample?.rscp ?? signalSample?.RSCP),
-          ecno: toMetric(marker.ecno ?? signalSample?.ecno ?? signalSample?.EcNo ?? signalSample?.ECNO),
-          nrRsrp: toMetric(marker.nrRsrp ?? signalSample?.nrRsrp ?? signalSample?.nr_rsrp ?? signalSample?.NR_RSRP ?? signalSample?.rsrp ?? signalSample?.RSRP),
-          nrRsrq: toMetric(marker.nrRsrq ?? signalSample?.nrRsrq ?? signalSample?.nr_rsrq ?? signalSample?.NR_RSRQ ?? signalSample?.rsrq ?? signalSample?.RSRQ),
-          nrSinr: toMetric(marker.nrSinr ?? signalSample?.nrSinr ?? signalSample?.nr_sinr ?? signalSample?.NR_SINR),
-          ci: cellId ?? marker.ci ?? signalSample?.ci ?? signalSample?.CI ?? signalSample?.ci_db ?? signalSample?.ciDb,
-          ci_db: marker.ci_db ?? signalSample?.ci_db ?? signalSample?.ciDb ?? signalSample?.CI_DB,
-          cell_id: cellId,
-          nodeb_id: marker.nodeb_id ?? marker.nodebId ?? signalSample?.nodeb_id ?? signalSample?.nodebId ?? signalSample?.NodeBId,
-          nodebId: marker.nodebId ?? marker.nodeb_id ?? signalSample?.nodebId ?? signalSample?.nodeb_id ?? signalSample?.NodeBId,
-          bcch: firstPresentValue(
-            marker.bcch,
-            signalSample?.bcch,
-            signalSample?.BCCH,
-            signalSample?.bcch_id,
-            signalSample?.bcchId,
-            marker.earfcn,
-            signalSample?.earfcn,
-            signalSample?.EARFCN,
-            signalSample?.Earfcn,
-          ),
-          fillColor: thresholdColor || formatStatus(marker.resultStatus).color,
-        };
-      }),
-    [bucketedNetworkLogs, markers, thresholds],
+  const renderMarkers = useMemo(
+    () => visibleMarkers.map((marker) => {
+      const dlThroughput = toMetric(marker.dlThroughput ?? marker.dl_tpt ?? marker.dl_thpt);
+      const hasDirectThroughput = String(marker.subSessionType ?? "").trim() === "1" && dlThroughput != null;
+      return {
+        ...marker,
+        fillColor: hasDirectThroughput
+          ? getColorForMetric("dl_thpt", dlThroughput, thresholds)
+          : formatStatus(marker.resultStatus).color,
+      };
+    }),
+    [visibleMarkers, thresholds],
   );
 
   const activeSelectedMarker = useMemo(
-    () => enrichedMarkers.find((item) => item.id === activeMarkerId) || null,
-    [enrichedMarkers, activeMarkerId],
+    () => renderMarkers.find((item) => item.id === activeMarkerId) || null,
+    [renderMarkers, activeMarkerId],
   );
 
   const activeHoveredMarker = useMemo(
-    () => enrichedMarkers.find((item) => item.id === hoveredMarkerId) || null,
-    [enrichedMarkers, hoveredMarkerId],
+    () => renderMarkers.find((item) => item.id === hoveredMarkerId) || null,
+    [renderMarkers, hoveredMarkerId],
   );
+
+  const detailedSelectedMarker = useMemo(
+    () => enrichMarkerDetails(activeSelectedMarker, bucketedNetworkLogs, thresholds),
+    [activeSelectedMarker, bucketedNetworkLogs, thresholds],
+  );
+
+  const detailedHoveredMarker = useMemo(
+    () => enrichMarkerDetails(activeHoveredMarker, bucketedNetworkLogs, thresholds),
+    [activeHoveredMarker, bucketedNetworkLogs, thresholds],
+  );
+
+  const deckPoints = useMemo(
+    () => show
+      ? buildDeckPointGroups(renderMarkers, mapZoom, highlightedMarkerIdSet)
+      : [],
+    [show, renderMarkers, mapZoom, highlightedMarkerIdSet],
+  );
+  deckInputRef.current = { points: deckPoints };
+
+  deckClickRef.current = (point) => {
+    if (!point) return;
+    if (point.isCluster) {
+      const LatLngBounds = window.google?.maps?.LatLngBounds;
+      if (!LatLngBounds) return;
+      const bounds = new LatLngBounds();
+      point.markers.forEach((marker) => {
+        const position = marker.position ?? marker.start;
+        const { lat, lng } = readLatLng(position);
+        if (Number.isFinite(lat) && Number.isFinite(lng)) bounds.extend({ lat, lng });
+      });
+      const northEast = bounds.getNorthEast();
+      const southWest = bounds.getSouthWest();
+      const isSingleLocation =
+        Math.abs(northEast.lat() - southWest.lat()) < 0.00008 &&
+        Math.abs(northEast.lng() - southWest.lng()) < 0.00008;
+      if (isSingleLocation) {
+        const currentZoom = Number(map.getZoom?.()) || 0;
+        if (currentZoom < 21) {
+          map.setZoom(Math.min(21, Math.max(currentZoom + 2, 19)));
+        } else {
+          const centerLat = point.position[1];
+          const centerLng = point.position[0];
+          const duplicateKey = `${centerLat.toFixed(5)}:${centerLng.toFixed(5)}`;
+          const nextIndex = ((duplicateCycleRef.current.get(duplicateKey) ?? -1) + 1) % point.markers.length;
+          duplicateCycleRef.current.set(duplicateKey, nextIndex);
+          const marker = point.markers[nextIndex];
+          setInternalSelectedMarkerId(marker.id);
+          onMarkerSelectRef.current?.(marker);
+        }
+      } else {
+        map.fitBounds(bounds, 64);
+      }
+      return;
+    }
+
+    const marker = point.markers[0];
+    if (!marker) return;
+    setInternalSelectedMarkerId(marker.id);
+    onMarkerSelectRef.current?.(marker);
+  };
+  deckHoverRef.current = (point) => {
+    const marker = point?.isCluster ? null : point?.markers?.[0];
+    setHoveredMarkerId((current) => (current === (marker?.id ?? null) ? current : marker?.id ?? null));
+  };
+
+  refreshDeckRef.current = () => {
+    const { overlay, classes } = deckRef.current;
+    if (!overlay || !classes) return;
+    overlay.setProps({
+      layers: createSubSessionDeckLayers(
+        classes,
+        deckInputRef.current.points,
+        (point) => deckClickRef.current?.(point),
+        (point) => deckHoverRef.current?.(point),
+      ),
+    });
+  };
+
+  useEffect(() => {
+    if (!show || !map || !hasMarkers) return undefined;
+    let cancelled = false;
+
+    Promise.all([
+      import("@deck.gl/google-maps"),
+      import("@deck.gl/layers"),
+    ]).then(([googleMapsModule, layersModule]) => {
+      if (cancelled) return;
+      const overlay = new googleMapsModule.GoogleMapsOverlay({
+        interleaved: false,
+        glOptions: { preserveDrawingBuffer: false },
+      });
+      deckRef.current = {
+        overlay,
+        classes: {
+          ScatterplotLayer: layersModule.ScatterplotLayer,
+          TextLayer: layersModule.TextLayer,
+        },
+      };
+      overlay.setMap(map);
+      refreshDeckRef.current?.();
+    }).catch((error) => {
+      if (!cancelled) console.error("Unable to load the sub-session WebGL layer:", error);
+    });
+
+    return () => {
+      cancelled = true;
+      const { overlay } = deckRef.current;
+      if (overlay) {
+        try {
+          overlay.setProps({ layers: [] });
+          overlay.setMap(null);
+          overlay.finalize();
+        } catch {
+          // The map may be tearing down while the optional WebGL layer is unloaded.
+        }
+      }
+      deckRef.current = { overlay: null, classes: null };
+    };
+  }, [map, show, hasMarkers]);
+
+  useEffect(() => {
+    refreshDeckRef.current?.();
+  }, [deckPoints]);
 
   if (!show || !Array.isArray(markers) || markers.length === 0) {
     return null;
@@ -376,9 +703,9 @@ const SubSessionMarkers = ({
 
   return (
     <>
-      {activeHoveredMarker?.start && activeHoveredMarker?.end && (
+      {detailedHoveredMarker?.start && detailedHoveredMarker?.end && (
         <PolylineF
-          path={[activeHoveredMarker.start, activeHoveredMarker.end]}
+          path={[detailedHoveredMarker.start, detailedHoveredMarker.end]}
           options={{
             strokeColor: "#22d3ee",
             strokeOpacity: 0.95,
@@ -401,57 +728,19 @@ const SubSessionMarkers = ({
         />
       )}
 
-      {activeHoveredMarker && activeHoveredMarker.id !== activeMarkerId && (
+      {detailedHoveredMarker && detailedHoveredMarker.id !== activeMarkerId && (
         <OverlayViewF
-          position={activeHoveredMarker.position}
+          position={detailedHoveredMarker.position}
           mapPaneName={FLOAT_PANE}
           getPixelPositionOffset={getHoverCardOffset}
           onLoad={disableOverlayPointerEvents}
           zIndex={1100}
         >
           <div className="pointer-events-none rounded-md border border-slate-200 bg-white px-3 py-2 shadow-lg">
-            <SubSessionTooltip marker={activeHoveredMarker} />
+            <SubSessionTooltip marker={detailedHoveredMarker} />
           </div>
         </OverlayViewF>
       )}
-
-      {enrichedMarkers.map((marker, index) => (
-        (() => {
-          const markerKey = String(marker.id ?? "");
-          const isHighlighted = highlightedMarkerIdSet.has(markerKey);
-
-          return (
-            <MarkerF
-              key={`${marker.id ?? "sub"}-${marker.sessionId ?? "na"}-${marker.subSessionId ?? "na"}-${index}`}
-              position={marker.position}
-              icon={{
-                path: getSubSessionMarkerPath(
-                  marker.subSessionType,
-                  marker.resultStatusRaw ?? marker.resultStatus,
-                ),
-                fillColor: marker.fillColor,
-                fillOpacity: 1,
-                strokeColor: isHighlighted ? marker.fillColor : "#f7f8f8",
-                strokeWeight: isHighlighted ? 5 : 2,
-                scale: isHighlighted ? 1.28 : 1,
-              }}
-              zIndex={isHighlighted ? 1000 : undefined}
-              onClick={() => {
-                setInternalSelectedMarkerId(marker.id);
-                if (typeof onMarkerSelect === "function") {
-                  onMarkerSelect(marker);
-                }
-              }}
-              onMouseOver={() => {
-                setHoveredMarkerId(marker.id);
-              }}
-              onMouseOut={() => {
-                setHoveredMarkerId((current) => (current === marker.id ? null : current));
-              }}
-            />
-          );
-        })()
-      ))}
 
       {activeSelectedMarker && (
         <InfoWindowF
@@ -465,7 +754,7 @@ const SubSessionMarkers = ({
             }
           }}
         >
-          <SubSessionTooltip marker={activeSelectedMarker} />
+          <SubSessionTooltip marker={detailedSelectedMarker} />
         </InfoWindowF>
       )}
     </>
