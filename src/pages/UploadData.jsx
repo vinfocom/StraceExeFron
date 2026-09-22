@@ -1470,7 +1470,7 @@ const UploadDataPage = () => {
 	                    })}
 	                  </div>
 	                  <p className="mt-2 text-xs text-gray-200">
-	                    Tick file-specific band rows. The Excel API receives the unique selected band names.
+	                    Tick file-specific band rows.
 	                  </p>
 	                </div>
 

@@ -36,6 +36,7 @@ import { Input } from "@/components/ui/input";
 import { getMetricLabelsForLocations, getTechnologyMetricOptions } from "@/utils/technologyMetricLabels";
 import { getTechnologyFamily } from "@/utils/technologySelection";
 import { DEBUG_L3 } from "@/utils/l3Debug";
+import SwapSectorPanel from "./SwapSectorPanel";
 
 const LTE_RECOMMENDATION_OPTIMIZED_DEFAULTS = Object.freeze({
   operator: "all",
@@ -5017,12 +5018,28 @@ const UnifiedMapSidebar = ({
                 </div>
               )}
             </CollapsibleSection>
+
+              <CollapsibleSection
+              title="Swap Sector"
+              icon={ArrowLeftRight}>
+              {canRunPrediction && (
+                  <SwapSectorPanel
+                    key={`${projectId}:${(sessionIds || []).join(",")}`}
+                    projectId={projectId}
+                    sessionIds={sessionIds}
+                    region={lteRegion}
+                    countryCode={lteCountryCode}
+                    operatorOptions={optimizationProviderOptions}
+                  />
+                )}
+              </CollapsibleSection>
           
 
           {activeSidebarTab === "optimisation" && (
           <CollapsibleSection
           title="Optimisation" 
           icon={TowerControl} >
+                
                 <div className="mt-3 pt-3 border-t border-slate-700/50 space-y-1.5">
             {canRunPrediction && (
               <>
@@ -5486,6 +5503,8 @@ const UnifiedMapSidebar = ({
                   )}
                 </div>
               </CollapsibleSection>
+
+            
           )}
             </>
           )}

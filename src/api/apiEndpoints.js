@@ -628,6 +628,18 @@ export const areaBreakdownApi = {
 };
 
 export const predictionApi = {
+  runSwapSector: ({ project_id, session_ids, region, country_code, operator, technology, method, max_violation_db }) =>
+    pythonApi.post("/api/swap-sector/run", {
+      project_id,
+      session_ids,
+      region,
+      country_code,
+      operator,
+      technology,
+      method,
+      max_violation_db,
+    }, { timeout: 600000 }),
+
   runPrediction: async (params) => {
     try {
 

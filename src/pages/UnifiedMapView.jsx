@@ -1844,7 +1844,7 @@ const UnifiedMapView = () => {
   const [showAnalytics, setShowAnalytics] = useState(false);
   const mapSnapshotContainerRef = useRef(null);
   const [analyticsActiveTab, setAnalyticsActiveTab] = useState("overview");
-  const [showInsights, setShowInsights] = useState(true);
+  const [showInsights, setShowInsights] = useState(false);
   const [insights, setInsights] = useState([]);
   const [insightsLoading, setInsightsLoading] = useState(false);
   const [selectedMetric, setSelectedMetricState] = useState("rsrp");
