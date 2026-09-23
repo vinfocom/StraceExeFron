@@ -2024,6 +2024,7 @@ const UnifiedMapView = () => {
 
   const [drawnPoints, setDrawnPoints] = useState(null);
   const [drawnShapeAnalytics, setDrawnShapeAnalytics] = useState([]);
+  const [activeDrawingPreview, setActiveDrawingPreview] = useState([]);
   const [generatedMapLogs, setGeneratedMapLogs] = useState([]);
   const [newProjectPolygonName, setNewProjectPolygonName] = useState("");
   const [isSavingProjectPolygon, setIsSavingProjectPolygon] = useState(false);
@@ -6634,6 +6635,11 @@ const UnifiedMapView = () => {
     setDrawnShapeAnalytics(drawingAnalytics);
   }, []);
 
+  const drawingShapesForMap = useMemo(
+    () => [...(drawnShapeAnalytics || []), ...(activeDrawingPreview || [])],
+    [drawnShapeAnalytics, activeDrawingPreview],
+  );
+
   const handleFillWithLogs = useCallback(() => {
     const latestDrawing = [...(drawnShapeAnalytics || [])]
       .reverse()
@@ -7913,6 +7919,9 @@ const UnifiedMapView = () => {
               showNumCells={showNumCells}
               showMetricLabels={showMetricLabels}
               overlapDrawOrder={ui.overlapDrawOrder}
+              drawingShapes={drawingShapesForMap}
+              siteData={siteData}
+              predictionGridData={lteLayerLocations}
               onLoad={handleMapLoad}
               pointRadius={logRadius}
               projectId={projectId}
@@ -7964,6 +7973,7 @@ const UnifiedMapView = () => {
                 onUIChange={handleUIChange}
                 clearSignal={ui.drawClearSignal}
                 onDrawingsChange={handleDrawingsChange}
+                onActiveDrawingChange={setActiveDrawingPreview}
                 terrainEnabled={ui.basemapStyle === "terrain"}
               />
 

@@ -1,8 +1,8 @@
-import { memo, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useMemo, useState } from "react";
 import { Rnd } from "react-rnd";
-import { GoogleMapsOverlay } from "@deck.gl/google-maps";
 import { GeoJsonLayer } from "@deck.gl/layers";
 import { useGoogleMap } from "@react-google-maps/api";
+import { useDeckLayerGroup } from "@/components/maps/deckLayerRegistry";
 import { useClutterGeometry } from "@/hooks/useClutterGeometry";
 import {
   CLUTTER_CLASS_DEFINITIONS,
@@ -25,9 +25,7 @@ const ClutterTilesLayer = ({
   hasMore = false,
 }) => {
   const map = useGoogleMap();
-  const overlayRef = useRef(null);
   const [hovered, setHovered] = useState(null);
-  const [overlayError, setOverlayError] = useState(null);
   const [hiddenClasses, setHiddenClasses] = useState(() => new Set());
   const {
     featureCollection,
@@ -61,58 +59,9 @@ const ClutterTilesLayer = ({
     });
   };
 
-  useEffect(() => {
-    if (!enabled || !map || !map.getDiv?.()) {
-      setOverlayError(null);
-      return undefined;
-    }
-
-    let overlay = null;
-    try {
-      overlay = new GoogleMapsOverlay({
-        interleaved: false,
-        glOptions: { preserveDrawingBuffer: false },
-      });
-      overlay.setMap(map);
-      overlayRef.current = overlay;
-      setOverlayError(null);
-    } catch {
-      try {
-        overlay?.finalize();
-      } catch {
-        // Ignore cleanup failures while the map is being initialized.
-      }
-      overlayRef.current = null;
-      setOverlayError("The map could not initialize the clutter layer.");
-      return undefined;
-    }
-
-    return () => {
-      try {
-        overlay.setProps({ layers: [] });
-        overlay.setMap(null);
-        overlay.finalize();
-      } catch {
-        // The Google Map may already be tearing down.
-      }
-      if (overlayRef.current === overlay) overlayRef.current = null;
-    };
-  }, [enabled, map]);
-
-  useEffect(() => {
-    const overlay = overlayRef.current;
-    if (!enabled || !overlay || visibleFeatureCollection.features.length === 0) {
-      try {
-        overlay?.setProps({ layers: [] });
-      } catch {
-        setOverlayError("The clutter layer could not be cleared from the map.");
-      }
-      setHovered(null);
-      return;
-    }
-
-    try {
-      const layer = new GeoJsonLayer({
+  const clutterLayer = useMemo(() => {
+    if (!enabled || visibleFeatureCollection.features.length === 0) return null;
+    return new GeoJsonLayer({
         id: "project-clutter-tiles",
         data: visibleFeatureCollection,
         pickable: true,
@@ -140,19 +89,9 @@ const ClutterTilesLayer = ({
           });
         },
       });
-
-      overlay.setProps({ layers: [layer] });
-      setOverlayError(null);
-    } catch {
-      setHovered(null);
-      setOverlayError("The clutter layer could not be rendered.");
-      try {
-        overlay.setProps({ layers: [] });
-      } catch {
-        // Keep a broken overlay from affecting the rest of the map.
-      }
-    }
   }, [enabled, visibleFeatureCollection, map]);
+
+  useDeckLayerGroup("clutterTiles", clutterLayer ? [clutterLayer] : []);
 
   if (!enabled) return null;
 
@@ -191,7 +130,6 @@ const ClutterTilesLayer = ({
         {processing && <div className="mt-1 text-slate-300">Updating the map…</div>}
         {processingError && <div className="mt-1 text-rose-300">{processingError}</div>}
         {error && <div className="mt-1 text-rose-300">{error}</div>}
-        {overlayError && <div className="mt-1 text-rose-300">{overlayError}</div>}
         {!loading && !processing && !error && !processingError && featureCollection.features.length === 0 && (
           <div className="mt-1 text-slate-300">
             No classified clutter tiles are available for this project.

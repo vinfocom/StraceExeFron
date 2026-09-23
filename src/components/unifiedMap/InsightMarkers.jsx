@@ -1,7 +1,7 @@
-import React, { useEffect, useMemo, useRef } from "react";
-import { GoogleMapsOverlay } from "@deck.gl/google-maps";
+import React, { useEffect, useMemo } from "react";
 import { PathLayer, ScatterplotLayer } from "@deck.gl/layers";
 import { useGoogleMap } from "@react-google-maps/api";
+import { useDeckLayerGroup } from "@/components/maps/deckLayerRegistry";
 import {
   getInsightCoordinates,
   getInsightSeverity,
@@ -25,7 +25,6 @@ const hexToRgba = (hex, alpha = 230) => {
 
 const InsightMarkers = ({ insights = [], show = false, radius = 10 }) => {
   const map = useGoogleMap();
-  const overlayRef = useRef(null);
 
   const markerRows = useMemo(
     () =>
@@ -42,24 +41,6 @@ const InsightMarkers = ({ insights = [], show = false, radius = 10 }) => {
         .filter(Boolean),
     [insights],
   );
-
-  useEffect(() => {
-    if (!map) return undefined;
-
-    if (!overlayRef.current) {
-      overlayRef.current = new GoogleMapsOverlay({
-        interleaved: false,
-        style: { zIndex: "10", pointerEvents: "none" },
-        glOptions: { preserveDrawingBuffer: false },
-      });
-    }
-
-    overlayRef.current.setMap(map);
-    return () => {
-      overlayRef.current?.setProps({ layers: [] });
-      overlayRef.current?.setMap(null);
-    };
-  }, [map]);
 
   const severityPaths = useMemo(() => {
     const groups = new Map();
@@ -112,10 +93,7 @@ const InsightMarkers = ({ insights = [], show = false, radius = 10 }) => {
     [markerRows, radius],
   );
 
-  useEffect(() => {
-    if (!overlayRef.current) return;
-    overlayRef.current.setProps({ layers: show ? [connectionLayer, markerLayer] : [] });
-  }, [connectionLayer, markerLayer, show]);
+  useDeckLayerGroup("insightMarkers", show ? [connectionLayer, markerLayer] : []);
 
   useEffect(() => {
     if (!show || !map || !window.google?.maps || markerRows.length === 0) return;

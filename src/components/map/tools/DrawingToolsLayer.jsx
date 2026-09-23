@@ -462,7 +462,10 @@ function createRasterRouteBufferPath(logs, offsetMeters) {
     1000,
     metersPerLat * Math.cos((originLat * Math.PI) / 180),
   );
-  const cellSize = Math.max(3, Math.min(18, offset / 4));
+  // Scale the raster cell with the requested offset. Keeping a small fixed
+  // cell size made radiusCells grow with offset and could exceed the global
+  // cell budget for wide (200m/500m) route buffers.
+  const cellSize = Math.max(3, offset / 16);
   const radiusCells = Math.ceil(offset / cellSize);
   const maxLinkMeters = Math.max(80, Math.min(300, offset * 4));
   const maxLinkCells = maxLinkMeters / cellSize;
@@ -505,7 +508,9 @@ function createRasterRouteBufferPath(logs, offsetMeters) {
     });
   };
   const markCenterline = ({ x, y }) => {
-    centerlineCells.add(keyOf(Math.floor(x), Math.floor(y)));
+    const key = keyOf(Math.floor(x), Math.floor(y));
+    centerlineCells.add(key);
+    if (radiusCells >= 12) markDisc({ x, y });
   };
 
   allPoints.forEach((point) => addSpatialPoint(toGridPoint(point)));
@@ -650,10 +655,12 @@ function createRasterRouteBufferPath(logs, offsetMeters) {
   }
 
   if (centerlineCells.size > MAX_ROUTE_BUFFER_CELLS) return [];
-  centerlineCells.forEach((key) => {
-    const [x, y] = key.split(",").map(Number);
-    markDisc({ x: x + 0.5, y: y + 0.5 });
-  });
+  if (radiusCells < 12) {
+    centerlineCells.forEach((key) => {
+      const [x, y] = key.split(",").map(Number);
+      markDisc({ x: x + 0.5, y: y + 0.5 });
+    });
+  }
   if (bufferTooLarge) return [];
 
   let minOccupiedX = Infinity;
@@ -1041,7 +1048,11 @@ const SHAPE_COLORS = {
   line: { light: "#ea580c", satellite: "#fb923c" },
   select: { light: "#0f766e", satellite: "#2dd4bf" },
 };
+// Keep all user drawings above data/grid overlays.  Google Maps uses zIndex
+// within its overlay pane, so these values are intentionally centralized.
 const DRAWING_Z_INDEX = 10000;
+const DRAWING_LABEL_Z_INDEX = DRAWING_Z_INDEX + 1;
+const DRAWING_VERTEX_Z_INDEX = DRAWING_Z_INDEX + 2;
 const getShapeColor = (kind, satellite) => SHAPE_COLORS[kind][satellite ? "satellite" : "light"];
 
 const getShapeOptions = (type, polygonOpacity, polygonFillOpacity, satellite = false) => {
@@ -1077,7 +1088,9 @@ const fmtArea = (m2) =>
 
 const createLabelMarker = (map, position) => {
   const AdvancedMarkerElement = window.google?.maps?.marker?.AdvancedMarkerElement;
-  return AdvancedMarkerElement ? new AdvancedMarkerElement({ map, position, zIndex: 1000 }) : null;
+  return AdvancedMarkerElement
+    ? new AdvancedMarkerElement({ map, position, zIndex: DRAWING_LABEL_Z_INDEX })
+    : null;
 };
 
 // Pill used for the live readout that follows the cursor while drawing.
@@ -1193,7 +1206,7 @@ const createVertexMarker = ({
     draggable,
     icon: getVertexMarkerIcon(type, isFirst),
     title: title || "Vertex",
-    zIndex: 3000 + index,
+    zIndex: DRAWING_VERTEX_Z_INDEX + index,
   });
   if (!marker) return null;
   marker.style.cursor = draggable ? "grab" : "pointer";
@@ -1251,6 +1264,7 @@ function DrawingToolsLayerComponent({
   cellSizeMeters = 100,
   onSummary,
   onDrawingsChange,
+  onActiveDrawingChange,
   clearSignal = 0,
   colorizeCells = true,
   polygonOpacity = 0.35,
@@ -1267,7 +1281,9 @@ function DrawingToolsLayerComponent({
   const shapesRef = useRef([]);
   const collectedDrawingRef = useRef([]);
   const lastClearSignalRef = useRef(clearSignal);
-  const callbacksRef = useRef({ onSummary, onDrawingsChange, onUIChange });
+  const callbacksRef = useRef({ onSummary, onDrawingsChange, onActiveDrawingChange, onUIChange });
+  const activePreviewFrameRef = useRef(null);
+  const activePreviewRef = useRef(null);
   const reAnalyzeShapeRef = useRef(null);
   const registerCompletedShapeRef = useRef(null);
   const finishActiveDrawingRef = useRef(null);
@@ -1281,6 +1297,32 @@ function DrawingToolsLayerComponent({
   const resolvedPolygonOpacity = clampOpacity(polygonOpacity);
   const resolvedPolygonFillOpacity =
     polygonFillOpacity === null ? resolvedPolygonOpacity : clampOpacity(polygonFillOpacity, 0);
+
+  const publishActiveDrawing = useCallback((type, overlay) => {
+    activePreviewRef.current = { type, overlay };
+    if (activePreviewFrameRef.current !== null) return;
+    activePreviewFrameRef.current = requestAnimationFrame(() => {
+      activePreviewFrameRef.current = null;
+      const preview = activePreviewRef.current;
+      const geometry = serializeOverlay(preview?.type, preview?.overlay);
+      if (geometry) {
+        callbacksRef.current.onActiveDrawingChange?.([{
+          id: `active-${preview.type}`,
+          type: preview.type,
+          geometry,
+        }]);
+      }
+    });
+  }, []);
+
+  const clearActiveDrawingPreview = useCallback(() => {
+    activePreviewRef.current = null;
+    if (activePreviewFrameRef.current !== null) {
+      cancelAnimationFrame(activePreviewFrameRef.current);
+      activePreviewFrameRef.current = null;
+    }
+    callbacksRef.current.onActiveDrawingChange?.([]);
+  }, []);
 
   const requestTerrainMetrics = useCallback(async (path) => {
     const gm = window.google?.maps;
@@ -1387,8 +1429,8 @@ function DrawingToolsLayerComponent({
   }, [requestTerrainMetrics, terrainEnabled]);
 
   useEffect(() => {
-    callbacksRef.current = { onSummary, onDrawingsChange, onUIChange };
-  }, [onSummary, onDrawingsChange, onUIChange]);
+    callbacksRef.current = { onSummary, onDrawingsChange, onActiveDrawingChange, onUIChange };
+  }, [onSummary, onDrawingsChange, onActiveDrawingChange, onUIChange]);
   useEffect(() => {
     logsRef.current = logs;
   }, [logs]);
@@ -1605,7 +1647,7 @@ function DrawingToolsLayerComponent({
         if (!shapeObj.labelMarker) {
           const AdvancedMarkerElement = window.google?.maps?.marker?.AdvancedMarkerElement;
           shapeObj.labelMarker = AdvancedMarkerElement
-            ? new AdvancedMarkerElement({ map, position: center, zIndex: 1000 })
+            ? new AdvancedMarkerElement({ map, position: center, zIndex: DRAWING_LABEL_Z_INDEX })
             : null;
         } else {
           shapeObj.labelMarker.position = center;
@@ -1786,6 +1828,7 @@ function DrawingToolsLayerComponent({
         finalOverlay.setOptions({ clickable: true, editable: false, draggable: true });
       }
       cleanupActiveDrawing(true);
+      clearActiveDrawingPreview();
       registerCompletedShape(active.type, finalOverlay);
     };
 
@@ -1883,6 +1926,7 @@ function DrawingToolsLayerComponent({
         });
 
         cleanupActiveDrawing(true);
+        clearActiveDrawingPreview();
         registerCompletedShape("polygon", overlay, {
           analysisLogs: selectedLogs,
           suppressVertexMarkers: true,
@@ -1910,7 +1954,7 @@ function DrawingToolsLayerComponent({
             clickable: false,
             editable: false,
             draggable: false,
-            zIndex: 450,
+            zIndex: DRAWING_Z_INDEX,
           });
           activeDrawingRef.current = { type, overlay: selectionRect, listeners };
         }),
@@ -1924,6 +1968,7 @@ function DrawingToolsLayerComponent({
             : 0;
           if (distance > 1) hasDragged = true;
           selectionRect.setBounds(createBoundsFromLatLngs(startPoint, event.latLng));
+          publishActiveDrawing(type, selectionRect);
         }),
       );
 
@@ -1951,7 +1996,7 @@ function DrawingToolsLayerComponent({
         clickable: false,
         editable: false,
         draggable: false,
-        zIndex: 400,
+        zIndex: DRAWING_Z_INDEX,
         ...previewOptions,
       });
 
@@ -2074,6 +2119,7 @@ function DrawingToolsLayerComponent({
           if (!event.latLng || activeDrawingRef.current?.overlay !== overlay) return;
           if (committedPoints.length === 0) return;
           overlay.setPath([...committedPoints, event.latLng]);
+          publishActiveDrawing(type, overlay);
 
           // Highlight the vertex that a click would close/finish on.
           const closing = type === "polygon"
@@ -2149,6 +2195,7 @@ function DrawingToolsLayerComponent({
         startPoint = null;
         hasDragged = false;
         cleanupActiveDrawing(true);
+        clearActiveDrawingPreview();
         registerCompletedShape(type, completedOverlay);
       };
 
@@ -2208,6 +2255,7 @@ function DrawingToolsLayerComponent({
             overlay.setRadius(Math.max(radius, 1));
             setLiveLabel(liveLabel, event.latLng, `r ${fmtLength(radius)}`, isSatelliteRef.current);
           }
+          publishActiveDrawing(type, overlay);
         }),
       );
 
@@ -2230,6 +2278,7 @@ function DrawingToolsLayerComponent({
       cancelActiveDrawingRef.current = null;
       undoActiveDrawingRef.current = null;
       cleanupActiveDrawing(false);
+      clearActiveDrawingPreview();
     };
   }, [
     map,
@@ -2241,6 +2290,8 @@ function DrawingToolsLayerComponent({
     resolvedPolygonFillOpacity,
     showDrawingControl,
     logPolygonOffsetMeters,
+    publishActiveDrawing,
+    clearActiveDrawingPreview,
   ]);
 
   useEffect(() => {
@@ -2304,6 +2355,7 @@ function DrawingToolsLayerComponent({
     if (clearSignal === 0 || clearSignal === lastClearSignalRef.current) return;
     lastClearSignalRef.current = clearSignal;
     cleanupActiveDrawing(false);
+    clearActiveDrawingPreview();
     shapesRef.current.forEach(s => {
       window.clearTimeout(s.analysisTimer);
       s.listeners?.forEach(l => window.google.maps.event.removeListener(l));
@@ -2318,7 +2370,7 @@ function DrawingToolsLayerComponent({
     callbacksRef.current.onDrawingsChange?.([]);
     callbacksRef.current.onSummary?.(null);
     toast.info("All drawings cleared", { position: "bottom-right", autoClose: 2000 });
-  }, [clearSignal, cleanupActiveDrawing]);
+  }, [clearSignal, cleanupActiveDrawing, clearActiveDrawingPreview]);
 
   useEffect(() => {
     if (shapesRef.current.length > 0) {

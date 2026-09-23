@@ -1,9 +1,10 @@
 // src/components/maps/DeckGLOverlay.jsx
 import React, { useEffect, useRef, useMemo, useCallback, useState } from 'react';
 import { GoogleMapsOverlay } from '@deck.gl/google-maps';
-import { ScatterplotLayer, PolygonLayer, TextLayer } from '@deck.gl/layers';
+import { PathLayer, ScatterplotLayer, PolygonLayer, TextLayer } from '@deck.gl/layers';
 import { getMetricConfig, getMetricValueFromLog } from '@/utils/metrics';
 import { sampleLogIndices } from '@/utils/logSpatialSampling';
+import { useDeckLayerRegistry } from '@/components/maps/deckLayerRegistry';
 
 const pickFirstNonEmpty = (obj, keys = []) => {
   for (const key of keys) {
@@ -86,6 +87,53 @@ const getLegendAlpha = (source, activeAlpha, dimmedAlpha = 55) =>
 
 const metersToLatDeg = 1 / 111320;
 
+const getDrawingPath = (drawing) => {
+  const geometry = drawing?.geometry;
+  if (!geometry) return [];
+
+  if (geometry.type === 'polyline') {
+    return (geometry.path || []).map((point) => [Number(point.lng), Number(point.lat)]);
+  }
+  if (geometry.type === 'polygon') {
+    return (geometry.polygon || []).map((point) => [Number(point.lng), Number(point.lat)]);
+  }
+  if (geometry.type === 'rectangle') {
+    const sw = geometry.rectangle?.sw;
+    const ne = geometry.rectangle?.ne;
+    if (!sw || !ne) return [];
+    return [
+      [Number(sw.lng), Number(sw.lat)],
+      [Number(ne.lng), Number(sw.lat)],
+      [Number(ne.lng), Number(ne.lat)],
+      [Number(sw.lng), Number(ne.lat)],
+      [Number(sw.lng), Number(sw.lat)],
+    ];
+  }
+  if (geometry.type === 'circle') {
+    const center = geometry.circle?.center;
+    const radius = Number(geometry.circle?.radius);
+    if (!center || !Number.isFinite(radius) || radius <= 0) return [];
+    const lat = Number(center.lat);
+    const lng = Number(center.lng);
+    const latDelta = radius / 111320;
+    const lngDelta = radius / (111320 * Math.max(0.1, Math.cos((lat * Math.PI) / 180)));
+    return Array.from({ length: 65 }, (_, index) => {
+      const angle = (index / 64) * Math.PI * 2;
+      return [lng + Math.cos(angle) * lngDelta, lat + Math.sin(angle) * latDelta];
+    });
+  }
+  return [];
+};
+
+const getPredictionRenderLimit = (total) => {
+  if (total > 300000) return 30000;
+  if (total > 100000) return 50000;
+  if (total > 50000) return 75000;
+  return 100000;
+};
+
+const LAYER_ORDER = ['clutterTiles', 'grid', 'predictions', 'sites', 'sectors', 'insightMarkers', 'l3Events', 'neighborLogs', 'primaryLogs', 'drawings'];
+
 const getSquarePolygon = (lat, lng, sizeMeters) => {
   const halfSize = sizeMeters / 2;
   const latDelta = halfSize * metersToLatDeg;
@@ -160,7 +208,11 @@ const DeckGLOverlay = ({
   gridOpacity = 0.72,
   onGridHover,
   gridMinPixelSize = 5,
+  drawingShapes = [],
+  siteData = [],
+  predictionGridData = [],
 }) => {
+  const { groups: registeredGroups, version: registryVersion } = useDeckLayerRegistry();
   const overlayRef = useRef(null);
   const [mapZoom, setMapZoom] = useState(null);
   const [viewportBounds, setViewportBounds] = useState(null);
@@ -168,6 +220,9 @@ const DeckGLOverlay = ({
   const samplingWorkerRef = useRef(null);
   const workerCoordinatesRef = useRef(null);
   const samplingRequestRef = useRef(0);
+  const predictionWorkerRef = useRef(null);
+  const predictionRequestRef = useRef(0);
+  const [visiblePredictionRows, setVisiblePredictionRows] = useState([]);
   const isCleanedUpRef = useRef(false);
   const attachedMapRef = useRef(null);
   const idleListenerRef = useRef(null);
@@ -487,6 +542,49 @@ const DeckGLOverlay = ({
       .filter(Boolean);
   }, [imageLogs, showImageLogs]);
 
+  const drawingData = useMemo(
+    () => (drawingShapes || [])
+      .map((drawing) => ({
+        id: drawing?.id,
+        type: drawing?.type,
+        path: getDrawingPath(drawing),
+      }))
+      .filter((drawing) => drawing.path.length >= 2 && drawing.path.every(([lng, lat]) => Number.isFinite(lng) && Number.isFinite(lat))),
+    [drawingShapes],
+  );
+
+  const siteRenderData = useMemo(
+    () => (siteData || []).map((site, index) => {
+      const lat = Number(site?.lat ?? site?.latitude);
+      const lng = Number(site?.lng ?? site?.longitude ?? site?.lon);
+      return Number.isFinite(lat) && Number.isFinite(lng)
+        ? { index, source: site, position: [lng, lat] }
+        : null;
+    }).filter(Boolean),
+    [siteData],
+  );
+
+  const predictionRenderData = useMemo(
+    () => visiblePredictionRows.map((row, index) => {
+      const bounds = row?.bounds;
+      if (!bounds) return null;
+      const rgb = parseColorToRGB(row?.fillColor || row?.color || '#8b5cf6');
+      return {
+        index,
+        source: row,
+        polygon: [
+          [bounds.west, bounds.south],
+          [bounds.east, bounds.south],
+          [bounds.east, bounds.north],
+          [bounds.west, bounds.north],
+          [bounds.west, bounds.south],
+        ],
+        fillColor: [rgb[0], rgb[1], rgb[2], row?.fillOpacity ?? 140],
+      };
+    }).filter(Boolean),
+    [visiblePredictionRows],
+  );
+
   const metricLabelData = useMemo(() => {
     if (!showPrimaryLogs || !showMetricLabels || !primaryData.length) return [];
     const metricConfig = getMetricConfig(selectedMetric);
@@ -553,6 +651,42 @@ const DeckGLOverlay = ({
         pickable,
         autoHighlight,
         onHover: handleGridHover,
+      }));
+    }
+
+    if (!registeredGroups.get('predictions')?.length && predictionRenderData.length > 0) {
+      layers.push(new PolygonLayer({
+        id: 'prediction-grid-layer',
+        data: predictionRenderData,
+        getPolygon: (row) => row.polygon,
+        getFillColor: (row) => row.fillColor,
+        getLineColor: [139, 92, 246, 170],
+        getLineWidth: 1,
+        lineWidthMinPixels: 1,
+        filled: true,
+        stroked: true,
+        pickable: Boolean(pickable && Number(mapZoom) >= 13),
+        autoHighlight,
+        onHover: handlePrimaryHover,
+      }));
+    }
+
+    if (!registeredGroups.get('sites')?.length && siteRenderData.length > 0) {
+      layers.push(new ScatterplotLayer({
+        id: 'sites-layer',
+        data: siteRenderData,
+        getPosition: (site) => site.position,
+        getFillColor: [147, 51, 234, 230],
+        getLineColor: [255, 255, 255, 255],
+        getLineWidth: 1,
+        stroked: true,
+        getRadius: 7,
+        radiusUnits: 'pixels',
+        radiusMinPixels: 4,
+        radiusMaxPixels: 14,
+        pickable,
+        autoHighlight,
+        onHover: handlePrimaryHover,
       }));
     }
 
@@ -656,12 +790,66 @@ const DeckGLOverlay = ({
       }));
     }
 
+    // User drawings must be in the same DeckGL stack as the logs. Native
+    // Google Maps zIndex cannot move a shape above this WebGL canvas.
+    if (drawingData.length > 0) {
+      const areaDrawings = drawingData.filter((drawing) => drawing.type !== 'polyline');
+      if (areaDrawings.length > 0) {
+        layers.push(new PolygonLayer({
+          id: 'user-drawings-fill-layer',
+          data: areaDrawings,
+          getPolygon: (drawing) => drawing.path,
+          getFillColor: [37, 99, 235, 35],
+          getLineColor: [37, 99, 235, 255],
+          getLineWidth: 3,
+          lineWidthMinPixels: 2,
+          filled: true,
+          stroked: true,
+          pickable: false,
+        }));
+      }
+
+      layers.push(new PathLayer({
+        id: 'user-drawings-line-layer',
+        data: drawingData,
+        getPath: (drawing) => drawing.path,
+        getColor: (drawing) => drawing.type === 'polyline'
+          ? [234, 88, 12, 255]
+          : [37, 99, 235, 255],
+        getWidth: 4,
+        widthUnits: 'pixels',
+        widthMinPixels: 3,
+        rounded: true,
+        pickable: false,
+      }));
+    }
+
+    registeredGroups.forEach((groupLayers) => {
+      layers.push(...groupLayers);
+    });
+
+    const layerPriority = new Map(LAYER_ORDER.map((name, index) => [name, index]));
+    const layerGroup = (id) => {
+      if (id.startsWith('grid-')) return 'grid';
+      if (id.startsWith('project-clutter-')) return 'clutterTiles';
+      if (id.startsWith('prediction-') || id.startsWith('lte-prediction-')) return 'predictions';
+      if (id.startsWith('sites-')) return 'sites';
+      if (id.startsWith('network-sector-') || id.startsWith('network-site-')) return 'sectors';
+      if (id.startsWith('unified-map-insight-')) return 'insightMarkers';
+      if (id.startsWith('l3-events-')) return 'l3Events';
+      if (id.startsWith('neighbor-')) return 'neighborLogs';
+      if (id.startsWith('primary-') || id === 'image-log-icons-layer') return 'primaryLogs';
+      if (id.startsWith('user-drawings-')) return 'drawings';
+      return 'primaryLogs';
+    };
+    layers.sort((a, b) => (layerPriority.get(layerGroup(a.id)) ?? 0) - (layerPriority.get(layerGroup(b.id)) ?? 0));
+
     try {
       overlayRef.current.setProps({ layers });
     } catch (e) {
       // Overlay can detach during map teardown; skip this update.
     }
-  }, [map, primaryData, neighborData, gridData, imageLogData, metricLabelData, showPrimaryLogs, showNeighbors, showGrid, gridOpacity, handleGridHover, showImageLogs, selectedIndex, radius, radiusMinPixels, radiusMaxPixels, opacity, neighborOpacity, showNumCells, showMetricLabels, getColor, getNeighborColor, handleImageLogClick, handlePrimaryHover, isValidMapInstance]);
+  }, [map, primaryData, neighborData, gridData, imageLogData, metricLabelData, drawingData, predictionRenderData, siteRenderData, registeredGroups, registryVersion, showPrimaryLogs, showNeighbors, showGrid, gridOpacity, handleGridHover, showImageLogs, selectedIndex, radius, radiusMinPixels, radiusMaxPixels, opacity, neighborOpacity, showNumCells, showMetricLabels, getColor, getNeighborColor, handleImageLogClick, handlePrimaryHover, isValidMapInstance, pickable, autoHighlight, mapZoom]);
 
   useEffect(() => {
     return () => {
@@ -688,6 +876,51 @@ const DeckGLOverlay = ({
       isCleanedUpRef.current = true;
     };
   }, []);
+
+  useEffect(() => {
+    if (typeof Worker === 'undefined') return undefined;
+    const worker = new Worker(new URL('../../workers/predictionGridViewport.worker.js', import.meta.url), { type: 'module' });
+    predictionWorkerRef.current = worker;
+    worker.onmessage = ({ data }) => {
+      if (data.requestId !== predictionRequestRef.current) return;
+      if (data.error) {
+        console.warn('[UnifiedMapView] Prediction grid worker failed:', data.error);
+        return;
+      }
+      setVisiblePredictionRows(Array.isArray(data.rows) ? data.rows : []);
+    };
+    worker.onerror = (error) => console.warn('[UnifiedMapView] Prediction grid worker error:', error.message);
+    return () => {
+      worker.terminate();
+      if (predictionWorkerRef.current === worker) predictionWorkerRef.current = null;
+    };
+  }, []);
+
+  useEffect(() => {
+    const requestId = predictionRequestRef.current + 1;
+    predictionRequestRef.current = requestId;
+    if (!predictionGridData?.length) {
+      setVisiblePredictionRows([]);
+      return;
+    }
+    const payload = {
+      requestId,
+      rows: predictionGridData,
+      bounds: viewportBounds,
+      zoom: mapZoom,
+      maxRows: getPredictionRenderLimit(predictionGridData.length),
+    };
+    if (predictionWorkerRef.current) {
+      predictionWorkerRef.current.postMessage(payload);
+      return;
+    }
+    const visible = predictionGridData.filter((row) => {
+      const lat = Number(row?.lat ?? row?.latitude);
+      const lng = Number(row?.lng ?? row?.longitude ?? row?.lon);
+      return !viewportBounds || (lat >= viewportBounds.south && lat <= viewportBounds.north && lng >= viewportBounds.west && lng <= viewportBounds.east);
+    });
+    setVisiblePredictionRows(visible.slice(0, getPredictionRenderLimit(visible.length)));
+  }, [predictionGridData, viewportBounds, mapZoom]);
 
   return null;
 };

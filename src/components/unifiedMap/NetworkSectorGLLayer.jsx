@@ -7,14 +7,13 @@
 // WebGL layers instead. The single currently-selected sector (which needs an
 // InfoWindow + draggable "move" handle) is intentionally excluded from this
 // layer and still rendered natively by NetworkPlannerMap.jsx.
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { GoogleMapsOverlay } from "@deck.gl/google-maps";
+import React, { useCallback, useMemo } from "react";
 import { PolygonLayer, ScatterplotLayer, TextLayer } from "@deck.gl/layers";
+import { useDeckLayerGroup } from "@/components/maps/deckLayerRegistry";
 
 const SECTOR_LAYER_ID = "network-sector-triangles-layer";
 
 const NetworkSectorGLLayer = ({
-  map,
   sectorFeatures = [],
   siteFeatures = [],
   sectorLabelFeatures = [],
@@ -23,34 +22,6 @@ const NetworkSectorGLLayer = ({
   onSectorRightClick,
   onSiteClick,
 }) => {
-  const overlayRef = useRef(null);
-  const isCleanedUpRef = useRef(false);
-  const attachedMapRef = useRef(null);
-  const idleListenerRef = useRef(null);
-  const attachTimerRef = useRef(null);
-  const contextMenuHandlerRef = useRef(null);
-  const [, forceRerender] = useState(0);
-
-  const isValidMapInstance = useCallback((m) => {
-    if (!m || !window.google?.maps) return false;
-    if (typeof m.getDiv !== "function") return false;
-    return Boolean(m.getDiv());
-  }, []);
-
-  const canAttachOverlay = useCallback(
-    (m) => {
-      if (!isValidMapInstance(m)) return false;
-      if (typeof m.addListener !== "function") return false;
-      try {
-        if (typeof m.getProjection === "function" && !m.getProjection()) return false;
-      } catch {
-        return false;
-      }
-      return true;
-    },
-    [isValidMapInstance],
-  );
-
   const handleSectorClick = useCallback(
     (info) => {
       if (!onSectorClick || !info?.object) return;
@@ -67,93 +38,13 @@ const NetworkSectorGLLayer = ({
     [onSiteClick],
   );
 
-  useEffect(() => {
-    if (!isValidMapInstance(map)) return;
-    isCleanedUpRef.current = false;
-
-    if (!overlayRef.current) {
-      overlayRef.current = new GoogleMapsOverlay({
-        interleaved: false,
-        glOptions: { preserveDrawingBuffer: false },
-      });
-    }
-
-    const clearPendingAttach = () => {
-      if (idleListenerRef.current && window.google?.maps?.event?.removeListener) {
-        window.google.maps.event.removeListener(idleListenerRef.current);
-      }
-      idleListenerRef.current = null;
-      if (attachTimerRef.current) window.clearTimeout(attachTimerRef.current);
-      attachTimerRef.current = null;
-    };
-
-    const attachOverlay = () => {
-      if (!overlayRef.current || isCleanedUpRef.current) return;
-      if (attachedMapRef.current === map) return;
-      if (!canAttachOverlay(map)) return;
-      try {
-        overlayRef.current.setMap(map);
-        attachedMapRef.current = map;
-        clearPendingAttach();
-        forceRerender((n) => n + 1);
-      } catch (err) {
-        console.warn("Could not attach sector GL overlay to map instance:", err);
-      }
-    };
-
-    attachOverlay();
-    if (attachedMapRef.current !== map && typeof map.addListener === "function") {
-      idleListenerRef.current = map.addListener("idle", attachOverlay);
-      attachTimerRef.current = window.setTimeout(attachOverlay, 150);
-    }
-
-    return () => {
-      clearPendingAttach();
-      if (overlayRef.current) {
-        try {
-          overlayRef.current.setProps({ layers: [] });
-          if (attachedMapRef.current === map) overlayRef.current.setMap(null);
-        } catch {
-          // ignore detach errors during fast remount/unmount
-        }
-      }
-      if (attachedMapRef.current === map) attachedMapRef.current = null;
-    };
-  }, [map, isValidMapInstance, canAttachOverlay]);
-
-  // Right-click support: deck.gl layers only expose onClick/onHover, so the
-  // native browser contextmenu event on the map div is intercepted and hit
-  // tested against the deck.gl scene via the overlay's own picking.
-  useEffect(() => {
-    if (!isValidMapInstance(map) || !onSectorRightClick) return undefined;
-    const mapDiv = map.getDiv();
-    if (!mapDiv) return undefined;
-
-    const handleContextMenu = (event) => {
-      const overlay = overlayRef.current;
-      if (!overlay || attachedMapRef.current !== map) return;
-      const rect = mapDiv.getBoundingClientRect();
-      const x = event.clientX - rect.left;
-      const y = event.clientY - rect.top;
-      let picked = null;
-      try {
-        picked = overlay.pickObject({ x, y, layerIds: [SECTOR_LAYER_ID] });
-      } catch {
-        picked = null;
-      }
-      if (picked?.object) {
-        event.preventDefault();
-        onSectorRightClick(picked.object.source, picked.object.infoPos);
-      }
-    };
-
-    contextMenuHandlerRef.current = handleContextMenu;
-    mapDiv.addEventListener("contextmenu", handleContextMenu);
-    return () => {
-      mapDiv.removeEventListener("contextmenu", handleContextMenu);
-      contextMenuHandlerRef.current = null;
-    };
-  }, [map, isValidMapInstance, onSectorRightClick]);
+  const handleSectorContextMenu = useCallback(
+    (info) => {
+      if (!onSectorRightClick || !info?.object) return;
+      onSectorRightClick(info.object.source, info.object.infoPos);
+    },
+    [onSectorRightClick],
+  );
 
   const sortedSectorFeatures = useMemo(() => {
     if (!Array.isArray(sectorFeatures) || sectorFeatures.length === 0) return [];
@@ -163,10 +54,7 @@ const NetworkSectorGLLayer = ({
     return [...sectorFeatures].sort((a, b) => (a.sortRank ?? 0) - (b.sortRank ?? 0));
   }, [sectorFeatures]);
 
-  useEffect(() => {
-    if (!overlayRef.current || !isValidMapInstance(map)) return;
-    if (attachedMapRef.current !== map) return;
-
+  const sectorLayers = useMemo(() => {
     const layers = [];
 
     if (sortedSectorFeatures.length > 0) {
@@ -185,6 +73,7 @@ const NetworkSectorGLLayer = ({
           pickable: true,
           autoHighlight: false,
           onClick: handleSectorClick,
+          onContextMenu: handleSectorContextMenu,
           updateTriggers: {
             getFillColor: [sortedSectorFeatures],
             getLineColor: [sortedSectorFeatures],
@@ -262,43 +151,18 @@ const NetworkSectorGLLayer = ({
       );
     }
 
-    try {
-      overlayRef.current.setProps({ layers });
-    } catch {
-      // Overlay can detach during map teardown; skip this update.
-    }
+    return layers;
   }, [
-    map,
-    isValidMapInstance,
     sortedSectorFeatures,
     siteFeatures,
     sectorLabelFeatures,
     siteLabelFeatures,
     handleSectorClick,
+    handleSectorContextMenu,
     handleSiteClick,
   ]);
 
-  useEffect(() => {
-    return () => {
-      if (idleListenerRef.current && window.google?.maps?.event?.removeListener) {
-        window.google.maps.event.removeListener(idleListenerRef.current);
-      }
-      idleListenerRef.current = null;
-      if (attachTimerRef.current) window.clearTimeout(attachTimerRef.current);
-      attachTimerRef.current = null;
-      if (!overlayRef.current || isCleanedUpRef.current) return;
-      try {
-        overlayRef.current.setProps({ layers: [] });
-        if (attachedMapRef.current) overlayRef.current.setMap(null);
-        overlayRef.current.finalize();
-      } catch {
-        // ignore cleanup errors
-      }
-      overlayRef.current = null;
-      attachedMapRef.current = null;
-      isCleanedUpRef.current = true;
-    };
-  }, []);
+  useDeckLayerGroup("sectors", sectorLayers);
 
   return null;
 };

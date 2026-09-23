@@ -1,6 +1,6 @@
-import React, { useMemo, useEffect, useRef, useState, useCallback } from "react";
-import { GoogleMapsOverlay } from "@deck.gl/google-maps";
+import React, { useMemo, useEffect, useState, useCallback } from "react";
 import { PolygonLayer, ScatterplotLayer } from "@deck.gl/layers";
+import { useDeckLayerGroup } from "@/components/maps/deckLayerRegistry";
 import {
   normalizeBandName,
   normalizeProviderName,
@@ -353,7 +353,6 @@ const LtePredictionLocationLayer = ({
   mlGridAggregation = "mean",
   legendFilter = null,
 }) => {
-  const overlayRef = useRef(null);
   const [zoomLevel, setZoomLevel] = useState(13);
   const [hovered, setHovered] = useState(null);
   const [metricColorOverrides, setMetricColorOverrides] = useState({});
@@ -896,21 +895,6 @@ const LtePredictionLocationLayer = ({
   useEffect(() => {
     if (!enabled || !validMap) return;
 
-    if (!overlayRef.current) {
-      overlayRef.current = new GoogleMapsOverlay({
-        interleaved: false,
-        glOptions: { preserveDrawingBuffer: false },
-      });
-    }
-
-    // Guard against cases where map exists but is mid-teardown (deck.gl google-maps overlay can call addListener on null)
-    try {
-      overlayRef.current.setMap(map);
-    } catch (e) {
-      // If map is not ready, avoid throwing and let next render attach again
-      return;
-    }
-
     // Only set zoom if it actually changed to avoid update loops
     const nextZoom = map.getZoom?.() ?? 13;
     setZoomLevel((prev) => (prev === nextZoom ? prev : nextZoom));
@@ -927,14 +911,6 @@ const LtePredictionLocationLayer = ({
       if (listener && window.google?.maps?.event?.removeListener) {
         window.google.maps.event.removeListener(listener);
       }
-      if (overlayRef.current) {
-        try {
-          overlayRef.current.setProps({ layers: [] });
-          overlayRef.current.setMap(null);
-        } catch (e) {
-          // ignore detach errors
-        }
-      }
     };
   }, [enabled, validMap, map]);
 
@@ -950,9 +926,8 @@ const LtePredictionLocationLayer = ({
     });
   }, []);
 
-  useEffect(() => {
-    if (!enabled || !overlayRef.current || !validMap) return;
-
+  const predictionLayers = useMemo(() => {
+    if (!enabled || !validMap) return [];
     const layers = [];
 
     if (isGridMode) {
@@ -1021,7 +996,7 @@ const LtePredictionLocationLayer = ({
       );
     }
 
-    overlayRef.current.setProps({ layers });
+    return layers;
   }, [
     enabled,
     validMap,
@@ -1039,15 +1014,7 @@ const LtePredictionLocationLayer = ({
     handleHover,
   ]);
 
-  useEffect(() => {
-    return () => {
-      if (!overlayRef.current) return;
-      overlayRef.current.setProps({ layers: [] });
-      overlayRef.current.setMap(null);
-      overlayRef.current.finalize();
-      overlayRef.current = null;
-    };
-  }, []);
+  useDeckLayerGroup("predictions", predictionLayers);
 
   if (!enabled) return null;
 

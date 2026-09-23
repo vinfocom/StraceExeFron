@@ -5,6 +5,7 @@ import { GoogleMap, PolygonF, InfoWindow } from "@react-google-maps/api";
 import { GOOGLE_MAP_ID } from "@/lib/googleMapsLoader";
 import { mapViewApi } from "@/api/apiEndpoints";
 import DeckGLOverlay from "@/components/maps/DeckGLOverlay";
+import { DeckLayerRegistryProvider } from "@/components/maps/deckLayerRegistry";
 import PrimaryLogTooltip from "./PrimaryLogTooltip";
 import { Zap, Layers, Radio, Square, Circle } from "lucide-react";
 // import TechHandoverMarkers from "../unifiedMap/TechHandoverMarkers";
@@ -1564,6 +1565,9 @@ const MapWithMultipleCircles = ({
   onProjectPolygonBoundaryChange,
   primaryRenderLimit = null,
   overlapDrawOrder = "original",
+  drawingShapes = EMPTY_ARRAY,
+  siteData = EMPTY_ARRAY,
+  predictionGridData = EMPTY_ARRAY,
 }) => {
   // L3DEBUG-START
   const l3MapRenderCountRef = useRef(0);
@@ -2475,7 +2479,10 @@ const MapWithMultipleCircles = ({
     (showPoints && orderedLocationsToRender.length > 0) ||
     (showNeighbors && processedNeighbors.length > 0) ||
     (showImageIcons && imageLogs.length > 0) ||
-    (enableGrid && visibleGridCells.length > 0);
+    (enableGrid && visibleGridCells.length > 0) ||
+    siteData.length > 0 ||
+    predictionGridData.length > 0 ||
+    drawingShapes.length > 0;
 
   const handleImageLogClick = useCallback((log) => {
     setSelectedImageLog(log);
@@ -2530,6 +2537,7 @@ const MapWithMultipleCircles = ({
 
   return (
     <div ref={mapContainerRef} className="relative w-full h-full">
+      <DeckLayerRegistryProvider>
       <GoogleMap
         mapContainerStyle={containerStyle}
         onLoad={handleMapLoad}
@@ -2538,6 +2546,44 @@ const MapWithMultipleCircles = ({
         defaultCenter={computedCenter}
         zoom={defaultZoom}
       >
+        {map && (
+          <DeckGLOverlay
+            map={map}
+            showGrid={enableGrid}
+            gridCells={enableGrid ? visibleGridCells : EMPTY_ARRAY}
+            gridOpacity={GRID_POLYGON_FILL_OPACITY}
+            drawingShapes={drawingShapes}
+            siteData={siteData}
+            predictionGridData={predictionGridData}
+            onGridHover={handleDeckGridHover}
+            locations={showPoints ? orderedLocationsToRender : []}
+            imageLogs={imageLogs}
+            getColor={getPrimaryColor}
+            radius={pointRadius}
+            opacity={opacity}
+            selectedIndex={activeMarkerIndex}
+            onClick={handlePrimaryClick}
+            radiusMinPixels={4}
+            radiusMaxPixels={40}
+            showPrimaryLogs={showPoints}
+            showNumCells={showNumCells}
+            showMetricLabels={showMetricLabels}
+            selectedMetric={selectedMetric}
+            onHover={handleHover}
+            primaryRenderLimit={primaryRenderLimit}
+            neighbors={processedNeighbors}
+            getNeighborColor={getNeighborColor}
+            neighborSquareSize={resolvedNeighborSquareSize}
+            neighborOpacity={neighborOpacity}
+            onNeighborClick={handleNeighborClick}
+            onImageLogClick={handleImageLogClick}
+            showImageLogs={showImageIcons}
+            showNeighbors={showNeighbors}
+            pickable={!disableDeckInteractions}
+            autoHighlight={!disableDeckInteractions}
+          />
+        )}
+
         {showPolygonBoundary && polygonGridAverages.map(({ path, uid, id, fillColor }, idx) => {
           const polygonKey = uid ?? id ?? `polygon-${idx}`;
           const isEditableBoundary =
@@ -2580,41 +2626,6 @@ const MapWithMultipleCircles = ({
          />
        ))}
        
-        {map && shouldRenderDeckOverlay && (
-          <DeckGLOverlay
-            map={map}
-            showGrid={enableGrid}
-            gridCells={enableGrid ? visibleGridCells : EMPTY_ARRAY}
-            gridOpacity={GRID_POLYGON_FILL_OPACITY}
-            onGridHover={handleDeckGridHover}
-            locations={showPoints ? orderedLocationsToRender : []}
-            imageLogs={imageLogs}
-            getColor={getPrimaryColor}
-            radius={pointRadius}
-            opacity={opacity}
-            selectedIndex={activeMarkerIndex}
-            onClick={handlePrimaryClick}
-            radiusMinPixels={4}
-            radiusMaxPixels={40}
-            showPrimaryLogs={showPoints}
-            showNumCells={showNumCells}
-            showMetricLabels={showMetricLabels}
-            selectedMetric={selectedMetric}
-            onHover={handleHover}
-            primaryRenderLimit={primaryRenderLimit}
-            neighbors={processedNeighbors}
-            getNeighborColor={getNeighborColor}
-            neighborSquareSize={resolvedNeighborSquareSize}
-            neighborOpacity={neighborOpacity}
-            onNeighborClick={handleNeighborClick}
-            onImageLogClick={handleImageLogClick}
-            showImageLogs={showImageIcons}
-            showNeighbors={showNeighbors}
-            pickable={!disableDeckInteractions}
-            autoHighlight={!disableDeckInteractions}
-          />
-        )}
-
         {selectedNeighbor && <NeighborInfoWindow neighbor={selectedNeighbor} onClose={() => setSelectedNeighbor(null)} resolveColor={resolveColor} selectedMetric={selectedMetric} />}
         {selectedImageLog && (
           <InfoWindow
@@ -2690,6 +2701,7 @@ const MapWithMultipleCircles = ({
 
         {children}
       </GoogleMap>
+      </DeckLayerRegistryProvider>
 
       {map && shouldRenderDeckOverlay && showPoints && !disableDeckInteractions && (
         <PrimaryLogTooltip
