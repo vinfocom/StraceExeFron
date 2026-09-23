@@ -2114,8 +2114,12 @@ const UnifiedMapView = () => {
       if (previous.length !== nextLogs.length) return nextLogs;
       const isSame = previous.every((row, index) =>
         row?.id === nextLogs[index]?.id &&
+        row?.grid_metric_key === nextLogs[index]?.grid_metric_key &&
         (row?.metric_value ?? row?.value) ===
-          (nextLogs[index]?.metric_value ?? nextLogs[index]?.value),
+          (nextLogs[index]?.metric_value ?? nextLogs[index]?.value) &&
+        row?.grid_category_key === nextLogs[index]?.grid_category_key &&
+        row?.grid_category_value === nextLogs[index]?.grid_category_value &&
+        row?.sample_count === nextLogs[index]?.sample_count,
       );
       return isSame ? previous : nextLogs;
     });

@@ -2220,6 +2220,15 @@ const MapWithMultipleCircles = ({
           value: metricValue,
           metric_value: metricValue,
           is_grid_cell: true,
+          // Keep the source KPI identity with the value. A value alone is not
+          // sufficient because two different KPIs can have the same aggregate
+          // (including null) for a cell.
+          grid_metric_key: metricKey,
+          // Preserve the exact winning category that determined this cell's
+          // map color. MapLegend uses this instead of trying to infer a value
+          // from the compact representative row below.
+          grid_category_key: categoryKey || null,
+          grid_category_value: categoryName,
           [metricKey]: metricValue,
         };
 
@@ -2265,7 +2274,14 @@ const MapWithMultipleCircles = ({
       "enabled",
       metricKey,
       categoryKey,
-      rows.map((row) => [row.id, row.metric_value ?? row.value]),
+      rows.map((row) => [
+        row.id,
+        row.grid_metric_key,
+        row.metric_value ?? row.value,
+        row.grid_category_key,
+        row.grid_category_value,
+        row.sample_count,
+      ]),
     ]);
     if (lastGridLegendSignatureRef.current === signature) return;
     lastGridLegendSignatureRef.current = signature;

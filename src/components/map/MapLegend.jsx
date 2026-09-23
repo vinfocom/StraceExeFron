@@ -221,6 +221,20 @@ const toggleLegendFilter = (activeFilter, nextFilter, onFilterChange) => {
 };
 
 const getNormalizedKey = (log, colorBy, scheme, macDetailField) => {
+  // Grid cells already resolve the winning category used for their fill color.
+  // Prefer that value over reconstructing it from the representative row: a
+  // grid row only contains a subset of the original log fields.
+  const gridCategoryKey = String(log?.grid_category_key ?? "").trim().toLowerCase();
+  const requestedCategoryKey = String(colorBy ?? "").trim().toLowerCase();
+  const gridCategoryValue = String(log?.grid_category_value ?? "").trim();
+  if (
+    log?.is_grid_cell &&
+    gridCategoryKey === requestedCategoryKey &&
+    gridCategoryValue
+  ) {
+    return gridCategoryValue;
+  }
+
   switch (colorBy) {
     case "provider":
       return resolveProviderDisplayName(log);
