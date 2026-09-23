@@ -2,7 +2,7 @@ import { memo, useMemo, useState } from "react";
 import { Rnd } from "react-rnd";
 import { GeoJsonLayer } from "@deck.gl/layers";
 import { useGoogleMap } from "@react-google-maps/api";
-import { useDeckLayerGroup } from "@/components/maps/deckLayerRegistry";
+import { useDeckLayerGroup } from "@/components/maps/deckLayerRegistry.jsx";
 import { useClutterGeometry } from "@/hooks/useClutterGeometry";
 import {
   CLUTTER_CLASS_DEFINITIONS,

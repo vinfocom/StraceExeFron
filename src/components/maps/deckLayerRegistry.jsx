@@ -29,8 +29,9 @@ export const useDeckLayerRegistry = () => {
 
 export const useDeckLayerGroup = (name, layers) => {
   const context = useContext(DeckLayerRegistryContext);
+  const registerGroup = context?.registerGroup;
   useEffect(() => {
-    if (!context) return undefined;
-    return context.registerGroup(name, layers);
-  }, [context, name, layers]);
+    if (!registerGroup) return undefined;
+    return registerGroup(name, layers);
+  }, [registerGroup, name, layers]);
 };

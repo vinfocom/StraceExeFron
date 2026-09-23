@@ -4,7 +4,7 @@ import { GoogleMapsOverlay } from '@deck.gl/google-maps';
 import { PathLayer, ScatterplotLayer, PolygonLayer, TextLayer } from '@deck.gl/layers';
 import { getMetricConfig, getMetricValueFromLog } from '@/utils/metrics';
 import { sampleLogIndices } from '@/utils/logSpatialSampling';
-import { useDeckLayerRegistry } from '@/components/maps/deckLayerRegistry';
+import { useDeckLayerRegistry } from '@/components/maps/deckLayerRegistry.jsx';
 
 const pickFirstNonEmpty = (obj, keys = []) => {
   for (const key of keys) {
@@ -828,23 +828,34 @@ const DeckGLOverlay = ({
       layers.push(...groupLayers);
     });
 
-    const layerPriority = new Map(LAYER_ORDER.map((name, index) => [name, index]));
-    const layerGroup = (id) => {
-      if (id.startsWith('grid-')) return 'grid';
-      if (id.startsWith('project-clutter-')) return 'clutterTiles';
-      if (id.startsWith('prediction-') || id.startsWith('lte-prediction-')) return 'predictions';
-      if (id.startsWith('sites-')) return 'sites';
-      if (id.startsWith('network-sector-') || id.startsWith('network-site-')) return 'sectors';
-      if (id.startsWith('unified-map-insight-')) return 'insightMarkers';
-      if (id.startsWith('l3-events-')) return 'l3Events';
-      if (id.startsWith('neighbor-')) return 'neighborLogs';
-      if (id.startsWith('primary-') || id === 'image-log-icons-layer') return 'primaryLogs';
-      if (id.startsWith('user-drawings-')) return 'drawings';
-      return 'primaryLogs';
-    };
-    layers.sort((a, b) => (layerPriority.get(layerGroup(a.id)) ?? 0) - (layerPriority.get(layerGroup(b.id)) ?? 0));
-
     try {
+      const layerPriority = new Map(LAYER_ORDER.map((name, index) => [name, index]));
+      const warnedFallbackIds = new Set();
+      const layerGroup = (id) => {
+        const normalizedId = typeof id === 'string' ? id : '';
+        if (normalizedId.startsWith('grid-') || normalizedId === 'grid-cells-layer') return 'grid';
+        if (normalizedId.startsWith('project-clutter-')) return 'clutterTiles';
+        if (normalizedId.startsWith('prediction-') || normalizedId.startsWith('lte-prediction-')) return 'predictions';
+        if (normalizedId.startsWith('sites-') || normalizedId === 'sites-layer') return 'sites';
+        if (normalizedId.startsWith('network-sector-') || normalizedId.startsWith('network-site-')) return 'sectors';
+        if (normalizedId.startsWith('unified-map-insight-')) return 'insightMarkers';
+        if (normalizedId.startsWith('l3-events-')) return 'l3Events';
+        if (normalizedId.startsWith('neighbor-')) return 'neighborLogs';
+        if (normalizedId.startsWith('primary-') || normalizedId === 'image-log-icons-layer') return 'primaryLogs';
+        if (normalizedId.startsWith('user-drawings-')) return 'drawings';
+
+        const warningKey = normalizedId || '<missing-id>';
+        if (import.meta.env?.DEV && !warnedFallbackIds.has(warningKey)) {
+          warnedFallbackIds.add(warningKey);
+          console.warn(`[DeckGLOverlay] Unmapped layer id "${warningKey}"; defaulting to primaryLogs.`);
+        }
+        return 'primaryLogs';
+      };
+
+      layers.sort((a, b) =>
+        (layerPriority.get(layerGroup(a?.id)) ?? 0) -
+        (layerPriority.get(layerGroup(b?.id)) ?? 0),
+      );
       overlayRef.current.setProps({ layers });
     } catch (e) {
       // Overlay can detach during map teardown; skip this update.

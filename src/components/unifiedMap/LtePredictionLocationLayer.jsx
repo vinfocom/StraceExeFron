@@ -1,6 +1,6 @@
 import React, { useMemo, useEffect, useState, useCallback } from "react";
 import { PolygonLayer, ScatterplotLayer } from "@deck.gl/layers";
-import { useDeckLayerGroup } from "@/components/maps/deckLayerRegistry";
+import { useDeckLayerGroup } from "@/components/maps/deckLayerRegistry.jsx";
 import {
   normalizeBandName,
   normalizeProviderName,

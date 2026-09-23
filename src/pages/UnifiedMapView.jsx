@@ -2203,6 +2203,12 @@ const UnifiedMapView = () => {
     grids: [],
     lastUpdatedAt: null,
   });
+  const storedGridAnalyticsCacheRef = useRef(new Map());
+  const storedGridAnalyticsAbortRef = useRef(null);
+  const storedGridAnalyticsRequestRef = useRef(0);
+  useEffect(() => () => {
+    storedGridAnalyticsAbortRef.current?.abort();
+  }, []);
   const [mlGridEnabled, setMlGridEnabled] = useState(false);
   const [mlGridSize, setMlGridSize] = useState(50);
   const [mlGridAggregation, setMlGridAggregation] = useState("mean");
@@ -3156,6 +3162,46 @@ const UnifiedMapView = () => {
     const effectiveScenarioId = Number(scenarioId ?? storedGridScenarioId) || undefined;
     const effectiveTechnology = String(technology || storedGridTechnology || "ALL").trim().toUpperCase();
     const requestedGridSize = Math.max(5, Number(lteGridSizeMeters) || 50);
+    const cacheKey = `${numericProjectId}:${normalizedVersion}:${effectiveScenarioId ?? ""}:${effectiveTechnology}`;
+    const applyGridResult = (result, { showToast = false } = {}) => {
+      clearSectorWiseGridData();
+      setDeltaGridApiState((prev) => ({
+        ...prev,
+        fetching: false,
+        firstFetchDone: true,
+        lastStatus: "fetched",
+        lastMessage: result.message,
+        lastError: "",
+        gridsCount: result.gridsCount,
+        grids: result.grids,
+        storedGridVersion: normalizedVersion,
+        storedGridTechnology: effectiveTechnology,
+        gridVisible: true,
+        gridSizeMeters: result.fetchedGridSize,
+        requestedGridSize,
+        lastUpdatedAt: result.cachedAt || new Date().toISOString(),
+      }));
+      setLteGridSizeMeters((prev) =>
+        Math.abs((Number(prev) || 0) - result.fetchedGridSize) < 0.001
+          ? prev
+          : result.fetchedGridSize,
+      );
+      if (showToast) {
+        toast.success(`Grid fetched (${result.fetchedGridSize}m). ${result.gridsCount} grid(s).`);
+      }
+    };
+
+    const cachedResult = storedGridAnalyticsCacheRef.current.get(cacheKey);
+    if (cachedResult) {
+      applyGridResult(cachedResult);
+      return true;
+    }
+
+    storedGridAnalyticsAbortRef.current?.abort();
+    const controller = new AbortController();
+    const requestId = storedGridAnalyticsRequestRef.current + 1;
+    storedGridAnalyticsRequestRef.current = requestId;
+    storedGridAnalyticsAbortRef.current = controller;
     setDeltaGridApiState((prev) => ({
       ...prev,
       fetching: true,
@@ -3174,7 +3220,7 @@ const UnifiedMapView = () => {
             ? effectiveScenarioId
             : undefined,
         technology: effectiveTechnology,
-      });
+      }, { signal: controller.signal });
       const root =
         response?.data && typeof response.data === "object" ? response.data : response || {};
       const data =
@@ -3190,32 +3236,21 @@ const UnifiedMapView = () => {
       const fetchedGridSize =
         Number(data?.grid_size_meters ?? data?.gridSizeMeters) || requestedGridSize;
       const message = String(root?.Message ?? root?.message ?? "Grid analytics fetched.").trim();
-
-      clearSectorWiseGridData();
-      setDeltaGridApiState((prev) => ({
-        ...prev,
-        fetching: false,
-        firstFetchDone: true,
-        lastStatus: "fetched",
-        lastMessage: message,
-        lastError: "",
+      if (controller.signal.aborted || requestId !== storedGridAnalyticsRequestRef.current) return false;
+      const result = {
         gridsCount,
         grids,
-        storedGridVersion: normalizedVersion,
-        storedGridTechnology: effectiveTechnology,
-        gridVisible: true,
-        gridSizeMeters: fetchedGridSize,
-        requestedGridSize,
-        lastUpdatedAt: new Date().toISOString(),
-      }));
-      setLteGridSizeMeters((prev) =>
-        Math.abs((Number(prev) || 0) - fetchedGridSize) < 0.001
-          ? prev
-          : fetchedGridSize,
-      );
-      toast.success(`Grid fetched (${fetchedGridSize}m). ${gridsCount} grid(s).`);
+        fetchedGridSize,
+        message,
+        cachedAt: new Date().toISOString(),
+      };
+      storedGridAnalyticsCacheRef.current.set(cacheKey, result);
+      applyGridResult(result, { showToast: true });
       return true;
     } catch (error) {
+      if (controller.signal.aborted || error?.name === "CanceledError" || error?.name === "AbortError") {
+        return false;
+      }
       const message =
         String(error?.message || "").trim() || "Failed to fetch stored grid analytics.";
       setDeltaGridApiState((prev) => ({
@@ -3224,10 +3259,11 @@ const UnifiedMapView = () => {
         lastStatus: "error",
         lastError: message,
         lastMessage: "",
-        grids: [],
+        // Keep the last successful grid visible when a refresh fails.
+        grids: prev.grids,
         storedGridVersion: normalizedVersion,
         storedGridTechnology: effectiveTechnology,
-        gridVisible: false,
+        gridVisible: Boolean(prev.grids?.length),
         requestedGridSize,
         lastUpdatedAt: new Date().toISOString(),
       }));
@@ -3239,7 +3275,6 @@ const UnifiedMapView = () => {
   useEffect(() => {
     if (
       !deltaGridApiState.gridVisible ||
-      deltaGridApiState.fetching ||
       deltaGridApiState.computing ||
       deltaGridApiState.storedGridTechnology === storedGridTechnology
     ) return;
@@ -3251,7 +3286,6 @@ const UnifiedMapView = () => {
     });
   }, [
     deltaGridApiState.gridVisible,
-    deltaGridApiState.fetching,
     deltaGridApiState.computing,
     deltaGridApiState.storedGridTechnology,
     storedGridTechnology,

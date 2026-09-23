@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo } from "react";
 import { PathLayer, ScatterplotLayer } from "@deck.gl/layers";
 import { useGoogleMap } from "@react-google-maps/api";
-import { useDeckLayerGroup } from "@/components/maps/deckLayerRegistry";
+import { useDeckLayerGroup } from "@/components/maps/deckLayerRegistry.jsx";
 import {
   getInsightCoordinates,
   getInsightSeverity,

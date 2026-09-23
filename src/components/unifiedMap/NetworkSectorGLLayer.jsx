@@ -9,7 +9,7 @@
 // layer and still rendered natively by NetworkPlannerMap.jsx.
 import React, { useCallback, useMemo } from "react";
 import { PolygonLayer, ScatterplotLayer, TextLayer } from "@deck.gl/layers";
-import { useDeckLayerGroup } from "@/components/maps/deckLayerRegistry";
+import { useDeckLayerGroup } from "@/components/maps/deckLayerRegistry.jsx";
 
 const SECTOR_LAYER_ID = "network-sector-triangles-layer";
 

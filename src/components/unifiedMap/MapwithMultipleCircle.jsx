@@ -5,7 +5,7 @@ import { GoogleMap, PolygonF, InfoWindow } from "@react-google-maps/api";
 import { GOOGLE_MAP_ID } from "@/lib/googleMapsLoader";
 import { mapViewApi } from "@/api/apiEndpoints";
 import DeckGLOverlay from "@/components/maps/DeckGLOverlay";
-import { DeckLayerRegistryProvider } from "@/components/maps/deckLayerRegistry";
+import { DeckLayerRegistryProvider } from "@/components/maps/deckLayerRegistry.jsx";
 import PrimaryLogTooltip from "./PrimaryLogTooltip";
 import { Zap, Layers, Radio, Square, Circle } from "lucide-react";
 // import TechHandoverMarkers from "../unifiedMap/TechHandoverMarkers";
