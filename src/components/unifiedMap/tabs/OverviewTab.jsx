@@ -231,6 +231,21 @@ export const OverviewTab = ({
   const [pptTemplate, setPptTemplate] = useState("");
   const [pptTechnologies, setPptTechnologies] = useState([]);
   const { user } = useAuth();
+  const isTaiwanUser = useMemo(
+    () => String(user?.country_code ?? "").trim().toUpperCase() === "TW",
+    [user?.country_code],
+  );
+  const pptTemplateOptions = useMemo(
+    () => (isTaiwanUser ? ["stracer", "taiwan"] : ["stracer"]),
+    [isTaiwanUser],
+  );
+
+  useEffect(() => {
+    if (!isTaiwanUser && pptTemplate === "taiwan") {
+      setPptTemplate("");
+      setLockedBand("all");
+    }
+  }, [isTaiwanUser, pptTemplate]);
 
   const plottedExportLocations = useMemo(() => {
     if (Array.isArray(mapPlotLocations) && mapPlotLocations.length > 0) {
@@ -825,8 +840,8 @@ export const OverviewTab = ({
 
           <div className="space-y-2">
             <span className="text-sm font-medium text-slate-200">Template</span>
-            <div className="grid grid-cols-2 gap-2">
-              {["stracer", "taiwan"].map((template) => (
+            <div className={`grid ${pptTemplateOptions.length === 1 ? "grid-cols-1" : "grid-cols-2"} gap-2`}>
+              {pptTemplateOptions.map((template) => (
                 <button
                   key={template}
                   type="button"

@@ -1041,6 +1041,7 @@ const SHAPE_COLORS = {
   line: { light: "#ea580c", satellite: "#fb923c" },
   select: { light: "#0f766e", satellite: "#2dd4bf" },
 };
+const DRAWING_Z_INDEX = 10000;
 const getShapeColor = (kind, satellite) => SHAPE_COLORS[kind][satellite ? "satellite" : "light"];
 
 const getShapeOptions = (type, polygonOpacity, polygonFillOpacity, satellite = false) => {
@@ -1051,6 +1052,7 @@ const getShapeOptions = (type, polygonOpacity, polygonFillOpacity, satellite = f
       clickable: true,
       editable: false,
       draggable: true,
+      zIndex: DRAWING_Z_INDEX,
       strokeWeight,
       strokeColor: getShapeColor("line", satellite),
     };
@@ -1060,6 +1062,7 @@ const getShapeOptions = (type, polygonOpacity, polygonFillOpacity, satellite = f
     clickable: true,
     editable: false,
     draggable: true,
+    zIndex: DRAWING_Z_INDEX,
     strokeWeight,
     strokeColor: getShapeColor("area", satellite),
     strokeOpacity: polygonOpacity,
