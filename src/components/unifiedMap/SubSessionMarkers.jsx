@@ -329,8 +329,8 @@ const buildDeckPointGroups = (markers, zoom, highlightedIds) => {
       count,
       selected,
       isCluster: count > 1,
-      fillColor: count > 1 ? [37, 99, 235, 245] : toDeckColor(marker.fillColor),
-      radius: count > 1 ? Math.min(18, 10 + Math.log2(count)) : selected ? 7 : 5.5,
+      fillColor: toDeckColor(marker.fillColor),
+      radius: selected ? 7 : 5.5,
     };
   });
 };
