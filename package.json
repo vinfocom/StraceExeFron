@@ -13,8 +13,9 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@deck.gl/google-maps": "^9.2.2",
-    "@deck.gl/layers": "^9.2.2",
+    "@deck.gl/google-maps": "9.3.7",
+    "@deck.gl/layers": "9.3.7",
+    "@deck.gl/core": "9.3.7",
     "@emotion/react": "^11.14.0",
     "@emotion/styled": "^11.14.1",
     "@googlemaps/markerclusterer": "^2.6.2",
@@ -79,6 +80,8 @@
     "vite": "^7.3.2"
   },
   "overrides": {
+    "@luma.gl/core": "9.3.6",
+    "@luma.gl/webgl": "9.3.6",
     "fast-xml-parser": "^5.3.4",
     "uuid": "^11.1.1"
   }
