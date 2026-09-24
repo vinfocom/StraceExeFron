@@ -20,6 +20,7 @@ import { PCI_COLOR_PALETTE } from "@/components/map/layers/MultiColorCirclesLaye
 import { useSearchParams } from "react-router-dom";
 import { toast } from "react-toastify";
 import { mapViewApi, pptReportApi } from "@/api/apiEndpoints";
+import ReportProgressToast from "../ReportProgressToast";
 import { useAuth } from "@/hooks/useAuth";
 import { resolveUserRegion } from "@/utils/authSession";
 import {
@@ -226,6 +227,7 @@ export const OverviewTab = ({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [isGeneratingPpt, setIsGeneratingPpt] = useState(false);
+  const [pptPercent, setPptPercent] = useState(null);
   const [isPptBandDialogOpen, setIsPptBandDialogOpen] = useState(false);
   const [lockedBand, setLockedBand] = useState("all");
   const [pptTemplate, setPptTemplate] = useState("");
@@ -380,20 +382,56 @@ export const OverviewTab = ({
 
     setIsPptBandDialogOpen(false);
     setIsGeneratingPpt(true);
+    setPptPercent(0);
     const toastId = toast.loading("Preparing PowerPoint report...");
+    const startedAtMs = Date.now();
+
+    // Shows the backend's percentage, current stage, elapsed time, time left and recent log lines.
+    const showProgress = (info) => {
+      const percent = Math.min(
+        100,
+        Math.max(0, Math.round(Number(info?.percentage ?? info?.progress ?? 0) || 0)),
+      );
+      setPptPercent(percent);
+      toast.update(toastId, {
+        type: "info",
+        isLoading: true,
+        render: (
+          <ReportProgressToast
+            percent={percent}
+            label={info?.step || info?.message || "Generating PowerPoint report..."}
+            elapsedSeconds={info?.elapsed_seconds ?? Math.round((Date.now() - startedAtMs) / 1000)}
+            etaSeconds={info?.eta_seconds ?? null}
+          />
+        ),
+      });
+    };
 
     try {
       const response = await pptReportApi.generate(payload);
       let reportResponse = response;
       let status = String(reportResponse?.status || "").toLowerCase();
       if (status === "processing" && reportResponse?.report_id) {
+        const reportId = reportResponse.report_id;
         const startedAt = Date.now();
         const maxWaitMs = 30 * 60 * 1000;
+        const maxTransientErrors = 30;
+        let transientErrors = 0;
+        showProgress(reportResponse);
         while (Date.now() - startedAt < maxWaitMs) {
-          await new Promise((resolve) => setTimeout(resolve, 2000));
-          reportResponse = await pptReportApi.getStatus(reportResponse.report_id);
+          await new Promise((resolve) => setTimeout(resolve, 1500));
+          try {
+            reportResponse = await pptReportApi.getStatus(reportId);
+            transientErrors = 0;
+          } catch (pollError) {
+            // A dropped poll is not a failed report; keep waiting unless it keeps failing.
+            transientErrors += 1;
+            if (transientErrors > maxTransientErrors) throw pollError;
+            continue;
+          }
           status = String(reportResponse?.status || "").toLowerCase();
           if (status === "ready" || status === "failed") break;
+          showProgress(reportResponse);
         }
         if (status !== "ready") {
           throw new Error(
@@ -435,6 +473,7 @@ export const OverviewTab = ({
       });
     } finally {
       setIsGeneratingPpt(false);
+      setPptPercent(null);
     }
   }, [isGeneratingPpt, lockedBand, projectId, pptTechnologies, pptTemplate, sessionIds, user]);
 
@@ -813,11 +852,11 @@ export const OverviewTab = ({
           type="button"
           onClick={handlePptButtonClick}
           disabled={isGeneratingPpt}
-          title={isGeneratingPpt ? "Preparing PPT" : "Download PPT"}
+          title={isGeneratingPpt ? (pptPercent != null ? `Generating PPT ${pptPercent}%` : "Preparing PPT") : "Download PPT"}
           className="inline-flex items-center gap-1.5 rounded-md border border-purple-500/50 bg-purple-600/15 px-2.5 py-1.5 text-xs font-medium text-purple-200 transition hover:bg-purple-600/25 disabled:cursor-wait disabled:opacity-60"
         >
           {isGeneratingPpt && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
-          {isGeneratingPpt ? "Preparing PPT…" : "PPT"}
+          {isGeneratingPpt ? (pptPercent != null ? `Generating ${pptPercent}%` : "Preparing PPT…") : "PPT"}
         </button>
       </div>
 

@@ -53,6 +53,7 @@ import { TABS } from "@/utils/constants";
 import { FEATURE_KEYS, hasFeatureAccess } from "@/utils/featureAccess";
 import { getMetricLabelsForLocations, getTechnologyDisplayLog } from "@/utils/technologyMetricLabels";
 import { adminApi, homeApi, reportApi, newPdfReportApi } from "@/api/apiEndpoints";
+import ReportProgressToast from "./ReportProgressToast";
 import { useAuth } from "@/hooks/useAuth";
 
 const OverviewTab = lazy(() =>
@@ -1348,6 +1349,8 @@ function UnifiedDetailLogs({
   const [expanded, setExpanded] = useState(false);
   const [activeTab, setActiveTab] = useState(activeTabExternal || "overview");
   const [isGeneratingReport, setIsGeneratingReport] = useState(false);
+  // Latest progress reported by the backend while a PDF report is generating.
+  const [reportProgress, setReportProgress] = useState(null);
   const isGeneratingReportRef = useRef(false);
   const [isPdfOptionsDialogOpen, setIsPdfOptionsDialogOpen] = useState(false);
   const [pdfReportType, setPdfReportType] = useState("combined"); // "combined" | "per_technology"
@@ -1956,9 +1959,9 @@ function UnifiedDetailLogs({
     // namespace on the backend so the two never collide.
     const apiClient = isPerTechnology ? newPdfReportApi : reportApi;
 
-    const REPORT_POLL_INTERVAL_MS = 5000;
+    const REPORT_POLL_INTERVAL_MS = 2000;
     const REPORT_TIMEOUT_MS = 60 * 60 * 1000; // 60 minutes for heavy report generation
-    const MAX_TRANSIENT_STATUS_ERRORS = 24; // keep polling for up to ~2 minutes of server misses
+    const MAX_TRANSIENT_STATUS_ERRORS = 60; // keep polling for up to ~2 minutes of server misses
 
     isGeneratingReportRef.current = true;
     setIsGeneratingReport(true);
@@ -1992,7 +1995,8 @@ function UnifiedDetailLogs({
 
       if (reportId) {
         toast.update(toastId, { render: "Report generating... this may take a moment", type: "info", isLoading: true });
-        const deadline = Date.now() + REPORT_TIMEOUT_MS;
+        const reportStartedAtMs = Date.now();
+        const deadline = reportStartedAtMs + REPORT_TIMEOUT_MS;
         let statusResponse = null;
         let transientStatusErrors = 0;
 
@@ -2022,6 +2026,23 @@ function UnifiedDetailLogs({
             continue;
           }
           const reportStatus = statusResponse?.status;
+
+          // The backend reports the current step and percentage while it
+          // runs; an older backend that doesn't keeps the plain message.
+          if (reportStatus === "processing" && statusResponse?.progress != null) {
+            const progressInfo = {
+              percent: statusResponse.progress,
+              label: statusResponse.step_label,
+              elapsedSeconds: Math.floor((Date.now() - reportStartedAtMs) / 1000),
+              etaSeconds: statusResponse.eta_seconds,
+            };
+            setReportProgress(progressInfo);
+            toast.update(toastId, {
+              render: <ReportProgressToast {...progressInfo} />,
+              type: "info",
+              isLoading: true,
+            });
+          }
 
           if (reportStatus === "ready") {
             break;
@@ -2075,6 +2096,7 @@ function UnifiedDetailLogs({
     } finally {
       isGeneratingReportRef.current = false;
       setIsGeneratingReport(false);
+      setReportProgress(null);
     }
   };
 
@@ -2149,7 +2171,7 @@ function UnifiedDetailLogs({
               {isGeneratingReport ? (
                 <>
                   <Loader2 className="h-4 w-4 animate-spin" />
-                  <span>Generating...</span>
+                  <span>{reportProgress ? `Generating ${reportProgress.percent}%` : "Generating..."}</span>
                 </>
               ) : (
                 <>
