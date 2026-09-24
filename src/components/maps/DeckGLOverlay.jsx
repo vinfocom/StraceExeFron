@@ -125,49 +125,6 @@ const getDrawingPath = (drawing) => {
   return [];
 };
 
-const formatDrawingDistance = (meters) => (
-  meters >= 1000 ? `${(meters / 1000).toFixed(2)} km` : `${Math.round(meters)} m`
-);
-
-const getDrawingMeasurement = (drawing) => {
-  if (drawing?.type !== 'polyline') return null;
-  const path = getDrawingPath(drawing);
-  if (path.length < 2) return null;
-
-  let totalMeters = 0;
-  const segments = [];
-  for (let index = 1; index < path.length; index += 1) {
-    const [lngA, latA] = path[index - 1];
-    const [lngB, latB] = path[index];
-    const lat1 = (latA * Math.PI) / 180;
-    const lat2 = (latB * Math.PI) / 180;
-    const dLat = lat2 - lat1;
-    const dLng = ((lngB - lngA) * Math.PI) / 180;
-    const haversine = Math.sin(dLat / 2) ** 2
-      + Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) ** 2;
-    const distance = 6371008.8 * 2 * Math.atan2(Math.sqrt(haversine), Math.sqrt(1 - haversine));
-    segments.push({ start: path[index - 1], end: path[index], distance });
-    totalMeters += distance;
-  }
-
-  if (!Number.isFinite(totalMeters) || totalMeters <= 0) return null;
-  let remaining = totalMeters / 2;
-  let position = path[0];
-  for (const segment of segments) {
-    if (remaining <= segment.distance) {
-      const ratio = segment.distance > 0 ? remaining / segment.distance : 0.5;
-      position = [
-        segment.start[0] + (segment.end[0] - segment.start[0]) * ratio,
-        segment.start[1] + (segment.end[1] - segment.start[1]) * ratio,
-      ];
-      break;
-    }
-    remaining -= segment.distance;
-  }
-
-  return { position, text: formatDrawingDistance(totalMeters) };
-};
-
 const getPredictionRenderLimit = (total) => {
   if (total > 300000) return 30000;
   if (total > 100000) return 50000;
@@ -596,18 +553,6 @@ const DeckGLOverlay = ({
     [drawingShapes],
   );
 
-  const drawingMeasurementData = useMemo(
-    () => (drawingShapes || [])
-      .map((drawing) => {
-        const measurement = getDrawingMeasurement(drawing);
-        return measurement
-          ? { id: `${drawing?.id || drawing?.type || 'drawing'}-measurement`, ...measurement }
-          : null;
-      })
-      .filter(Boolean),
-    [drawingShapes],
-  );
-
   const siteRenderData = useMemo(
     () => (siteData || []).map((site, index) => {
       const lat = Number(site?.lat ?? site?.latitude);
@@ -861,6 +806,7 @@ const DeckGLOverlay = ({
           filled: true,
           stroked: true,
           pickable: false,
+          parameters: { depthTest: false },
         }));
       }
 
@@ -876,27 +822,8 @@ const DeckGLOverlay = ({
         widthMinPixels: 3,
         rounded: true,
         pickable: false,
+        parameters: { depthTest: false },
       }));
-
-      if (drawingMeasurementData.length > 0) {
-        layers.push(new TextLayer({
-          id: 'user-drawings-measurement-label-layer',
-          data: drawingMeasurementData,
-          getPosition: (measurement) => measurement.position,
-          getText: (measurement) => measurement.text,
-          getSize: 13,
-          sizeUnits: 'pixels',
-          getColor: [15, 23, 42, 255],
-          getTextAnchor: 'middle',
-          getAlignmentBaseline: 'center',
-          background: true,
-          getBackgroundColor: [255, 255, 255, 245],
-          backgroundPadding: [6, 3],
-          billboard: true,
-          pickable: false,
-          parameters: { depthTest: false },
-        }));
-      }
     }
 
     registeredGroups.forEach((groupLayers) => {
@@ -935,7 +862,7 @@ const DeckGLOverlay = ({
     } catch (e) {
       // Overlay can detach during map teardown; skip this update.
     }
-  }, [map, primaryData, neighborData, gridData, imageLogData, metricLabelData, drawingData, drawingMeasurementData, predictionRenderData, siteRenderData, registeredGroups, registryVersion, showPrimaryLogs, showNeighbors, showGrid, gridOpacity, handleGridHover, showImageLogs, selectedIndex, radius, radiusMinPixels, radiusMaxPixels, opacity, neighborOpacity, showNumCells, showMetricLabels, getColor, getNeighborColor, handleImageLogClick, handlePrimaryHover, isValidMapInstance, pickable, autoHighlight, mapZoom]);
+  }, [map, primaryData, neighborData, gridData, imageLogData, metricLabelData, drawingData, predictionRenderData, siteRenderData, registeredGroups, registryVersion, showPrimaryLogs, showNeighbors, showGrid, gridOpacity, handleGridHover, showImageLogs, selectedIndex, radius, radiusMinPixels, radiusMaxPixels, opacity, neighborOpacity, showNumCells, showMetricLabels, getColor, getNeighborColor, handleImageLogClick, handlePrimaryHover, isValidMapInstance, pickable, autoHighlight, mapZoom]);
 
   useEffect(() => {
     return () => {
