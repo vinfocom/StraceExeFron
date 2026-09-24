@@ -8,7 +8,7 @@ import {
   useGoogleMap,
 } from "@react-google-maps/api";
 import { getColorForMetric } from "@/utils/metrics";
-import { ScatterplotLayer, TextLayer } from "@deck.gl/layers";
+import { ScatterplotLayer } from "@deck.gl/layers";
 import { useDeckLayerGroup } from "@/components/maps/deckLayerRegistry.jsx";
 
 const formatMetric = (value, suffix = "") => {
@@ -374,32 +374,7 @@ const createSubSessionDeckLayers = (points, onClick, onHover, interactive = true
     },
     onHover: ({ object }) => onHover?.(object),
   });
-  const countLabels = new TextLayer({
-    id: "sub-session-cluster-counts",
-    data: points.filter((point) => point.isCluster),
-    pickable: false,
-    billboard: true,
-    sizeUnits: "pixels",
-    getPosition: (point) => point.position,
-    getText: (point) => String(point.count),
-    getSize: 12,
-    getColor: [255, 255, 255, 255],
-    getTextAnchor: "middle",
-    getAlignmentBaseline: "center",
-    fontFamily: "system-ui, sans-serif",
-    outlineWidth: 2,
-    outlineColor: [30, 64, 175, 255],
-    transitions: {
-      getPosition: { duration: 150, easing: smoothEase },
-      getColor: {
-        duration: 150,
-        easing: smoothEase,
-        enter: (color) => [color[0], color[1], color[2], 0],
-      },
-      getSize: { duration: 150, easing: smoothEase, enter: () => 0 },
-    },
-  });
-  return [scatterplot, countLabels];
+  return [scatterplot];
 };
 
 
