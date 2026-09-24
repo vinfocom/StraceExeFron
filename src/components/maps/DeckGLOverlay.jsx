@@ -1007,15 +1007,16 @@ const DeckGLOverlay = ({
             const offsetPx = 10;
             return [offsetPx * Math.sin(rad), -offsetPx * Math.cos(rad)];
           },
-          getSize: 13,
+          getSize: 17,
           sizeUnits: 'pixels',
-          getColor: [15, 23, 42, 255],
+          getColor: [0, 0, 0, 255],
+          fontWeight: 700,
+          outlineColor: [255, 255, 255, 220],
+          outlineWidth: 2,
           getTextAnchor: 'middle',
           getAlignmentBaseline: 'center',
-          background: true,
-          getBackgroundColor: [255, 255, 255, 245],
-          backgroundPadding: [6, 3],
-          billboard: true,
+          background: false,
+          billboard: false,
           pickable: false,
           parameters: { depthTest: false },
         }));

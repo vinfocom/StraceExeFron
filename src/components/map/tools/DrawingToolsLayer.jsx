@@ -1161,6 +1161,19 @@ const getVertexMarkerIcon = (type, isFirst = false) => {
   };
 };
 
+const getMidpointMarkerIcon = (type) => {
+  const gm = window.google.maps;
+  return {
+    path: gm.SymbolPath.CIRCLE,
+    scale: 2.2,
+    fillColor: type === "polyline" ? "#fb923c" : "#60a5fa",
+    fillOpacity: 0.55,
+    strokeColor: "#ffffff",
+    strokeOpacity: 0.9,
+    strokeWeight: 1,
+  };
+};
+
 const createVertexMarker = ({
   map,
   position,
@@ -1168,7 +1181,9 @@ const createVertexMarker = ({
   index,
   title,
   draggable = false,
+  icon,
   onClick,
+  onDragStart,
   onDrag,
   onDragEnd,
 }) => {
@@ -1178,7 +1193,7 @@ const createVertexMarker = ({
     map,
     position,
     draggable,
-    icon: getVertexMarkerIcon(type, isFirst),
+    icon: icon || getVertexMarkerIcon(type, isFirst),
     title: title || "Vertex",
     zIndex: DRAWING_VERTEX_Z_INDEX + index,
   });
@@ -1193,6 +1208,9 @@ const createVertexMarker = ({
 
   if (onClick) {
     listen("gmp-click", (event) => onClick(getAdvancedMarkerLatLngEvent(marker, event), index));
+  }
+  if (onDragStart) {
+    listen("gmp-dragstart", (event) => onDragStart(getAdvancedMarkerLatLngEvent(marker, event), index));
   }
   if (onDrag) {
     listen("gmp-drag", (event) => onDrag(getAdvancedMarkerLatLngEvent(marker, event), index));
@@ -1220,6 +1238,26 @@ const syncVertexMarkerPositions = (vertexMarkers = [], path) => {
   vertexMarkers.forEach(({ marker }, index) => {
     const position = path.getAt?.(index);
     if (position && marker) marker.position = position;
+  });
+};
+
+const clearMidpointMarkers = (midpointMarkers = []) => {
+  clearVertexMarkers(midpointMarkers);
+};
+
+const syncMidpointMarkerPositions = (midpointMarkers = [], path, type) => {
+  if (!path) return;
+  const points = path.getArray?.() || [];
+  const segmentCount = type === "polygon" ? points.length : points.length - 1;
+  midpointMarkers.forEach(({ marker }, segmentIndex) => {
+    if (!marker || segmentIndex >= segmentCount) return;
+    const nextIndex = (segmentIndex + 1) % points.length;
+    const midpoint = window.google.maps.geometry.spherical.interpolate(
+      points[segmentIndex],
+      points[nextIndex],
+      0.5,
+    );
+    marker.position = midpoint;
   });
 };
 
@@ -1511,6 +1549,8 @@ function DrawingToolsLayerComponent({
       overlay,
       gridOverlays: [],
       vertexMarkers: [],
+      midpointMarkers: [],
+      midpointDragIndex: null,
       analysisLogs: options.analysisLogs,
       suppressVertexMarkers: options.suppressVertexMarkers === true,
       suppressGridAnalysis: options.suppressGridAnalysis === true,
@@ -1603,17 +1643,71 @@ function DrawingToolsLayerComponent({
       ).filter(Boolean);
     };
 
+    const rebuildMidpointMarkers = () => {
+      if (shapeObj.suppressVertexMarkers) return;
+      if (type !== "polygon" && type !== "polyline") return;
+
+      const path = overlay.getPath?.();
+      const points = path?.getArray?.() || [];
+      if (!path || points.length < 2) {
+        clearMidpointMarkers(shapeObj.midpointMarkers);
+        shapeObj.midpointMarkers = [];
+        return;
+      }
+
+      clearMidpointMarkers(shapeObj.midpointMarkers);
+      shapeObj.midpointMarkers = [];
+      const segmentCount = type === "polygon" ? points.length : points.length - 1;
+      const spherical = window.google.maps.geometry.spherical;
+
+      for (let segmentIndex = 0; segmentIndex < segmentCount; segmentIndex += 1) {
+        const nextIndex = (segmentIndex + 1) % points.length;
+        const midpoint = spherical.interpolate(points[segmentIndex], points[nextIndex], 0.5);
+        const insertIndex = segmentIndex + 1;
+        const markerEntry = createVertexMarker({
+          map,
+          position: midpoint,
+          type,
+          index: segmentIndex,
+          title: "Add vertex",
+          draggable: true,
+          icon: getMidpointMarkerIcon(type),
+          onDragStart: (event) => {
+            if (!event.latLng || shapeObj.midpointDragIndex !== null) return;
+            shapeObj.midpointDragIndex = insertIndex;
+            path.insertAt(insertIndex, event.latLng);
+          },
+          onDrag: (event) => {
+            if (!event.latLng || !Number.isInteger(shapeObj.midpointDragIndex)) return;
+            path.setAt(shapeObj.midpointDragIndex, event.latLng);
+          },
+          onDragEnd: () => {
+            shapeObj.midpointDragIndex = null;
+            rebuildVertexMarkers();
+            rebuildMidpointMarkers();
+            rebuildSegmentLabels();
+            update();
+          },
+        });
+        if (markerEntry) shapeObj.midpointMarkers.push(markerEntry);
+      }
+    };
+
     if (type === "polyline") {
       const path = overlay.getPath?.();
       if (path) {
         listeners.push(window.google.maps.event.addListener(path, "set_at", () => {
           syncVertexMarkerPositions(shapeObj.vertexMarkers, path);
+          syncMidpointMarkerPositions(shapeObj.midpointMarkers, path, type);
           rebuildSegmentLabels();
           update();
         }));
         ["insert_at", "remove_at"].forEach((ev) =>
           listeners.push(window.google.maps.event.addListener(path, ev, () => {
-            rebuildVertexMarkers();
+            if (!Number.isInteger(shapeObj.midpointDragIndex)) {
+              rebuildVertexMarkers();
+              rebuildMidpointMarkers();
+            }
             rebuildSegmentLabels();
             update();
           })),
@@ -1621,10 +1715,14 @@ function DrawingToolsLayerComponent({
         ["drag", "dragend"].forEach((ev) =>
           listeners.push(window.google.maps.event.addListener(overlay, ev, () => {
             syncVertexMarkerPositions(shapeObj.vertexMarkers, path);
-            if (ev === "dragend") rebuildSegmentLabels();
+            if (ev === "dragend") {
+              rebuildMidpointMarkers();
+              rebuildSegmentLabels();
+            }
           })),
         );
         rebuildVertexMarkers();
+        rebuildMidpointMarkers();
         rebuildSegmentLabels();
       }
     } else if (type === "polygon") {
@@ -1632,12 +1730,16 @@ function DrawingToolsLayerComponent({
       if (path) {
         listeners.push(window.google.maps.event.addListener(path, "set_at", () => {
           syncVertexMarkerPositions(shapeObj.vertexMarkers, path);
+          syncMidpointMarkerPositions(shapeObj.midpointMarkers, path, type);
           refreshLabels();
           update();
         }));
         ["insert_at", "remove_at"].forEach((ev) =>
           listeners.push(window.google.maps.event.addListener(path, ev, () => {
-            rebuildVertexMarkers();
+            if (!Number.isInteger(shapeObj.midpointDragIndex)) {
+              rebuildVertexMarkers();
+              rebuildMidpointMarkers();
+            }
             refreshLabels();
             update();
           })),
@@ -1646,10 +1748,14 @@ function DrawingToolsLayerComponent({
           listeners.push(window.google.maps.event.addListener(overlay, ev, () => {
             syncVertexMarkerPositions(shapeObj.vertexMarkers, path);
             updateMeasureLabel();
-            if (ev === "dragend") rebuildSegmentLabels();
+            if (ev === "dragend") {
+              rebuildMidpointMarkers();
+              rebuildSegmentLabels();
+            }
           })),
         );
         rebuildVertexMarkers();
+        rebuildMidpointMarkers();
         refreshLabels();
       }
     } else if (type === "rectangle") {
@@ -2299,6 +2405,7 @@ function DrawingToolsLayerComponent({
       if (s.labelMarker) s.labelMarker.map = null;
       (s.segmentLabels || []).forEach((m) => { m.map = null; });
       clearVertexMarkers(s.vertexMarkers);
+      clearMidpointMarkers(s.midpointMarkers);
     });
     shapesRef.current = [];
     collectedDrawingRef.current = [];
