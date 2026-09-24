@@ -1069,8 +1069,8 @@ const createLabelMarker = (map, position) => {
 
 // Pill used for the live readout that follows the cursor while drawing.
 const getLivePillStyle = (satellite) => ({
-  fontSize: "12px",
-  fontWeight: "600",
+  fontSize: "14px",
+  fontWeight: "700",
   padding: "3px 9px",
   borderRadius: "999px",
   color: satellite ? "#f8fafc" : "#0f172a",
@@ -1239,6 +1239,26 @@ const syncVertexMarkerPositions = (vertexMarkers = [], path) => {
 
 const clearMidpointMarkers = (midpointMarkers = []) => {
   clearVertexMarkers(midpointMarkers);
+};
+
+const cleanupCompletedShape = (shapeObj) => {
+  if (!shapeObj) return;
+  window.clearTimeout(shapeObj.analysisTimer);
+  shapeObj.terrainRequestId = (shapeObj.terrainRequestId || 0) + 1;
+  (shapeObj.listeners || []).forEach((listener) => {
+    try {
+      window.google?.maps?.event?.removeListener(listener);
+    } catch {
+      // The map may already be unmounted.
+    }
+  });
+  shapeObj.overlay?.setMap?.(null);
+  (shapeObj.gridOverlays || []).forEach((overlay) => overlay?.setMap?.(null));
+  shapeObj.labelMarker && (shapeObj.labelMarker.map = null);
+  shapeObj.totalLabelMarker && (shapeObj.totalLabelMarker.map = null);
+  (shapeObj.segmentLabels || []).forEach((marker) => { marker.map = null; });
+  clearVertexMarkers(shapeObj.vertexMarkers);
+  clearMidpointMarkers(shapeObj.midpointMarkers);
 };
 
 const syncMidpointMarkerPositions = (midpointMarkers = [], path, type) => {
@@ -1419,6 +1439,8 @@ function DrawingToolsLayerComponent({
       const updatedEntry = { ...entry, ...metrics, terrainMode: true };
       const index = collectedDrawingRef.current.findIndex((drawing) => drawing.id === shapeObj.id);
       if (index < 0) return;
+      shapeObj.terrainMetrics = updatedEntry;
+      shapeObj.updateTotalDistanceLabel?.(updatedEntry);
       collectedDrawingRef.current[index] = updatedEntry;
       callbacksRef.current.onDrawingsChange?.([...collectedDrawingRef.current]);
       callbacksRef.current.onSummary?.(updatedEntry);
@@ -1555,7 +1577,6 @@ function DrawingToolsLayerComponent({
     // DeckGLOverlay paints the visible outline in the shared ordered stack.
     // Keep this native geometry for dragging/editing and hit handling only.
     overlay.setOptions?.({ strokeOpacity: 0, fillOpacity: 0 });
-    const isMeasurementTool = type === "polyline";
     const entry = reAnalyzeShapeRef.current?.(shapeObj);
     const listeners = [];
     // Polygons/polylines are edited through the small custom vertex dots. Google's native
@@ -1586,8 +1607,61 @@ function DrawingToolsLayerComponent({
       shapeObj.labelMarker = shapeObj.labelMarker || createLabelMarker(map, info.center);
       if (!shapeObj.labelMarker) return;
       shapeObj.labelMarker.position = info.center;
-      setAdvancedMarkerLabel(shapeObj.labelMarker, info.text, { fontSize: "13px" });
+      setAdvancedMarkerLabel(shapeObj.labelMarker, info.text, { fontSize: "15px", fontWeight: "700" });
       orientAdvancedMarkerLabel(shapeObj.labelMarker, 0, 0);
+    };
+    const updateTotalDistanceLabel = (terrainEntry = null) => {
+      if (type !== "polyline") return;
+      const path = overlay.getPath?.();
+      const points = path?.getArray?.() || [];
+      const spherical = window.google.maps.geometry?.spherical;
+      if (!spherical || points.length < 2) {
+        if (shapeObj.totalLabelMarker) shapeObj.totalLabelMarker.map = null;
+        return;
+      }
+
+      const totalDistance = spherical.computeLength(path);
+      if (!Number.isFinite(totalDistance) || totalDistance <= 0) {
+        if (shapeObj.totalLabelMarker) shapeObj.totalLabelMarker.map = null;
+        return;
+      }
+
+      let remainingDistance = totalDistance / 2;
+      let midpoint = points[0];
+      let midpointSegment = [points[0], points[1]];
+      for (let index = 1; index < points.length; index += 1) {
+        const start = points[index - 1];
+        const end = points[index];
+        const segmentLength = spherical.computeDistanceBetween(start, end);
+        if (remainingDistance <= segmentLength || index === points.length - 1) {
+          const fraction = segmentLength > 0 ? Math.min(1, remainingDistance / segmentLength) : 0;
+          midpoint = spherical.interpolate(start, end, fraction);
+          midpointSegment = [start, end];
+          break;
+        }
+        remainingDistance -= segmentLength;
+      }
+
+      const metrics = terrainEntry || shapeObj.terrainMetrics || {};
+      const terrainDistance = Number(metrics.terrainDistance);
+      const hasTerrainDistance = metrics.terrainMode === true && Number.isFinite(terrainDistance) && terrainDistance > 0;
+      const displayDistance = hasTerrainDistance ? terrainDistance : totalDistance;
+      const label = `${fmtLength(displayDistance)}${hasTerrainDistance ? " terrain" : ""}`;
+      shapeObj.totalLabelMarker = shapeObj.totalLabelMarker || createLabelMarker(map, midpoint);
+      if (!shapeObj.totalLabelMarker) return;
+      shapeObj.totalLabelMarker.map = map;
+      shapeObj.totalLabelMarker.position = midpoint;
+      setAdvancedMarkerLabel(shapeObj.totalLabelMarker, label, {
+        fontSize: "15px",
+        fontWeight: "700",
+      });
+      orientAdvancedMarkerLabel(shapeObj.totalLabelMarker, getScreenAngleDeg(...midpointSegment), -15);
+    };
+    shapeObj.updateTotalDistanceLabel = updateTotalDistanceLabel;
+    const invalidateTerrainMetrics = () => {
+      shapeObj.terrainRequestId = (shapeObj.terrainRequestId || 0) + 1;
+      shapeObj.terrainMetrics = null;
+      updateTotalDistanceLabel();
     };
     // Optional per-segment lengths, only at street-level zoom so they never clutter the map.
     const rebuildSegmentLabels = () => {
@@ -1605,8 +1679,8 @@ function DrawingToolsLayerComponent({
         const marker = createLabelMarker(map, spherical.interpolate(a, b, 0.5));
         if (!marker) continue;
         setAdvancedMarkerLabel(marker, fmtLength(spherical.computeDistanceBetween(a, b)), {
-          fontSize: "11px",
-          fontWeight: "600",
+          fontSize: "13px",
+          fontWeight: "700",
         });
         orientAdvancedMarkerLabel(marker, getScreenAngleDeg(a, b), -9);
         shapeObj.segmentLabels.push(marker);
@@ -1698,6 +1772,7 @@ function DrawingToolsLayerComponent({
           syncVertexMarkerPositions(shapeObj.vertexMarkers, path);
           syncMidpointMarkerPositions(shapeObj.midpointMarkers, path, type);
           rebuildSegmentLabels();
+          invalidateTerrainMetrics();
           update();
         }));
         ["insert_at", "remove_at"].forEach((ev) =>
@@ -1707,21 +1782,25 @@ function DrawingToolsLayerComponent({
               rebuildMidpointMarkers();
             }
             rebuildSegmentLabels();
+            invalidateTerrainMetrics();
             update();
           })),
         );
         ["drag", "dragend"].forEach((ev) =>
           listeners.push(window.google.maps.event.addListener(overlay, ev, () => {
             syncVertexMarkerPositions(shapeObj.vertexMarkers, path);
+            invalidateTerrainMetrics();
             if (ev === "dragend") {
               rebuildMidpointMarkers();
               rebuildSegmentLabels();
             }
+            update();
           })),
         );
         rebuildVertexMarkers();
         rebuildMidpointMarkers();
         rebuildSegmentLabels();
+        updateTotalDistanceLabel();
       }
     } else if (type === "polygon") {
       const path = overlay.getPath?.();
@@ -1791,9 +1870,14 @@ function DrawingToolsLayerComponent({
   }, [map, terrainEnabled]);
 
   useEffect(() => {
-    if (!terrainEnabled) return;
     shapesRef.current.forEach((shapeObj) => {
       if (shapeObj.type !== "polyline") return;
+      if (!terrainEnabled) {
+        shapeObj.terrainRequestId = (shapeObj.terrainRequestId || 0) + 1;
+        shapeObj.terrainMetrics = null;
+        shapeObj.updateTotalDistanceLabel?.();
+        return;
+      }
       void reAnalyzeShapeRef.current?.(shapeObj);
     });
   }, [terrainEnabled]);
@@ -2146,6 +2230,19 @@ function DrawingToolsLayerComponent({
       listeners.push(
         gm.event.addListener(map, "dblclick", (event) => {
           event?.domEvent?.preventDefault?.();
+          if (type !== "polyline" || activeDrawingRef.current?.overlay !== overlay) return;
+          if (event?.latLng && !isDuplicateVertex(committedPoints, event.latLng)) {
+            committedPoints.push(event.latLng);
+            overlay.setPath(committedPoints);
+            addDraftVertexMarker(event.latLng, committedPoints.length - 1);
+            setActiveDraft({
+              type,
+              pointCount: committedPoints.length,
+              canFinish: committedPoints.length >= minPathPoints,
+              canUndo: true,
+            });
+          }
+          finishPathShape();
         }),
       );
 
@@ -2158,7 +2255,7 @@ function DrawingToolsLayerComponent({
       toast.info(
         type === "polygon"
           ? "Click polygon points. Click the first point, use Finish, Enter or right-click to close. Backspace undoes."
-          : "Click line points. Use Finish, Enter or right-click to finish. Backspace undoes.",
+          : "Click line points. Double-click to finish at that point, or use Finish, Enter or right-click. Backspace undoes.",
         { position: "bottom-right", autoClose: 2500 },
       );
     } else if (type === "rectangle" || type === "circle") {
@@ -2355,22 +2452,20 @@ function DrawingToolsLayerComponent({
     lastClearSignalRef.current = clearSignal;
     cleanupActiveDrawing(false);
     clearActiveDrawingPreview();
-    shapesRef.current.forEach(s => {
-      window.clearTimeout(s.analysisTimer);
-      s.listeners?.forEach(l => window.google.maps.event.removeListener(l));
-      s.overlay?.setMap(null);
-      s.gridOverlays?.forEach(r => r.setMap(null));
-      if (s.labelMarker) s.labelMarker.map = null;
-      (s.segmentLabels || []).forEach((m) => { m.map = null; });
-      clearVertexMarkers(s.vertexMarkers);
-      clearMidpointMarkers(s.midpointMarkers);
-    });
+    shapesRef.current.forEach(cleanupCompletedShape);
     shapesRef.current = [];
     collectedDrawingRef.current = [];
     callbacksRef.current.onDrawingsChange?.([]);
     callbacksRef.current.onSummary?.(null);
     toast.info("All drawings cleared", { position: "bottom-right", autoClose: 2000 });
   }, [clearSignal, cleanupActiveDrawing, clearActiveDrawingPreview]);
+
+  useEffect(() => () => {
+    cleanupActiveDrawing(false);
+    clearActiveDrawingPreview();
+    shapesRef.current.forEach(cleanupCompletedShape);
+    shapesRef.current = [];
+  }, [cleanupActiveDrawing, clearActiveDrawingPreview]);
 
   useEffect(() => {
     if (shapesRef.current.length > 0) {
@@ -2415,7 +2510,10 @@ function DrawingToolsLayerComponent({
     if (!map?.addListener) return undefined;
     const sync = () => {
       setIsSatellite(isSatelliteMapType(map.getMapTypeId?.()));
-      shapesRef.current.forEach((s) => refreshAdvancedMarkerLabelTheme(s.labelMarker));
+      shapesRef.current.forEach((s) => {
+        refreshAdvancedMarkerLabelTheme(s.labelMarker);
+        refreshAdvancedMarkerLabelTheme(s.totalLabelMarker);
+      });
     };
     sync();
     const listener = map.addListener("maptypeid_changed", sync);
