@@ -54,7 +54,8 @@ const DEFAULT_CI_THRESHOLDS = [
 ];
 
 const SPECIAL_FIELDS = {
-    volte_call: "VoLTE Call"
+    volte_call: "VoLTE Call",
+    report_acceptance: "Report Acceptance"
 };
 
 const DEFAULT_COVERAGE_HOLE = -110;
@@ -672,6 +673,106 @@ const VoLTECallForm = memo(({ value, setValue, onClose }) => {
 
 VoLTECallForm.displayName = 'VoLTECallForm';
 
+const formatAcceptanceMetric = (key) => String(key || '')
+    .replace(/[_-]+/g, ' ')
+    .replace(/\b\w/g, char => char.toUpperCase());
+
+const ReportAcceptanceForm = memo(({ value, setValue, onClose }) => {
+    const [localValue, setLocalValue] = useState({});
+
+    useEffect(() => {
+        setLocalValue(value && typeof value === 'object' && !Array.isArray(value) ? value : {});
+    }, [value]);
+
+    const updateEntry = useCallback((metric, index, field, nextValue) => {
+        setLocalValue(previous => {
+            const next = { ...previous };
+            next[metric] = (next[metric] || []).map((entry, entryIndex) => (
+                entryIndex === index ? { ...entry, [field]: nextValue } : entry
+            ));
+            setValue(next);
+            return next;
+        });
+    }, [setValue]);
+
+    const addEntry = useCallback((metric) => {
+        setLocalValue(previous => {
+            const next = {
+                ...previous,
+                [metric]: [...(previous[metric] || []), { grade: '', condition: '' }],
+            };
+            setValue(next);
+            return next;
+        });
+    }, [setValue]);
+
+    const removeEntry = useCallback((metric, index) => {
+        setLocalValue(previous => {
+            const next = {
+                ...previous,
+                [metric]: (previous[metric] || []).filter((_, entryIndex) => entryIndex !== index),
+            };
+            setValue(next);
+            return next;
+        });
+    }, [setValue]);
+
+    return (
+        <div className="mt-5 p-5 border border-slate-700 rounded-2xl bg-gradient-to-b from-slate-900 to-slate-950 shadow-lg">
+            <div className="flex justify-between items-start mb-5">
+                <div>
+                    <h3 className="text-lg font-semibold tracking-wide text-white">Report Acceptance</h3>
+                    <p className="text-xs text-slate-400 mt-1">Acceptance grades and conditions used in generated reports.</p>
+                </div>
+                <Button variant="ghost" size="icon" onClick={onClose} className="rounded-lg hover:bg-slate-800">
+                    <X className="h-4 w-4" />
+                </Button>
+            </div>
+
+            <div className="space-y-5 max-h-[32rem] overflow-y-auto pr-1">
+                {Object.entries(localValue).map(([metric, entries]) => (
+                    <div key={metric} className="rounded-xl border border-slate-700 bg-slate-800/70 p-4">
+                        <div className="flex items-center justify-between mb-3">
+                            <h4 className="font-semibold text-slate-100">{formatAcceptanceMetric(metric)}</h4>
+                            <Button type="button" variant="outline" onClick={() => addEntry(metric)} className="border-slate-500 bg-slate-800 hover:bg-slate-700 text-slate-100 rounded-lg">
+                                <Plus className="h-4 w-4 mr-1" /> Add grade
+                            </Button>
+                        </div>
+                        <div className="space-y-2">
+                            {(Array.isArray(entries) ? entries : []).map((entry, index) => (
+                                <div key={`${metric}-${index}`} className="grid grid-cols-1 md:grid-cols-[9rem_1fr_auto] gap-2 items-start">
+                                    <Input
+                                        value={entry?.grade || ''}
+                                        onChange={event => updateEntry(metric, index, 'grade', event.target.value)}
+                                        placeholder="Grade"
+                                        className="text-white bg-slate-950 border-slate-600"
+                                    />
+                                    <Input
+                                        value={entry?.condition || ''}
+                                        onChange={event => updateEntry(metric, index, 'condition', event.target.value)}
+                                        placeholder="Acceptance condition"
+                                        className="text-white bg-slate-950 border-slate-600"
+                                    />
+                                    <Button type="button" variant="ghost" size="icon" onClick={() => removeEntry(metric, index)} className="text-slate-300 hover:text-red-300 hover:bg-red-950/30">
+                                        <X className="h-4 w-4" />
+                                    </Button>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                ))}
+                {Object.keys(localValue).length === 0 && (
+                    <div className="text-center py-8 text-slate-400 border-2 border-dashed border-slate-600/70 rounded-xl">
+                        No report acceptance rules configured
+                    </div>
+                )}
+            </div>
+        </div>
+    );
+});
+
+ReportAcceptanceForm.displayName = 'ReportAcceptanceForm';
+
 const CoverageHoleForm = memo(({ value, setValue, onClose }) => {
     const [localValues, setLocalValues] = useState(createEmptyScalarBuckets(DEFAULT_COVERAGE_HOLE));
     const [activeTechTab, setActiveTechTab] = useState("default");
@@ -823,6 +924,16 @@ const parseThresholdData = (data) => {
         return acc;
     }, createEmptyThresholdBuckets());
 
+    try {
+        const acceptance = data.report_acceptance_json;
+        parsedData.report_acceptance = typeof acceptance === "string"
+            ? (JSON.parse(acceptance) || {})
+            : (acceptance && typeof acceptance === "object" ? acceptance : {});
+    } catch (error) {
+        console.error("Error parsing report acceptance settings:", error);
+        parsedData.report_acceptance = {};
+    }
+
     return parsedData;
 };
 
@@ -887,6 +998,7 @@ const buildSavePayload = (thresholds, userId) => {
         rsrq_json: normalizeBucketedRanges("rsrq", thresholds.rsrq),
         sinr_json: normalizeBucketedRanges("sinr", thresholds.sinr),
         c_i_json: normalizeCiRanges(thresholds.ci_db, DEFAULT_CI_THRESHOLDS),
+        report_acceptance_json: JSON.stringify(thresholds.report_acceptance || {}),
         dl_thpt_json: normalizeBucketedRanges("dl_thpt", thresholds.dl_thpt),
         ul_thpt_json: normalizeBucketedRanges("ul_thpt", thresholds.ul_thpt),
         delta_json: normalizeBucketedRanges("delta", thresholds.delta),
@@ -1475,7 +1587,7 @@ const SettingsPage = ({ onSaveSuccess }) => {
     }, []);
 
     const getParamCount = (key) => {
-        if (key === "coveragehole") return null;
+        if (key === "coveragehole" || key === "report_acceptance") return null;
         const data = thresholds?.[key];
         return Array.isArray(data?.default) ? data.default.length : 0;
     };
@@ -1582,7 +1694,15 @@ const SettingsPage = ({ onSaveSuccess }) => {
                                     />
                                 )}
 
-                                {activeParam && activeParam !== "coveragehole" && activeParam !== "volte_call" && (
+                                {activeParam === "report_acceptance" && (
+                                    <ReportAcceptanceForm
+                                        value={thresholds.report_acceptance}
+                                        setValue={val => updateParam("report_acceptance", val)}
+                                        onClose={handleClose}
+                                    />
+                                )}
+
+                                {activeParam && activeParam !== "coveragehole" && activeParam !== "volte_call" && activeParam !== "report_acceptance" && (
                                     <ThresholdForm
                                         key={activeParam}
                                         paramKey={activeParam}
@@ -1600,7 +1720,22 @@ const SettingsPage = ({ onSaveSuccess }) => {
                                         </h4>
                                         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
                                             {Object.entries(allParameters).map(([key, name]) => {
-                                                if (key === "coveragehole") {
+                                                if (key === "coveragehole" || key === "report_acceptance") {
+                                                    if (key === "report_acceptance") {
+                                                        const metricCount = Object.keys(thresholds.report_acceptance || {}).length;
+                                                        return (
+                                                            <div
+                                                                key={key}
+                                                                className="p-3.5 bg-gradient-to-br from-slate-800 to-slate-900 border border-slate-700 rounded-xl cursor-pointer hover:border-blue-500/40 transition-all"
+                                                                onClick={() => toggleParam(key)}
+                                                            >
+                                                                <div className="text-xs text-slate-400">{name}</div>
+                                                                <div className="text-lg font-bold text-white">
+                                                                    {metricCount} metric{metricCount !== 1 ? 's' : ''}
+                                                                </div>
+                                                            </div>
+                                                        );
+                                                    }
                                                     return (
                                                         <div 
                                                             key={key} 

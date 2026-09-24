@@ -335,6 +335,17 @@ export const useUnifiedGridViewData = ({
       const bucket = buckets.get(bucketKey);
       bucket.sampleCount += 1;
 
+      const providerName = resolveProviderName(loc);
+      const rawBand = loc?.band ?? loc?.primaryBand;
+      const bandName = normalizeBandName(rawBand);
+      const rawTechnology = loc?.technology ?? loc?.networkType ?? loc?.network;
+      const technologyName = normalizeTechName(rawTechnology, rawBand) || "Unknown";
+      const nodebidName = String(resolveNodebValue(loc)).trim() || "Unknown";
+      const cellIdName = String(resolveCellIdValue(loc)).trim() || "Unknown";
+      const rawPci = resolvePciValue(loc);
+      const parsedPci = Number.parseInt(rawPci, 10);
+      const pciName = Number.isFinite(parsedPci) ? String(parsedPci) : "Unknown";
+
       const sessionId = String(
         loc?.session_id ?? loc?.sessionId ?? loc?.session ?? "",
       ).trim();
@@ -347,59 +358,21 @@ export const useUnifiedGridViewData = ({
         }
       }
 
-      incrementCounter(
-        bucket.providers,
-        loc,
-        resolveProviderName,
-      );
-      incrementCounter(
-        bucket.bands,
-        loc?.band ?? loc?.primaryBand,
-        normalizeBandName,
-      );
-      incrementCounter(
-        bucket.technologies,
-        loc?.technology ?? loc?.networkType ?? loc?.network,
-        (value) => normalizeTechName(value, loc?.band ?? loc?.primaryBand),
-      );
-      incrementCounter(
-        bucket.nodebids,
-        resolveNodebValue(loc),
-        (value) => String(value ?? "").trim() || "Unknown",
-      );
-      incrementCounter(
-        bucket.cellIds,
-        resolveCellIdValue(loc),
-        (value) => String(value ?? "").trim() || "Unknown",
-      );
-      incrementCounter(
-        bucket.pcis,
-        resolvePciValue(loc),
-        (value) => {
-          const parsed = Number.parseInt(value, 10);
-          return Number.isFinite(parsed) ? String(parsed) : "Unknown";
-        },
-      );
+      incrementCounter(bucket.providers, providerName);
+      incrementCounter(bucket.bands, bandName);
+      incrementCounter(bucket.technologies, technologyName);
+      incrementCounter(bucket.nodebids, nodebidName);
+      incrementCounter(bucket.cellIds, cellIdName);
+      incrementCounter(bucket.pcis, pciName);
 
       const selectedMetricValue = toFiniteNumber(
         normalizedColorBy === "mac_detail"
           ? getMacDetailValueFromLog(loc, selectedMetricKey)
-          : getMetricValueFromLog(loc, selectedMetricKey),
+          : METRICS_TO_AGGREGATE.includes(selectedMetricKey)
+            ? bucket.metrics.get(selectedMetricKey)?.at(-1)
+            : getMetricValueFromLog(loc, selectedMetricKey),
       );
       if (selectedMetricValue !== null) {
-        const providerName = resolveProviderName(loc);
-        const technologyName =
-          normalizeTechName(
-            loc?.technology ?? loc?.networkType ?? loc?.network,
-            loc?.band ?? loc?.primaryBand,
-          ) || "Unknown";
-        const bandName = normalizeBandName(loc?.band ?? loc?.primaryBand);
-        const nodebidName = String(
-          resolveNodebValue(loc),
-        ).trim() || "Unknown";
-        const cellIdName = String(resolveCellIdValue(loc)).trim() || "Unknown";
-        const pciValue = Number.parseInt(resolvePciValue(loc), 10);
-
         pushCategoryMetricValue(bucket.providerMetrics, providerName, selectedMetricValue);
         pushCategoryMetricValue(bucket.bandMetrics, bandName, selectedMetricValue);
         pushCategoryMetricValue(bucket.technologyMetrics, technologyName, selectedMetricValue);
@@ -407,7 +380,7 @@ export const useUnifiedGridViewData = ({
         pushCategoryMetricValue(bucket.cellIdMetrics, cellIdName, selectedMetricValue);
         pushCategoryMetricValue(
           bucket.pciMetrics,
-          Number.isFinite(pciValue) ? String(pciValue) : "Unknown",
+          pciName,
           selectedMetricValue,
         );
       }

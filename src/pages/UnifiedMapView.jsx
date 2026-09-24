@@ -5180,7 +5180,7 @@ const UnifiedMapView = () => {
   );
 
   const baseHandoverTransitions = useMemo(() => {
-    if (!handoverEligibleLogs?.length || !orderedDriveLogs.length) {
+    if (!orderedDriveLogs.length) {
       return {
         technologyTransitions: [],
         bandTransitions: [],
@@ -5188,32 +5188,47 @@ const UnifiedMapView = () => {
       };
     }
 
-    const eligibleLogs = new Set(handoverEligibleLogs);
-    const eligibleKeys = new Set(
-      handoverEligibleLogs.map(getLocationIdentityKey).filter(Boolean),
-    );
-    const orderedEligibleLogs = orderedDriveLogs.filter(({ loc }) =>
-      eligibleLogs.has(loc) || (getLocationIdentityKey(loc) && eligibleKeys.has(getLocationIdentityKey(loc))),
-    );
-    if (orderedEligibleLogs.length < 2) {
-      return {
-        technologyTransitions: [],
-        bandTransitions: [],
-        pciTransitions: [],
-      };
-    }
-
-    // Handover eligibility follows the active data/legend filters, not DeckGL's
-    // zoom-dependent viewport sampling. Logs at an identical coordinate remain
-    // eligible and are exposed together in the primary-log overlap tooltip.
-    return buildHandoverTransitionsFromOrdered(orderedEligibleLogs, {
+    // Build once from the complete raw log sequence. Active data/legend
+    // filters are applied to the resulting transition list below.
+    return buildHandoverTransitionsFromOrdered(orderedDriveLogs, {
       neighborLogs: polygonFilteredNeighborData,
     });
   }, [
-    handoverEligibleLogs,
     orderedDriveLogs,
     polygonFilteredNeighborData,
   ]);
+
+  const visibleHandoverLogKeys = useMemo(() => {
+    const keys = new Set();
+    (handoverEligibleLogs || []).forEach((log) => {
+      const idKey = getLocationIdKey(log);
+      if (idKey) keys.add(`id:${idKey}`);
+      const coordinateKey = getLocationCoordinateKey(log);
+      if (coordinateKey) keys.add(`coord:${coordinateKey}`);
+    });
+    return keys;
+  }, [handoverEligibleLogs]);
+
+  const filterHandoverTransitionsToVisibleLogs = useCallback(
+    (transitions = []) => transitions.filter((transition) => {
+      const endpointKeys = [
+        transition?.sequenceLogId
+          ? `id:${normalizeKey(transition.sequenceLogId)}`
+          : null,
+        transition?.previousSequenceLogId
+          ? `id:${normalizeKey(transition.previousSequenceLogId)}`
+          : null,
+        Number.isFinite(Number(transition?.lat)) && Number.isFinite(Number(transition?.lng))
+          ? `coord:${toCoordinateKey(transition.lat, transition.lng)}`
+          : null,
+        Number.isFinite(Number(transition?.fromLat)) && Number.isFinite(Number(transition?.fromLng))
+          ? `coord:${toCoordinateKey(transition.fromLat, transition.fromLng)}`
+          : null,
+      ].filter(Boolean);
+      return endpointKeys.length > 0 && endpointKeys.every((key) => visibleHandoverLogKeys.has(key));
+    }),
+    [visibleHandoverLogKeys],
+  );
 
   const [handoverTargetObservations, setHandoverTargetObservations] = useState(
     () => new Map(),
@@ -5390,16 +5405,25 @@ const UnifiedMapView = () => {
   }, [technologyTransitions, bandTransitions, pciTransitions]);
 
   const visibleTechnologyTransitions = useMemo(
-    () => filterHandoverTransitionsByPairs(technologyTransitions, handoverLegendSelectedPairs.technology),
-    [technologyTransitions, handoverLegendSelectedPairs.technology],
+    () => filterHandoverTransitionsByPairs(
+      filterHandoverTransitionsToVisibleLogs(technologyTransitions),
+      handoverLegendSelectedPairs.technology,
+    ),
+    [technologyTransitions, filterHandoverTransitionsToVisibleLogs, handoverLegendSelectedPairs.technology],
   );
   const visibleBandTransitions = useMemo(
-    () => filterHandoverTransitionsByPairs(bandTransitions, handoverLegendSelectedPairs.band),
-    [bandTransitions, handoverLegendSelectedPairs.band],
+    () => filterHandoverTransitionsByPairs(
+      filterHandoverTransitionsToVisibleLogs(bandTransitions),
+      handoverLegendSelectedPairs.band,
+    ),
+    [bandTransitions, filterHandoverTransitionsToVisibleLogs, handoverLegendSelectedPairs.band],
   );
   const visiblePciTransitions = useMemo(
-    () => filterHandoverTransitionsByPairs(pciTransitions, handoverLegendSelectedPairs.pci),
-    [pciTransitions, handoverLegendSelectedPairs.pci],
+    () => filterHandoverTransitionsByPairs(
+      filterHandoverTransitionsToVisibleLogs(pciTransitions),
+      handoverLegendSelectedPairs.pci,
+    ),
+    [pciTransitions, filterHandoverTransitionsToVisibleLogs, handoverLegendSelectedPairs.pci],
   );
 
   const polygonGridColorSource = useMemo(() => {
