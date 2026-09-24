@@ -673,97 +673,245 @@ const VoLTECallForm = memo(({ value, setValue, onClose }) => {
 
 VoLTECallForm.displayName = 'VoLTECallForm';
 
-const formatAcceptanceMetric = (key) => String(key || '')
-    .replace(/[_-]+/g, ' ')
-    .replace(/\b\w/g, char => char.toUpperCase());
+// Report Acceptance is stored per technology. Each metric keeps TWO numbers, the Good edge
+// and the Poor edge; Fair is the range between them, so the three levels can never
+// overlap or leave a gap. PASS means "Fair or better": the Poor edge is the pass/fail
+// cutoff used by the generated report.
+const ACCEPTANCE_TECHNOLOGIES = [
+    { key: '2g', label: '2G' },
+    { key: '3g', label: '3G' },
+    { key: '4g', label: '4G' },
+    { key: '5g', label: '5G' },
+];
+
+const acceptanceNumber = (value) => (Number.isFinite(Number(value)) && value !== '' && value !== null
+    ? String(Number(value))
+    : '');
+
+const acceptanceEdgeError = (metric) => {
+    const good = Number(metric?.good);
+    const poor = Number(metric?.poor);
+    if (!Number.isFinite(good) || !Number.isFinite(poor)) return 'Enter a number for every edge.';
+    if (metric.direction === 'lower') {
+        return good >= poor ? 'Good must end below where Poor starts.' : '';
+    }
+    return good <= poor ? 'Good must start above where Poor ends.' : '';
+};
+
+// First problem in a whole Report Acceptance document, or '' when it is fine to save.
+const findAcceptanceError = (acceptance) => {
+    if (!acceptance || typeof acceptance !== 'object') return '';
+    for (const tech of ACCEPTANCE_TECHNOLOGIES) {
+        const metrics = acceptance[tech.key];
+        if (!metrics || typeof metrics !== 'object') continue;
+        for (const [key, metric] of Object.entries(metrics)) {
+            if (!metric || typeof metric !== 'object') continue;
+            const problem = acceptanceEdgeError(metric);
+            if (problem) return `${tech.label} ${metric.label || key}: ${problem}`;
+        }
+    }
+    return '';
+};
+
+const countAcceptanceMetrics = (acceptance) => ACCEPTANCE_TECHNOLOGIES.reduce((total, tech) => {
+    const metrics = acceptance?.[tech.key];
+    return total + (metrics && typeof metrics === 'object' ? Object.keys(metrics).length : 0);
+}, 0);
+
+// The three rows of one metric. `field` is the stored number a box edits ('good' or
+// 'poor'); `null` means "no limit" on that side. Boxes that share a field stay in sync.
+const acceptanceRows = (direction) => (direction === 'lower'
+    ? [
+        { level: 'Good', tone: 'emerald', from: null, to: 'good' },
+        { level: 'Fair', tone: 'amber', from: 'good', to: 'poor' },
+        { level: 'Poor', tone: 'red', from: 'poor', to: null },
+    ]
+    : [
+        { level: 'Good', tone: 'emerald', from: 'good', to: null },
+        { level: 'Fair', tone: 'amber', from: 'poor', to: 'good' },
+        { level: 'Poor', tone: 'red', from: null, to: 'poor' },
+    ]);
+
+const acceptanceMeaning = (metric, level) => {
+    const unit = metric.unit ? ` ${metric.unit}` : '';
+    const good = acceptanceNumber(metric.good);
+    const poor = acceptanceNumber(metric.poor);
+    if (metric.direction === 'lower') {
+        if (level === 'Good') return `\u2264 ${good}${unit}`;
+        if (level === 'Fair') return `> ${good} and \u2264 ${poor}${unit}`;
+        return `> ${poor}${unit}`;
+    }
+    if (level === 'Good') return `\u2265 ${good}${unit}`;
+    if (level === 'Fair') return `\u2265 ${poor} and < ${good}${unit}`;
+    return `< ${poor}${unit}`;
+};
+
+const ACCEPTANCE_TONES = {
+    emerald: 'border-emerald-500/60 text-emerald-300',
+    amber: 'border-amber-500/60 text-amber-300',
+    red: 'border-red-500/60 text-red-300',
+};
 
 const ReportAcceptanceForm = memo(({ value, setValue, onClose }) => {
     const [localValue, setLocalValue] = useState({});
+    const [activeTech, setActiveTech] = useState('4g');
+    const [drafts, setDrafts] = useState({});
+    // Always the newest document, so several quick edits never build on a stale copy.
+    const latest = useRef({});
 
     useEffect(() => {
-        setLocalValue(value && typeof value === 'object' && !Array.isArray(value) ? value : {});
+        const incoming = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+        latest.current = incoming;
+        setLocalValue(incoming);
     }, [value]);
 
-    const updateEntry = useCallback((metric, index, field, nextValue) => {
-        setLocalValue(previous => {
+    const updateField = useCallback((tech, metric, field, raw) => {
+        const draftKey = `${tech}.${metric}.${field}`;
+        setDrafts(previous => ({ ...previous, [draftKey]: raw }));
+        const text = String(raw).trim();
+        const parsed = text === '' || text === '-' || text === '.' || text === '-.' ? NaN : Number(text);
+        if (!Number.isFinite(parsed)) return; // still typing, keep the draft only
+        const previous = latest.current || {};
+        const next = {
+            ...previous,
+            [tech]: {
+                ...(previous[tech] || {}),
+                [metric]: { ...(previous[tech]?.[metric] || {}), [field]: parsed },
+            },
+        };
+        latest.current = next;
+        setLocalValue(next);
+        setValue(next);
+    }, [setValue]);
+
+    const clearDraft = useCallback((tech, metric, field) => {
+        const draftKey = `${tech}.${metric}.${field}`;
+        setDrafts(previous => {
+            if (!(draftKey in previous)) return previous;
             const next = { ...previous };
-            next[metric] = (next[metric] || []).map((entry, entryIndex) => (
-                entryIndex === index ? { ...entry, [field]: nextValue } : entry
-            ));
-            setValue(next);
+            delete next[draftKey];
             return next;
         });
-    }, [setValue]);
+    }, []);
 
-    const addEntry = useCallback((metric) => {
-        setLocalValue(previous => {
-            const next = {
-                ...previous,
-                [metric]: [...(previous[metric] || []), { grade: '', condition: '' }],
-            };
-            setValue(next);
-            return next;
-        });
-    }, [setValue]);
+    const shownValue = (tech, metric, field, stored) => {
+        const draftKey = `${tech}.${metric}.${field}`;
+        return draftKey in drafts ? drafts[draftKey] : acceptanceNumber(stored);
+    };
 
-    const removeEntry = useCallback((metric, index) => {
-        setLocalValue(previous => {
-            const next = {
-                ...previous,
-                [metric]: (previous[metric] || []).filter((_, entryIndex) => entryIndex !== index),
-            };
-            setValue(next);
-            return next;
-        });
-    }, [setValue]);
+    const metrics = Object.entries(localValue?.[activeTech] || {})
+        .filter(([, metric]) => metric && typeof metric === 'object' && !Array.isArray(metric));
+
+    const numberBox = (tech, metricKey, field, stored, ariaLabel) => (
+        <Input
+            value={shownValue(tech, metricKey, field, stored)}
+            onChange={event => updateField(tech, metricKey, field, event.target.value)}
+            onBlur={() => clearDraft(tech, metricKey, field)}
+            inputMode="decimal"
+            aria-label={ariaLabel}
+            className="h-9 text-white bg-slate-950 border-slate-600"
+        />
+    );
+
+    const noLimit = (
+        <div className="h-9 flex items-center px-3 rounded-md border border-dashed border-slate-600 text-xs text-slate-400">
+            no limit
+        </div>
+    );
 
     return (
         <div className="mt-5 p-5 border border-slate-700 rounded-2xl bg-gradient-to-b from-slate-900 to-slate-950 shadow-lg">
-            <div className="flex justify-between items-start mb-5">
+            <div className="flex justify-between items-start mb-4">
                 <div>
                     <h3 className="text-lg font-semibold tracking-wide text-white">Report Acceptance</h3>
-                    <p className="text-xs text-slate-400 mt-1">Acceptance grades and conditions used in generated reports.</p>
+                    <p className="text-xs text-slate-400 mt-1">
+                        Good / Fair / Poor limits used in generated reports, set separately for each technology.
+                        Changing a limit on one row moves the matching limit on its neighbour, so the levels always fit together.
+                    </p>
                 </div>
                 <Button variant="ghost" size="icon" onClick={onClose} className="rounded-lg hover:bg-slate-800">
                     <X className="h-4 w-4" />
                 </Button>
             </div>
 
-            <div className="space-y-5 max-h-[32rem] overflow-y-auto pr-1">
-                {Object.entries(localValue).map(([metric, entries]) => (
-                    <div key={metric} className="rounded-xl border border-slate-700 bg-slate-800/70 p-4">
-                        <div className="flex items-center justify-between mb-3">
-                            <h4 className="font-semibold text-slate-100">{formatAcceptanceMetric(metric)}</h4>
-                            <Button type="button" variant="outline" onClick={() => addEntry(metric)} className="border-slate-500 bg-slate-800 hover:bg-slate-700 text-slate-100 rounded-lg">
-                                <Plus className="h-4 w-4 mr-1" /> Add grade
-                            </Button>
-                        </div>
-                        <div className="space-y-2">
-                            {(Array.isArray(entries) ? entries : []).map((entry, index) => (
-                                <div key={`${metric}-${index}`} className="grid grid-cols-1 md:grid-cols-[9rem_1fr_auto] gap-2 items-start">
-                                    <Input
-                                        value={entry?.grade || ''}
-                                        onChange={event => updateEntry(metric, index, 'grade', event.target.value)}
-                                        placeholder="Grade"
-                                        className="text-white bg-slate-950 border-slate-600"
-                                    />
-                                    <Input
-                                        value={entry?.condition || ''}
-                                        onChange={event => updateEntry(metric, index, 'condition', event.target.value)}
-                                        placeholder="Acceptance condition"
-                                        className="text-white bg-slate-950 border-slate-600"
-                                    />
-                                    <Button type="button" variant="ghost" size="icon" onClick={() => removeEntry(metric, index)} className="text-slate-300 hover:text-red-300 hover:bg-red-950/30">
-                                        <X className="h-4 w-4" />
-                                    </Button>
-                                </div>
-                            ))}
-                        </div>
-                    </div>
+            <div className="flex flex-wrap gap-2 mb-4">
+                {ACCEPTANCE_TECHNOLOGIES.map(tech => (
+                    <Button
+                        key={tech.key}
+                        type="button"
+                        variant={activeTech === tech.key ? 'default' : 'outline'}
+                        onClick={() => setActiveTech(tech.key)}
+                        className={activeTech === tech.key
+                            ? 'bg-blue-600 hover:bg-blue-700 text-white rounded-full px-5'
+                            : 'border-slate-500 !bg-slate-600 hover:!bg-slate-700 text-gray-100 rounded-full px-5'}
+                    >
+                        {tech.label}
+                    </Button>
                 ))}
-                {Object.keys(localValue).length === 0 && (
+            </div>
+
+            <div className="space-y-4 max-h-[32rem] overflow-y-auto pr-1">
+                {metrics.map(([metricKey, metric]) => {
+                    const error = acceptanceEdgeError(metric);
+                    const lower = metric.direction === 'lower';
+                    const unit = metric.unit ? ` ${metric.unit}` : '';
+                    const hasShares = metric.good_share !== undefined || metric.poor_share !== undefined;
+                    return (
+                        <div key={`${activeTech}-${metricKey}`} className="rounded-xl border border-slate-700 bg-slate-800/70 p-4">
+                            <div className="flex items-center justify-between mb-3">
+                                <h4 className="font-semibold text-slate-100">
+                                    {metric.label || metricKey}
+                                    {metric.unit ? <span className="ml-2 text-xs font-normal text-slate-400">({metric.unit})</span> : null}
+                                </h4>
+                                <span className="text-[11px] px-2 py-0.5 rounded-full border border-slate-500 text-slate-300">
+                                    {lower ? 'Lower is better' : 'Higher is better'}
+                                </span>
+                            </div>
+
+                            <div className="grid grid-cols-[4.5rem_1fr_1fr_1.4fr] gap-2 items-center text-xs text-slate-400 mb-1">
+                                <span>Level</span><span>From</span><span>To</span><span>Meaning</span>
+                            </div>
+                            <div className="space-y-2">
+                                {acceptanceRows(metric.direction).map(row => (
+                                    <div key={row.level} className="grid grid-cols-[4.5rem_1fr_1fr_1.4fr] gap-2 items-center">
+                                        <span className={`text-xs text-center px-2 py-1 rounded-lg border ${ACCEPTANCE_TONES[row.tone]}`}>{row.level}</span>
+                                        {row.from
+                                            ? numberBox(activeTech, metricKey, row.from, metric[row.from], `${metric.label} ${row.level} from`)
+                                            : noLimit}
+                                        {row.to
+                                            ? numberBox(activeTech, metricKey, row.to, metric[row.to], `${metric.label} ${row.level} to`)
+                                            : noLimit}
+                                        <span className="text-xs text-slate-300">{error ? '' : acceptanceMeaning(metric, row.level)}</span>
+                                    </div>
+                                ))}
+                            </div>
+
+                            {error ? (
+                                <p className="mt-3 text-xs text-red-300">{error}</p>
+                            ) : (
+                                <p className="mt-3 text-xs text-slate-300">
+                                    PASS at {acceptanceNumber(metric.poor)}{unit} or {lower ? 'lower' : 'higher'} (Fair or better).
+                                </p>
+                            )}
+
+                            {hasShares && (
+                                <div className="mt-3 pt-3 border-t border-slate-700 grid grid-cols-1 md:grid-cols-2 gap-3 text-xs text-slate-300">
+                                    <label className="flex flex-col gap-1">
+                                        Good also needs more than this % of samples in the Good range
+                                        {numberBox(activeTech, metricKey, 'good_share', metric.good_share, `${metric.label} good share`)}
+                                    </label>
+                                    <label className="flex flex-col gap-1">
+                                        Poor also applies when fewer than this % of samples reach Good
+                                        {numberBox(activeTech, metricKey, 'poor_share', metric.poor_share, `${metric.label} poor share`)}
+                                    </label>
+                                </div>
+                            )}
+                        </div>
+                    );
+                })}
+                {metrics.length === 0 && (
                     <div className="text-center py-8 text-slate-400 border-2 border-dashed border-slate-600/70 rounded-xl">
-                        No report acceptance rules configured
+                        No report acceptance rules configured for {activeTech.toUpperCase()}
                     </div>
                 )}
             </div>
@@ -1481,6 +1629,12 @@ const SettingsPage = ({ onSaveSuccess }) => {
             return;
         }
 
+        const acceptanceProblem = findAcceptanceError(nextThresholds.report_acceptance);
+        if (acceptanceProblem) {
+            toast.error(`Report Acceptance: ${acceptanceProblem}`);
+            return;
+        }
+
         // Ensure any focused input commits its latest value before building payload.
         if (typeof document !== "undefined" && document.activeElement instanceof HTMLElement) {
             document.activeElement.blur();
@@ -1722,7 +1876,7 @@ const SettingsPage = ({ onSaveSuccess }) => {
                                             {Object.entries(allParameters).map(([key, name]) => {
                                                 if (key === "coveragehole" || key === "report_acceptance") {
                                                     if (key === "report_acceptance") {
-                                                        const metricCount = Object.keys(thresholds.report_acceptance || {}).length;
+                                                        const metricCount = countAcceptanceMetrics(thresholds.report_acceptance);
                                                         return (
                                                             <div
                                                                 key={key}
