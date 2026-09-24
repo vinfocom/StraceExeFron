@@ -1571,7 +1571,8 @@ function L3MapDeckOverlay({ map, trailPoints, activePoints }) {
     if (!map) return undefined;
     if (!overlayRef.current) {
       overlayRef.current = new GoogleMapsOverlay({
-        interleaved: false,
+        // Keep Google Maps DOM tooltips above the WebGL event/log layer.
+        interleaved: true,
         glOptions: { preserveDrawingBuffer: false },
       });
     }

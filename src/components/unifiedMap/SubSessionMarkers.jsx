@@ -8,6 +8,8 @@ import {
   useGoogleMap,
 } from "@react-google-maps/api";
 import { getColorForMetric } from "@/utils/metrics";
+import { ScatterplotLayer, TextLayer } from "@deck.gl/layers";
+import { useDeckLayerGroup } from "@/components/maps/deckLayerRegistry.jsx";
 
 const formatMetric = (value, suffix = "") => {
   if (value == null || value === "" || !Number.isFinite(Number(value))) return "N/A";
@@ -333,12 +335,12 @@ const buildDeckPointGroups = (markers, zoom, highlightedIds) => {
   });
 };
 
-const createSubSessionDeckLayers = ({ ScatterplotLayer, TextLayer }, points, onClick, onHover) => {
+const createSubSessionDeckLayers = (points, onClick, onHover, interactive = true) => {
   const smoothEase = (value) => value * value * (3 - 2 * value);
   const scatterplot = new ScatterplotLayer({
     id: "sub-session-points",
     data: points,
-    pickable: true,
+    pickable: interactive,
     autoHighlight: true,
     highlightColor: [255, 255, 255, 180],
     stroked: true,
@@ -366,7 +368,7 @@ const createSubSessionDeckLayers = ({ ScatterplotLayer, TextLayer }, points, onC
       getLineWidth: { duration: 180, easing: smoothEase },
     },
     onClick: ({ object }) => {
-      if (!object) return false;
+      if (!object || !interactive) return false;
       onClick?.(object);
       return true;
     },
@@ -437,15 +439,13 @@ const SubSessionMarkers = ({
   selectedMarkerId = null,
   selectedMarkerIds = [],
   onMarkerSelect,
+  interactionsDisabled = false,
 }) => {
   const map = useGoogleMap();
   const [internalSelectedMarkerId, setInternalSelectedMarkerId] = useState(null);
   const [hoveredMarkerId, setHoveredMarkerId] = useState(null);
   const [viewport, setViewport] = useState(null);
   const [mapZoom, setMapZoom] = useState(0);
-  const deckRef = useRef({ overlay: null, classes: null });
-  const deckInputRef = useRef({ points: [] });
-  const refreshDeckRef = useRef(null);
   const deckClickRef = useRef(null);
   const deckHoverRef = useRef(null);
   const duplicateCycleRef = useRef(new Map());
@@ -590,8 +590,6 @@ const SubSessionMarkers = ({
       : [],
     [show, renderMarkers, mapZoom, highlightedMarkerIdSet],
   );
-  deckInputRef.current = { points: deckPoints };
-
   deckClickRef.current = (point) => {
     if (!point) return;
     if (point.isCluster) {
@@ -638,64 +636,15 @@ const SubSessionMarkers = ({
     setHoveredMarkerId((current) => (current === (marker?.id ?? null) ? current : marker?.id ?? null));
   };
 
-  refreshDeckRef.current = () => {
-    const { overlay, classes } = deckRef.current;
-    if (!overlay || !classes) return;
-    overlay.setProps({
-      layers: createSubSessionDeckLayers(
-        classes,
-        deckInputRef.current.points,
-        (point) => deckClickRef.current?.(point),
-        (point) => deckHoverRef.current?.(point),
-      ),
-    });
-  };
-
-  useEffect(() => {
-    if (!show || !map || !hasMarkers) return undefined;
-    let cancelled = false;
-
-    Promise.all([
-      import("@deck.gl/google-maps"),
-      import("@deck.gl/layers"),
-    ]).then(([googleMapsModule, layersModule]) => {
-      if (cancelled) return;
-      const overlay = new googleMapsModule.GoogleMapsOverlay({
-        interleaved: false,
-        glOptions: { preserveDrawingBuffer: false },
-      });
-      deckRef.current = {
-        overlay,
-        classes: {
-          ScatterplotLayer: layersModule.ScatterplotLayer,
-          TextLayer: layersModule.TextLayer,
-        },
-      };
-      overlay.setMap(map);
-      refreshDeckRef.current?.();
-    }).catch((error) => {
-      if (!cancelled) console.error("Unable to load the sub-session WebGL layer:", error);
-    });
-
-    return () => {
-      cancelled = true;
-      const { overlay } = deckRef.current;
-      if (overlay) {
-        try {
-          overlay.setProps({ layers: [] });
-          overlay.setMap(null);
-          overlay.finalize();
-        } catch {
-          // The map may be tearing down while the optional WebGL layer is unloaded.
-        }
-      }
-      deckRef.current = { overlay: null, classes: null };
-    };
-  }, [map, show, hasMarkers]);
-
-  useEffect(() => {
-    refreshDeckRef.current?.();
-  }, [deckPoints]);
+  const subSessionLayers = useMemo(() => show && hasMarkers
+    ? createSubSessionDeckLayers(
+      deckPoints,
+      (point) => deckClickRef.current?.(point),
+      (point) => deckHoverRef.current?.(point),
+      !interactionsDisabled,
+    )
+    : [], [deckPoints, show, hasMarkers, interactionsDisabled]);
+  useDeckLayerGroup("events", subSessionLayers, 30);
 
   if (!show || !Array.isArray(markers) || markers.length === 0) {
     return null;

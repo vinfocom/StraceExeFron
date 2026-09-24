@@ -1,7 +1,9 @@
 // src/components/unifiedMap/TechHandoverMarkers.jsx
 import React, { useMemo, memo, useState, useCallback, useEffect, useRef } from "react";
 import { MarkerClusterer } from "@googlemaps/markerclusterer";
-import { OverlayView, Polyline, useGoogleMap } from "@react-google-maps/api";
+import { OverlayView, useGoogleMap } from "@react-google-maps/api";
+import { PathLayer } from "@deck.gl/layers";
+import { useDeckLayerGroup } from "@/components/maps/deckLayerRegistry.jsx";
 import { ADVANCED_MARKER_CLUSTER_RENDERER, createAdvancedMarker } from "@/lib/advancedMarkers";
 import { ArrowRightLeft, Hand, Download } from "lucide-react";
 import { COLOR_SCHEMES, normalizeTechName, getBandColor } from "@/utils/colorUtils";
@@ -10,41 +12,7 @@ import {
   normalizeMetricTechnology,
 } from "@/utils/technologyMetricLabels";
 
-const HANDOVER_POLYLINE_REGISTRY_KEY = "__stracer_handover_polylines__";
 const DEFAULT_CLUSTER_THRESHOLD = 80;
-
-const getPolylineRegistry = () => {
-  if (typeof window === "undefined") return new Map();
-  if (!window[HANDOVER_POLYLINE_REGISTRY_KEY]) {
-    window[HANDOVER_POLYLINE_REGISTRY_KEY] = new Map();
-  }
-  return window[HANDOVER_POLYLINE_REGISTRY_KEY];
-};
-
-const trackActivePolyline = (polyline, type) => {
-  if (!polyline) return;
-  const registry = getPolylineRegistry();
-  registry.set(polyline, type);
-};
-
-const untrackActivePolyline = (polyline) => {
-  if (!polyline) return;
-  const registry = getPolylineRegistry();
-  registry.delete(polyline);
-};
-
-const forceClearActivePolylinesByType = (type = null) => {
-  const registry = getPolylineRegistry();
-  registry.forEach((polylineType, polyline) => {
-    if (type && polylineType !== type) return;
-    try {
-      polyline?.setMap?.(null);
-    } catch (e) {
-      // Ignore stale map cleanup errors
-    }
-    registry.delete(polyline);
-  });
-};
 
 const getColor = (value, type) => {
   if (type === 'band') {
@@ -580,7 +548,6 @@ const TechHandoverMarkers = ({
   clusterThreshold = DEFAULT_CLUSTER_THRESHOLD,
 }) => {
   const [selectedTransition, setSelectedTransition] = useState(null);
-  const connectionRefs = useRef(new Set());
   const sortedTransitions = useMemo(
     () => sortTransitionsByDriveSequence(transitions),
     [transitions],
@@ -596,48 +563,9 @@ const TechHandoverMarkers = ({
   }, [onTransitionClick]);
   const handlePopupClose = useCallback(() => setSelectedTransition(null), []);
 
-  const clearConnectionPolylines = useCallback(() => {
-    connectionRefs.current.forEach((polyline) => {
-      try {
-        polyline?.setMap?.(null);
-      } catch (e) {
-        // Ignore map cleanup errors from stale instances
-      }
-      untrackActivePolyline(polyline);
-    });
-    connectionRefs.current.clear();
-    forceClearActivePolylinesByType(type);
-  }, [type]);
-
-  const registerConnection = useCallback((polyline) => {
-    if (!polyline) return;
-    connectionRefs.current.add(polyline);
-    trackActivePolyline(polyline, type);
-  }, [type]);
-
-  const unregisterConnection = useCallback((polyline) => {
-    if (!polyline) return;
-    try {
-      polyline.setMap(null);
-    } catch (e) {
-      // Ignore stale map cleanup errors
-    }
-    connectionRefs.current.delete(polyline);
-    untrackActivePolyline(polyline);
-  }, []);
-
   useEffect(() => {
-    if (!show || !showConnections) {
-      clearConnectionPolylines();
-      if (!show) setSelectedTransition(null);
-    }
-  }, [show, showConnections, clearConnectionPolylines]);
-
-  useEffect(() => {
-    return () => {
-      clearConnectionPolylines();
-    };
-  }, [clearConnectionPolylines]);
+    if (!show) setSelectedTransition(null);
+  }, [show]);
 
   const connectionPaths = useMemo(() => {
     if (!showConnections || sortedTransitions.length < 1) return [];
@@ -678,6 +606,20 @@ const TechHandoverMarkers = ({
       .filter(Boolean);
   }, [sortedTransitions, showConnections, type]);
 
+  const connectionLayer = useMemo(() => new PathLayer({
+    id: `handover-connections-${type}`,
+    data: connectionPaths,
+    getPath: (connection) => connection.path.map((point) => [point.lng, point.lat]),
+    getColor: [245, 158, 11, 150],
+    getWidth: 2,
+    widthUnits: "pixels",
+    widthMinPixels: 2,
+    rounded: true,
+    pickable: false,
+    parameters: { depthTest: false },
+  }), [connectionPaths, type]);
+  useDeckLayerGroup("events", show && showConnections && !shouldCluster ? [connectionLayer] : [], 20);
+
   if (!show || !renderedTransitions.length) return null;
   const MarkerComponent = (compactMode || renderedTransitions.length > 20) ? CompactHandoverMarker : HandoverMarker;
 
@@ -690,15 +632,6 @@ const TechHandoverMarkers = ({
           onClick={handleMarkerClick}
         />
       )}
-      {!shouldCluster && showConnections && connectionPaths.map((c) => (
-        <Polyline 
-            key={c.id} 
-            path={c.path} 
-            onLoad={(polyline) => registerConnection(polyline)}
-            onUnmount={(polyline) => unregisterConnection(polyline)}
-            options={{ strokeColor: "#F59E0B", strokeOpacity: 0.5, strokeWeight: 2, geodesic: true, icons: [{ icon: { path: window.google?.maps?.SymbolPath?.FORWARD_CLOSED_ARROW, scale: 3, fillColor: "#F59E0B", fillOpacity: 1, strokeWeight: 0 }, offset: "50%" }] }} 
-        />
-      ))}
       {!shouldCluster && renderedTransitions.map((t, i) => (
         <MarkerComponent 
            key={`handover-marker-${type}-${t.session_id}-${t.atIndex}-${i}`} 
@@ -714,8 +647,5 @@ const TechHandoverMarkers = ({
 };
 
 export const downloadCSV = downloadCSVFunc;
-export const clearHandoverPolylines = (type = null) => {
-  forceClearActivePolylinesByType(type);
-};
 export { DownloadButton };
 export default memo(TechHandoverMarkers);

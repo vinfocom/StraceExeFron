@@ -5,6 +5,7 @@ import { PathLayer, ScatterplotLayer, PolygonLayer, TextLayer } from '@deck.gl/l
 import { getMetricConfig, getMetricValueFromLog } from '@/utils/metrics';
 import { sampleLogIndices } from '@/utils/logSpatialSampling';
 import { useDeckLayerRegistry } from '@/components/maps/deckLayerRegistry.jsx';
+import { assertCategorizedLayerEntries, categorizeMapLayer, getMapLayerMetadata, sortMapLayerEntries } from '@/components/maps/mapLayerPolicy.js';
 
 const pickFirstNonEmpty = (obj, keys = []) => {
   for (const key of keys) {
@@ -95,7 +96,11 @@ const getDrawingPath = (drawing) => {
     return (geometry.path || []).map((point) => [Number(point.lng), Number(point.lat)]);
   }
   if (geometry.type === 'polygon') {
-    return (geometry.polygon || []).map((point) => [Number(point.lng), Number(point.lat)]);
+    const path = (geometry.polygon || []).map((point) => [Number(point.lng), Number(point.lat)]);
+    if (path.length < 3 || String(drawing?.id).startsWith('active-')) return path;
+    const first = path[0];
+    const last = path[path.length - 1];
+    return first[0] === last[0] && first[1] === last[1] ? path : [...path, first];
   }
   if (geometry.type === 'rectangle') {
     const sw = geometry.rectangle?.sw;
@@ -285,8 +290,6 @@ const getPredictionRenderLimit = (total) => {
   return 100000;
 };
 
-const LAYER_ORDER = ['clutterTiles', 'grid', 'predictions', 'sites', 'sectors', 'insightMarkers', 'l3Events', 'neighborLogs', 'primaryLogs', 'drawings'];
-
 const getSquarePolygon = (lat, lng, sizeMeters) => {
   const halfSize = sizeMeters / 2;
   const latDelta = halfSize * metersToLatDeg;
@@ -342,6 +345,7 @@ const DeckGLOverlay = ({
   opacity = 0.8,
   selectedIndex = null,
   onClick,
+  onPrimaryTooltipClick,
   radiusMinPixels = 2,
   radiusMaxPixels = 40,
   showPrimaryLogs = true,
@@ -354,6 +358,7 @@ const DeckGLOverlay = ({
   showImageLogs = true,
   showNeighbors = true,
   pickable = true,
+  interactionsDisabled = false,
   autoHighlight = true,
   primaryRenderLimit = null,
   gridCells = [],
@@ -362,6 +367,8 @@ const DeckGLOverlay = ({
   onGridHover,
   gridMinPixelSize = 5,
   drawingShapes = [],
+  drawingOpacity = 0.8,
+  nativeOutlinePaths = [],
   siteData = [],
   predictionGridData = [],
 }) => {
@@ -405,8 +412,10 @@ const DeckGLOverlay = ({
     isCleanedUpRef.current = false;
 
     if (!overlayRef.current) {
-      overlayRef.current = new GoogleMapsOverlay({ 
-        interleaved: false,
+      overlayRef.current = new GoogleMapsOverlay({
+        // Composite with Google's vector renderer so map DOM tooltips stay
+        // above the WebGL log canvas.
+        interleaved: true,
         // Keep WebGL memory bounded. preserveDrawingBuffer causes large persistent buffers.
         glOptions: { preserveDrawingBuffer: false }
       });
@@ -559,9 +568,13 @@ const DeckGLOverlay = ({
   }, [locations, samplingCoordinates, showPrimaryLogs, viewportBounds, mapZoom, selectedIndex, primaryRenderLimit]);
 
   const handlePrimaryClick = useCallback((info) => {
-    if (!onClick || !info?.object) return;
-    onClick(info.object.index, info.object.source ?? info.object);
-  }, [onClick]);
+    if (!info?.object) {
+      onPrimaryTooltipClick?.(null);
+      return;
+    }
+    onClick?.(info.object.index, info.object.source ?? info.object);
+    onPrimaryTooltipClick?.({ ...info, object: info.object.source ?? info.object });
+  }, [onClick, onPrimaryTooltipClick]);
 
   const handleNeighborClick = useCallback((info) => {
     if (!onNeighborClick || !info?.object) return;
@@ -711,6 +724,20 @@ const DeckGLOverlay = ({
     [drawingShapes],
   );
 
+  const nativeOutlineData = useMemo(() => (nativeOutlinePaths || [])
+    .map((outline, index) => {
+      const path = (outline.path || []).map((point) => [Number(point.lng), Number(point.lat)]);
+      if (path.length < 3 || !path.every(([lng, lat]) => Number.isFinite(lng) && Number.isFinite(lat))) return null;
+      const first = path[0];
+      const last = path[path.length - 1];
+      return {
+        id: String(outline.id ?? outline.uid ?? `project-boundary-${index}`),
+        path: first[0] === last[0] && first[1] === last[1] ? path : [...path, first],
+        color: outline.fillColor || '#2563eb',
+      };
+    })
+    .filter(Boolean), [nativeOutlinePaths]);
+
   const drawingLabelData = useMemo(
     () => drawingData
       .map((drawing) => {
@@ -804,9 +831,10 @@ const DeckGLOverlay = ({
     if (attachedMapRef.current !== map) return;
 
     const layers = [];
+    const addLayer = (category, layer, order = 0) => layers.push(categorizeMapLayer(layer, category, order));
 
     if (showGrid && gridData.length > 0) {
-      layers.push(new PolygonLayer({
+      addLayer('predictions', new PolygonLayer({
         id: 'grid-cells-layer',
         data: gridData,
         getPolygon: d => d.polygon,
@@ -824,8 +852,8 @@ const DeckGLOverlay = ({
       }));
     }
 
-    if (!registeredGroups.get('predictions')?.length && predictionRenderData.length > 0) {
-      layers.push(new PolygonLayer({
+    if (![...registeredGroups.values()].some((group) => group.category === 'predictions' && group.layers.length) && predictionRenderData.length > 0) {
+      addLayer('predictions', new PolygonLayer({
         id: 'prediction-grid-layer',
         data: predictionRenderData,
         getPolygon: (row) => row.polygon,
@@ -841,8 +869,8 @@ const DeckGLOverlay = ({
       }));
     }
 
-    if (!registeredGroups.get('sites')?.length && siteRenderData.length > 0) {
-      layers.push(new ScatterplotLayer({
+    if (![...registeredGroups.values()].some((group) => group.category === 'sites' && group.layers.length) && siteRenderData.length > 0) {
+      addLayer('sites', new ScatterplotLayer({
         id: 'sites-layer',
         data: siteRenderData,
         getPosition: (site) => site.position,
@@ -861,7 +889,7 @@ const DeckGLOverlay = ({
     }
 
     if (showNeighbors && neighborData.length > 0) {
-      layers.push(new PolygonLayer({
+      addLayer('logs', new PolygonLayer({
         id: 'neighbor-logs-layer',
         data: neighborData,
         getPolygon: d => d.polygon,
@@ -871,8 +899,8 @@ const DeckGLOverlay = ({
         lineWidthMinPixels: 1,
         filled: true,
         stroked: true,
-        extruded: true,
-        getElevation: 5,
+        extruded: Number(map?.getTilt?.()) > 0,
+        getElevation: Number(map?.getTilt?.()) > 0 ? 5 : 0,
         opacity: neighborOpacity,
         pickable,
         autoHighlight,
@@ -881,7 +909,7 @@ const DeckGLOverlay = ({
     }
 
     if (showPrimaryLogs && primaryData.length > 0) {
-      layers.push(new ScatterplotLayer({
+      addLayer('logs', new ScatterplotLayer({
         id: 'primary-logs-layer',
         data: primaryData,
         getPosition: d => d.position,
@@ -890,9 +918,7 @@ const DeckGLOverlay = ({
         getLineWidth: 0,
         lineWidthMinPixels: 0,
         stroked: true,
-        getRadius: d => {
-          return d.index === selectedIndex ? radius * 1.5 : radius;
-        },
+        getRadius: radius,
         radiusUnits: 'pixels',
         radiusMinPixels,
         radiusMaxPixels,
@@ -903,12 +929,33 @@ const DeckGLOverlay = ({
         onClick: handlePrimaryClick,
         updateTriggers: {
           getFillColor: [getColor],
-          getRadius: [selectedIndex, radius],
+          getRadius: [radius],
         },
       }));
 
+      const selectedLog = primaryData.find((log) => log.index === selectedIndex);
+      if (selectedLog) {
+        addLayer('logs', new ScatterplotLayer({
+          id: 'primary-log-selection-halo',
+          data: [selectedLog],
+          getPosition: (log) => log.position,
+          getRadius: Math.max(radius * 1.7, radius + 4),
+          radiusUnits: 'pixels',
+          radiusMinPixels: radiusMinPixels + 3,
+          radiusMaxPixels: radiusMaxPixels + 6,
+          filled: false,
+          stroked: true,
+          getLineColor: [250, 204, 21, 245],
+          getLineWidth: 2,
+          lineWidthUnits: 'pixels',
+          lineWidthMinPixels: 2,
+          pickable: false,
+          parameters: { depthTest: false },
+        }), 10);
+      }
+
       if (showNumCells) {
-        layers.push(new TextLayer({
+        addLayer('logs', new TextLayer({
           id: 'primary-logs-text-layer',
           data: primaryData,
           getPosition: d => d.position,
@@ -923,7 +970,7 @@ const DeckGLOverlay = ({
       }
 
       if (showMetricLabels && metricLabelData.length > 0) {
-        layers.push(new TextLayer({
+        addLayer('logs', new TextLayer({
           id: 'primary-logs-metric-label-layer',
           data: metricLabelData,
           getPosition: d => d.position,
@@ -941,7 +988,7 @@ const DeckGLOverlay = ({
     }
 
     if (showImageLogs && imageLogData.length > 0) {
-      layers.push(new TextLayer({
+      addLayer('logs', new TextLayer({
         id: 'image-log-icons-layer',
         data: imageLogData,
         getPosition: d => d.position,
@@ -957,46 +1004,32 @@ const DeckGLOverlay = ({
         pickable,
         autoHighlight,
         onClick: handleImageLogClick,
-      }));
+      }), 5);
     }
 
     // User drawings must be in the same DeckGL stack as the logs. Native
     // Google Maps zIndex cannot move a shape above this WebGL canvas.
     if (drawingData.length > 0) {
-      const areaDrawings = drawingData.filter((drawing) => drawing.type !== 'polyline');
-      if (areaDrawings.length > 0) {
-        layers.push(new PolygonLayer({
-          id: 'user-drawings-fill-layer',
-          data: areaDrawings,
-          getPolygon: (drawing) => drawing.path,
-          getFillColor: [37, 99, 235, 35],
-          getLineColor: [37, 99, 235, 255],
-          getLineWidth: 3,
-          lineWidthMinPixels: 2,
-          filled: true,
-          stroked: true,
-          pickable: false,
-          parameters: { depthTest: false },
-        }));
-      }
-
-      layers.push(new PathLayer({
+      addLayer('drawings', new PathLayer({
         id: 'user-drawings-line-layer',
         data: drawingData,
         getPath: (drawing) => drawing.path,
-        getColor: (drawing) => drawing.type === 'polyline'
-          ? [234, 88, 12, 255]
-          : [37, 99, 235, 255],
-        getWidth: 4,
+        getColor: (drawing) => {
+          const alpha = Math.round(255 * Math.max(0, Math.min(1, Number(drawingOpacity) || 0)));
+          return drawing.type === 'polyline'
+            ? [234, 88, 12, alpha]
+            : [37, 99, 235, alpha];
+        },
+        getWidth: 2,
         widthUnits: 'pixels',
-        widthMinPixels: 3,
+        widthMinPixels: 2,
         rounded: true,
         pickable: false,
         parameters: { depthTest: false },
       }));
 
       if (drawingLabelData.length > 0) {
-        layers.push(new TextLayer({
+        addLayer('drawings', new TextLayer({
           id: 'user-drawings-measurement-label-layer',
           data: drawingLabelData,
           getPosition: (measurement) => measurement.position,
@@ -1023,43 +1056,51 @@ const DeckGLOverlay = ({
       }
     }
 
-    registeredGroups.forEach((groupLayers) => {
-      layers.push(...groupLayers);
+    if (nativeOutlineData.length > 0) {
+      addLayer('drawings', new PathLayer({
+        id: 'project-boundary-outline-layer',
+        data: nativeOutlineData,
+        getPath: (outline) => outline.path,
+        getColor: (outline) => {
+          const rgb = parseColorToRGB(outline.color);
+          return [rgb[0], rgb[1], rgb[2], Math.round(255 * Math.max(0, Math.min(1, Number(drawingOpacity) || 0)))];
+        },
+        getWidth: 2,
+        widthUnits: 'pixels',
+        widthMinPixels: 1,
+        rounded: true,
+        pickable: false,
+      }));
+    }
+
+    const registeredMetadata = new Map();
+    registeredGroups.forEach((group) => {
+      group.layers.forEach((layer) => {
+        layers.push(layer);
+        registeredMetadata.set(layer, { category: group.category, order: group.order });
+      });
     });
 
     try {
-      const layerPriority = new Map(LAYER_ORDER.map((name, index) => [name, index]));
-      const warnedFallbackIds = new Set();
-      const layerGroup = (id) => {
-        const normalizedId = typeof id === 'string' ? id : '';
-        if (normalizedId.startsWith('grid-') || normalizedId === 'grid-cells-layer') return 'grid';
-        if (normalizedId.startsWith('project-clutter-')) return 'clutterTiles';
-        if (normalizedId.startsWith('prediction-') || normalizedId.startsWith('lte-prediction-')) return 'predictions';
-        if (normalizedId.startsWith('sites-') || normalizedId === 'sites-layer') return 'sites';
-        if (normalizedId.startsWith('network-sector-') || normalizedId.startsWith('network-site-')) return 'sectors';
-        if (normalizedId.startsWith('unified-map-insight-')) return 'insightMarkers';
-        if (normalizedId.startsWith('l3-events-')) return 'l3Events';
-        if (normalizedId.startsWith('neighbor-')) return 'neighborLogs';
-        if (normalizedId.startsWith('primary-') || normalizedId === 'image-log-icons-layer') return 'primaryLogs';
-        if (normalizedId.startsWith('user-drawings-')) return 'drawings';
-
-        const warningKey = normalizedId || '<missing-id>';
-        if (import.meta.env?.DEV && !warnedFallbackIds.has(warningKey)) {
-          warnedFallbackIds.add(warningKey);
-          console.warn(`[DeckGLOverlay] Unmapped layer id "${warningKey}"; defaulting to primaryLogs.`);
-        }
-        return 'primaryLogs';
-      };
-
-      layers.sort((a, b) =>
-        (layerPriority.get(layerGroup(a?.id)) ?? 0) -
-        (layerPriority.get(layerGroup(b?.id)) ?? 0),
-      );
-      overlayRef.current.setProps({ layers });
+      const entries = layers.map((layer) => ({
+        layer,
+        ...(registeredMetadata.get(layer) || getMapLayerMetadata(layer) || {}),
+      }));
+      if (import.meta.env?.DEV) assertCategorizedLayerEntries(entries);
+      const orderedLayers = sortMapLayerEntries(entries).map(({ layer }) => {
+        // Flat maps use painter ordering; tilted maps retain depth testing.
+        const cloneProps = interactionsDisabled ? { pickable: false } : {};
+        if (Number(map?.getTilt?.()) > 0) return Object.keys(cloneProps).length ? layer.clone(cloneProps) : layer;
+        return layer.clone({
+          ...cloneProps,
+          parameters: { ...(layer.props.parameters || {}), depthTest: false },
+        });
+      });
+      overlayRef.current.setProps({ layers: orderedLayers });
     } catch (e) {
       // Overlay can detach during map teardown; skip this update.
     }
-  }, [map, primaryData, neighborData, gridData, imageLogData, metricLabelData, drawingData, drawingLabelData, predictionRenderData, siteRenderData, registeredGroups, registryVersion, showPrimaryLogs, showNeighbors, showGrid, gridOpacity, handleGridHover, showImageLogs, selectedIndex, radius, radiusMinPixels, radiusMaxPixels, opacity, neighborOpacity, showNumCells, showMetricLabels, getColor, getNeighborColor, handleImageLogClick, handlePrimaryHover, isValidMapInstance, pickable, autoHighlight, mapZoom]);
+  }, [map, primaryData, neighborData, gridData, imageLogData, metricLabelData, drawingData, drawingLabelData, drawingOpacity, nativeOutlineData, predictionRenderData, siteRenderData, registeredGroups, registryVersion, showPrimaryLogs, showNeighbors, showGrid, gridOpacity, handleGridHover, showImageLogs, selectedIndex, radius, radiusMinPixels, radiusMaxPixels, opacity, neighborOpacity, showNumCells, showMetricLabels, getColor, getNeighborColor, handleImageLogClick, handlePrimaryHover, isValidMapInstance, pickable, autoHighlight, mapZoom, interactionsDisabled]);
 
   useEffect(() => {
     return () => {

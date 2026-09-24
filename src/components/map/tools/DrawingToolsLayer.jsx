@@ -1137,16 +1137,6 @@ const isDuplicateVertex = (points, nextPoint) => {
   return lastPoint && getLatLngDistance(lastPoint, nextPoint) < 0.5;
 };
 
-const isClosingVertex = (points, nextPoint) => {
-  const firstPoint = points[0];
-  return points.length >= 3 && firstPoint && getLatLngDistance(firstPoint, nextPoint) < 25;
-};
-
-const isEndingPolyline = (points, nextPoint) => {
-  const lastPoint = points[points.length - 1];
-  return points.length >= 2 && lastPoint && getLatLngDistance(lastPoint, nextPoint) < 25;
-};
-
 const getVertexMarkerIcon = (type, isFirst = false) => {
   const gm = window.google.maps;
   const color = type === "polyline" ? "#ea580c" : "#1d4ed8";
@@ -1181,6 +1171,7 @@ const createVertexMarker = ({
   index,
   title,
   draggable = false,
+  clickable = true,
   icon,
   onClick,
   onDragStart,
@@ -1193,12 +1184,13 @@ const createVertexMarker = ({
     map,
     position,
     draggable,
+    clickable,
     icon: icon || getVertexMarkerIcon(type, isFirst),
     title: title || "Vertex",
     zIndex: DRAWING_VERTEX_Z_INDEX + index,
   });
   if (!marker) return null;
-  marker.style.cursor = draggable ? "grab" : "pointer";
+  marker.style.cursor = draggable ? "grab" : clickable ? "pointer" : "default";
   const listeners = [];
   const listen = (eventName, callback) => {
     const handler = (event) => callback(event);
@@ -1207,7 +1199,11 @@ const createVertexMarker = ({
   };
 
   if (onClick) {
-    listen("gmp-click", (event) => onClick(getAdvancedMarkerLatLngEvent(marker, event), index));
+    listen("gmp-click", (event) => {
+      event?.stopPropagation?.();
+      event?.domEvent?.stopPropagation?.();
+      onClick(getAdvancedMarkerLatLngEvent(marker, event), index);
+    });
   }
   if (onDragStart) {
     listen("gmp-dragstart", (event) => onDragStart(getAdvancedMarkerLatLngEvent(marker, event), index));
@@ -1280,7 +1276,7 @@ function DrawingToolsLayerComponent({
   clearSignal = 0,
   colorizeCells = true,
   polygonOpacity = 0.35,
-  polygonFillOpacity = null,
+  polygonFillOpacity = 0,
   logPolygonOffsetMeters = 50,
   onUIChange,
   terrainEnabled = false,
@@ -1307,8 +1303,7 @@ function DrawingToolsLayerComponent({
   showSegmentLabelsRef.current = showSegmentLabels;
   const shapeModeRef = useRef(shapeMode);
   const resolvedPolygonOpacity = clampOpacity(polygonOpacity);
-  const resolvedPolygonFillOpacity =
-    polygonFillOpacity === null ? resolvedPolygonOpacity : clampOpacity(polygonFillOpacity, 0);
+  const resolvedPolygonFillOpacity = clampOpacity(polygonFillOpacity, 0);
 
   const publishActiveDrawing = useCallback((type, overlay) => {
     activePreviewRef.current = { type, overlay };
@@ -1557,6 +1552,9 @@ function DrawingToolsLayerComponent({
       createdAt: new Date().toISOString(),
     };
     shapesRef.current.push(shapeObj);
+    // DeckGLOverlay paints the visible outline in the shared ordered stack.
+    // Keep this native geometry for dragging/editing and hit handling only.
+    overlay.setOptions?.({ strokeOpacity: 0, fillOpacity: 0 });
     const isMeasurementTool = type === "polyline";
     const entry = reAnalyzeShapeRef.current?.(shapeObj);
     const listeners = [];
@@ -2029,8 +2027,8 @@ function DrawingToolsLayerComponent({
       // its closing edge, making it look like a finished polygon after two points.
       const previewOptions =
         type === "polygon"
-          ? { strokeWeight: isSatelliteRef.current ? 3 : 2, strokeColor: getShapeColor("area", isSatelliteRef.current), strokeOpacity: resolvedPolygonOpacity }
-          : { strokeWeight: isSatelliteRef.current ? 3 : 2, strokeColor: getShapeColor("line", isSatelliteRef.current) };
+          ? { strokeWeight: isSatelliteRef.current ? 3 : 2, strokeColor: getShapeColor("area", isSatelliteRef.current), strokeOpacity: 0 }
+          : { strokeWeight: isSatelliteRef.current ? 3 : 2, strokeColor: getShapeColor("line", isSatelliteRef.current), strokeOpacity: 0 };
       const overlay = new gm.Polyline({
         map,
         path: [],
@@ -2053,48 +2051,27 @@ function DrawingToolsLayerComponent({
       setActiveDraft({ type, pointCount: 0, canFinish: false, canUndo: false });
 
       const addDraftVertexMarker = (position, index) => {
+        const isStartVertex = type === "polygon" && index === 0;
         const markerEntry = createVertexMarker({
           map,
           position,
           type,
           index,
-          title: index === 0 && type === "polygon"
-            ? "Start point - click to finish polygon"
-            : type === "polyline" && index > 0
-              ? "End point - click to finish line"
-              : "Vertex",
-          onClick: (event) => {
-            event?.domEvent?.preventDefault?.();
-            event?.domEvent?.stopPropagation?.();
-            if (type === "polygon" && index === 0 && committedPoints.length >= 3) {
-              finishPathShape();
-            } else if (type === "polyline" && index === committedPoints.length - 1 && committedPoints.length >= 2) {
+          clickable: isStartVertex,
+          title: isStartVertex ? "Click to finish polygon" : "Vertex",
+          onClick: isStartVertex ? () => {
+            if (activeDrawingRef.current?.overlay === overlay && committedPoints.length >= 3) {
               finishPathShape();
             }
-          },
+          } : undefined,
         });
         activeDrawingRef.current?.vertexMarkers?.push(markerEntry);
       };
 
       const minPathPoints = type === "polygon" ? 3 : 2;
-      let hotIndex = -1;
-      const setHotVertex = (index) => {
-        if (index === hotIndex) return;
-        const markers = activeDrawingRef.current?.vertexMarkers || [];
-        const setScale = (i, on) => {
-          const el = markers[i]?.marker?.content;
-          if (!el) return;
-          el.style.transition = "transform 120ms ease-out";
-          el.style.transform = on ? "scale(2)" : "";
-        };
-        if (hotIndex >= 0) setScale(hotIndex, false);
-        if (index >= 0) setScale(index, true);
-        hotIndex = index;
-      };
 
       undoActiveDrawingRef.current = () => {
         if (activeDrawingRef.current?.overlay !== overlay || committedPoints.length === 0) return;
-        setHotVertex(-1);
         committedPoints.pop();
         const last = activeDrawingRef.current.vertexMarkers.pop();
         if (last) clearVertexMarkers([last]);
@@ -2119,13 +2096,7 @@ function DrawingToolsLayerComponent({
           if (activeDrawingRef.current?.overlay !== overlay) {
             return;
           }
-          setHotVertex(-1);
           if (type === "polygon") {
-            if (isClosingVertex(committedPoints, event.latLng)) {
-              finishPathShape();
-              return;
-            }
-
             if (isDuplicateVertex(committedPoints, event.latLng)) {
               return;
             }
@@ -2133,11 +2104,6 @@ function DrawingToolsLayerComponent({
             overlay.setPath(committedPoints);
             addDraftVertexMarker(event.latLng, committedPoints.length - 1);
           } else {
-            if (isEndingPolyline(committedPoints, event.latLng)) {
-              finishPathShape();
-              return;
-            }
-
             if (isDuplicateVertex(committedPoints, event.latLng)) {
               return;
             }
@@ -2162,12 +2128,6 @@ function DrawingToolsLayerComponent({
           overlay.setPath([...committedPoints, event.latLng]);
           publishActiveDrawing(type, overlay);
 
-          // Highlight the vertex that a click would close/finish on.
-          const closing = type === "polygon"
-            ? committedPoints.length >= 3 && isClosingVertex(committedPoints, event.latLng)
-            : committedPoints.length >= 2 && isEndingPolyline(committedPoints, event.latLng);
-          setHotVertex(closing ? (type === "polygon" ? 0 : committedPoints.length - 1) : -1);
-
           // Live readout: running total and current segment (plus area for polygons).
           const spherical = gm.geometry?.spherical;
           const active = activeDrawingRef.current;
@@ -2178,7 +2138,6 @@ function DrawingToolsLayerComponent({
           if (type === "polygon" && committedPoints.length >= 2) {
             text = `${fmtArea(spherical.computeArea([...committedPoints, event.latLng]))} · ${text}`;
           }
-          if (closing) text = type === "polygon" ? "Click to close shape" : "Click to finish line";
           active.liveLabel = active.liveLabel || createLabelMarker(map, event.latLng);
           setLiveLabel(active.liveLabel, event.latLng, text, isSatelliteRef.current);
         }),
@@ -2187,7 +2146,6 @@ function DrawingToolsLayerComponent({
       listeners.push(
         gm.event.addListener(map, "dblclick", (event) => {
           event?.domEvent?.preventDefault?.();
-          finishPathShape();
         }),
       );
 
@@ -2199,8 +2157,8 @@ function DrawingToolsLayerComponent({
 
       toast.info(
         type === "polygon"
-          ? "Click points on the map. Click the first point, double-click, Enter or right-click to finish. Backspace undoes."
-          : "Click line points. Click the last point, double-click, Enter or right-click to finish. Backspace undoes.",
+          ? "Click polygon points. Click the first point, use Finish, Enter or right-click to close. Backspace undoes."
+          : "Click line points. Use Finish, Enter or right-click to finish. Backspace undoes.",
         { position: "bottom-right", autoClose: 2500 },
       );
     } else if (type === "rectangle" || type === "circle") {
@@ -2339,11 +2297,11 @@ function DrawingToolsLayerComponent({
     shapesRef.current.forEach(({ type, overlay }) => {
       if (!overlay || type === "polyline") return;
       overlay.setOptions?.({
-        strokeOpacity: resolvedPolygonOpacity,
-        fillOpacity: resolvedPolygonOpacity,
+        strokeOpacity: 0,
+        fillOpacity: 0,
       });
     });
-  }, [resolvedPolygonOpacity]);
+  }, [resolvedPolygonOpacity, resolvedPolygonFillOpacity]);
 
   // Keep map and overlay cursor in sync with active drawing mode.
   useEffect(() => {

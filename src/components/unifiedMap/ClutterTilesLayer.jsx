@@ -91,7 +91,7 @@ const ClutterTilesLayer = ({
       });
   }, [enabled, visibleFeatureCollection, map]);
 
-  useDeckLayerGroup("clutterTiles", clutterLayer ? [clutterLayer] : []);
+  useDeckLayerGroup("background", clutterLayer ? [clutterLayer] : []);
 
   if (!enabled) return null;
 

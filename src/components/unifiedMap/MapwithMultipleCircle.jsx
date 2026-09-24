@@ -1919,7 +1919,11 @@ const MapWithMultipleCircles = ({
   }, [activePolygonData, enableGrid, locationsToRender]);
 
   const handleHover = useCallback((info) => {
-    primaryLogTooltipRef.current?.update(info);
+    onMarkerHover?.(info?.object ?? null);
+  }, [onMarkerHover]);
+
+  const handlePrimaryTooltipClick = useCallback((info) => {
+    primaryLogTooltipRef.current?.select(info);
   }, []);
 
   // Process and filter neighbor data by polygon AND Legend
@@ -2587,6 +2591,8 @@ const MapWithMultipleCircles = ({
             gridCells={enableGrid ? visibleGridCells : EMPTY_ARRAY}
             gridOpacity={GRID_POLYGON_FILL_OPACITY}
             drawingShapes={drawingShapes}
+            drawingOpacity={polygonOpacity}
+            nativeOutlinePaths={showPolygonBoundary ? polygonGridAverages : EMPTY_ARRAY}
             siteData={siteData}
             predictionGridData={predictionGridData}
             onGridHover={handleDeckGridHover}
@@ -2597,6 +2603,7 @@ const MapWithMultipleCircles = ({
             opacity={opacity}
             selectedIndex={activeMarkerIndex}
             onClick={handlePrimaryClick}
+            onPrimaryTooltipClick={handlePrimaryTooltipClick}
             radiusMinPixels={4}
             radiusMaxPixels={40}
             showPrimaryLogs={showPoints}
@@ -2613,8 +2620,9 @@ const MapWithMultipleCircles = ({
             onImageLogClick={handleImageLogClick}
             showImageLogs={showImageIcons}
             showNeighbors={showNeighbors}
-            pickable={!disableDeckInteractions}
-            autoHighlight={!disableDeckInteractions}
+            pickable={!disableDeckInteractions && !drawingEnabled && !projectPolygonEditEnabled}
+            autoHighlight={!disableDeckInteractions && !drawingEnabled && !projectPolygonEditEnabled}
+            interactionsDisabled={disableDeckInteractions || drawingEnabled || projectPolygonEditEnabled}
           />
         )}
 
@@ -2632,7 +2640,7 @@ const MapWithMultipleCircles = ({
                 fillOpacity: 0,
                 strokeColor: boundaryStrokeColor,
                 strokeWeight: 1,
-                strokeOpacity: resolvedPolygonOpacity,
+                strokeOpacity: 0,
                 zIndex: 2500,
                 clickable: isEditableBoundary,
                 editable: isEditableBoundary,
@@ -2737,7 +2745,7 @@ const MapWithMultipleCircles = ({
       </GoogleMap>
       </DeckLayerRegistryProvider>
 
-      {map && shouldRenderDeckOverlay && showPoints && !disableDeckInteractions && (
+      {map && shouldRenderDeckOverlay && showPoints && !disableDeckInteractions && !drawingEnabled && !projectPolygonEditEnabled && (
         <PrimaryLogTooltip
           ref={primaryLogTooltipRef}
           map={map}
@@ -2759,7 +2767,7 @@ const MapWithMultipleCircles = ({
 
       {enableGrid && hoveredCell && (
         <div
-          className="absolute bg-white/95 backdrop-blur-sm rounded-lg shadow-lg p-3 z-20 min-w-[190px] text-xs pointer-events-none"
+          className="absolute bg-white/95 backdrop-blur-sm rounded-lg shadow-lg p-3 z-[1000000] min-w-[190px] text-xs pointer-events-none"
           style={{
             left: `${hoveredCellTooltipPos?.x ?? 16}px`,
             top: `${hoveredCellTooltipPos?.y ?? 16}px`,

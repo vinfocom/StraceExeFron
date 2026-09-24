@@ -93,7 +93,7 @@ const InsightMarkers = ({ insights = [], show = false, radius = 10 }) => {
     [markerRows, radius],
   );
 
-  useDeckLayerGroup("insightMarkers", show ? [connectionLayer, markerLayer] : []);
+  useDeckLayerGroup("events", show ? [connectionLayer, markerLayer] : [], 40);
 
   useEffect(() => {
     if (!show || !map || !window.google?.maps || markerRows.length === 0) return;

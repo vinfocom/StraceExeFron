@@ -1,4 +1,5 @@
-import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
+import React, { createContext, useCallback, useContext, useEffect, useId, useMemo, useRef, useState } from "react";
+import { MAP_LAYER_CATEGORIES, registerMapLayerGroup } from "./mapLayerPolicy.js";
 
 const DeckLayerRegistryContext = createContext(null);
 const DeckLayerRegistryVersionContext = createContext(0);
@@ -11,14 +12,15 @@ export const DeckLayerRegistryProvider = ({ children }) => {
   const groupsRef = useRef(new Map());
   const [version, setVersion] = useState(0);
 
-  const registerGroup = useCallback((name, layers) => {
-    groupsRef.current.set(name, Array.isArray(layers) ? layers.filter(Boolean) : []);
-    setVersion((value) => value + 1);
-    return () => {
-      if (!groupsRef.current.has(name)) return;
-      groupsRef.current.delete(name);
-      setVersion((value) => value + 1);
-    };
+  const registerGroup = useCallback((ownerId, category, layers, order = 0) => {
+    return registerMapLayerGroup(
+      groupsRef.current,
+      ownerId,
+      category,
+      layers,
+      order,
+      () => setVersion((value) => value + 1),
+    );
   }, []);
 
   const value = useMemo(() => ({ groupsRef, registerGroup }), [registerGroup]);
@@ -39,9 +41,10 @@ export const useDeckLayerRegistry = () => {
     : { groups: new Map(), version: 0 };
 };
 
-export const useDeckLayerGroup = (name, layers) => {
+export const useDeckLayerGroup = (category, layers, order = 0) => {
   const context = useContext(DeckLayerRegistryContext);
   const registerGroup = context?.registerGroup;
+  const ownerId = useId();
   const stableLayersRef = useRef({ input: null, value: EMPTY_LAYERS });
   const stableLayers = useMemo(() => {
     const nextLayers = Array.isArray(layers) ? layers.filter(Boolean) : EMPTY_LAYERS;
@@ -54,6 +57,10 @@ export const useDeckLayerGroup = (name, layers) => {
 
   useEffect(() => {
     if (!registerGroup) return undefined;
-    return registerGroup(name, stableLayers);
-  }, [registerGroup, name, stableLayers]);
+    if (!Object.hasOwn(MAP_LAYER_CATEGORIES, category)) {
+      if (import.meta.env?.DEV) console.warn(`[DeckLayerRegistry] Unknown layer category "${category}".`);
+      return undefined;
+    }
+    return registerGroup(ownerId, category, stableLayers, order);
+  }, [registerGroup, ownerId, category, stableLayers, order]);
 };

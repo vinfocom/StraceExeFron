@@ -274,7 +274,8 @@ export default function RealtimeNetworkMap() {
 
     if (!deckOverlayRef.current) {
       deckOverlayRef.current = new GoogleMapsOverlay({
-        interleaved: false,
+        // Keep Google Maps DOM tooltips above the WebGL log layer.
+        interleaved: true,
         glOptions: { preserveDrawingBuffer: false },
       });
     }

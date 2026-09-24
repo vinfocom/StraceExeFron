@@ -3061,10 +3061,27 @@ const NetworkPlannerMap = ({
     [sectorGeometryList],
   );
 
+  const selectedSectorOutlineFeature = useMemo(() => {
+    if (!selectedSectorGeometry) return null;
+    const { p0, p1, p2 } = selectedSectorGeometry;
+    return {
+      polygon: [
+        [p0.lng, p0.lat],
+        [p1.lng, p1.lat],
+        [p2.lng, p2.lat],
+        [p0.lng, p0.lat],
+      ],
+    };
+  }, [selectedSectorGeometry]);
+
   const hoveredMatchGeometry = useMemo(
     () => sectorGeometryList.find((item) => item.isHoveredMatch) || null,
     [sectorGeometryList],
   );
+
+  const hoveredMatchPathFeatures = useMemo(() => hoveredMatchGeometry && logCoords ? [{
+    path: [[hoveredMatchGeometry.p0.lng, hoveredMatchGeometry.p0.lat], [logCoords.lng, logCoords.lat]],
+  }] : [], [hoveredMatchGeometry, logCoords]);
 
   const bulkSectorFeatures = useMemo(() => {
     return sectorGeometryList
@@ -4399,6 +4416,8 @@ const NetworkPlannerMap = ({
       <NetworkSectorGLLayer
         map={map}
         sectorFeatures={bulkSectorFeatures}
+        selectedSectorFeature={selectedSectorOutlineFeature}
+        highlightPaths={hoveredMatchPathFeatures}
         siteFeatures={showSiteMarkers ? bulkSiteFeatures : []}
         sectorLabelFeatures={bulkSectorLabelFeatures}
         siteLabelFeatures={bulkSiteLabelFeatures}
@@ -4709,8 +4728,9 @@ const NetworkPlannerMap = ({
           path={[hoveredMatchGeometry.p0, logCoords]}
           options={{
             strokeColor: "#000000",
-            strokeOpacity: 1.0,
+            strokeOpacity: 0,
             strokeWeight: 2,
+            clickable: false,
             zIndex: 999999,
           }}
           onLoad={(polyline) => {
@@ -4746,10 +4766,10 @@ const NetworkPlannerMap = ({
                 fillColor: effectiveSector.color,
                 // This is always the selected sector, so opacity/stroke only ever
                 // need to account for whether prediction-grid data is loaded for it.
-                fillOpacity: isSectorDataActive ? 0.22 : 0.95,
+                fillOpacity: 0,
                 strokeWeight: 2,
                 strokeColor: "#111827",
-                strokeOpacity: isSectorDataActive ? 0.95 : 1,
+                strokeOpacity: 0,
                 // Size must always win the stacking order: a selected/active
                 // sector must never rise above a smaller sibling cell (e.g. clicking the
                 // bigger 900 MHz triangle must not cover/hide the smaller 1800 MHz one),

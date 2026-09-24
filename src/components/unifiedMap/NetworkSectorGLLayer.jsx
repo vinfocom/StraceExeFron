@@ -8,16 +8,18 @@
 // InfoWindow + draggable "move" handle) is intentionally excluded from this
 // layer and still rendered natively by NetworkPlannerMap.jsx.
 import React, { useCallback, useMemo } from "react";
-import { PolygonLayer, ScatterplotLayer, TextLayer } from "@deck.gl/layers";
+import { PathLayer, PolygonLayer, ScatterplotLayer, TextLayer } from "@deck.gl/layers";
 import { useDeckLayerGroup } from "@/components/maps/deckLayerRegistry.jsx";
 
 const SECTOR_LAYER_ID = "network-sector-triangles-layer";
 
 const NetworkSectorGLLayer = ({
   sectorFeatures = [],
+  selectedSectorFeature = null,
   siteFeatures = [],
   sectorLabelFeatures = [],
   siteLabelFeatures = [],
+  highlightPaths = [],
   onSectorClick,
   onSectorRightClick,
   onSiteClick,
@@ -81,6 +83,22 @@ const NetworkSectorGLLayer = ({
           },
         }),
       );
+    }
+
+    if (selectedSectorFeature) {
+      layers.push(new PolygonLayer({
+        id: "network-selected-sector-outline-layer",
+        data: [selectedSectorFeature],
+        getPolygon: (d) => d.polygon,
+        getLineColor: [17, 24, 39, 255],
+        getLineWidth: 2,
+        lineWidthUnits: "pixels",
+        filled: false,
+        stroked: true,
+        extruded: false,
+        pickable: false,
+        parameters: { depthTest: false },
+      }));
     }
 
     if (Array.isArray(siteFeatures) && siteFeatures.length > 0) {
@@ -154,6 +172,7 @@ const NetworkSectorGLLayer = ({
     return layers;
   }, [
     sortedSectorFeatures,
+    selectedSectorFeature,
     siteFeatures,
     sectorLabelFeatures,
     siteLabelFeatures,
@@ -162,7 +181,20 @@ const NetworkSectorGLLayer = ({
     handleSiteClick,
   ]);
 
-  useDeckLayerGroup("sectors", sectorLayers);
+  useDeckLayerGroup("sites", sectorLayers);
+  const highlightLayers = useMemo(() => highlightPaths.length ? [new PathLayer({
+    id: "network-sector-match-highlight",
+    data: highlightPaths,
+    getPath: (item) => item.path,
+    getColor: [0, 0, 0, 255],
+    getWidth: 2,
+    widthUnits: "pixels",
+    widthMinPixels: 2,
+    rounded: true,
+    pickable: false,
+    parameters: { depthTest: false },
+  })] : [], [highlightPaths]);
+  useDeckLayerGroup("drawings", highlightLayers, 90);
 
   return null;
 };

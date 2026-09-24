@@ -31,9 +31,7 @@ import MapLegend from "@/components/map/MapLegend";
 import SiteLegend from "@/components/unifiedMap/SiteLegend";
 import DrawingToolsLayer from "@/components/map/tools/DrawingToolsLayer";
 import LoadingProgress from "@/components/LoadingProgress";
-import TechHandoverMarkers, {
-  clearHandoverPolylines,
-} from "@/components/unifiedMap/TechHandoverMarkers";
+import TechHandoverMarkers from "@/components/unifiedMap/TechHandoverMarkers";
 import SubSessionMarkers from "@/components/unifiedMap/SubSessionMarkers";
 import InsightMarkers from "@/components/unifiedMap/InsightMarkers";
 import { extractInsightRows } from "@/components/unifiedMap/insightUtils";
@@ -2309,30 +2307,6 @@ const UnifiedMapView = () => {
       setSelectedSubSessionTarget(null);
     }
   }, [showSubSession]);
-
-  useEffect(() => {
-    if (!techHandOver) {
-      clearHandoverPolylines("technology");
-    }
-  }, [techHandOver]);
-
-  useEffect(() => {
-    if (!bandHandover) {
-      clearHandoverPolylines("band");
-    }
-  }, [bandHandover]);
-
-  useEffect(() => {
-    if (!pciHandover) {
-      clearHandoverPolylines("pci");
-    }
-  }, [pciHandover]);
-
-  useEffect(() => {
-    return () => {
-      clearHandoverPolylines();
-    };
-  }, []);
 
   const handleSitePredictionScenarioSaved = useCallback((scenario) => {
     const scenarioId = Number(scenario);
@@ -8241,6 +8215,7 @@ const UnifiedMapView = () => {
                
               <SubSessionMarkers
                 show={showSubSession}
+                interactionsDisabled={ui.drawEnabled || (projectPolygonEditEnabled && polygonSource === "map")}
                 markers={visibleSubSessionMarkers}
                 thresholds={effectiveThresholds}
                 networkLogData={filteredLocations}
