@@ -131,13 +131,25 @@ const formatDrawingDistance = (meters, suffix = '') => (
     : `${Math.round(meters)} m${suffix}`
 );
 
-const getDrawingMeasurement = (drawing) => {
-  if (drawing?.type !== 'polyline') return null;
-  const path = getDrawingPath(drawing);
-  if (path.length < 2) return null;
+const formatDrawingArea = (squareMeters) => {
+  if (squareMeters >= 1e6) return `${(squareMeters / 1e6).toFixed(2)} km²`;
+  if (squareMeters >= 1e4) return `${(squareMeters / 1e4).toFixed(2)} ha`;
+  return `${Math.round(squareMeters)} m²`;
+};
 
+const getScreenAngleDeg = (a, b) => {
+  const mercY = (latDeg) => Math.log(Math.tan(Math.PI / 4 + (latDeg * Math.PI) / 360));
+  const dx = ((b[0] - a[0]) * Math.PI) / 180;
+  const dy = -(mercY(b[1]) - mercY(a[1]));
+  if (!Number.isFinite(dx) || !Number.isFinite(dy) || (dx === 0 && dy === 0)) return 0;
+  let deg = (Math.atan2(dy, dx) * 180) / Math.PI;
+  if (deg > 90) deg -= 180;
+  else if (deg < -90) deg += 180;
+  return deg;
+};
+
+const getPathLengthMeters = (path) => {
   let totalMeters = 0;
-  const segments = [];
   for (let index = 1; index < path.length; index += 1) {
     const [lngA, latA] = path[index - 1];
     const [lngB, latB] = path[index];
@@ -147,38 +159,122 @@ const getDrawingMeasurement = (drawing) => {
     const dLng = ((lngB - lngA) * Math.PI) / 180;
     const haversine = Math.sin(dLat / 2) ** 2
       + Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) ** 2;
-    const distance = 6371008.8 * 2 * Math.atan2(Math.sqrt(haversine), Math.sqrt(1 - haversine));
-    segments.push({ start: path[index - 1], end: path[index], distance });
-    totalMeters += distance;
+    totalMeters += 6371008.8 * 2 * Math.atan2(Math.sqrt(haversine), Math.sqrt(1 - haversine));
+  }
+  return totalMeters;
+};
+
+const getPathAreaSquareMeters = (path) => {
+  if (path.length < 3) return 0;
+  const meanLat = path.reduce((sum, [, lat]) => sum + lat, 0) / path.length;
+  const metersPerLng = 111320 * Math.max(0.1, Math.cos((meanLat * Math.PI) / 180));
+  const metersPerLat = 111320;
+  let area = 0;
+  for (let index = 0; index < path.length; index += 1) {
+    const nextIndex = (index + 1) % path.length;
+    const x1 = path[index][0] * metersPerLng;
+    const y1 = path[index][1] * metersPerLat;
+    const x2 = path[nextIndex][0] * metersPerLng;
+    const y2 = path[nextIndex][1] * metersPerLat;
+    area += x1 * y2 - x2 * y1;
+  }
+  return Math.abs(area) / 2;
+};
+
+const getBoundsCenter = (path) => {
+  const lngs = path.map(([lng]) => lng);
+  const lats = path.map(([, lat]) => lat);
+  return [
+    (Math.min(...lngs) + Math.max(...lngs)) / 2,
+    (Math.min(...lats) + Math.max(...lats)) / 2,
+  ];
+};
+
+const getDrawingLabel = (drawing) => {
+  const type = drawing?.type;
+
+  if (type === 'circle') {
+    const center = drawing.geometry?.circle?.center;
+    const radius = Number(drawing.geometry?.circle?.radius);
+    if (!center || !Number.isFinite(radius) || radius <= 0) return null;
+    const sourceArea = Number(drawing?.area);
+    const area = Number.isFinite(sourceArea) && sourceArea > 0
+      ? sourceArea
+      : Math.PI * radius * radius;
+    return {
+      position: [Number(center.lng), Number(center.lat)],
+      text: `r ${formatDrawingDistance(radius)} · ${formatDrawingArea(area)}`,
+      angle: 0,
+    };
   }
 
-  if (!Number.isFinite(totalMeters) || totalMeters <= 0) return null;
-  let remaining = totalMeters / 2;
-  let position = path[0];
-  for (const segment of segments) {
-    if (remaining <= segment.distance) {
-      const ratio = segment.distance > 0 ? remaining / segment.distance : 0.5;
-      position = [
-        segment.start[0] + (segment.end[0] - segment.start[0]) * ratio,
-        segment.start[1] + (segment.end[1] - segment.start[1]) * ratio,
-      ];
-      break;
+  const path = getDrawingPath(drawing);
+  if (type === 'polyline') {
+    if (path.length < 2) return null;
+
+    let totalMeters = 0;
+    let midpointPosition = path[0];
+    let midpointSegment = [path[0], path[1]];
+    const segments = [];
+    for (let index = 1; index < path.length; index += 1) {
+      const segmentPath = [path[index - 1], path[index]];
+      const distance = getPathLengthMeters(segmentPath);
+      segments.push({ start: segmentPath[0], end: segmentPath[1], distance });
+      totalMeters += distance;
     }
-    remaining -= segment.distance;
+
+    if (!Number.isFinite(totalMeters) || totalMeters <= 0) return null;
+    let remaining = totalMeters / 2;
+    for (const segment of segments) {
+      if (remaining <= segment.distance) {
+        const ratio = segment.distance > 0 ? remaining / segment.distance : 0.5;
+        midpointPosition = [
+          segment.start[0] + (segment.end[0] - segment.start[0]) * ratio,
+          segment.start[1] + (segment.end[1] - segment.start[1]) * ratio,
+        ];
+        midpointSegment = [segment.start, segment.end];
+        break;
+      }
+      remaining -= segment.distance;
+    }
+
+    const sourceDistance = Number(drawing?.length);
+    const baseDistance = Number.isFinite(sourceDistance) && sourceDistance > 0
+      ? sourceDistance
+      : totalMeters;
+    const terrainDistance = Number(drawing?.terrainDistance);
+    const hasTerrainDistance = drawing?.terrainMode === true
+      && Number.isFinite(terrainDistance)
+      && terrainDistance > 0;
+    const displayedDistance = hasTerrainDistance ? terrainDistance : baseDistance;
+    return {
+      position: midpointPosition,
+      text: formatDrawingDistance(displayedDistance, hasTerrainDistance ? ' terrain' : ''),
+      angle: getScreenAngleDeg(midpointSegment[0], midpointSegment[1]),
+    };
   }
 
-  const sourceDistance = Number(drawing?.length);
-  const baseDistance = Number.isFinite(sourceDistance) && sourceDistance > 0
-    ? sourceDistance
-    : totalMeters;
-  const terrainDistance = Number(drawing?.terrainDistance);
-  const hasTerrainDistance = drawing?.terrainMode === true
-    && Number.isFinite(terrainDistance)
-    && terrainDistance > 0;
-  const displayedDistance = hasTerrainDistance ? terrainDistance : baseDistance;
+  if (type !== 'polygon' && type !== 'rectangle') return null;
+  const areaPath = path.length > 1
+    && path[0][0] === path[path.length - 1][0]
+    && path[0][1] === path[path.length - 1][1]
+    ? path.slice(0, -1)
+    : path;
+  if (areaPath.length < 3) return null;
+
+  const sourceArea = Number(drawing?.area);
+  const area = Number.isFinite(sourceArea) && sourceArea > 0
+    ? sourceArea
+    : getPathAreaSquareMeters(areaPath);
+  const sourcePerimeter = Number(drawing?.length);
+  const perimeter = Number.isFinite(sourcePerimeter) && sourcePerimeter > 0
+    ? sourcePerimeter
+    : getPathLengthMeters([...areaPath, areaPath[0]]);
+  if (!Number.isFinite(area) || !Number.isFinite(perimeter)) return null;
   return {
-    position,
-    text: formatDrawingDistance(displayedDistance, hasTerrainDistance ? ' terrain' : ''),
+    position: getBoundsCenter(areaPath),
+    text: `${formatDrawingArea(area)} · P ${formatDrawingDistance(perimeter)}`,
+    angle: 0,
   };
 };
 
@@ -604,22 +700,27 @@ const DeckGLOverlay = ({
       .map((drawing) => ({
         id: drawing?.id,
         type: drawing?.type,
+        geometry: drawing?.geometry,
+        area: drawing?.area,
+        length: drawing?.length,
+        terrainMode: drawing?.terrainMode,
+        terrainDistance: drawing?.terrainDistance,
         path: getDrawingPath(drawing),
       }))
       .filter((drawing) => drawing.path.length >= 2 && drawing.path.every(([lng, lat]) => Number.isFinite(lng) && Number.isFinite(lat))),
     [drawingShapes],
   );
 
-  const drawingMeasurementData = useMemo(
-    () => (drawingShapes || [])
+  const drawingLabelData = useMemo(
+    () => drawingData
       .map((drawing) => {
-        const measurement = getDrawingMeasurement(drawing);
+        const measurement = getDrawingLabel(drawing);
         return measurement
           ? { id: `${drawing?.id || drawing?.type || 'drawing'}-measurement`, ...measurement }
           : null;
       })
       .filter(Boolean),
-    [drawingShapes],
+    [drawingData],
   );
 
   const siteRenderData = useMemo(
@@ -894,12 +995,18 @@ const DeckGLOverlay = ({
         parameters: { depthTest: false },
       }));
 
-      if (drawingMeasurementData.length > 0) {
+      if (drawingLabelData.length > 0) {
         layers.push(new TextLayer({
           id: 'user-drawings-measurement-label-layer',
-          data: drawingMeasurementData,
+          data: drawingLabelData,
           getPosition: (measurement) => measurement.position,
           getText: (measurement) => measurement.text,
+          getAngle: (measurement) => measurement.angle || 0,
+          getPixelOffset: (measurement) => {
+            const rad = ((measurement.angle || 0) * Math.PI) / 180;
+            const offsetPx = 10;
+            return [offsetPx * Math.sin(rad), -offsetPx * Math.cos(rad)];
+          },
           getSize: 13,
           sizeUnits: 'pixels',
           getColor: [15, 23, 42, 255],
@@ -951,7 +1058,7 @@ const DeckGLOverlay = ({
     } catch (e) {
       // Overlay can detach during map teardown; skip this update.
     }
-  }, [map, primaryData, neighborData, gridData, imageLogData, metricLabelData, drawingData, drawingMeasurementData, predictionRenderData, siteRenderData, registeredGroups, registryVersion, showPrimaryLogs, showNeighbors, showGrid, gridOpacity, handleGridHover, showImageLogs, selectedIndex, radius, radiusMinPixels, radiusMaxPixels, opacity, neighborOpacity, showNumCells, showMetricLabels, getColor, getNeighborColor, handleImageLogClick, handlePrimaryHover, isValidMapInstance, pickable, autoHighlight, mapZoom]);
+  }, [map, primaryData, neighborData, gridData, imageLogData, metricLabelData, drawingData, drawingLabelData, predictionRenderData, siteRenderData, registeredGroups, registryVersion, showPrimaryLogs, showNeighbors, showGrid, gridOpacity, handleGridHover, showImageLogs, selectedIndex, radius, radiusMinPixels, radiusMaxPixels, opacity, neighborOpacity, showNumCells, showMetricLabels, getColor, getNeighborColor, handleImageLogClick, handlePrimaryHover, isValidMapInstance, pickable, autoHighlight, mapZoom]);
 
   useEffect(() => {
     return () => {
