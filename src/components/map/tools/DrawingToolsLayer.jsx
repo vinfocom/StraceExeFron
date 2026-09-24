@@ -1009,32 +1009,6 @@ function getScreenAngleDeg(a, b) {
   return deg;
 }
 
-function getPolylineDetails(polyline) {
-  const gm = window.google.maps;
-  const path = polyline.getPath?.();
-  if (!path) return { length: 0, center: null, angle: 0 };
-  const len = gm.geometry.spherical.computeLength(path);
-  const points = path.getArray();
-  if (points.length < 2) return { length: 0, center: points[0], angle: 0 };
-
-  let dist = 0;
-  const targetDist = len / 2;
-  let mid = points[0];
-  let angle = 0;
-
-  for (let i = 0; i < points.length - 1; i++) {
-    const segLen = gm.geometry.spherical.computeDistanceBetween(points[i], points[i+1]);
-    if (dist + segLen >= targetDist) {
-      const fraction = (targetDist - dist) / segLen;
-      mid = gm.geometry.spherical.interpolate(points[i], points[i+1], fraction);
-      angle = getScreenAngleDeg(points[i], points[i+1]);
-      break;
-    }
-    dist += segLen;
-  }
-  return { length: len, center: mid, angle };
-}
-
 const clampOpacity = (value, fallback = 0.35) => {
   const parsed = Number(value);
   if (!Number.isFinite(parsed)) return fallback;
@@ -1415,12 +1389,6 @@ function DrawingToolsLayerComponent({
       collectedDrawingRef.current[index] = updatedEntry;
       callbacksRef.current.onDrawingsChange?.([...collectedDrawingRef.current]);
       callbacksRef.current.onSummary?.(updatedEntry);
-      if (shapeObj.labelMarker) {
-        const text = metrics.terrainDistance >= 1000
-          ? `${metrics.terrainLengthInKm} km terrain`
-          : `${Math.round(metrics.terrainDistance)} m terrain`;
-        setAdvancedMarkerLabel(shapeObj.labelMarker, text);
-      }
     } catch (error) {
       if (shapeObj.terrainRequestId === requestId) {
         console.warn("[UnifiedMap] Terrain elevation request failed:", error);
@@ -1636,36 +1604,15 @@ function DrawingToolsLayerComponent({
     };
 
     if (type === "polyline") {
-      const updateDistanceLabel = () => {
-        const { length, center, angle } = getPolylineDetails(overlay);
-        const displayedLength = terrainEnabled && shapeObj.terrainDistance
-          ? shapeObj.terrainDistance
-          : length;
-        const text = displayedLength >= 1000
-          ? `${(displayedLength / 1000).toFixed(2)} km${terrainEnabled && shapeObj.terrainDistance ? " terrain" : ""}`
-          : `${Math.round(displayedLength)} m${terrainEnabled && shapeObj.terrainDistance ? " terrain" : ""}`;
-        if (!shapeObj.labelMarker) {
-          const AdvancedMarkerElement = window.google?.maps?.marker?.AdvancedMarkerElement;
-          shapeObj.labelMarker = AdvancedMarkerElement
-            ? new AdvancedMarkerElement({ map, position: center, zIndex: DRAWING_LABEL_Z_INDEX })
-            : null;
-        } else {
-          shapeObj.labelMarker.position = center;
-        }
-        setAdvancedMarkerLabel(shapeObj.labelMarker, text);
-        orientAdvancedMarkerLabel(shapeObj.labelMarker, angle);
-      };
       const path = overlay.getPath?.();
       if (path) {
         listeners.push(window.google.maps.event.addListener(path, "set_at", () => {
-          updateDistanceLabel();
           syncVertexMarkerPositions(shapeObj.vertexMarkers, path);
           rebuildSegmentLabels();
           update();
         }));
         ["insert_at", "remove_at"].forEach((ev) =>
           listeners.push(window.google.maps.event.addListener(path, ev, () => {
-            updateDistanceLabel();
             rebuildVertexMarkers();
             rebuildSegmentLabels();
             update();
@@ -1673,12 +1620,10 @@ function DrawingToolsLayerComponent({
         );
         ["drag", "dragend"].forEach((ev) =>
           listeners.push(window.google.maps.event.addListener(overlay, ev, () => {
-            updateDistanceLabel();
             syncVertexMarkerPositions(shapeObj.vertexMarkers, path);
             if (ev === "dragend") rebuildSegmentLabels();
           })),
         );
-        updateDistanceLabel();
         rebuildVertexMarkers();
         rebuildSegmentLabels();
       }
@@ -1742,17 +1687,7 @@ function DrawingToolsLayerComponent({
   }, [map, terrainEnabled]);
 
   useEffect(() => {
-    if (!terrainEnabled) {
-      shapesRef.current.forEach((shapeObj) => {
-        if (shapeObj.type !== "polyline" || !shapeObj.labelMarker) return;
-        const { length } = getPolylineDetails(shapeObj.overlay);
-        setAdvancedMarkerLabel(
-          shapeObj.labelMarker,
-          length >= 1000 ? `${(length / 1000).toFixed(2)} km` : `${Math.round(length)} m`,
-        );
-      });
-      return;
-    }
+    if (!terrainEnabled) return;
     shapesRef.current.forEach((shapeObj) => {
       if (shapeObj.type !== "polyline") return;
       void reAnalyzeShapeRef.current?.(shapeObj);
