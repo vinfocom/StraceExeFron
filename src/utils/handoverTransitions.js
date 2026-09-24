@@ -8,6 +8,10 @@ export const DEFAULT_SERVING_TRANSITION_CONFIRMATION_MS = 2 * 1000;
 
 const MISSING_SESSION = "__session_missing__";
 const INVALID_TEXT_VALUES = new Set(["", "n/a", "na", "null", "undefined", "-"]);
+const sessionCollator = new Intl.Collator(undefined, {
+  numeric: true,
+  sensitivity: "base",
+});
 
 const EXPLICIT_HANDOVER_COMPLETE_RE = /\b(?:handover|hand\s*over)\b.{0,80}\b(?:complete(?:d|ion)?|success(?:ful(?:ly)?)?)\b/i;
 const EXPLICIT_HANDOVER_FAILURE_RE = /\b(?:handover|hand\s*over)\b.{0,80}\b(?:fail(?:ed|ure|uire)?|reject(?:ed)?|abort(?:ed)?)\b|\bhandover\s*fail(?:ure|uire)?\b/i;
@@ -496,10 +500,7 @@ export const buildOrderedDriveLogs = (logs = []) =>
       };
     })
     .sort((a, b) => {
-      const sessionCompare = String(a.sessionKey).localeCompare(String(b.sessionKey), undefined, {
-        numeric: true,
-        sensitivity: "base",
-      });
+      const sessionCompare = sessionCollator.compare(String(a.sessionKey), String(b.sessionKey));
       if (sessionCompare !== 0) return sessionCompare;
 
       // RF chronology comes from time. The database ID is only a tie-breaker.
@@ -510,10 +511,7 @@ export const buildOrderedDriveLogs = (logs = []) =>
       if (idCompare !== 0) return idCompare;
 
       if (a.logIdRaw && b.logIdRaw && a.logIdRaw !== b.logIdRaw) {
-        const rawCompare = a.logIdRaw.localeCompare(b.logIdRaw, undefined, {
-          numeric: true,
-          sensitivity: "base",
-        });
+        const rawCompare = sessionCollator.compare(a.logIdRaw, b.logIdRaw);
         if (rawCompare !== 0) return rawCompare;
       }
       return a.originalIndex - b.originalIndex;
@@ -902,8 +900,8 @@ const buildFieldTransitions = ({
   return transitions;
 };
 
-export const buildHandoverTransitions = (
-  logs = [],
+export const buildHandoverTransitionsFromOrdered = (
+  ordered = [],
   {
     neighborLogs = [],
     maxGapMs = DEFAULT_HANDOVER_MAX_GAP_MS,
@@ -911,7 +909,6 @@ export const buildHandoverTransitions = (
     minTargetSamples = 2,
   } = {},
 ) => {
-  const ordered = buildOrderedDriveLogs(logs);
   const technologyTransitions = [];
   const bandTransitions = [];
   const pciTransitions = [];
@@ -1005,3 +1002,9 @@ export const buildHandoverTransitions = (
 
   return { technologyTransitions, bandTransitions, pciTransitions };
 };
+
+// Backwards-compatible convenience API for non-rendering callers. The map
+// view uses buildHandoverTransitionsFromOrdered so filter changes never sort
+// the full raw log collection again.
+export const buildHandoverTransitions = (logs = [], options = {}) =>
+  buildHandoverTransitionsFromOrdered(buildOrderedDriveLogs(logs), options);

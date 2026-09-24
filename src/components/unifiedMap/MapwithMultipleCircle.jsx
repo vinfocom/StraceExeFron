@@ -1133,6 +1133,22 @@ const generateGridCellsOptimized = (
             };
             fillColor = getOverridablePciColor(rankedPcis[0][0]);
           }
+        } else if (
+          normalizedColorBy &&
+          normalizedColorBy !== "metric" &&
+          !isMacDetailGridMetric &&
+          !isCategoryGridMetric &&
+          !bestByColor?.name
+        ) {
+          // Same rule as PCI above, generalized to every other "Color By"
+          // category (provider/operator, band, technology, nodebid,
+          // cell_id, earfcn): a grid cell that has no data for the
+          // currently selected category cannot be assigned a category
+          // color. Force it grey instead of letting the underlying metric's
+          // threshold color leak through and make the cell look like it
+          // belongs to a category it doesn't actually have.
+          fillColor = "#9CA3AF";
+          bestByColor = null;
         }
       }
 
@@ -2200,11 +2216,29 @@ const MapWithMultipleCircles = ({
     const rows = gridCells
       .filter((cell) => cell.count > 0)
       .filter((cell) => {
-        if (categoryKey !== "pci") return true;
+        if (!categoryKey || categoryKey === "metric") {
+          // Plain numeric metric coloring: a cell with no valid value for
+          // the selected metric is intentionally grey on the map and must
+          // not create a legend entry for a value it doesn't have.
+          return (
+            cell.aggregatedValue !== null &&
+            cell.aggregatedValue !== undefined &&
+            Number.isFinite(Number(cell.aggregatedValue))
+          );
+        }
 
-        // PCI-less cells are intentionally grey on the map and must not
-        // create an "Unknown"/empty PCI entry in the legend.
-        return Number.isFinite(Number.parseInt(cell.bestByColor?.name, 10));
+        if (categoryKey === "pci") {
+          // PCI-less cells are intentionally grey on the map and must not
+          // create an "Unknown"/empty PCI entry in the legend.
+          return Number.isFinite(Number.parseInt(cell.bestByColor?.name, 10));
+        }
+
+        // Every other "Color By" category (provider/operator, band,
+        // technology, nodebid, cell_id, earfcn, mac_detail): a cell with no
+        // data for that category is intentionally grey on the map (see the
+        // matching fallback in generateGridCellsOptimized) and must not
+        // create a synthetic/"Unknown" legend entry either.
+        return Boolean(String(cell.bestByColor?.name ?? "").trim());
       })
       .map((cell) => {
         const centerLat = (cell.bounds.north + cell.bounds.south) / 2;

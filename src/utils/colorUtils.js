@@ -103,7 +103,7 @@ export const generateColorFromHash = (str) => {
   return DYNAMIC_COLOR_PALETTE[index];
 };
 
-export const normalizeProviderName = (rawName) => {
+const normalizeProviderNameUncached = (rawName) => {
   if (!rawName) return null;
 
   const invalidValues = ["000 000", "000000", " 000 000 ", "404440", "404011"];
@@ -182,7 +182,7 @@ export const normalizeProviderName = (rawName) => {
   return s;
 };
 
-export const normalizeTechName = (tech, band = null) => {
+const normalizeTechNameUncached = (tech, band = null) => {
   const technologyToken = String(tech ?? "").trim().toUpperCase().replace(/[^A-Z0-9]/g, "");
   // Preserve explicit modes before an NR band can reduce the label to generic 5G.
   if (technologyToken.includes("LTEANCHOR") && technologyToken.includes("NSA")) {
@@ -289,7 +289,7 @@ export const normalizeTechName = (tech, band = null) => {
   return tech;
 };
 
-export const normalizeBandName = (band) => {
+const normalizeBandNameUncached = (band) => {
   if (band === null || band === undefined) return "Unknown";
 
   const raw = String(band).trim();
@@ -324,6 +324,31 @@ export const normalizeBandName = (band) => {
   }
 
   return raw;
+};
+
+// These normalizers are used in several filter/legend passes. Cache by their
+// primitive inputs so the regex/text classification is paid once per field
+// value instead of once per render pass and log.
+const providerNameCache = new Map();
+const techNameCache = new Map();
+const bandNameCache = new Map();
+
+export const normalizeProviderName = (rawName) => {
+  const key = `${typeof rawName}:${String(rawName ?? "")}`;
+  if (!providerNameCache.has(key)) providerNameCache.set(key, normalizeProviderNameUncached(rawName));
+  return providerNameCache.get(key);
+};
+
+export const normalizeTechName = (tech, band = null) => {
+  const key = `${typeof tech}:${String(tech ?? "")}\u0000${typeof band}:${String(band ?? "")}`;
+  if (!techNameCache.has(key)) techNameCache.set(key, normalizeTechNameUncached(tech, band));
+  return techNameCache.get(key);
+};
+
+export const normalizeBandName = (band) => {
+  const key = `${typeof band}:${String(band ?? "")}`;
+  if (!bandNameCache.has(key)) bandNameCache.set(key, normalizeBandNameUncached(band));
+  return bandNameCache.get(key);
 };
 
 export const COLOR_SCHEMES = {

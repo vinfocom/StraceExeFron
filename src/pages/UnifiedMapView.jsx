@@ -76,7 +76,10 @@ import {
 import { PolygonChecker as FastPolygonChecker } from "@/utils/polygonUtils";
 import { getMetricValueFromLog } from "@/utils/metrics";
 import { shouldRenderLogOnMap } from "@/utils/mapEventRenderFilter";
-import { buildHandoverTransitions } from "@/utils/handoverTransitions";
+import {
+  buildOrderedDriveLogs,
+  buildHandoverTransitionsFromOrdered,
+} from "@/utils/handoverTransitions";
 import {
   findProjectInProjectsCache,
   upsertProjectInProjectsCache,
@@ -5171,9 +5174,28 @@ const UnifiedMapView = () => {
     [renderedLegendFilteredLocations],
   );
 
+  const orderedDriveLogs = useMemo(
+    () => buildOrderedDriveLogs(locations || EMPTY_LIST),
+    [locations],
+  );
+
   const baseHandoverTransitions = useMemo(() => {
-    const sourceLogs = handoverEligibleLogs;
-    if (!sourceLogs?.length) {
+    if (!handoverEligibleLogs?.length || !orderedDriveLogs.length) {
+      return {
+        technologyTransitions: [],
+        bandTransitions: [],
+        pciTransitions: [],
+      };
+    }
+
+    const eligibleLogs = new Set(handoverEligibleLogs);
+    const eligibleKeys = new Set(
+      handoverEligibleLogs.map(getLocationIdentityKey).filter(Boolean),
+    );
+    const orderedEligibleLogs = orderedDriveLogs.filter(({ loc }) =>
+      eligibleLogs.has(loc) || (getLocationIdentityKey(loc) && eligibleKeys.has(getLocationIdentityKey(loc))),
+    );
+    if (orderedEligibleLogs.length < 2) {
       return {
         technologyTransitions: [],
         bandTransitions: [],
@@ -5184,11 +5206,12 @@ const UnifiedMapView = () => {
     // Handover eligibility follows the active data/legend filters, not DeckGL's
     // zoom-dependent viewport sampling. Logs at an identical coordinate remain
     // eligible and are exposed together in the primary-log overlap tooltip.
-    return buildHandoverTransitions(sourceLogs, {
+    return buildHandoverTransitionsFromOrdered(orderedEligibleLogs, {
       neighborLogs: polygonFilteredNeighborData,
     });
   }, [
     handoverEligibleLogs,
+    orderedDriveLogs,
     polygonFilteredNeighborData,
   ]);
 

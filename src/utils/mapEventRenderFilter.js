@@ -22,6 +22,8 @@ const FIELD_KEYS = [
   "technology",
 ];
 
+const mapRenderEventTypeCache = new WeakMap();
+
 function collectText(log = {}) {
   const raw = log.raw_event || log.raw || null;
   const values = FIELD_KEYS.flatMap((key) => [log?.[key], raw?.[key]]);
@@ -31,7 +33,7 @@ function collectText(log = {}) {
     .toLowerCase();
 }
 
-export function getMapRenderEventType(log = {}) {
+function computeMapRenderEventType(log = {}) {
   const text = collectText(log);
 
   if (/\b(hand\s*over|handover|ho[_ -]?(attempt|success|failure|complete)|technology transition|band transition|pci transition)\b/i.test(text)) {
@@ -69,6 +71,14 @@ export function getMapRenderEventType(log = {}) {
   }
 
   return null;
+}
+
+export function getMapRenderEventType(log = {}) {
+  if (!log || typeof log !== "object") return computeMapRenderEventType(log);
+  if (mapRenderEventTypeCache.has(log)) return mapRenderEventTypeCache.get(log);
+  const eventType = computeMapRenderEventType(log);
+  mapRenderEventTypeCache.set(log, eventType);
+  return eventType;
 }
 
 export function shouldRenderLogOnMap(log = {}) {
