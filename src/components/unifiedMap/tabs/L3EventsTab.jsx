@@ -56,6 +56,10 @@ const MAX_VISIBLE_MAP_MESSAGES = 1000;
 const MAP_MESSAGE_ROW_HEIGHT = 52;
 const MAP_MESSAGE_OVERSCAN = 8;
 const CALL_MARKER_TYPES = new Set(["call-start", "disconnect", "dropped", "not-connected"]);
+const RADIO_MARKER_TYPES = new Set([
+  "vonr-start", "volte-start", "rrc-configuration", "rrc-request",
+  "endc-start", "endc-end", "endc-failure", "rach", "rach-failure",
+]);
 const MAP_INTERFACE_COLOR_PALETTE = [
   "#38bdf8",
   "#a78bfa",
@@ -755,12 +759,58 @@ function getMapEventMarker(item = {}) {
   return null;
 }
 
+function getRadioMapEventMarker(item = {}) {
+  const text = [
+    item.cause, item.message, item.title, item.summary, item.rawMessage, item.category,
+    item.sourceCategory, item.protocol, item.procedure, item.officialName, item.type,
+    item.result, item.severity, item.eventKey, item.milestone, item.technology,
+    item.technologyStart, item.technologyEnd, item.serviceType,
+  ].filter(Boolean).join(" ").replace(/[_-]+/g, " ");
+  const milestone = String(item.milestone || "").toUpperCase();
+  const eventKey = String(item.eventKey || "").toUpperCase();
+  const isVoNR = /\bvonr\b|voice\s+over\s+nr/i.test(text);
+  const isVoLTE = /\bvolte\b|ims\s+volte|voice\s+over\s+lte/i.test(text);
+  const callStart = milestone.includes("CALL START") || /(?:vonr|volte).*(?:start|initiated|originat|setup)/i.test(text)
+    || /(?:CALL DIAL INITIATED|CALL START|VONR.*START|VOLTE.*START)/.test(eventKey)
+    || /\b(?:call|voice)\b.{0,50}\b(?:start|initiated|originat(?:e|ed|ing)|setup|establish(?:ed|ment)?)\b|\b(?:start|initiated|originat(?:e|d|ing)|setup|establish(?:ed|ment)?)\b.{0,50}\b(?:call|voice)\b/i.test(text);
+
+  if (callStart && isVoNR) return { markerType: "vonr-start", markerSymbol: "N", markerLabel: "VoNR Start", markerColor: "#8b5cf6" };
+  if (callStart && isVoLTE) return { markerType: "volte-start", markerSymbol: "V", markerLabel: "VoLTE Start", markerColor: "#06b6d4" };
+
+  if (/\b(?:scg|endc|secondary\s+cell\s+group)\b.{0,100}\b(?:fail(?:ed|ure)?|reject(?:ed|ion)?|timeout|abort(?:ed)?)\b|\b(?:scg|endc)\s*(?:failure|fail)\b|\b(?:scg|endc)(?:failure|fail)\b/i.test(text)) {
+    return { markerType: "endc-failure", markerSymbol: "!", markerLabel: "EN-DC Failure", markerColor: "#ef4444" };
+  }
+  if (/\b(?:endc|scg|secondary\s+cell\s+group)\b.{0,100}\b(?:release|released|remove|removed|deactivat(?:e|ed|ion)|end)\b|\b(?:release|remove|deactivat(?:e|ed|ion))\b.{0,60}\b(?:endc|scg|secondary\s+cell\s+group)\b|\b(?:endc|scg)(?:release|remove|deactivation)\b/i.test(text)) {
+    return { markerType: "endc-end", markerSymbol: "-", markerLabel: "EN-DC End / Release", markerColor: "#94a3b8" };
+  }
+  if (/\b(?:endc|scg|secondary\s+cell\s+group)\b.{0,100}\b(?:addition|add(?:ed)?|setup|activat(?:e|ed|ion)|start|establish(?:ed|ment)?)\b|\b(?:addition|add(?:ed)?|setup|activat(?:e|ed|ion))\b.{0,60}\b(?:endc|scg|secondary\s+cell\s+group)\b|\b(?:endc|scg)(?:addition|add|setup|activation)\b/i.test(text)) {
+    return { markerType: "endc-start", markerSymbol: "+", markerLabel: "EN-DC Start / Add", markerColor: "#22c55e" };
+  }
+  if (/\b(?:rrc|radio\s+resource\s+control)\b.{0,100}\b(?:reconfiguration|configuration|config(?:ure|ured|uration)?)\b|\brrc(?:connection)?(?:reconfiguration|configuration)\b|\bnr\s+rrc\s+config\b/i.test(text)) {
+    return { markerType: "rrc-configuration", markerSymbol: "CFG", markerLabel: "RRC Configuration", markerColor: "#f59e0b" };
+  }
+  if (/\b(?:rrc|radio\s+resource\s+control)\b.{0,100}\b(?:connection\s*)?request\b|\brrcconnectionrequest\b/i.test(text)) {
+    return { markerType: "rrc-request", markerSymbol: "REQ", markerLabel: "RRC Request", markerColor: "#3b82f6" };
+  }
+  if (/\brach\b|\bnr\s+rach\b|random\s+access\s+(?:preamble|request|procedure)/i.test(text)) {
+    const failed = /\b(?:rach|random\s+access)\b.{0,100}\b(?:fail(?:ed|ure)?|reject(?:ed|ion)?|timeout)\b/i.test(text);
+    return failed
+      ? { markerType: "rach-failure", markerSymbol: "!", markerLabel: "RACH Failure", markerColor: "#ef4444" }
+      : { markerType: "rach", markerSymbol: "R", markerLabel: "RACH", markerColor: "#eab308" };
+  }
+  return null;
+}
+
 function isCallMarker(point) {
   return CALL_MARKER_TYPES.has(point?.markerType);
 }
 
 function isHandoverMarker(point) {
   return point?.markerType === "handover" || point?.markerType === "handover-failure";
+}
+
+function isRadioMarker(point) {
+  return RADIO_MARKER_TYPES.has(point?.markerType);
 }
 
 export function buildMapPoints(timeline, rsrpByRowId = new Map()) {
@@ -776,7 +826,10 @@ export function buildMapPoints(timeline, rsrpByRowId = new Map()) {
       const lng = toMapCoordinate(item?.longitude, -180, 180);
       if (lat === null || lng === null) return null;
       const rsrpMatch = rsrpByRowId.get(item?.id) || null;
-      const eventMarker = getMapEventMarker(item);
+      const baseEventMarker = getMapEventMarker(item);
+      const eventMarker = baseEventMarker?.markerType === "call-start"
+        ? getRadioMapEventMarker(item) || baseEventMarker
+        : baseEventMarker || getRadioMapEventMarker(item);
       return {
         id: item?.id || `l3-map-point-${index}`,
         index,
@@ -850,6 +903,7 @@ export function L3EventsMapView({ points, onNeedRsrpAnalysis, active = true }) {
   const [showAllPoints, setShowAllPoints] = useState(false);
   const [showCallMarkers, setShowCallMarkers] = useState(true);
   const [showHandoverMarkers, setShowHandoverMarkers] = useState(true);
+  const [showRadioMarkers, setShowRadioMarkers] = useState(true);
   const [playbackSpeedMs, setPlaybackSpeedMs] = useState(750);
   const [messageSearch, setMessageSearch] = useState("");
   const [messagePanelWidth, setMessagePanelWidth] = useState(340);
@@ -955,6 +1009,7 @@ export function L3EventsMapView({ points, onNeedRsrpAnalysis, active = true }) {
       .filter((point) => {
         if (isCallMarker(point)) return showCallMarkers;
         if (isHandoverMarker(point)) return showHandoverMarkers;
+        if (isRadioMarker(point)) return showRadioMarkers;
         return true;
       });
     const callMarkers = eventPoints.filter(isCallMarker);
@@ -964,7 +1019,7 @@ export function L3EventsMapView({ points, onNeedRsrpAnalysis, active = true }) {
 
     return [...otherMarkers, ...callMarkers]
       .map((point) => ({ ...point, colorHex: point.markerColor || getMapPointColor(point) }));
-  }, [currentIndex, getMapPointColor, points, showAllPoints, showCallMarkers, showHandoverMarkers]);
+  }, [currentIndex, getMapPointColor, points, showAllPoints, showCallMarkers, showHandoverMarkers, showRadioMarkers]);
   const eventMarkerStats = useMemo(() => {
     const stats = {
       handover: 0,
@@ -973,6 +1028,15 @@ export function L3EventsMapView({ points, onNeedRsrpAnalysis, active = true }) {
       disconnect: 0,
       dropped: 0,
       notConnected: 0,
+      vonrStart: 0,
+      volteStart: 0,
+      rrcConfiguration: 0,
+      rrcRequest: 0,
+      endcStart: 0,
+      endcEnd: 0,
+      endcFailure: 0,
+      rach: 0,
+      rachFailure: 0,
     };
     points.forEach((point) => {
       if (point.markerType === "handover") stats.handover += 1;
@@ -981,6 +1045,15 @@ export function L3EventsMapView({ points, onNeedRsrpAnalysis, active = true }) {
       if (point.markerType === "disconnect") stats.disconnect += 1;
       if (point.markerType === "dropped") stats.dropped += 1;
       if (point.markerType === "not-connected") stats.notConnected += 1;
+      if (point.markerType === "vonr-start") stats.vonrStart += 1;
+      if (point.markerType === "volte-start") stats.volteStart += 1;
+      if (point.markerType === "rrc-configuration") stats.rrcConfiguration += 1;
+      if (point.markerType === "rrc-request") stats.rrcRequest += 1;
+      if (point.markerType === "endc-start") stats.endcStart += 1;
+      if (point.markerType === "endc-end") stats.endcEnd += 1;
+      if (point.markerType === "endc-failure") stats.endcFailure += 1;
+      if (point.markerType === "rach") stats.rach += 1;
+      if (point.markerType === "rach-failure") stats.rachFailure += 1;
     });
     return stats;
   }, [pointSetKey]);
@@ -1114,7 +1187,10 @@ export function L3EventsMapView({ points, onNeedRsrpAnalysis, active = true }) {
     if (isHandoverMarker(selectedEventMarker) && !showHandoverMarkers) {
       setSelectedEventMarker(null);
     }
-  }, [selectedEventMarker, showCallMarkers, showHandoverMarkers]);
+    if (isRadioMarker(selectedEventMarker) && !showRadioMarkers) {
+      setSelectedEventMarker(null);
+    }
+  }, [selectedEventMarker, showCallMarkers, showHandoverMarkers, showRadioMarkers]);
 
   const togglePlayback = () => {
     if (currentIndex >= points.length - 1) setCurrentIndex(0);
@@ -1273,6 +1349,30 @@ export function L3EventsMapView({ points, onNeedRsrpAnalysis, active = true }) {
                 <span className="flex items-center gap-1 text-yellow-300"><PhoneOff className="h-3 w-3" /> NC</span>
                 <span className="font-mono text-slate-200">{eventMarkerStats.notConnected.toLocaleString()}</span>
               </div>
+              {[
+                ["VoNR", "vonrStart", "#8b5cf6"],
+                ["VoLTE", "volteStart", "#06b6d4"],
+                ["RRC Config", "rrcConfiguration", "#f59e0b"],
+                ["RRC Request", "rrcRequest", "#3b82f6"],
+                ["EN-DC Start", "endcStart", "#22c55e"],
+                ["EN-DC End", "endcEnd", "#94a3b8"],
+                ["EN-DC Fail", "endcFailure", "#ef4444"],
+                ["RACH", "rach", "#eab308"],
+                ["RACH Fail", "rachFailure", "#ef4444"],
+              ].map(([label, countKey, color]) => (
+                <div key={countKey} className="flex items-center justify-between gap-1 rounded bg-slate-950 px-1.5 py-1">
+                  <span className="flex min-w-0 items-center gap-1 truncate" style={{ color }}>
+                    <span className="inline-flex h-3 w-4 shrink-0 items-center justify-center rounded-sm border border-current text-[8px] font-bold">
+                      {countKey.startsWith("endc") ? (countKey === "endcStart" ? "+" : countKey === "endcEnd" ? "-" : "!")
+                        : countKey.startsWith("rrc") ? (countKey === "rrcRequest" ? "R" : "C")
+                          : countKey.startsWith("rach") ? (countKey === "rachFailure" ? "!" : "R")
+                            : countKey === "vonrStart" ? "N" : "V"}
+                    </span>
+                    {label}
+                  </span>
+                  <span className="font-mono text-slate-200">{eventMarkerStats[countKey].toLocaleString()}</span>
+                </div>
+              ))}
             </div>
           </div>
           <div className="min-h-0 overflow-y-auto rounded-lg border border-slate-600/80 bg-slate-950/90 p-2 shadow-xl backdrop-blur-sm">
@@ -1521,6 +1621,20 @@ export function L3EventsMapView({ points, onNeedRsrpAnalysis, active = true }) {
             <Hand className="h-3.5 w-3.5" />
             Handover
           </button>
+          <button
+            type="button"
+            onClick={() => setShowRadioMarkers((value) => !value)}
+            aria-pressed={showRadioMarkers}
+            className={`inline-flex h-8 shrink-0 items-center gap-1 rounded-full border px-2 transition-colors duration-200 ${
+              showRadioMarkers
+                ? "border-violet-500/70 bg-violet-500/15 text-violet-200 hover:bg-violet-500/25"
+                : "border-slate-600 bg-slate-900 text-slate-400 hover:bg-slate-800"
+            }`}
+            title={showRadioMarkers ? "Hide radio procedure markers" : "Show radio procedure markers"}
+          >
+            <span className="inline-flex h-4 w-4 items-center justify-center rounded border border-current text-[9px] font-bold">R</span>
+            Radio
+          </button>
           <select
             value={playbackSpeedMs}
             onChange={(event) => setPlaybackSpeedMs(Number(event.target.value))}
@@ -1672,7 +1786,7 @@ function L3MapDeckOverlay({ map, trailPoints, activePoints, trailEndIndex, event
       getFillColor: (point) => hexToRgbArray(point.colorHex, 255),
       getLineColor: [15, 23, 42, 245],
       getLineWidth: 1.5,
-      getRadius: (point) => isCallMarker(point) ? 11 : 9,
+      getRadius: (point) => isCallMarker(point) ? 11 : (String(point.markerSymbol || "").length > 1 ? 15 : 9),
       radiusUnits: "pixels",
       lineWidthUnits: "pixels",
       stroked: true,
@@ -1695,7 +1809,7 @@ function L3MapDeckOverlay({ map, trailPoints, activePoints, trailEndIndex, event
         return point.markerSymbol || "•";
       },
       getColor: [255, 255, 255, 255],
-      getSize: (point) => isCallMarker(point) ? 15 : 12,
+      getSize: (point) => isCallMarker(point) ? 15 : (String(point.markerSymbol || "").length > 1 ? 10 : 12),
       sizeUnits: "pixels",
       getTextAnchor: "middle",
       getAlignmentBaseline: "center",
