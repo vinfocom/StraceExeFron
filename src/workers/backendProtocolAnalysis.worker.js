@@ -9,6 +9,9 @@ self.onmessage = ({ data }) => {
       return;
     }
     const analysis = buildProtocolAnalysis(data.timeline || [], []);
+    // Functions cannot cross the worker boundary. ProtocolAnalyzerView owns
+    // its duration formatter, so keep the analysis payload data-only.
+    delete analysis.formatDuration;
     self.postMessage({ id: data.id, analysis });
   } catch (error) {
     self.postMessage({ id: data.id, error: error?.message || "Protocol analysis failed." });
