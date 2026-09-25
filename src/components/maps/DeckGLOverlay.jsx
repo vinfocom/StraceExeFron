@@ -6,6 +6,7 @@ import { getMetricConfig, getMetricValueFromLog } from '@/utils/metrics';
 import { sampleLogIndices } from '@/utils/logSpatialSampling';
 import { useDeckLayerRegistry } from '@/components/maps/deckLayerRegistry.jsx';
 import { assertCategorizedLayerEntries, categorizeMapLayer, getMapLayerMetadata, sortMapLayerEntries } from '@/components/maps/mapLayerPolicy.js';
+import { getDrawingHoverTarget, getPolygonDrawingHitData, getPolylineDrawingHitData } from '@/components/maps/drawingShapeInteractions.js';
 
 const pickFirstNonEmpty = (obj, keys = []) => {
   for (const key of keys) {
@@ -444,12 +445,7 @@ const DeckGLOverlay = ({
   }, [onHover]);
 
   const handleDrawingHover = useCallback((info) => {
-    const drawing = info?.object;
-    onDrawingHover?.(
-      drawing?.type === 'polygon' && !String(drawing.id).startsWith('active-')
-        ? { id: drawing.id, x: info.x, y: info.y }
-        : null,
-    );
+    onDrawingHover?.(getDrawingHoverTarget(info));
   }, [onDrawingHover]);
 
   const handleGridHover = useCallback((info) => {
@@ -576,15 +572,11 @@ const DeckGLOverlay = ({
     [drawingShapes],
   );
   const drawingPolygonHitData = useMemo(
-    () => drawingData
-      .filter((drawing) => drawing.type === 'polygon' && !String(drawing.id).startsWith('active-'))
-      .map((drawing) => {
-        const first = drawing.path[0];
-        const last = drawing.path[drawing.path.length - 1];
-        const isClosed = first?.[0] === last?.[0] && first?.[1] === last?.[1];
-        return { ...drawing, polygon: isClosed ? drawing.path.slice(0, -1) : drawing.path };
-      })
-      .filter((drawing) => drawing.polygon.length >= 3),
+    () => getPolygonDrawingHitData(drawingData),
+    [drawingData],
+  );
+  const drawingPolylineHitData = useMemo(
+    () => getPolylineDrawingHitData(drawingData),
     [drawingData],
   );
 
@@ -883,9 +875,9 @@ const DeckGLOverlay = ({
     }
 
     if (drawingPolygonHitData.length > 0) {
-      // Keep the transparent hit surface below log markers so existing marker
-      // hover and click interactions retain priority where they overlap a polygon.
-      addLayer('logs', new PolygonLayer({
+      // The shared drawings category paints above map data; this transparent
+      // hit surface sits below the visible drawing outlines.
+      addLayer('drawings', new PolygonLayer({
         id: 'user-drawing-polygon-hit-layer',
         data: drawingPolygonHitData,
         getPolygon: (drawing) => drawing.polygon,
@@ -897,6 +889,22 @@ const DeckGLOverlay = ({
         pickable: Boolean(pickable && !interactionsDisabled),
         onHover: handleDrawingHover,
       }), -100);
+    }
+
+    if (drawingPolylineHitData.length > 0) {
+      addLayer('drawings', new PathLayer({
+        id: 'user-drawing-polyline-hit-layer',
+        data: drawingPolylineHitData,
+        getPath: (drawing) => drawing.path,
+        getColor: [0, 0, 0, 0],
+        getWidth: 14,
+        widthUnits: 'pixels',
+        widthMinPixels: 14,
+        rounded: true,
+        opacity: 0,
+        pickable: Boolean(pickable && !interactionsDisabled),
+        onHover: handleDrawingHover,
+      }), -101);
     }
 
     if (nativeOutlineData.length > 0) {
@@ -943,7 +951,7 @@ const DeckGLOverlay = ({
     } catch (e) {
       // Overlay can detach during map teardown; skip this update.
     }
-  }, [map, primaryData, neighborData, gridData, imageLogData, metricLabelData, drawingData, drawingPolygonHitData, drawingOpacity, nativeOutlineData, predictionRenderData, siteRenderData, registeredGroups, registryVersion, showPrimaryLogs, showNeighbors, showGrid, gridOpacity, handleGridHover, handleDrawingHover, showImageLogs, selectedIndex, radius, radiusMinPixels, radiusMaxPixels, opacity, neighborOpacity, showNumCells, showMetricLabels, getColor, getNeighborColor, handleImageLogClick, handlePrimaryHover, isValidMapInstance, pickable, autoHighlight, mapZoom, interactionsDisabled]);
+  }, [map, primaryData, neighborData, gridData, imageLogData, metricLabelData, drawingData, drawingPolygonHitData, drawingPolylineHitData, drawingOpacity, nativeOutlineData, predictionRenderData, siteRenderData, registeredGroups, registryVersion, showPrimaryLogs, showNeighbors, showGrid, gridOpacity, handleGridHover, handleDrawingHover, showImageLogs, selectedIndex, radius, radiusMinPixels, radiusMaxPixels, opacity, neighborOpacity, showNumCells, showMetricLabels, getColor, getNeighborColor, handleImageLogClick, handlePrimaryHover, isValidMapInstance, pickable, autoHighlight, mapZoom, interactionsDisabled]);
 
   useEffect(() => {
     return () => {

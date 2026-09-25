@@ -8,6 +8,7 @@ import DeckGLOverlay from "@/components/maps/DeckGLOverlay";
 import { DeckLayerRegistryProvider } from "@/components/maps/deckLayerRegistry.jsx";
 import PrimaryLogTooltip from "./PrimaryLogTooltip";
 import { Zap, Layers, Radio, Square, Circle, Trash2 } from "lucide-react";
+import { isCompletedDeletableDrawing } from "@/components/maps/drawingShapeInteractions.js";
 // import TechHandoverMarkers from "../unifiedMap/TechHandoverMarkers";
 import useColorForLog from "@/hooks/useColorForLog";
 import { getMetricValueFromLog, getMacDetailValueFromLog, getPciColor, getEarfcnColor } from "@/utils/metrics";
@@ -1956,11 +1957,11 @@ const MapWithMultipleCircles = ({
   }, [drawingEnabled, clearHoveredDrawingAction]);
 
   useEffect(() => {
-    if (!hoveredDrawingAction?.id) return;
-    const polygonStillExists = drawingShapes.some(
-      (drawing) => drawing?.type === "polygon" && String(drawing.id) === String(hoveredDrawingAction.id),
+    if (hoveredDrawingAction?.id === null || hoveredDrawingAction?.id === undefined) return;
+    const drawingStillExists = drawingShapes.some(
+      (drawing) => isCompletedDeletableDrawing(drawing) && String(drawing.id) === String(hoveredDrawingAction.id),
     );
-    if (!polygonStillExists) clearHoveredDrawingAction();
+    if (!drawingStillExists) clearHoveredDrawingAction();
   }, [drawingShapes, hoveredDrawingAction?.id, clearHoveredDrawingAction]);
 
   useEffect(() => () => {
@@ -2803,8 +2804,8 @@ const MapWithMultipleCircles = ({
       {hoveredDrawingAction && !drawingEnabled && (
         <button
           type="button"
-          title="Delete polygon"
-          aria-label="Delete polygon"
+          title="Delete shape"
+          aria-label="Delete shape"
           onPointerDown={(event) => event.stopPropagation()}
           onMouseDown={(event) => event.stopPropagation()}
           onTouchStart={(event) => event.stopPropagation()}

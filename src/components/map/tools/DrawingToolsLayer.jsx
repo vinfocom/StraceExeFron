@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useCallback, useState, memo } from "react";
 import { toast } from "react-toastify";
 import { createAdvancedMarker, getAdvancedMarkerLatLngEvent, isSatelliteMapType, orientAdvancedMarkerLabel, refreshAdvancedMarkerLabelTheme, setAdvancedMarkerLabel } from "@/lib/advancedMarkers";
+import { handleShapeOverlayRightClick, removeDrawingEntryById, removeShapeById } from "@/components/maps/drawingShapeInteractions.js";
 
 // --- Helper Functions (Same as before, collapsed for brevity) ---
 function toLatLng(item) {
@@ -1330,11 +1331,17 @@ function DrawingToolsLayerComponent({
 
   deleteActionsRef.current = {
     remove: (shapeObj) => {
-      if (!shapeObj || shapeObj.type !== "polygon") return;
-      cleanupCompletedShape(shapeObj);
-      shapesRef.current = shapesRef.current.filter((shape) => shape !== shapeObj);
-      collectedDrawingRef.current = collectedDrawingRef.current.filter(
-        (drawing) => drawing.id !== shapeObj.id,
+      if (!shapeObj) return;
+      const removal = removeShapeById(
+        shapesRef.current,
+        shapeObj.id,
+        cleanupCompletedShape,
+      );
+      if (removal.target !== shapeObj) return;
+      shapesRef.current = removal.remaining;
+      collectedDrawingRef.current = removeDrawingEntryById(
+        collectedDrawingRef.current,
+        shapeObj.id,
       );
       const remainingById = new Map(
         collectedDrawingRef.current.map((drawing) => [String(drawing.id), drawing]),
@@ -1486,7 +1493,7 @@ function DrawingToolsLayerComponent({
     const id = deleteRequest?.id;
     if (id === null || id === undefined) return;
     const shapeObj = shapesRef.current.find(
-      (shape) => shape.type === "polygon" && String(shape.id) === String(id),
+      (shape) => String(shape.id) === String(id),
     );
     if (shapeObj) deleteActionsRef.current?.remove(shapeObj);
   }, [deleteRequest]);
@@ -1629,6 +1636,15 @@ function DrawingToolsLayerComponent({
         }),
       );
     }
+    listeners.push(
+      window.google.maps.event.addListener(overlay, "rightclick", (event) => {
+        handleShapeOverlayRightClick(
+          event,
+          shapeObj,
+          (target) => deleteActionsRef.current?.remove(target),
+        );
+      }),
+    );
     const update = () => {
       window.clearTimeout(shapeObj.analysisTimer);
       shapeObj.analysisTimer = window.setTimeout(
