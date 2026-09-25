@@ -52,6 +52,12 @@ function firstProcedure(procedures) {
 
 const ALL_PROCEDURES_ID = "__all-procedures__";
 
+function callIdKey(value) {
+  const id = String(value ?? "").trim();
+  const numberedCall = id.match(/^c(?:l)?[\s_-]*(\d+)$/i);
+  return numberedCall ? `c${Number(numberedCall[1])}` : id.toLocaleLowerCase();
+}
+
 const MESSAGE_TYPE_FILTERS = [
   { id: "all", label: "All" },
   { id: "l3", label: "L3" },
@@ -687,13 +693,13 @@ export function ProtocolAnalyzerView({ analysis, callScoped = false, calls = [] 
       const id = call?.id ?? call?.callId;
       if (id === null || id === undefined || String(id).trim() === "") return;
       const value = String(id).trim();
-      const key = value.toLocaleLowerCase();
+      const key = callIdKey(value);
       if (!callLabels.has(key)) callLabels.set(key, { id: value, label: call?.name || call?.label || call?.call || value });
     });
     procedures.forEach((procedure) => {
       if (procedure.callId === null || procedure.callId === undefined || String(procedure.callId).trim() === "") return;
       const id = String(procedure.callId).trim();
-      const key = id.toLocaleLowerCase();
+      const key = callIdKey(id);
       if (!callLabels.has(key)) callLabels.set(key, { id, label: id });
     });
     return Array.from(callLabels.values());
@@ -701,7 +707,7 @@ export function ProtocolAnalyzerView({ analysis, callScoped = false, calls = [] 
 
   const filteredProcedures = useMemo(() => {
     if (selectedCallId === "all") return procedures;
-    return procedures.filter((procedure) => String(procedure.callId || "").trim().toLocaleLowerCase() === selectedCallId.toLocaleLowerCase());
+    return procedures.filter((procedure) => callIdKey(procedure.callId) === callIdKey(selectedCallId));
   }, [procedures, selectedCallId]);
   const showCombinedProcedure = callScoped || selectedCallId !== "all";
 
