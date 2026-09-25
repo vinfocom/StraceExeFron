@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { ArrowLeft, Download, Edit3, FileUp, History, Loader2, RefreshCw, Save, Search, Trash2, Upload, X } from "lucide-react";
 import { toast } from "react-toastify";
-import { l3EventApi } from "@/api/apiEndpoints";
+import { l3EventApi, mapViewApi } from "@/api/apiEndpoints";
 import { parseTimestampValue } from "@/utils/l3Events/timelineBuilder";
 import { decodeEventItem, decodeL3Item } from "@/utils/l3Events/eventDecoder";
 import { createBackendL3Loader, createBackendScopedLoader } from "@/utils/l3Events/backendDetailModel";
@@ -205,6 +205,71 @@ function diagnosticRowsFromResponse(response) {
     ];
   }
   return [];
+}
+
+function networkLogRowsFromResponse(response) {
+  const payload = response?.data ?? response ?? {};
+  if (Array.isArray(payload)) return payload;
+  if (Array.isArray(payload.data)) return payload.data;
+  if (Array.isArray(payload.Data)) return payload.Data;
+  if (Array.isArray(payload.logs)) return payload.logs;
+  if (Array.isArray(payload.result)) return payload.result;
+  if (Array.isArray(payload.Result)) return payload.Result;
+  return [];
+}
+
+async function loadMapNetworkRows(scope, signal) {
+  const sessionIds = String(scope?.sessionIds || "").trim();
+  if (!sessionIds) return [];
+
+  const pageSize = 10000;
+  const maxPages = 20;
+  const rows = [];
+  let totalCount = 0;
+  for (let page = 1; page <= maxPages; page += 1) {
+    const response = await mapViewApi.getNetworkLog({ session_ids: sessionIds, page, limit: pageSize, signal });
+    const pageRows = networkLogRowsFromResponse(response);
+    const body = response?.data ?? response ?? {};
+    if (page === 1) totalCount = Number(body.total_count ?? body.totalCount ?? body.TotalCount) || 0;
+    rows.push(...pageRows);
+    if (pageRows.length < pageSize || (totalCount > 0 && rows.length >= totalCount)) break;
+  }
+
+  return rows.map((row, index) => {
+    const status = valueOf(row, "volte_call", "volteCall", "VolteCall");
+    const latitude = valueOf(row, "lat", "latitude", "Latitude");
+    const longitude = valueOf(row, "lon", "lng", "longitude", "Longitude");
+    if (status === null || String(status).trim() === "" || latitude === null || longitude === null) return null;
+
+    const id = valueOf(row, "id", "Id") ?? index;
+    const sessionId = valueOf(row, "session_id", "sessionId", "SessionId") ?? "unknown";
+    const statusText = String(status).trim();
+    const rawMessage = `volte_call: ${statusText}`;
+    const timestamp = valueOf(row, "timestamp", "time", "Timestamp") || "";
+    return normalizeTimelineRow({
+      ...row,
+      id: `network-volte-${sessionId}-${id}`,
+      type: "event",
+      sourceType: "event",
+      sourceFile: "Network Log",
+      sourceCategory: "Network Log",
+      category: "Network Log",
+      title: "VoLTE Network Status",
+      officialName: "VoLTE Network Status",
+      message: "VoLTE Network Status",
+      eventKey: "VOLTE_NETWORK_STATUS",
+      summary: rawMessage,
+      rawMessage,
+      timestamp,
+      timestampLabel: timestamp,
+      technology: "4G LTE",
+      protocol: "VoLTE",
+      procedure: "VoLTE Network Status",
+      serviceIndicators: ["VoLTE"],
+      latitude,
+      longitude,
+    }, "event");
+  }).filter(Boolean);
 }
 
 function normalizeSummary(summary) {
@@ -734,12 +799,22 @@ function BackendAnalyzer({ sessionIds, analysisId, projectName, onBack }) {
     if (loaded) return;
     let cancelled = false;
     let worker = null;
+    const networkAbort = new AbortController();
     const loader = activeView === "map" ? loadMapRows : loadExcelRows;
     setViewErrors((current) => ({ ...current, [activeView]: "" }));
-    loader(scope).then((response) => {
+    const networkRowsRequest = activeView === "map" && summary.detectedServices?.hasVolte
+      ? loadMapNetworkRows(scope, networkAbort.signal).catch((networkError) => {
+        if (!networkAbort.signal.aborted) console.warn("Unable to load network log VoLTE map rows.", networkError);
+        return [];
+      })
+      : Promise.resolve([]);
+    Promise.all([loader(scope), networkRowsRequest]).then(([response, networkRows]) => {
       if (cancelled) return;
       const payload = unwrapDiagnosticSummary(response) || {};
-      const rows = diagnosticRowsFromResponse(response).map((row) => normalizeTimelineRow(row));
+      const rows = [
+        ...diagnosticRowsFromResponse(response).map((row) => normalizeTimelineRow(row)),
+        ...networkRows,
+      ];
       if (!Array.isArray(payload.rows)) throw new Error(`Invalid diagnostic response: ${activeView} rows are missing.`);
       const calls = (Array.isArray(payload.calls) ? payload.calls : summary.calls).map(normalizeCall);
       worker = new Worker(new URL("../workers/backendProtocolAnalysis.worker.js", import.meta.url), { type: "module" });
@@ -764,8 +839,8 @@ function BackendAnalyzer({ sessionIds, analysisId, projectName, onBack }) {
     }).catch((requestError) => {
       if (!cancelled) setViewErrors((current) => ({ ...current, [activeView]: requestError?.response?.data?.message || requestError?.message || `Failed to load ${activeView} rows.` }));
     });
-    return () => { cancelled = true; worker?.terminate(); };
-  }, [activeView, error, excelRows, loadExcelRows, loadMapRows, loading, mapRows, scope, summary.calls, viewRetry]);
+    return () => { cancelled = true; networkAbort.abort(); worker?.terminate(); };
+  }, [activeView, error, excelRows, loadExcelRows, loadMapRows, loading, mapRows, scope, summary.calls, summary.detectedServices?.hasVolte, viewRetry]);
 
   const protocolTimeline = useMemo(() => {
     if (!selectedCall) return timeline;
