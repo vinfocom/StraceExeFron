@@ -842,7 +842,7 @@ function isFailurePoint(point) {
   return HANDOVER_FAILURE_TEXT_RE.test(text) || /\b(fail(?:ed|ure|uire)?|reject(?:ed)?|timeout|error|rlf|radio link failure|dropped|forbidden|unavailable)\b|\b[45]\d{2}\b/i.test(text);
 }
 
-export function L3EventsMapView({ points, onNeedRsrpAnalysis }) {
+export function L3EventsMapView({ points, onNeedRsrpAnalysis, active = true }) {
   const { isLoaded, loadError } = useJsApiLoader(GOOGLE_MAPS_LOADER_OPTIONS);
   const { getThresholdInfo, getThresholdsForMetric } = useColorForLog();
   const [isPlaying, setIsPlaying] = useState(false);
@@ -880,6 +880,7 @@ export function L3EventsMapView({ points, onNeedRsrpAnalysis }) {
   const [mapStageWidth, setMapStageWidth] = useState(0);
   const mapsError = getGoogleMapsConfigError() || (loadError ? getGoogleMapsErrorMessage(loadError) : null);
   const currentPoint = points[currentIndex] || points[0] || null;
+  const handleEventMarkerClick = useCallback((point) => setSelectedEventMarker(point), []);
   const currentRawMessage = useMemo(() => formatMapRawMessage(currentPoint), [currentPoint]);
   const progressPercent = points.length > 1 ? (currentIndex / (points.length - 1)) * 100 : 100;
   const interfaceLegend = useMemo(() => {
@@ -1047,6 +1048,15 @@ export function L3EventsMapView({ points, onNeedRsrpAnalysis }) {
   useEffect(() => {
     if (colorMode === "rsrp") onNeedRsrpAnalysis?.();
   }, [colorMode, onNeedRsrpAnalysis]);
+
+  useEffect(() => {
+    if (!active || !mapInstance || !window.google?.maps?.event) return undefined;
+    const frame = window.requestAnimationFrame(() => {
+      window.google.maps.event.trigger(mapInstance, "resize");
+      if (currentPoint) mapInstance.setCenter({ lat: currentPoint.lat, lng: currentPoint.lng });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [active, currentPoint, mapInstance]);
 
   useEffect(() => {
     if (!isPlaying || points.length <= 1) return undefined;
@@ -1220,7 +1230,7 @@ export function L3EventsMapView({ points, onNeedRsrpAnalysis }) {
                 activePoints={deckActivePoint}
                 trailEndIndex={showAllPoints ? points.length - 1 : currentIndex - 1}
                 eventMarkers={deckEventMarkers}
-                onEventMarkerClick={(point) => setSelectedEventMarker(point)}
+                onEventMarkerClick={handleEventMarkerClick}
               />
               {selectedEventMarker && (
                 <InfoWindow
