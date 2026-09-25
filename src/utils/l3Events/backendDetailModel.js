@@ -20,6 +20,23 @@ export function createBackendL3Loader(fetchSummary) {
   };
 }
 
+// Per-view endpoints use the same scope-level in-flight deduplication as the
+// summary/timeline loader while keeping each view's response independent.
+export function createBackendScopedLoader(fetchRows) {
+  let current = null;
+  return (scope) => {
+    const key = JSON.stringify(scope);
+    if (current?.key !== key) current = { key, promise: null };
+    if (current.promise) return current.promise;
+    const entry = current;
+    entry.promise = Promise.resolve().then(() => fetchRows(scope)).catch((error) => {
+      if (current === entry) entry.promise = null;
+      throw error;
+    });
+    return entry.promise;
+  };
+}
+
 // Build once per loaded response. Tab selection must not clear another view's data.
 export function buildBackendDetailModel(timeline, calls = []) {
   const analysis = buildProtocolAnalysis(timeline, []);

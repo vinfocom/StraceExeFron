@@ -2,11 +2,10 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { ArrowLeft, Download, Edit3, FileUp, History, Loader2, RefreshCw, Save, Search, Trash2, Upload, X } from "lucide-react";
 import { toast } from "react-toastify";
-import { l3EventApi } from "@/api/apiEndpoints";
+import { l3EventApi, mapViewApi } from "@/api/apiEndpoints";
 import { parseTimestampValue } from "@/utils/l3Events/timelineBuilder";
 import { decodeEventItem, decodeL3Item } from "@/utils/l3Events/eventDecoder";
-import { buildProtocolAnalysis } from "@/utils/l3Events/protocolAnalyzer";
-import { buildBackendDetailModel, createBackendL3Loader } from "@/utils/l3Events/backendDetailModel";
+import { createBackendL3Loader, createBackendScopedLoader } from "@/utils/l3Events/backendDetailModel";
 import { ExcelSignalingView } from "@/components/unifiedMap/tabs/l3Events/ExcelSignalingView";
 import { ProtocolAnalyzerView } from "@/components/unifiedMap/tabs/l3Events/ProtocolAnalyzerView";
 import { TimelineCard } from "@/components/unifiedMap/tabs/l3Events/TimelineCard";
@@ -206,6 +205,71 @@ function diagnosticRowsFromResponse(response) {
     ];
   }
   return [];
+}
+
+function networkLogRowsFromResponse(response) {
+  const payload = response?.data ?? response ?? {};
+  if (Array.isArray(payload)) return payload;
+  if (Array.isArray(payload.data)) return payload.data;
+  if (Array.isArray(payload.Data)) return payload.Data;
+  if (Array.isArray(payload.logs)) return payload.logs;
+  if (Array.isArray(payload.result)) return payload.result;
+  if (Array.isArray(payload.Result)) return payload.Result;
+  return [];
+}
+
+async function loadMapNetworkRows(scope, signal) {
+  const sessionIds = String(scope?.sessionIds || "").trim();
+  if (!sessionIds) return [];
+
+  const pageSize = 10000;
+  const maxPages = 20;
+  const rows = [];
+  let totalCount = 0;
+  for (let page = 1; page <= maxPages; page += 1) {
+    const response = await mapViewApi.getNetworkLog({ session_ids: sessionIds, page, limit: pageSize, signal });
+    const pageRows = networkLogRowsFromResponse(response);
+    const body = response?.data ?? response ?? {};
+    if (page === 1) totalCount = Number(body.total_count ?? body.totalCount ?? body.TotalCount) || 0;
+    rows.push(...pageRows);
+    if (pageRows.length < pageSize || (totalCount > 0 && rows.length >= totalCount)) break;
+  }
+
+  return rows.map((row, index) => {
+    const status = valueOf(row, "volte_call", "volteCall", "VolteCall");
+    const latitude = valueOf(row, "lat", "latitude", "Latitude");
+    const longitude = valueOf(row, "lon", "lng", "longitude", "Longitude");
+    if (status === null || String(status).trim() === "" || latitude === null || longitude === null) return null;
+
+    const id = valueOf(row, "id", "Id") ?? index;
+    const sessionId = valueOf(row, "session_id", "sessionId", "SessionId") ?? "unknown";
+    const statusText = String(status).trim();
+    const rawMessage = `volte_call: ${statusText}`;
+    const timestamp = valueOf(row, "timestamp", "time", "Timestamp") || "";
+    return normalizeTimelineRow({
+      ...row,
+      id: `network-volte-${sessionId}-${id}`,
+      type: "event",
+      sourceType: "event",
+      sourceFile: "Network Log",
+      sourceCategory: "Network Log",
+      category: "Network Log",
+      title: "VoLTE Network Status",
+      officialName: "VoLTE Network Status",
+      message: "VoLTE Network Status",
+      eventKey: "VOLTE_NETWORK_STATUS",
+      summary: rawMessage,
+      rawMessage,
+      timestamp,
+      timestampLabel: timestamp,
+      technology: "4G LTE",
+      protocol: "VoLTE",
+      procedure: "VoLTE Network Status",
+      serviceIndicators: ["VoLTE"],
+      latitude,
+      longitude,
+    }, "event");
+  }).filter(Boolean);
 }
 
 function normalizeSummary(summary) {
@@ -652,7 +716,20 @@ function BackendAnalyzer({ sessionIds, analysisId, projectName, onBack }) {
   const [detailsLoaded, setDetailsLoaded] = useState(false);
   const [detailsError, setDetailsError] = useState("");
   const [detailsRetry, setDetailsRetry] = useState(0);
+  const [mapRows, setMapRows] = useState(null);
+  const [mapRsrpByRowId, setMapRsrpByRowId] = useState(null);
+  const [mapRsrpRequested, setMapRsrpRequested] = useState(false);
+  const [excelRows, setExcelRows] = useState(null);
+  const [tabCounts, setTabCounts] = useState(null);
+  const [viewErrors, setViewErrors] = useState({});
+  const [viewRetry, setViewRetry] = useState({});
+  const [protocolAnalysis, setProtocolAnalysis] = useState(null);
+  const [analysisError, setAnalysisError] = useState("");
+  const [mapOpened, setMapOpened] = useState(false);
   const [loadResponse] = useState(() => createBackendL3Loader(l3EventApi.getDiagnosticL3Summary));
+  const [loadMapRows] = useState(() => createBackendScopedLoader(l3EventApi.getMapRows));
+  const [loadExcelRows] = useState(() => createBackendScopedLoader(l3EventApi.getExcelRows));
+  const [loadTabCounts] = useState(() => createBackendScopedLoader(l3EventApi.getTabCounts));
   const [summary, setSummary] = useState(normalizeSummary(null));
   const [l3Messages, setL3Messages] = useState([]);
   const [eventMessages, setEventMessages] = useState([]);
@@ -685,7 +762,20 @@ function BackendAnalyzer({ sessionIds, analysisId, projectName, onBack }) {
   }, [scope, loadResponse]);
 
   useEffect(() => {
-    if (loading || error || activeView === "summary" || detailsLoaded) return;
+    if (loading || error || tabCounts) return;
+    let cancelled = false;
+    loadTabCounts(scope).then((response) => {
+      if (cancelled) return;
+      const payload = unwrapDiagnosticSummary(response) || {};
+      setTabCounts(payload);
+    }).catch(() => {
+      // The count endpoint is an optimization; summary counts remain available.
+    });
+    return () => { cancelled = true; };
+  }, [error, loadTabCounts, loading, scope, tabCounts]);
+
+  useEffect(() => {
+    if (loading || error || !["analyzer", "l3", "events"].includes(activeView) || detailsLoaded) return;
     let cancelled = false;
     setDetailsError("");
     loadResponse({ ...scope, includeRows: true }).then((response) => {
@@ -703,8 +793,55 @@ function BackendAnalyzer({ sessionIds, analysisId, projectName, onBack }) {
     return () => { cancelled = true; };
   }, [activeView, detailsLoaded, detailsRetry, error, loading, loadResponse, scope]);
 
-  // Details are requested once when a detail tab is opened and reused by all tabs.
-  const detailModel = useMemo(() => detailsLoaded ? buildBackendDetailModel(timeline, summary.calls) : null, [detailsLoaded, timeline, summary.calls]);
+  useEffect(() => {
+    if (loading || error || !["map", "excel"].includes(activeView)) return;
+    const loaded = activeView === "map" ? mapRows : excelRows;
+    if (loaded) return;
+    let cancelled = false;
+    let worker = null;
+    const networkAbort = new AbortController();
+    const loader = activeView === "map" ? loadMapRows : loadExcelRows;
+    setViewErrors((current) => ({ ...current, [activeView]: "" }));
+    const networkRowsRequest = activeView === "map" && summary.detectedServices?.hasVolte
+      ? loadMapNetworkRows(scope, networkAbort.signal).catch((networkError) => {
+        if (!networkAbort.signal.aborted) console.warn("Unable to load network log VoLTE map rows.", networkError);
+        return [];
+      })
+      : Promise.resolve([]);
+    Promise.all([loader(scope), networkRowsRequest]).then(([response, networkRows]) => {
+      if (cancelled) return;
+      const payload = unwrapDiagnosticSummary(response) || {};
+      const rows = [
+        ...diagnosticRowsFromResponse(response).map((row) => normalizeTimelineRow(row)),
+        ...networkRows,
+      ];
+      if (!Array.isArray(payload.rows)) throw new Error(`Invalid diagnostic response: ${activeView} rows are missing.`);
+      const calls = (Array.isArray(payload.calls) ? payload.calls : summary.calls).map(normalizeCall);
+      worker = new Worker(new URL("../workers/backendProtocolAnalysis.worker.js", import.meta.url), { type: "module" });
+      worker.onmessage = ({ data }) => {
+        if (cancelled) return;
+        if (data.error) {
+          setViewErrors((current) => ({ ...current, [activeView]: data.error }));
+          worker.terminate();
+          return;
+        }
+        if (activeView === "map") {
+          setMapRows(data.rows);
+          setMapOpened(true);
+        } else setExcelRows(data.rows);
+        worker.terminate();
+      };
+      worker.onerror = (workerError) => {
+        if (!cancelled) setViewErrors((current) => ({ ...current, [activeView]: workerError.message || `Failed to prepare ${activeView} rows.` }));
+        worker.terminate();
+      };
+      worker.postMessage({ id: `${activeView}:${scope.sessionIds}`, kind: "signaling", timeline: rows, calls });
+    }).catch((requestError) => {
+      if (!cancelled) setViewErrors((current) => ({ ...current, [activeView]: requestError?.response?.data?.message || requestError?.message || `Failed to load ${activeView} rows.` }));
+    });
+    return () => { cancelled = true; networkAbort.abort(); worker?.terminate(); };
+  }, [activeView, error, excelRows, loadExcelRows, loadMapRows, loading, mapRows, scope, summary.calls, summary.detectedServices?.hasVolte, viewRetry]);
+
   const protocolTimeline = useMemo(() => {
     if (!selectedCall) return timeline;
     const start = selectedCall.startTime?.getTime();
@@ -714,25 +851,55 @@ function BackendAnalyzer({ sessionIds, analysisId, projectName, onBack }) {
       return Number.isFinite(time) && Number.isFinite(start) && Number.isFinite(end) && time >= start && time <= end;
     });
   }, [selectedCall, timeline]);
-  const fullAnalysis = detailModel?.analysis;
   const enrichedSummary = summary;
-  const protocolAnalysis = useMemo(
-    () => activeView === "analyzer" && selectedCall ? buildProtocolAnalysis(protocolTimeline, []) : fullAnalysis,
-    [activeView, fullAnalysis, protocolTimeline, selectedCall],
-  );
-  const signalingRows = detailModel?.signalingRows;
-  const rsrpByRowId = useMemo(() => fullAnalysis ? buildRsrpByRowId(fullAnalysis) : new Map(), [fullAnalysis]);
-  const mapPoints = useMemo(() => activeView === "map" && signalingRows ? buildMapPoints(signalingRows, rsrpByRowId) : [], [activeView, signalingRows, rsrpByRowId]);
+  useEffect(() => {
+    if (!detailsLoaded || activeView !== "analyzer") return;
+    let cancelled = false;
+    const worker = new Worker(new URL("../workers/backendProtocolAnalysis.worker.js", import.meta.url), { type: "module" });
+    setAnalysisError("");
+    setProtocolAnalysis(null);
+    worker.onmessage = ({ data }) => {
+      if (cancelled) return;
+      if (data.error) setAnalysisError(data.error);
+      else setProtocolAnalysis(data.analysis);
+      worker.terminate();
+    };
+    worker.onerror = (workerError) => {
+      if (!cancelled) setAnalysisError(workerError.message || "Protocol analysis worker failed.");
+      worker.terminate();
+    };
+    worker.postMessage({ id: scope.sessionIds, timeline: protocolTimeline });
+    return () => { cancelled = true; worker.terminate(); };
+  }, [activeView, detailsLoaded, protocolTimeline, scope.sessionIds]);
+  const mapPoints = useMemo(() => mapRows ? buildMapPoints(mapRows, mapRsrpByRowId || new Map()) : [], [mapRows, mapRsrpByRowId]);
+  const requestMapRsrpAnalysis = useCallback(() => setMapRsrpRequested(true), []);
+  useEffect(() => {
+    if (!mapRsrpRequested || !mapRows || mapRsrpByRowId) return;
+    let cancelled = false;
+    const worker = new Worker(new URL("../workers/backendProtocolAnalysis.worker.js", import.meta.url), { type: "module" });
+    worker.onmessage = ({ data }) => {
+      if (cancelled) return;
+      if (data.error) setViewErrors((current) => ({ ...current, map: data.error }));
+      else setMapRsrpByRowId(buildRsrpByRowId(data.analysis));
+      worker.terminate();
+    };
+    worker.onerror = (workerError) => {
+      if (!cancelled) setViewErrors((current) => ({ ...current, map: workerError.message || "Map RSRP analysis failed." }));
+      worker.terminate();
+    };
+    worker.postMessage({ id: `map-rsrp:${scope.sessionIds}`, timeline: mapRows });
+    return () => { cancelled = true; worker.terminate(); };
+  }, [mapRows, mapRsrpByRowId, mapRsrpRequested, scope.sessionIds]);
   const rawRows = activeView === "events" ? eventMessages : l3Messages;
   const countForTab = useCallback((tabId) => {
     if (tabId === "summary") return enrichedSummary?.totalCalls ?? 0;
-    if (tabId === "map") return detailsLoaded && activeView === "map" ? mapPoints.length : null;
-    if (tabId === "excel") return signalingRows?.length ?? counts.excel_view_count ?? 0;
-    if (tabId === "analyzer") return fullAnalysis?.stats?.totalProcedures ?? null;
+    if (tabId === "map") return tabCounts?.map_view_count ?? mapRows?.length ?? null;
+    if (tabId === "excel") return tabCounts?.excel_view_count ?? excelRows?.length ?? counts.excel_view_count ?? 0;
+    if (tabId === "analyzer") return tabCounts?.analyzer_count ?? protocolAnalysis?.stats?.totalProcedures ?? null;
     if (tabId === "l3") return l3Messages.length || counts.l3_count || 0;
     if (tabId === "events") return eventMessages.length || counts.event_count || 0;
     return 0;
-  }, [activeView, detailsLoaded, counts.event_count, counts.excel_view_count, counts.l3_count, enrichedSummary?.totalCalls, eventMessages.length, l3Messages.length, mapPoints.length, fullAnalysis?.stats?.totalProcedures, signalingRows?.length]);
+  }, [activeView, counts.event_count, counts.excel_view_count, counts.l3_count, enrichedSummary?.totalCalls, eventMessages.length, l3Messages.length, mapRows?.length, excelRows?.length, protocolAnalysis?.stats?.totalProcedures, tabCounts]);
   const visibleRawRows = useMemo(() => {
     const needle = search.trim().toLowerCase();
     if (!needle) return rawRows;
@@ -761,7 +928,13 @@ function BackendAnalyzer({ sessionIds, analysisId, projectName, onBack }) {
         {VIEW_TABS.map((tab) => <button key={tab.id} type="button" onClick={() => setActiveView(tab.id)} className={`border px-2.5 py-1.5 text-xs ${activeView === tab.id ? "border-blue-500 bg-blue-600" : "border-slate-700 bg-slate-900 text-slate-300 hover:bg-slate-700"}`}>{tab.label}{countForTab(tab.id) != null ? ` (${countForTab(tab.id).toLocaleString()})` : ""}</button>)}
       </header>
       <main className="l3-analysis-main flex min-h-0 flex-1 flex-col overflow-hidden">
-        {activeView !== "summary" && !detailsLoaded && (detailsError
+        {activeView === "map" && !mapRows && (viewErrors.map
+          ? <div className="p-4 text-red-300">{viewErrors.map}<button type="button" onClick={() => setViewRetry((current) => ({ ...current, map: (current.map || 0) + 1 }))} className="ml-3 rounded border border-slate-600 px-3 py-1 text-white">Retry</button></div>
+          : <div className="flex items-center justify-center p-8 text-blue-300"><Loader2 className="mr-2 h-5 w-5 animate-spin" />Loading map rows...</div>)}
+        {activeView === "excel" && !excelRows && (viewErrors.excel
+          ? <div className="p-4 text-red-300">{viewErrors.excel}<button type="button" onClick={() => setViewRetry((current) => ({ ...current, excel: (current.excel || 0) + 1 }))} className="ml-3 rounded border border-slate-600 px-3 py-1 text-white">Retry</button></div>
+          : <div className="flex items-center justify-center p-8 text-blue-300"><Loader2 className="mr-2 h-5 w-5 animate-spin" />Loading Excel rows...</div>)}
+        {["analyzer", "l3", "events"].includes(activeView) && !detailsLoaded && (detailsError
           ? <div className="p-4 text-red-300">{detailsError}<button type="button" onClick={() => setDetailsRetry(value => value + 1)} className="ml-3 rounded border border-slate-600 px-3 py-1 text-white">Retry</button></div>
           : <div className="flex items-center justify-center p-8 text-blue-300"><Loader2 className="mr-2 h-5 w-5 animate-spin" />Loading detailed logs...</div>)}
         {activeView === "summary" && <div className="h-full overflow-auto p-3"><HomeCallSummary summary={enrichedSummary} timeline={timeline} /></div>}
@@ -775,9 +948,9 @@ function BackendAnalyzer({ sessionIds, analysisId, projectName, onBack }) {
             </button>
           </div>
         )}
-        {detailsLoaded && activeView === "map" && <L3EventsMapView points={mapPoints} />}
-        {detailsLoaded && activeView === "excel" && <ExcelSignalingView rows={signalingRows} calls={enrichedSummary.calls} selectedCall={selectedCall} onSelectCall={setSelectedCall} sourceFileName={analysisId ? `l3-session-${analysisId}` : `sessions-${sessionIds.join("-")}`} />}
-        {detailsLoaded && activeView === "analyzer" && <div className="flex h-full min-h-0 flex-col"><div className="flex shrink-0 gap-3 border-b border-slate-800 px-3 py-1.5 text-[11px] text-slate-300"><span>RRC: {protocolAnalysis?.states?.rrc || "—"}</span><span>NAS: {protocolAnalysis?.states?.nas || "—"}</span><span>IMS: {protocolAnalysis?.states?.ims || "—"}</span><span>Failures: {protocolAnalysis?.stats?.failures ?? 0}</span></div><div className="min-h-0 flex-1"><ProtocolAnalyzerView analysis={protocolAnalysis} calls={enrichedSummary.calls} callScoped={Boolean(selectedCall)} /></div></div>}
+        {mapOpened && <div className={`flex h-full min-h-0 min-w-0 ${activeView === "map" ? "" : "hidden"}`}><L3EventsMapView points={mapPoints} onNeedRsrpAnalysis={requestMapRsrpAnalysis} active={activeView === "map"} /></div>}
+        {activeView === "excel" && excelRows && <ExcelSignalingView rows={excelRows} calls={enrichedSummary.calls} selectedCall={selectedCall} onSelectCall={setSelectedCall} sourceFileName={analysisId ? `l3-session-${analysisId}` : `sessions-${sessionIds.join("-")}`} />}
+        {detailsLoaded && activeView === "analyzer" && <div className="flex h-full min-h-0 flex-col"><div className="flex shrink-0 gap-3 border-b border-slate-800 px-3 py-1.5 text-[11px] text-slate-300"><span>RRC: {protocolAnalysis?.states?.rrc || "—"}</span><span>NAS: {protocolAnalysis?.states?.nas || "—"}</span><span>IMS: {protocolAnalysis?.states?.ims || "—"}</span><span>Failures: {protocolAnalysis?.stats?.failures ?? 0}</span>{analysisError && <span className="text-red-300">{analysisError}</span>}</div><div className="min-h-0 flex-1">{protocolAnalysis ? <ProtocolAnalyzerView analysis={protocolAnalysis} calls={enrichedSummary.calls} callScoped={Boolean(selectedCall)} /> : <div className="flex h-full items-center justify-center text-blue-300"><Loader2 className="mr-2 h-5 w-5 animate-spin" />Analyzing protocol rows...</div>}</div></div>}
         {detailsLoaded && (activeView === "l3" || activeView === "events") && <div className="l3-glass flex h-full min-h-0 flex-col"><div className="l3-glass-subtle flex shrink-0 flex-wrap items-center justify-between gap-2 border-x-0 border-t-0 px-2 py-1"><div><h3 className="l3-ui-copy font-semibold text-white">{activeView === "l3" ? "All L3 Messages" : "All Event Rows"}</h3><p className="l3-meta-copy text-slate-400">Showing {visibleRawRows.length.toLocaleString()} of {rawRows.length.toLocaleString()} backend rows.</p></div><div className="relative w-full sm:w-80"><Search className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-slate-500" /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search timestamp, file, title, or raw text..." className="l3-glass-control l3-ui-copy w-full rounded-md py-2 pl-8 pr-2 text-white outline-none" /></div></div><div className="min-h-0 flex-1 space-y-2 overflow-auto">{visibleRawRows.length ? visibleRawRows.map((row) => <TimelineCard key={row.id} item={row} />) : <div className="py-10 text-center l3-ui-copy text-slate-400">No matching {activeView === "l3" ? "L3 messages" : "event rows"}.</div>}</div></div>}
       </main>
     </div>

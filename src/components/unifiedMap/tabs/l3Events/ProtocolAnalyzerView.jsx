@@ -52,6 +52,12 @@ function firstProcedure(procedures) {
 
 const ALL_PROCEDURES_ID = "__all-procedures__";
 
+function callIdKey(value) {
+  const id = String(value ?? "").trim();
+  const numberedCall = id.match(/^c(?:l)?[\s_-]*(\d+)$/i);
+  return numberedCall ? `c${Number(numberedCall[1])}` : id.toLocaleLowerCase();
+}
+
 const MESSAGE_TYPE_FILTERS = [
   { id: "all", label: "All" },
   { id: "l3", label: "L3" },
@@ -414,6 +420,9 @@ function LadderDiagram({
   typeFilter,
   onTypeFilterChange,
 }) {
+  if (!procedure) {
+    return <div className="flex h-full items-center justify-center text-sm text-slate-400">Select a procedure to view its ladder.</div>;
+  }
   const safeColumns = procedure.flowModel?.nodes?.length ? procedure.flowModel.nodes : columns.length ? columns : ["UE", "eNodeB", "MME", "IMS", "gNB"];
   const visibleItems = typeFilter && typeFilter !== "all"
     ? procedure.items.filter((item) => item.type === typeFilter)
@@ -563,6 +572,13 @@ function LadderDiagram({
 }
 
 function MessageDetails({ procedure, message }) {
+  if (!procedure) {
+    return (
+      <aside className={`${ANALYZER_PANEL_HEIGHT_CLASS} rounded-lg border border-slate-700 bg-slate-900/80 p-4 text-sm text-slate-400`}>
+        Message details will appear when a procedure is selected.
+      </aside>
+    );
+  }
   const selected = message || procedure.items[0];
   const direction = getDirectionInfo(selected);
 
@@ -659,32 +675,40 @@ function DetailSection({ title, rows }) {
 
 export function ProtocolAnalyzerView({ analysis, callScoped = false, calls = [] }) {
   const [selectedProcedureId, setSelectedProcedureId] = useState(
-    () => (callScoped ? ALL_PROCEDURES_ID : firstProcedure(analysis.procedures)?.id || ""),
+    () => (callScoped ? ALL_PROCEDURES_ID : analysis?.procedures?.find(Boolean)?.id || ""),
   );
   const [selectedCallId, setSelectedCallId] = useState("all");
   const [selectedMessage, setSelectedMessage] = useState(null);
   const [query, setQuery] = useState("");
   const [messageTypeFilter, setMessageTypeFilter] = useState("all");
 
+  const procedures = useMemo(
+    () => (Array.isArray(analysis?.procedures) ? analysis.procedures : []).filter((procedure) => procedure && Array.isArray(procedure.items)),
+    [analysis?.procedures],
+  );
+
   const callOptions = useMemo(() => {
     const callLabels = new Map();
     calls.forEach((call) => {
       const id = call?.id ?? call?.callId;
       if (id === null || id === undefined || String(id).trim() === "") return;
-      callLabels.set(String(id), call?.name || call?.label || call?.call || String(id));
+      const value = String(id).trim();
+      const key = callIdKey(value);
+      if (!callLabels.has(key)) callLabels.set(key, { id: value, label: call?.name || call?.label || call?.call || value });
     });
-    analysis.procedures.forEach((procedure) => {
+    procedures.forEach((procedure) => {
       if (procedure.callId === null || procedure.callId === undefined || String(procedure.callId).trim() === "") return;
-      const id = String(procedure.callId);
-      if (!callLabels.has(id)) callLabels.set(id, id);
+      const id = String(procedure.callId).trim();
+      const key = callIdKey(id);
+      if (!callLabels.has(key)) callLabels.set(key, { id, label: id });
     });
-    return Array.from(callLabels, ([id, label]) => ({ id, label }));
-  }, [analysis.procedures, calls]);
+    return Array.from(callLabels.values());
+  }, [calls, procedures]);
 
   const filteredProcedures = useMemo(() => {
-    if (selectedCallId === "all") return analysis.procedures;
-    return analysis.procedures.filter((procedure) => String(procedure.callId || "") === selectedCallId);
-  }, [analysis.procedures, selectedCallId]);
+    if (selectedCallId === "all") return procedures;
+    return procedures.filter((procedure) => callIdKey(procedure.callId) === callIdKey(selectedCallId));
+  }, [procedures, selectedCallId]);
   const showCombinedProcedure = callScoped || selectedCallId !== "all";
 
   useEffect(() => {
@@ -727,7 +751,7 @@ export function ProtocolAnalyzerView({ analysis, callScoped = false, calls = [] 
     }
   }, [selectedProcedure, selectedMessage, selectedProcedureVisibleItems]);
 
-  if (!analysis.procedures.length) {
+  if (!procedures.length) {
     return (
       <div className="rounded-lg border border-slate-700 bg-slate-900/80 p-8 text-center text-sm text-slate-300">
         No Layer 3 or Event rows were found in this upload.
@@ -774,14 +798,20 @@ export function ProtocolAnalyzerView({ analysis, callScoped = false, calls = [] 
 
         <div className={`${ANALYZER_PANEL_HEIGHT_CLASS} min-w-0 rounded-lg border border-slate-700 bg-slate-900/80 overflow-hidden flex flex-col`}>
           <div className="min-h-0 flex-1 overflow-hidden">
-            <LadderDiagram
-              procedure={selectedProcedure}
-              columns={analysis.columns}
-              selectedMessageId={selectedMessage?.id}
-              onSelectMessage={setSelectedMessage}
-              typeFilter={messageTypeFilter}
-              onTypeFilterChange={setMessageTypeFilter}
-            />
+            {selectedProcedure ? (
+              <LadderDiagram
+                procedure={selectedProcedure}
+                columns={analysis.columns || []}
+                selectedMessageId={selectedMessage?.id}
+                onSelectMessage={setSelectedMessage}
+                typeFilter={messageTypeFilter}
+                onTypeFilterChange={setMessageTypeFilter}
+              />
+            ) : (
+              <div className="flex h-full items-center justify-center px-4 text-center text-sm text-slate-400">
+                No procedures are associated with this call. Choose another call or select All Calls.
+              </div>
+            )}
           </div>
         </div>
 
