@@ -6,7 +6,6 @@ import { l3EventApi } from "@/api/apiEndpoints";
 import { parseTimestampValue } from "@/utils/l3Events/timelineBuilder";
 import { decodeEventItem, decodeL3Item } from "@/utils/l3Events/eventDecoder";
 import { createBackendL3Loader, createBackendScopedLoader } from "@/utils/l3Events/backendDetailModel";
-import { buildUnifiedSignalingRows } from "@/utils/l3Events/signalingModel";
 import { ExcelSignalingView } from "@/components/unifiedMap/tabs/l3Events/ExcelSignalingView";
 import { ProtocolAnalyzerView } from "@/components/unifiedMap/tabs/l3Events/ProtocolAnalyzerView";
 import { TimelineCard } from "@/components/unifiedMap/tabs/l3Events/TimelineCard";
@@ -734,6 +733,7 @@ function BackendAnalyzer({ sessionIds, analysisId, projectName, onBack }) {
     const loaded = activeView === "map" ? mapRows : excelRows;
     if (loaded) return;
     let cancelled = false;
+    let worker = null;
     const loader = activeView === "map" ? loadMapRows : loadExcelRows;
     setViewErrors((current) => ({ ...current, [activeView]: "" }));
     loader(scope).then((response) => {
@@ -742,15 +742,29 @@ function BackendAnalyzer({ sessionIds, analysisId, projectName, onBack }) {
       const rows = diagnosticRowsFromResponse(response).map((row) => normalizeTimelineRow(row));
       if (!Array.isArray(payload.rows)) throw new Error(`Invalid diagnostic response: ${activeView} rows are missing.`);
       const calls = (Array.isArray(payload.calls) ? payload.calls : summary.calls).map(normalizeCall);
-      const signalingRows = buildUnifiedSignalingRows(rows, calls, null);
-      if (activeView === "map") {
-        setMapRows(signalingRows);
-        setMapOpened(true);
-      } else setExcelRows(signalingRows);
+      worker = new Worker(new URL("../workers/backendProtocolAnalysis.worker.js", import.meta.url), { type: "module" });
+      worker.onmessage = ({ data }) => {
+        if (cancelled) return;
+        if (data.error) {
+          setViewErrors((current) => ({ ...current, [activeView]: data.error }));
+          worker.terminate();
+          return;
+        }
+        if (activeView === "map") {
+          setMapRows(data.rows);
+          setMapOpened(true);
+        } else setExcelRows(data.rows);
+        worker.terminate();
+      };
+      worker.onerror = (workerError) => {
+        if (!cancelled) setViewErrors((current) => ({ ...current, [activeView]: workerError.message || `Failed to prepare ${activeView} rows.` }));
+        worker.terminate();
+      };
+      worker.postMessage({ id: `${activeView}:${scope.sessionIds}`, kind: "signaling", timeline: rows, calls });
     }).catch((requestError) => {
       if (!cancelled) setViewErrors((current) => ({ ...current, [activeView]: requestError?.response?.data?.message || requestError?.message || `Failed to load ${activeView} rows.` }));
     });
-    return () => { cancelled = true; };
+    return () => { cancelled = true; worker?.terminate(); };
   }, [activeView, error, excelRows, loadExcelRows, loadMapRows, loading, mapRows, scope, summary.calls, viewRetry]);
 
   const protocolTimeline = useMemo(() => {
