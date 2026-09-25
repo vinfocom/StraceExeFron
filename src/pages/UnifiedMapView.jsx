@@ -2025,6 +2025,8 @@ const UnifiedMapView = () => {
 
   const [drawnPoints, setDrawnPoints] = useState(null);
   const [drawnShapeAnalytics, setDrawnShapeAnalytics] = useState([]);
+  const [drawingDeleteRequest, setDrawingDeleteRequest] = useState(null);
+  const drawingDeleteSequenceRef = useRef(0);
   const [activeDrawingPreview, setActiveDrawingPreview] = useState([]);
   const [generatedMapLogs, setGeneratedMapLogs] = useState([]);
   const [newProjectPolygonName, setNewProjectPolygonName] = useState("");
@@ -6610,6 +6612,9 @@ const UnifiedMapView = () => {
         });
         return hasDiff ? newPoints : prev;
       });
+    } else {
+      // Measurement drawings remain in analytics, but never keep an area log filter active.
+      setDrawnPoints(null);
     }
 
     const drawingAnalytics = drawings.map((drawing) => {
@@ -6688,6 +6693,10 @@ const UnifiedMapView = () => {
     });
 
     setDrawnShapeAnalytics(drawingAnalytics);
+  }, []);
+
+  const handleDrawingDeleteRequest = useCallback((id) => {
+    setDrawingDeleteRequest({ id, sequence: ++drawingDeleteSequenceRef.current });
   }, []);
 
   const drawingShapesForMap = useMemo(
@@ -7975,6 +7984,7 @@ const UnifiedMapView = () => {
               showMetricLabels={showMetricLabels}
               overlapDrawOrder={ui.overlapDrawOrder}
               drawingShapes={drawingShapesForMap}
+              onDeleteDrawing={handleDrawingDeleteRequest}
               siteData={siteData}
               predictionGridData={lteLayerLocations}
               onLoad={handleMapLoad}
@@ -8028,6 +8038,7 @@ const UnifiedMapView = () => {
                 onUIChange={handleUIChange}
                 clearSignal={ui.drawClearSignal}
                 onDrawingsChange={handleDrawingsChange}
+                deleteRequest={drawingDeleteRequest}
                 onActiveDrawingChange={setActiveDrawingPreview}
                 terrainEnabled={ui.basemapStyle === "terrain"}
               />

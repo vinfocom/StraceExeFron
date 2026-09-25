@@ -181,6 +181,7 @@ const normalizeMapBounds = (bounds) => {
 
 const DeckGLOverlay = ({
   onHover,
+  onDrawingHover,
   map,
   showNumCells = false,
   showMetricLabels = false,
@@ -442,6 +443,15 @@ const DeckGLOverlay = ({
     onHover(info);
   }, [onHover]);
 
+  const handleDrawingHover = useCallback((info) => {
+    const drawing = info?.object;
+    onDrawingHover?.(
+      drawing?.type === 'polygon' && !String(drawing.id).startsWith('active-')
+        ? { id: drawing.id, x: info.x, y: info.y }
+        : null,
+    );
+  }, [onDrawingHover]);
+
   const handleGridHover = useCallback((info) => {
     if (!onGridHover) return;
     if (info?.object?.source) {
@@ -564,6 +574,18 @@ const DeckGLOverlay = ({
       }))
       .filter((drawing) => drawing.path.length >= 2 && drawing.path.every(([lng, lat]) => Number.isFinite(lng) && Number.isFinite(lat))),
     [drawingShapes],
+  );
+  const drawingPolygonHitData = useMemo(
+    () => drawingData
+      .filter((drawing) => drawing.type === 'polygon' && !String(drawing.id).startsWith('active-'))
+      .map((drawing) => {
+        const first = drawing.path[0];
+        const last = drawing.path[drawing.path.length - 1];
+        const isClosed = first?.[0] === last?.[0] && first?.[1] === last?.[1];
+        return { ...drawing, polygon: isClosed ? drawing.path.slice(0, -1) : drawing.path };
+      })
+      .filter((drawing) => drawing.polygon.length >= 3),
+    [drawingData],
   );
 
   const nativeOutlineData = useMemo(() => (nativeOutlinePaths || [])
@@ -860,6 +882,23 @@ const DeckGLOverlay = ({
 
     }
 
+    if (drawingPolygonHitData.length > 0) {
+      // Keep the transparent hit surface below log markers so existing marker
+      // hover and click interactions retain priority where they overlap a polygon.
+      addLayer('logs', new PolygonLayer({
+        id: 'user-drawing-polygon-hit-layer',
+        data: drawingPolygonHitData,
+        getPolygon: (drawing) => drawing.polygon,
+        getFillColor: [0, 0, 0, 0],
+        getLineColor: [0, 0, 0, 0],
+        filled: true,
+        stroked: false,
+        opacity: 0,
+        pickable: Boolean(pickable && !interactionsDisabled),
+        onHover: handleDrawingHover,
+      }), -100);
+    }
+
     if (nativeOutlineData.length > 0) {
       addLayer('drawings', new PathLayer({
         id: 'project-boundary-outline-layer',
@@ -904,7 +943,7 @@ const DeckGLOverlay = ({
     } catch (e) {
       // Overlay can detach during map teardown; skip this update.
     }
-  }, [map, primaryData, neighborData, gridData, imageLogData, metricLabelData, drawingData, drawingOpacity, nativeOutlineData, predictionRenderData, siteRenderData, registeredGroups, registryVersion, showPrimaryLogs, showNeighbors, showGrid, gridOpacity, handleGridHover, showImageLogs, selectedIndex, radius, radiusMinPixels, radiusMaxPixels, opacity, neighborOpacity, showNumCells, showMetricLabels, getColor, getNeighborColor, handleImageLogClick, handlePrimaryHover, isValidMapInstance, pickable, autoHighlight, mapZoom, interactionsDisabled]);
+  }, [map, primaryData, neighborData, gridData, imageLogData, metricLabelData, drawingData, drawingPolygonHitData, drawingOpacity, nativeOutlineData, predictionRenderData, siteRenderData, registeredGroups, registryVersion, showPrimaryLogs, showNeighbors, showGrid, gridOpacity, handleGridHover, handleDrawingHover, showImageLogs, selectedIndex, radius, radiusMinPixels, radiusMaxPixels, opacity, neighborOpacity, showNumCells, showMetricLabels, getColor, getNeighborColor, handleImageLogClick, handlePrimaryHover, isValidMapInstance, pickable, autoHighlight, mapZoom, interactionsDisabled]);
 
   useEffect(() => {
     return () => {

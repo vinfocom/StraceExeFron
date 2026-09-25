@@ -13,6 +13,7 @@ function toLatLng(item) {
 const MAX_ROUTE_BUFFER_POINTS = 220;
 const MAX_ROUTE_BUFFER_CELLS = 90000;
 const MAX_ROUTE_EXTERIOR_CELLS = 300000;
+let nextDrawingId = 0;
 
 function simplifyClosedGridPath(points, maxPoints, initialTolerance = 0.5) {
   if (!Array.isArray(points) || points.length <= 3) return points || [];
@@ -1293,6 +1294,7 @@ function DrawingToolsLayerComponent({
   onSummary,
   onDrawingsChange,
   onActiveDrawingChange,
+  deleteRequest = null,
   clearSignal = 0,
   colorizeCells = true,
   polygonOpacity = 0.35,
@@ -1316,6 +1318,7 @@ function DrawingToolsLayerComponent({
   const registerCompletedShapeRef = useRef(null);
   const finishActiveDrawingRef = useRef(null);
   const cancelActiveDrawingRef = useRef(null);
+  const deleteActionsRef = useRef(null);
   const undoActiveDrawingRef = useRef(null);
   const isSatelliteRef = useRef(isSatellite);
   isSatelliteRef.current = isSatellite;
@@ -1324,6 +1327,30 @@ function DrawingToolsLayerComponent({
   const shapeModeRef = useRef(shapeMode);
   const resolvedPolygonOpacity = clampOpacity(polygonOpacity);
   const resolvedPolygonFillOpacity = clampOpacity(polygonFillOpacity, 0);
+
+  deleteActionsRef.current = {
+    remove: (shapeObj) => {
+      if (!shapeObj || shapeObj.type !== "polygon") return;
+      cleanupCompletedShape(shapeObj);
+      shapesRef.current = shapesRef.current.filter((shape) => shape !== shapeObj);
+      collectedDrawingRef.current = collectedDrawingRef.current.filter(
+        (drawing) => drawing.id !== shapeObj.id,
+      );
+      const remainingById = new Map(
+        collectedDrawingRef.current.map((drawing) => [String(drawing.id), drawing]),
+      );
+      const remaining = shapesRef.current.map((shape) => {
+        const geometry = serializeOverlay(shape.type, shape.overlay);
+        const existing = remainingById.get(String(shape.id));
+        return existing
+          ? { ...existing, geometry, updatedAt: new Date().toISOString() }
+          : { id: shape.id, type: shape.type, geometry };
+      }).filter((drawing) => drawing.geometry);
+      collectedDrawingRef.current = remaining;
+      callbacksRef.current.onDrawingsChange?.(remaining);
+      callbacksRef.current.onSummary?.(remaining[remaining.length - 1] || null);
+    },
+  };
 
   const publishActiveDrawing = useCallback((type, overlay) => {
     activePreviewRef.current = { type, overlay };
@@ -1454,6 +1481,16 @@ function DrawingToolsLayerComponent({
   useEffect(() => {
     callbacksRef.current = { onSummary, onDrawingsChange, onActiveDrawingChange, onUIChange };
   }, [onSummary, onDrawingsChange, onActiveDrawingChange, onUIChange]);
+
+  useEffect(() => {
+    const id = deleteRequest?.id;
+    if (id === null || id === undefined) return;
+    const shapeObj = shapesRef.current.find(
+      (shape) => shape.type === "polygon" && String(shape.id) === String(id),
+    );
+    if (shapeObj) deleteActionsRef.current?.remove(shapeObj);
+  }, [deleteRequest]);
+
   useEffect(() => {
     logsRef.current = logs;
   }, [logs]);
@@ -1561,7 +1598,7 @@ function DrawingToolsLayerComponent({
     if (!overlay) return;
 
     const shapeObj = {
-      id: Date.now(),
+      id: `drawing-${Date.now()}-${++nextDrawingId}`,
       type,
       overlay,
       gridOverlays: [],

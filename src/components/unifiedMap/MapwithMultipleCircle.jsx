@@ -7,7 +7,7 @@ import { mapViewApi } from "@/api/apiEndpoints";
 import DeckGLOverlay from "@/components/maps/DeckGLOverlay";
 import { DeckLayerRegistryProvider } from "@/components/maps/deckLayerRegistry.jsx";
 import PrimaryLogTooltip from "./PrimaryLogTooltip";
-import { Zap, Layers, Radio, Square, Circle } from "lucide-react";
+import { Zap, Layers, Radio, Square, Circle, Trash2 } from "lucide-react";
 // import TechHandoverMarkers from "../unifiedMap/TechHandoverMarkers";
 import useColorForLog from "@/hooks/useColorForLog";
 import { getMetricValueFromLog, getMacDetailValueFromLog, getPciColor, getEarfcnColor } from "@/utils/metrics";
@@ -1584,6 +1584,7 @@ const MapWithMultipleCircles = ({
   drawingShapes = EMPTY_ARRAY,
   siteData = EMPTY_ARRAY,
   predictionGridData = EMPTY_ARRAY,
+  onDeleteDrawing,
 }) => {
   // L3DEBUG-START
   const l3MapRenderCountRef = useRef(0);
@@ -1603,6 +1604,8 @@ const MapWithMultipleCircles = ({
   const [map, setMap] = useState(null);
   const [hoveredCell, setHoveredCell] = useState(null);
   const [hoveredCellTooltipPos, setHoveredCellTooltipPos] = useState(null);
+  const [hoveredDrawingAction, setHoveredDrawingAction] = useState(null);
+  const drawingActionHideTimerRef = useRef(null);
   const [polygonData, setPolygonData] = useState(EMPTY_ARRAY);
   const [polygonsFetched, setPolygonsFetched] = useState(false);
   const [fetchError, setFetchError] = useState(null);
@@ -1921,6 +1924,57 @@ const MapWithMultipleCircles = ({
   const handleHover = useCallback((info) => {
     onMarkerHover?.(info?.object ?? null);
   }, [onMarkerHover]);
+
+  const handleDrawingHover = useCallback((target) => {
+    if (drawingEnabled) {
+      window.clearTimeout(drawingActionHideTimerRef.current);
+      drawingActionHideTimerRef.current = null;
+      setHoveredDrawingAction(null);
+      return;
+    }
+    if (!target?.id) {
+      window.clearTimeout(drawingActionHideTimerRef.current);
+      drawingActionHideTimerRef.current = window.setTimeout(() => {
+        setHoveredDrawingAction(null);
+        drawingActionHideTimerRef.current = null;
+      }, 220);
+      return;
+    }
+    window.clearTimeout(drawingActionHideTimerRef.current);
+    drawingActionHideTimerRef.current = null;
+    setHoveredDrawingAction(target);
+  }, [drawingEnabled]);
+
+  const clearHoveredDrawingAction = useCallback(() => {
+    window.clearTimeout(drawingActionHideTimerRef.current);
+    drawingActionHideTimerRef.current = null;
+    setHoveredDrawingAction(null);
+  }, []);
+
+  useEffect(() => {
+    if (drawingEnabled) clearHoveredDrawingAction();
+  }, [drawingEnabled, clearHoveredDrawingAction]);
+
+  useEffect(() => {
+    if (!hoveredDrawingAction?.id) return;
+    const polygonStillExists = drawingShapes.some(
+      (drawing) => drawing?.type === "polygon" && String(drawing.id) === String(hoveredDrawingAction.id),
+    );
+    if (!polygonStillExists) clearHoveredDrawingAction();
+  }, [drawingShapes, hoveredDrawingAction?.id, clearHoveredDrawingAction]);
+
+  useEffect(() => () => {
+    window.clearTimeout(drawingActionHideTimerRef.current);
+  }, []);
+
+  const handleDeleteDrawing = useCallback((event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    if (hoveredDrawingAction?.id !== null && hoveredDrawingAction?.id !== undefined) {
+      onDeleteDrawing?.(hoveredDrawingAction.id);
+    }
+    clearHoveredDrawingAction();
+  }, [hoveredDrawingAction, onDeleteDrawing, clearHoveredDrawingAction]);
 
   const handlePrimaryTooltipClick = useCallback((info) => {
     primaryLogTooltipRef.current?.select(info);
@@ -2596,6 +2650,7 @@ const MapWithMultipleCircles = ({
             siteData={siteData}
             predictionGridData={predictionGridData}
             onGridHover={handleDeckGridHover}
+            onDrawingHover={handleDrawingHover}
             locations={showPoints ? orderedLocationsToRender : []}
             imageLogs={imageLogs}
             getColor={getPrimaryColor}
@@ -2744,6 +2799,34 @@ const MapWithMultipleCircles = ({
         {children}
       </GoogleMap>
       </DeckLayerRegistryProvider>
+
+      {hoveredDrawingAction && !drawingEnabled && (
+        <button
+          type="button"
+          title="Delete polygon"
+          aria-label="Delete polygon"
+          onPointerDown={(event) => event.stopPropagation()}
+          onMouseDown={(event) => event.stopPropagation()}
+          onTouchStart={(event) => event.stopPropagation()}
+          onClick={handleDeleteDrawing}
+          onKeyDown={(event) => {
+            event.stopPropagation();
+            if (event.key === "Escape") clearHoveredDrawingAction();
+          }}
+          onMouseEnter={() => {
+            window.clearTimeout(drawingActionHideTimerRef.current);
+            drawingActionHideTimerRef.current = null;
+          }}
+          onMouseLeave={() => handleDrawingHover(null)}
+          className="absolute z-[1000001] grid h-8 w-8 place-items-center rounded-md border border-red-400/60 bg-slate-950/95 text-red-300 shadow-lg transition hover:border-red-300 hover:bg-red-600 hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-400"
+          style={{
+            left: `${hoveredDrawingAction.x + 10}px`,
+            top: `${hoveredDrawingAction.y + 10}px`,
+          }}
+        >
+          <Trash2 size={15} aria-hidden="true" />
+        </button>
+      )}
 
       {map && shouldRenderDeckOverlay && showPoints && !disableDeckInteractions && !drawingEnabled && !projectPolygonEditEnabled && (
         <PrimaryLogTooltip
