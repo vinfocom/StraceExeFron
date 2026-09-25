@@ -6,9 +6,10 @@ import React, {
   useRef,
 } from "react";
 import { Upload, Loader2, AlertTriangle, X, Search, Play, Pause, RotateCcw, Rewind, FastForward, Hand, PhoneCall, PhoneOff } from "lucide-react";
-import { GoogleMap, InfoWindow, OverlayView, useJsApiLoader } from "@react-google-maps/api";
+import { GoogleMap, InfoWindow, useJsApiLoader } from "@react-google-maps/api";
 import { GoogleMapsOverlay } from "@deck.gl/google-maps";
-import { ScatterplotLayer } from "@deck.gl/layers";
+import { ScatterplotLayer, TextLayer } from "@deck.gl/layers";
+import { DataFilterExtension } from "@deck.gl/extensions";
 import { Rnd } from "react-rnd";
 import { extractL3AndEventFiles } from "@/utils/l3Events/zipParser";
 import { parseL3CSV } from "@/utils/l3Events/l3Parser";
@@ -49,8 +50,11 @@ const MAP_CONTAINER_STYLE = { width: "100%", height: "100%" };
 const DEFAULT_MAP_CENTER = { lat: 20.5937, lng: 78.9629 };
 const MAP_INTERFACE_COLOR_STORAGE_KEY = "l3-events-map-interface-colors";
 const MAP_COLOR_MODE_STORAGE_KEY = "l3-events-map-color-mode";
+const MAP_TRAIL_FILTER_EXTENSION = new DataFilterExtension({ filterSize: 1 });
 const MAX_VISIBLE_EVENT_MARKERS = 75;
 const MAX_VISIBLE_MAP_MESSAGES = 1000;
+const MAP_MESSAGE_ROW_HEIGHT = 52;
+const MAP_MESSAGE_OVERSCAN = 8;
 const CALL_MARKER_TYPES = new Set(["call-start", "disconnect", "dropped", "not-connected"]);
 const MAP_INTERFACE_COLOR_PALETTE = [
   "#38bdf8",
@@ -775,6 +779,7 @@ export function buildMapPoints(timeline, rsrpByRowId = new Map()) {
       const eventMarker = getMapEventMarker(item);
       return {
         id: item?.id || `l3-map-point-${index}`,
+        index,
         lat,
         lng,
         type: item?.type || "event",
@@ -837,7 +842,7 @@ function isFailurePoint(point) {
   return HANDOVER_FAILURE_TEXT_RE.test(text) || /\b(fail(?:ed|ure|uire)?|reject(?:ed)?|timeout|error|rlf|radio link failure|dropped|forbidden|unavailable)\b|\b[45]\d{2}\b/i.test(text);
 }
 
-export function L3EventsMapView({ points }) {
+export function L3EventsMapView({ points, onNeedRsrpAnalysis }) {
   const { isLoaded, loadError } = useJsApiLoader(GOOGLE_MAPS_LOADER_OPTIONS);
   const { getThresholdInfo, getThresholdsForMetric } = useColorForLog();
   const [isPlaying, setIsPlaying] = useState(false);
@@ -848,6 +853,8 @@ export function L3EventsMapView({ points }) {
   const [playbackSpeedMs, setPlaybackSpeedMs] = useState(750);
   const [messageSearch, setMessageSearch] = useState("");
   const [messagePanelWidth, setMessagePanelWidth] = useState(340);
+  const [messageScrollTop, setMessageScrollTop] = useState(0);
+  const [messageViewportHeight, setMessageViewportHeight] = useState(420);
   const [mapInstance, setMapInstance] = useState(null);
   const [selectedEventMarker, setSelectedEventMarker] = useState(null);
   const [colorMode, setColorMode] = useState(() => {
@@ -869,12 +876,12 @@ export function L3EventsMapView({ points }) {
   const activeCardRef = useRef(null);
   const messageListRef = useRef(null);
   const mapStageRef = useRef(null);
+  const pointSetKey = useMemo(() => `${points.length}:${points[0]?.id || ""}:${points[points.length - 1]?.id || ""}`, [points]);
   const [mapStageWidth, setMapStageWidth] = useState(0);
   const mapsError = getGoogleMapsConfigError() || (loadError ? getGoogleMapsErrorMessage(loadError) : null);
   const currentPoint = points[currentIndex] || points[0] || null;
   const currentRawMessage = useMemo(() => formatMapRawMessage(currentPoint), [currentPoint]);
   const progressPercent = points.length > 1 ? (currentIndex / (points.length - 1)) * 100 : 100;
-  const trailPoints = showAllPoints ? points : points.slice(0, currentIndex);
   const interfaceLegend = useMemo(() => {
     const counts = new Map();
     points.forEach((point) => counts.set(point.state, (counts.get(point.state) || 0) + 1));
@@ -933,8 +940,8 @@ export function L3EventsMapView({ points }) {
       : interfaceColors[point?.state] || MAP_UNKNOWN_RSRP_COLOR
   ), [colorMode, getThresholdInfo, interfaceColors]);
   const deckTrailPoints = useMemo(
-    () => trailPoints.map((point) => ({ ...point, colorHex: getMapPointColor(point) })),
-    [getMapPointColor, trailPoints],
+    () => points.map((point) => ({ ...point, colorHex: getMapPointColor(point) })),
+    [getMapPointColor, points],
   );
   const deckActivePoint = useMemo(
     () => (currentPoint ? [{ ...currentPoint, colorHex: getMapPointColor(currentPoint) }] : []),
@@ -975,7 +982,7 @@ export function L3EventsMapView({ points }) {
       if (point.markerType === "not-connected") stats.notConnected += 1;
     });
     return stats;
-  }, [points]);
+  }, [pointSetKey]);
   const filteredMessagePoints = useMemo(() => {
     const query = messageSearch.trim().toLowerCase();
     if (!query) return points.map((point, index) => ({ point, index }));
@@ -1000,6 +1007,12 @@ export function L3EventsMapView({ points }) {
     start = Math.max(0, end - MAX_VISIBLE_MAP_MESSAGES);
     return filteredMessagePoints.slice(start, end);
   }, [filteredMessagePoints, currentIndex]);
+  const messageWindowStart = Math.max(0, Math.floor(messageScrollTop / MAP_MESSAGE_ROW_HEIGHT) - MAP_MESSAGE_OVERSCAN);
+  const messageWindowEnd = Math.min(
+    visibleMessagePoints.length,
+    messageWindowStart + Math.ceil(messageViewportHeight / MAP_MESSAGE_ROW_HEIGHT) + MAP_MESSAGE_OVERSCAN * 2,
+  );
+  const virtualMessagePoints = visibleMessagePoints.slice(messageWindowStart, messageWindowEnd);
   const center = points.length
     ? {
         lat: currentPoint?.lat ?? points.reduce((sum, point) => sum + point.lat, 0) / points.length,
@@ -1032,6 +1045,10 @@ export function L3EventsMapView({ points }) {
   }, [colorMode]);
 
   useEffect(() => {
+    if (colorMode === "rsrp") onNeedRsrpAnalysis?.();
+  }, [colorMode, onNeedRsrpAnalysis]);
+
+  useEffect(() => {
     if (!isPlaying || points.length <= 1) return undefined;
     const timer = window.setInterval(() => {
       setCurrentIndex((index) => {
@@ -1046,32 +1063,28 @@ export function L3EventsMapView({ points }) {
   }, [isPlaying, playbackSpeedMs, points.length]);
 
   useEffect(() => {
-    const activeEl = activeCardRef.current;
     const listEl = messageListRef.current;
-    if (!activeEl || !listEl) return;
-
-    const activeTop = activeEl.offsetTop;
-    const activeBottom = activeTop + activeEl.offsetHeight;
+    if (!listEl) return;
+    const activePosition = visibleMessagePoints.findIndex(({ index }) => index === currentIndex);
+    if (activePosition < 0) return;
+    const activeTop = activePosition * MAP_MESSAGE_ROW_HEIGHT;
+    const activeBottom = activeTop + MAP_MESSAGE_ROW_HEIGHT;
     const viewTop = listEl.scrollTop;
     const viewBottom = viewTop + listEl.clientHeight;
-    const topPadding = 24;
-    const bottomPadding = 48;
-
-    if (activeTop < viewTop + topPadding) {
-      listEl.scrollTo({
-        top: Math.max(0, activeTop - topPadding),
-        behavior: isPlaying ? "auto" : "smooth",
-      });
-      return;
-    }
-
-    if (activeBottom > viewBottom - bottomPadding) {
-      listEl.scrollTo({
-        top: activeBottom - listEl.clientHeight + bottomPadding,
-        behavior: isPlaying ? "auto" : "smooth",
-      });
+    if (activeTop < viewTop + MAP_MESSAGE_ROW_HEIGHT || activeBottom > viewBottom - MAP_MESSAGE_ROW_HEIGHT) {
+      listEl.scrollTo({ top: Math.max(0, activeTop - MAP_MESSAGE_ROW_HEIGHT * 2), behavior: isPlaying ? "auto" : "smooth" });
     }
   }, [currentIndex, isPlaying, visibleMessagePoints]);
+
+  useEffect(() => {
+    const listEl = messageListRef.current;
+    if (!listEl) return undefined;
+    const updateHeight = () => setMessageViewportHeight(listEl.clientHeight || 420);
+    updateHeight();
+    const observer = new ResizeObserver(updateHeight);
+    observer.observe(listEl);
+    return () => observer.disconnect();
+  }, []);
 
   useEffect(() => {
     if (!mapStageRef.current) return undefined;
@@ -1205,14 +1218,10 @@ export function L3EventsMapView({ points }) {
                 map={mapInstance}
                 trailPoints={deckTrailPoints}
                 activePoints={deckActivePoint}
+                trailEndIndex={showAllPoints ? points.length - 1 : currentIndex - 1}
+                eventMarkers={deckEventMarkers}
+                onEventMarkerClick={(point) => setSelectedEventMarker(point)}
               />
-              {deckEventMarkers.map((point) => (
-                <L3EventMapMarker
-                  key={`event-marker-${point.id}`}
-                  point={point}
-                  onSelect={setSelectedEventMarker}
-                />
-              ))}
               {selectedEventMarker && (
                 <InfoWindow
                   position={{ lat: selectedEventMarker.lat, lng: selectedEventMarker.lng }}
@@ -1352,27 +1361,37 @@ export function L3EventsMapView({ points }) {
                 />
               </div>
             </div>
-            <div ref={messageListRef} className="min-h-0 flex-1 w-full max-w-full min-w-0 overflow-y-auto overflow-x-hidden">
+            <div
+              ref={messageListRef}
+              onScroll={(event) => setMessageScrollTop(event.currentTarget.scrollTop)}
+              className="min-h-0 flex-1 w-full max-w-full min-w-0 overflow-y-auto overflow-x-hidden"
+            >
               {filteredMessagePoints.length > MAX_VISIBLE_MAP_MESSAGES && (
                 <div className="border-b border-slate-800 bg-slate-900/80 px-2 py-1 text-[10px] text-slate-400">
                   Showing {MAX_VISIBLE_MAP_MESSAGES.toLocaleString()} of {filteredMessagePoints.length.toLocaleString()} messages. Search to narrow.
                 </div>
               )}
-              {visibleMessagePoints.length > 0 ? visibleMessagePoints.map(({ point, index }) => (
-                <MapMessageCard
-                  key={point.id}
-                  ref={index === currentIndex ? activeCardRef : null}
-                  point={point}
-                  stateColor={getMapPointColor(point)}
-                  colorMode={colorMode}
-                  active={index === currentIndex}
-                  onClick={() => {
-                    setIsPlaying(false);
-                    setShowAllPoints(false);
-                    setCurrentIndex(index);
-                  }}
-                />
-              )) : (
+              {visibleMessagePoints.length > 0 ? (
+                <>
+                  <div aria-hidden="true" style={{ height: messageWindowStart * MAP_MESSAGE_ROW_HEIGHT }} />
+                  {virtualMessagePoints.map(({ point, index }) => (
+                    <MapMessageCard
+                      key={point.id}
+                      ref={index === currentIndex ? activeCardRef : null}
+                      point={point}
+                      stateColor={getMapPointColor(point)}
+                      colorMode={colorMode}
+                      active={index === currentIndex}
+                      onClick={() => {
+                        setIsPlaying(false);
+                        setShowAllPoints(false);
+                        setCurrentIndex(index);
+                      }}
+                    />
+                  ))}
+                  <div aria-hidden="true" style={{ height: Math.max(0, (visibleMessagePoints.length - messageWindowEnd) * MAP_MESSAGE_ROW_HEIGHT) }} />
+                </>
+              ) : (
                 <div className="px-2 py-4 text-center text-xs text-slate-500">No matching messages.</div>
               )}
             </div>
@@ -1512,33 +1531,6 @@ export function L3EventsMapView({ points }) {
   );
 }
 
-function L3EventMapMarker({ point, onSelect }) {
-  const callMarker = isCallMarker(point);
-
-  return (
-    <OverlayView
-      position={{ lat: point.lat, lng: point.lng }}
-      mapPaneName={OverlayView.OVERLAY_MOUSE_TARGET}
-      zIndex={callMarker ? 1000 : 500}
-    >
-      <button
-        type="button"
-        title={point.markerLabel || point.title}
-        onClick={(event) => {
-          event.stopPropagation();
-          onSelect(point);
-        }}
-        className={`pointer-events-auto flex -translate-x-1/2 -translate-y-full items-center justify-center drop-shadow-[0_1px_2px_rgba(0,0,0,0.8)] ${
-          callMarker ? "h-6 w-6" : "h-5 w-5"
-        }`}
-        style={{ color: point.markerColor || point.colorHex }}
-      >
-        <EventMarkerGlyph point={point} className={callMarker ? "h-5 w-5" : "h-4 w-4"} color={point.markerColor || point.colorHex} />
-      </button>
-    </OverlayView>
-  );
-}
-
 function EventMarkerGlyph({ point, className = "h-4 w-4", color }) {
   if (point?.markerType === "handover" || point?.markerType === "handover-failure") {
     return <Hand className={className} fill={color} />;
@@ -1608,7 +1600,7 @@ function L3EventMarkerInfo({ point }) {
   );
 }
 
-function L3MapDeckOverlay({ map, trailPoints, activePoints }) {
+function L3MapDeckOverlay({ map, trailPoints, activePoints, trailEndIndex, eventMarkers, onEventMarkerClick }) {
   const overlayRef = useRef(null);
 
   useEffect(() => {
@@ -1634,6 +1626,9 @@ function L3MapDeckOverlay({ map, trailPoints, activePoints }) {
     new ScatterplotLayer({
       id: "l3-events-trail-points",
       data: trailPoints,
+      extensions: [MAP_TRAIL_FILTER_EXTENSION],
+      getFilterValue: (point) => point.index,
+      filterRange: [0, trailEndIndex],
       getPosition: (point) => [point.lng, point.lat],
       getFillColor: (point) => hexToRgbArray(point.colorHex, 220),
       getLineColor: [15, 23, 42, 230],
@@ -1644,9 +1639,7 @@ function L3MapDeckOverlay({ map, trailPoints, activePoints }) {
       stroked: true,
       filled: true,
       pickable: false,
-      updateTriggers: {
-        getFillColor: [trailPoints],
-      },
+      updateTriggers: { getFillColor: [trailPoints] },
     }),
     new ScatterplotLayer({
       id: "l3-events-active-point",
@@ -1665,7 +1658,47 @@ function L3MapDeckOverlay({ map, trailPoints, activePoints }) {
         getFillColor: [activePoints],
       },
     }),
-  ], [activePoints, trailPoints]);
+    new ScatterplotLayer({
+      id: "l3-events-event-markers",
+      data: eventMarkers,
+      getPosition: (point) => [point.lng, point.lat],
+      getFillColor: (point) => hexToRgbArray(point.colorHex, 255),
+      getLineColor: [15, 23, 42, 245],
+      getLineWidth: 1.5,
+      getRadius: (point) => isCallMarker(point) ? 11 : 9,
+      radiusUnits: "pixels",
+      lineWidthUnits: "pixels",
+      stroked: true,
+      filled: true,
+      pickable: true,
+      onClick: ({ object }) => {
+        if (object) onEventMarkerClick?.(object);
+        return Boolean(object);
+      },
+      updateTriggers: { getFillColor: [eventMarkers] },
+    }),
+    new TextLayer({
+      id: "l3-events-event-marker-glyphs",
+      data: eventMarkers,
+      getPosition: (point) => [point.lng, point.lat],
+      getText: (point) => {
+        if (point.markerType === "handover" || point.markerType === "handover-failure") return "↗";
+        if (point.markerType === "call-start") return "☎";
+        if (isCallMarker(point)) return "×";
+        return point.markerSymbol || "•";
+      },
+      getColor: [255, 255, 255, 255],
+      getSize: (point) => isCallMarker(point) ? 15 : 12,
+      sizeUnits: "pixels",
+      getTextAnchor: "middle",
+      getAlignmentBaseline: "center",
+      fontFamily: "Arial, sans-serif",
+      outlineWidth: 1,
+      outlineColor: [15, 23, 42, 255],
+      pickable: false,
+      characterSet: "auto",
+    }),
+  ], [activePoints, eventMarkers, onEventMarkerClick, trailEndIndex, trailPoints]);
 
   useEffect(() => {
     if (!overlayRef.current) return;
@@ -1693,7 +1726,7 @@ const MapMessageCard = React.forwardRef(function MapMessageCard({ point, stateCo
       ref={ref}
       type="button"
       onClick={onClick}
-      className={`block w-full max-w-full overflow-hidden border-b px-2 py-1.5 text-left transition-colors duration-200 ${
+      className={`block h-[52px] w-full max-w-full overflow-hidden border-b px-2 py-1.5 text-left transition-colors duration-200 ${
         active
           ? failure
             ? "border-red-300 bg-red-600/80 text-white shadow-[inset_0_0_18px_rgba(127,29,29,0.55)] backdrop-blur-sm"
@@ -1705,7 +1738,7 @@ const MapMessageCard = React.forwardRef(function MapMessageCard({ point, stateCo
     >
       <div className="flex min-w-0 items-start gap-1.5 text-[11px] font-semibold leading-snug sm:text-xs">
         <span className="mt-1 h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: stateColor }} />
-        <span className="min-w-0 break-words">{point.title || "Message"}</span>
+        <span className="min-w-0 truncate">{point.title || "Message"}</span>
       </div>
       <div className="mt-0.5 pl-3.5 text-[9px] font-medium uppercase tracking-wide opacity-70">{metaLabel}</div>
     </button>
