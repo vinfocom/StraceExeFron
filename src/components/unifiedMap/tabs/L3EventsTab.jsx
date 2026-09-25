@@ -57,7 +57,7 @@ const MAP_MESSAGE_ROW_HEIGHT = 52;
 const MAP_MESSAGE_OVERSCAN = 8;
 const CALL_MARKER_TYPES = new Set(["call-start", "disconnect", "dropped", "not-connected"]);
 const RADIO_MARKER_TYPES = new Set([
-  "vonr-start", "volte-start", "rrc-configuration", "rrc-request",
+  "vonr", "vonr-start", "volte", "volte-start", "rrc-configuration", "rrc-request",
   "endc-start", "endc-end", "endc-failure", "rach", "rach-failure",
 ]);
 const MAP_INTERFACE_COLOR_PALETTE = [
@@ -763,7 +763,7 @@ function getRadioMapEventMarker(item = {}) {
   const text = [
     item.cause, item.message, item.title, item.summary, item.rawMessage, item.category,
     item.sourceCategory, item.protocol, item.procedure, item.officialName, item.type,
-    item.result, item.severity, item.eventKey, item.milestone, item.technology,
+    item.result, item.severity, item.eventKey, item.milestone, item.technology, item.serviceIndicators,
     item.technologyStart, item.technologyEnd, item.serviceType,
   ].filter(Boolean).join(" ").replace(/[_-]+/g, " ");
   const milestone = String(item.milestone || "").toUpperCase();
@@ -776,6 +776,8 @@ function getRadioMapEventMarker(item = {}) {
 
   if (callStart && isVoNR) return { markerType: "vonr-start", markerSymbol: "N", markerLabel: "VoNR Start", markerColor: "#8b5cf6" };
   if (callStart && isVoLTE) return { markerType: "volte-start", markerSymbol: "V", markerLabel: "VoLTE Start", markerColor: "#06b6d4" };
+  if (isVoNR) return { markerType: "vonr", markerSymbol: "N", markerLabel: "VoNR", markerColor: "#8b5cf6" };
+  if (isVoLTE) return { markerType: "volte", markerSymbol: "V", markerLabel: "VoLTE", markerColor: "#06b6d4" };
 
   if (/\b(?:scg|endc|secondary\s+cell\s+group)\b.{0,100}\b(?:fail(?:ed|ure)?|reject(?:ed|ion)?|timeout|abort(?:ed)?)\b|\b(?:scg|endc)\s*(?:failure|fail)\b|\b(?:scg|endc)(?:failure|fail)\b/i.test(text)) {
     return { markerType: "endc-failure", markerSymbol: "!", markerLabel: "EN-DC Failure", markerColor: "#ef4444" };
@@ -1045,8 +1047,8 @@ export function L3EventsMapView({ points, onNeedRsrpAnalysis, active = true }) {
       if (point.markerType === "disconnect") stats.disconnect += 1;
       if (point.markerType === "dropped") stats.dropped += 1;
       if (point.markerType === "not-connected") stats.notConnected += 1;
-      if (point.markerType === "vonr-start") stats.vonrStart += 1;
-      if (point.markerType === "volte-start") stats.volteStart += 1;
+      if (point.markerType === "vonr" || point.markerType === "vonr-start") stats.vonrStart += 1;
+      if (point.markerType === "volte" || point.markerType === "volte-start") stats.volteStart += 1;
       if (point.markerType === "rrc-configuration") stats.rrcConfiguration += 1;
       if (point.markerType === "rrc-request") stats.rrcRequest += 1;
       if (point.markerType === "endc-start") stats.endcStart += 1;
