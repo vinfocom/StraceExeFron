@@ -1185,14 +1185,6 @@ export function L3EventsMapView({ points, onNeedRsrpAnalysis, active = true }) {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [currentIndex, points]);
 
-  if (!points.length) {
-    return (
-      <div className="flex min-h-0 flex-1 w-full max-w-full min-w-0 items-center justify-center overflow-hidden bg-slate-900/70 text-center text-xs text-slate-300 sm:text-sm">
-        No lat/lon available in the uploaded L3/Event data.
-      </div>
-    );
-  }
-
   return (
     <div className="flex min-h-0 flex-1 w-full max-w-full min-w-0 flex-col overflow-hidden bg-slate-900/70">
       <div ref={mapStageRef} className="relative min-h-0 w-full max-w-full min-w-0 flex-1 overflow-hidden">
@@ -1242,6 +1234,11 @@ export function L3EventsMapView({ points, onNeedRsrpAnalysis, active = true }) {
                 </InfoWindow>
               )}
             </GoogleMap>
+          )}
+          {!mapsError && isLoaded && !points.length && (
+            <div className="pointer-events-none absolute inset-0 z-[2] flex items-center justify-center bg-slate-900/20 px-6 text-center text-sm text-slate-700">
+              No diagnostic rows have valid latitude and longitude. The map and message panel are ready when coordinates are available.
+            </div>
           )}
         </div>
         <div
@@ -1358,7 +1355,7 @@ export function L3EventsMapView({ points, onNeedRsrpAnalysis, active = true }) {
               <div className="flex items-center justify-between gap-2 px-2 py-1">
                 <span className="font-medium text-white">Messages</span>
                 <span className="font-mono text-[10px] text-slate-400 sm:text-[11px]">
-                  {currentIndex + 1} / {points.length}
+                  {points.length ? currentIndex + 1 : 0} / {points.length}
                 </span>
               </div>
               <div className="relative">
