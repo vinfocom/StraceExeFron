@@ -617,6 +617,20 @@ export const cellSiteApi = {
   },
 };
 
+// One background job for project setup (buildings + clutter, area breakup, cell sites).
+// Start returns immediately; the caller polls status, so no single request has to
+// stay open for the length of the whole setup.
+export const projectSetupApi = {
+  start: (payload) => pythonApi.post("/api/project-setup/start", payload, { timeout: 60000 }),
+  status: (jobId) => pythonApi.get(`/api/project-setup/status/${encodeURIComponent(jobId)}`, { timeout: 60000 }),
+  cancel: (jobId) => pythonApi.post(`/api/project-setup/cancel/${encodeURIComponent(jobId)}`, {}, { timeout: 30000 }),
+  projectStatus: (projectId, region, config = {}) =>
+    pythonApi.get(
+      `/api/project-setup/project/${encodeURIComponent(projectId)}/status${region ? `?region=${encodeURIComponent(region)}` : ""}`,
+      { timeout: 30000, ...config },
+    ),
+};
+
 export const areaBreakdownApi = {
   getAreaBreakdown: (params) => {
     const response = pythonApi.post("/api/area-breakup/process", params);
@@ -1312,6 +1326,8 @@ export const reportApi = {
     pythonApi.post("/api/report/generate", payload, { timeout: 600000 }),
   getReportStatus: (reportId) =>
     pythonApi.get(`/api/report/status/${reportId}`, { timeout: 120000 }),
+  cancelReport: (reportId) =>
+    pythonApi.post(`/api/report/cancel/${encodeURIComponent(reportId)}`, {}, { timeout: 30000 }),
   downloadReport: (reportId) =>
     pythonApi.get(`/api/report/download/${reportId}`, {
       responseType: 'blob',
@@ -1339,6 +1355,8 @@ export const newPdfReportApi = {
     pythonApi.post("/api/new-pdf-report/generate", payload, { timeout: 600000 }),
   getReportStatus: (reportId) =>
     pythonApi.get(`/api/new-pdf-report/status/${reportId}`, { timeout: 120000 }),
+  cancelReport: (reportId) =>
+    pythonApi.post(`/api/new-pdf-report/cancel/${encodeURIComponent(reportId)}`, {}, { timeout: 30000 }),
   downloadReport: (reportId) =>
     pythonApi.get(`/api/new-pdf-report/download/${reportId}`, {
       responseType: 'blob',
@@ -1351,6 +1369,8 @@ export const pptReportApi = {
     pythonApi.post("/api/ppt-report/generate", payload, { timeout: 30 * 60 * 1000 }),
   getStatus: (reportId) =>
     pythonApi.get(`/api/ppt-report/status/${encodeURIComponent(reportId)}`, { timeout: 120000 }),
+  cancel: (reportId) =>
+    pythonApi.post(`/api/ppt-report/cancel/${encodeURIComponent(reportId)}`, {}, { timeout: 30000 }),
   healthCheck: () =>
     pythonApi.get("/api/ppt-report/health", { timeout: 120000 }),
   getDownloadUrl: (downloadUrl, projectId) => {

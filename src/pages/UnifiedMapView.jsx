@@ -43,6 +43,9 @@ import { normalizeBandName } from "@/utils/colorUtils";
 
 // Hooks
 import { useSiteData } from "@/hooks/useSiteData";
+import { useProjectSetupStatus } from "@/hooks/useProjectSetupStatus";
+import { useAuth } from "@/hooks/useAuth";
+import { getUserProjectRegion } from "@/utils/projectRegion";
 import { useNeighborCollisions } from "@/hooks/useNeighborCollisions";
 import { useLtePrediction } from "@/hooks/useLtePrediction";
 import useColorForLog from "@/hooks/useColorForLog";
@@ -1927,8 +1930,14 @@ const UnifiedMapView = () => {
 
   const [showPolygons, setShowPolygons] = useState(false);
   const [showClutterTiles, setShowClutterTiles] = useState(false);
+  // While the project's creation-time setup is still running in the backend, clutter and
+  // building data are incomplete: the switches are locked until that part is finished.
+  const { user: setupStatusUser } = useAuth();
+  const projectSetup = useProjectSetupStatus(hasOpenProject ? projectId : null, getUserProjectRegion(setupStatusUser));
+  const clutterSetupLocked = projectSetup.running && !projectSetup.clutterReady;
+  const buildingsSetupLocked = projectSetup.running && (!projectSetup.buildingsReady || !projectSetup.clutterReady);
   const clutterTilesEnabled =
-    CLUTTER_TILES_FEATURE_AVAILABLE && hasOpenProject && showClutterTiles;
+    CLUTTER_TILES_FEATURE_AVAILABLE && hasOpenProject && showClutterTiles && !clutterSetupLocked;
   const [sourceGeometryLayers, setSourceGeometryLayers] = useState({
     buildings: false,
     roads: false,
@@ -7758,6 +7767,9 @@ const UnifiedMapView = () => {
         setShowPolygons={setShowPolygons}
         showClutterTiles={clutterTilesEnabled}
         setShowClutterTiles={setShowClutterTiles}
+        clutterSetupLocked={clutterSetupLocked}
+        buildingsSetupLocked={buildingsSetupLocked}
+        clutterSetupIncomplete={projectSetup.clutterIncomplete || ""}
         clutterTilesAvailable={CLUTTER_TILES_FEATURE_AVAILABLE}
         clutterTileCount={clutterTiles.length}
         clutterTileLoading={clutterTileLoading}

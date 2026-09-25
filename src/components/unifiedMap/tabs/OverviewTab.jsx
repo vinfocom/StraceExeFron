@@ -386,6 +386,10 @@ export const OverviewTab = ({
     const toastId = toast.loading("Preparing PowerPoint report...");
     const startedAtMs = Date.now();
 
+    // Cancel is offered once the backend has given the job an id. The backend reports "cancelled"
+    // at once and stops the presentation at its next step.
+    let cancelPpt = null;
+    let pptCancelling = false;
     // Shows the backend's percentage, current stage, elapsed time, time left and recent log lines.
     const showProgress = (info) => {
       const percent = Math.min(
@@ -402,6 +406,8 @@ export const OverviewTab = ({
             label={info?.step || info?.message || "Generating PowerPoint report..."}
             elapsedSeconds={info?.elapsed_seconds ?? Math.round((Date.now() - startedAtMs) / 1000)}
             etaSeconds={info?.eta_seconds ?? null}
+            onCancel={cancelPpt || undefined}
+            cancelling={pptCancelling}
           />
         ),
       });
@@ -413,6 +419,17 @@ export const OverviewTab = ({
       let status = String(reportResponse?.status || "").toLowerCase();
       if (status === "processing" && reportResponse?.report_id) {
         const reportId = reportResponse.report_id;
+        cancelPpt = async () => {
+          if (pptCancelling) return;
+          pptCancelling = true;
+          showProgress(reportResponse);
+          try {
+            await pptReportApi.cancel(reportId);
+          } catch (cancelError) {
+            pptCancelling = false;
+            toast.warn("Could not cancel the PowerPoint report. It is still running.");
+          }
+        };
         const startedAt = Date.now();
         const maxWaitMs = 30 * 60 * 1000;
         const maxTransientErrors = 30;
@@ -430,8 +447,17 @@ export const OverviewTab = ({
             continue;
           }
           status = String(reportResponse?.status || "").toLowerCase();
-          if (status === "ready" || status === "failed") break;
+          if (status === "ready" || status === "failed" || status === "cancelled") break;
           showProgress(reportResponse);
+        }
+        if (status === "cancelled") {
+          toast.update(toastId, {
+            render: "PowerPoint report cancelled.",
+            type: "info",
+            isLoading: false,
+            autoClose: 4000,
+          });
+          return;
         }
         if (status !== "ready") {
           throw new Error(

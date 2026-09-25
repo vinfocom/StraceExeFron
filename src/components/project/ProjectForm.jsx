@@ -36,8 +36,12 @@ import { useAuth } from "../../context/AuthContext";
 import Spinner from "../common/Spinner";
 import { upsertProjectInProjectsCache } from "@/utils/projectsCache";
 import { resolveCompanyId } from "@/utils/authSession";
+import { getUserCountryCode, getProjectRegionFromCountryCode } from "@/utils/projectRegion";
 import { normalizeSiteUploadFile, getSiteUploadValidationMessage } from "@/utils/siteUpload";
 import SiteUploadValidationDialog from "@/components/common/SiteUploadValidationDialog";
+import ReportProgressToast from "../unifiedMap/ReportProgressToast";
+import { runProjectSetupJob, ProjectSetupUnavailableError } from "@/utils/projectSetupJob";
+import { projectSetupApi } from "../../api/apiEndpoints";
 
 const DEFAULT_MIN_SAMPLES = 10;
 
@@ -398,21 +402,6 @@ const PredictionOptions = ({
 // endpoint defaults to region="india" when no region is sent, so without
 // this every project (regardless of actual country) silently generated its
 // buildings/clutter against the wrong regional database.
-const normalizeProjectCountryCode = (value) => {
-  const raw = String(value || "").trim().toUpperCase();
-  if (!raw) return "";
-  if (["TAIWAN", "TWN"].includes(raw)) return "TW";
-  if (["INDIA", "IND"].includes(raw)) return "IN";
-  return raw;
-};
-
-const getProjectRegionFromCountryCode = (value) => {
-  const normalized = normalizeProjectCountryCode(value);
-  if (normalized === "TW") return "taiwan";
-  if (normalized === "IN") return "india";
-  return "";
-};
-
 export const ProjectForm = ({
   polygons,
   loading: parentLoading,
@@ -420,9 +409,7 @@ export const ProjectForm = ({
   onPolygonDeleted,
 }) => {
   const { user } = useAuth();
-  const userCountryCode = normalizeProjectCountryCode(
-    user?.country_code ?? user?.countryCode ?? user?.country ?? user?.source_db ?? user?.sourceDb
-  );
+  const userCountryCode = getUserCountryCode(user);
   const userRegion = getProjectRegionFromCountryCode(userCountryCode);
   const [projectName, setProjectName] = useState("");
   const [selectedPolygon, setSelectedPolygon] = useState(null);
@@ -589,6 +576,134 @@ export const ProjectForm = ({
     let buildingProcessingToastId = null;
     const completedSteps = [];
 
+    // One progress toast for the whole creation. The backend job covers geo setup,
+    // area breakup and cell sites; the site-file upload and LTE prediction are
+    // separate calls that continue the same bar. Each extra stage owns a share of it.
+    const EXTRA_STAGE_SHARE = { site: 4, prediction: 30 };
+    const extraStages = [];
+    if (siteFile) extraStages.push({ key: "site", label: "Site file" });
+    if (runPrediction && selectedSessions.length > 0) extraStages.push({ key: "prediction", label: "LTE prediction" });
+    const jobShare = 100 - extraStages.reduce((sum, stage) => sum + EXTRA_STAGE_SHARE[stage.key], 0);
+    const setupStartedAt = Date.now();
+    let setupToastId = null;
+    let setupJobHandled = false;
+    let jobStagesTotal = 2 + (selectedSessions.length > 0 ? 1 : 0);
+    let setupHadIssues = false;
+    let setupCancelled = false;
+    let setupJobId = null;
+    let setupCancelling = false;
+    let lastSetupProgress = null;
+    // Cancel is offered only while the backend job runs (setup, area breakup, cell sites);
+    // the site-file upload and LTE prediction that follow are single calls that cannot be stopped.
+    const cancelSetupJob = async () => {
+      if (!setupJobId || setupCancelling) return;
+      setupCancelling = true;
+      if (lastSetupProgress) showSetupProgress({ ...lastSetupProgress, cancellable: true });
+      try {
+        await projectSetupApi.cancel(setupJobId);
+      } catch (err) {
+        setupCancelling = false;
+        toast.warn("Could not cancel the setup. It is still running.");
+        if (lastSetupProgress) showSetupProgress({ ...lastSetupProgress, cancellable: true });
+      }
+    };
+    const showSetupProgress = ({ percent, label, stageLabel, etaSeconds = null, cancellable = false }) => {
+      lastSetupProgress = { percent, label, stageLabel, etaSeconds };
+      const content = (
+        <ReportProgressToast
+          percent={percent}
+          label={label}
+          stageLabel={stageLabel}
+          elapsedSeconds={Math.floor((Date.now() - setupStartedAt) / 1000)}
+          etaSeconds={etaSeconds}
+          onCancel={cancellable ? cancelSetupJob : undefined}
+          cancelling={cancellable && setupCancelling}
+        />
+      );
+      if (setupToastId === null) {
+        // type "info" from the first render: a plain loading toast is white and the white bar would be invisible
+        setupToastId = toast.loading(content, { type: "info" });
+      } else {
+        toast.update(setupToastId, { render: content, type: "info", isLoading: true });
+      }
+    };
+    const showExtraStage = (key, label) => {
+      if (!setupJobHandled) return;
+      const position = extraStages.findIndex((stage) => stage.key === key);
+      const before = extraStages.slice(0, position).reduce((sum, stage) => sum + EXTRA_STAGE_SHARE[stage.key], 0);
+      showSetupProgress({
+        percent: jobShare + before,
+        label,
+        stageLabel: `Stage ${jobStagesTotal + position + 1} of ${jobStagesTotal + extraStages.length} · ${extraStages[position].label}`,
+      });
+    };
+
+    // The previous step-by-step setup, kept as the fallback when the setup job is unavailable.
+    const runLegacyGeoSteps = async () => {
+      setCurrentStep("Generating buildings...");
+      buildingProcessingToastId = toast.loading(
+        "Processing building and cluster data..."
+      );
+
+      try {
+        const buildingPayload = {
+          WKT: selectedPolygonData.wkt,
+          Name: selectedPolygonData.label || projectName.trim(),
+          project_id: projectId,
+          ...(userRegion ? { region: userRegion } : {}),
+          ...(userCountryCode ? { country_code: userCountryCode } : {}),
+        };
+
+        const buildingRes = await buildingApi.generateBuildings(
+          buildingPayload
+        );
+
+        if (buildingRes.Status === 1 || buildingRes.success) {
+          toast.dismiss(buildingProcessingToastId);
+          buildingProcessingToastId = null;
+          toast.success(
+            `Generated ${buildingRes.Stats?.extracted || 0} buildings`
+          );
+          completedSteps.push("buildings_generated");
+        } else {
+          toast.dismiss(buildingProcessingToastId);
+          buildingProcessingToastId = null;
+        }
+      } catch (err) {
+        toast.dismiss(buildingProcessingToastId);
+        buildingProcessingToastId = null;
+        toast.warn("Building generation skipped");
+      }
+
+      setCurrentStep(`Analyzing area (${gridSize}m grid)...`);
+
+      try {
+        const breakdownPayload = {
+          WKT: selectedPolygonData.wkt,
+          project_id: projectId,
+          Name: projectName.trim(),
+          grid: parseFloat(gridSize),
+          min_samples: DEFAULT_MIN_SAMPLES,
+        };
+
+        const breakdownRes = await areaBreakdownApi.getAreaBreakdown(
+          breakdownPayload
+        );
+
+        if (breakdownRes?.status === "success") {
+          const details = breakdownRes.details || [];
+          toast.success(
+            `Area analysis complete: ${details.length} items processed`
+          );
+          completedSteps.push("breakdown_processed");
+        }
+      } catch (err) {
+        toast.warn(
+          "Area breakdown failed: " + (err.message || "Unknown error")
+        );
+      }
+    };
+
     try {
       // Validate before creating a project or making any upload request.
       let uploadFile = siteFile;
@@ -646,72 +761,78 @@ export const ProjectForm = ({
       completedSteps.push("project_created");
 
       if (selectedPolygonData?.wkt) {
-        setCurrentStep("Generating buildings...");
-        buildingProcessingToastId = toast.loading(
-          "Processing building and cluster data..."
-        );
-
+        setCurrentStep("Setting up project...");
         try {
-          const buildingPayload = {
-            WKT: selectedPolygonData.wkt,
-            Name: selectedPolygonData.label || projectName.trim(),
-            project_id: projectId,
-            ...(userRegion ? { region: userRegion } : {}),
-            ...(userCountryCode ? { country_code: userCountryCode } : {}),
-          };
-
-          const buildingRes = await buildingApi.generateBuildings(
-            buildingPayload
+          showSetupProgress({
+            percent: 0,
+            label: "Starting",
+            stageLabel: `Stage 1 of ${jobStagesTotal + extraStages.length} · Setup`,
+          });
+          const jobStatus = await runProjectSetupJob(
+            {
+              project_id: projectId,
+              WKT: selectedPolygonData.wkt,
+              Name: selectedPolygonData.label || projectName.trim(),
+              area_name: projectName.trim(),
+              grid: parseFloat(gridSize),
+              min_samples: DEFAULT_MIN_SAMPLES,
+              session_ids: selectedSessions,
+              ...(userRegion ? { region: userRegion } : {}),
+              ...(userCountryCode ? { country_code: userCountryCode } : {}),
+            },
+            (status) => {
+              setupJobHandled = true;
+              if (status?.job_id) setupJobId = status.job_id;
+              if (status?.cancel_requested) setupCancelling = true;
+              if (status?.stages_total) jobStagesTotal = status.stages_total;
+              if (status?.status && status.status !== "processing") return;
+              const index = Math.min(Math.max(status?.stage_index || 1, 1), jobStagesTotal);
+              showSetupProgress({
+                percent: ((status?.progress || 0) * jobShare) / 100,
+                label: status?.step_label || "Working",
+                stageLabel: `Stage ${index} of ${jobStagesTotal + extraStages.length} · ${status?.stage_label || "Setup"}`,
+                etaSeconds: status?.eta_seconds ?? null,
+                cancellable: true,
+              });
+            }
           );
-
-          if (buildingRes.Status === 1 || buildingRes.success) {
-            toast.dismiss(buildingProcessingToastId);
-            buildingProcessingToastId = null;
-            toast.success(
-              `Generated ${buildingRes.Stats?.extracted || 0} buildings`
-            );
-            completedSteps.push("buildings_generated");
+          setupJobHandled = true;
+          if (jobStatus?.status === "cancelled") setupCancelled = true;
+          const stageByKey = Object.fromEntries((jobStatus?.stages || []).map((stage) => [stage.key, stage]));
+          if (stageByKey.setup?.state === "done") completedSteps.push("buildings_generated");
+          if (stageByKey.area?.state === "done") completedSteps.push("breakdown_processed");
+          if (stageByKey.sites?.state === "done") completedSteps.push("sessions_uploaded");
+          (jobStatus?.stages || [])
+            .filter((stage) => stage.state === "failed")
+            .forEach((stage) => {
+              setupHadIssues = true;
+              toast.warn(`${stage.label}: ${stage.message || "could not be completed"}`);
+            });
+          if (jobStatus?.status === "failed") {
+            setupHadIssues = true;
+            toast.warn(jobStatus.error || "Project setup did not finish");
+          }
+        } catch (err) {
+          if (err instanceof ProjectSetupUnavailableError) {
+            // The setup job could not be started (for example an older backend):
+            // fall back to the step-by-step calls this form always used.
+            console.warn("Project setup job unavailable, using step-by-step setup:", err.message);
+            if (setupToastId !== null) {
+              toast.dismiss(setupToastId);
+              setupToastId = null;
+            }
+            setupJobHandled = false;
+            await runLegacyGeoSteps();
           } else {
-            toast.dismiss(buildingProcessingToastId);
-            buildingProcessingToastId = null;
+            setupHadIssues = true;
+            toast.warn(err.message || "Project setup did not finish");
           }
-        } catch (err) {
-          toast.dismiss(buildingProcessingToastId);
-          buildingProcessingToastId = null;
-          toast.warn("Building generation skipped");
-        }
-
-        setCurrentStep(`Analyzing area (${gridSize}m grid)...`);
-
-        try {
-          const breakdownPayload = {
-            WKT: selectedPolygonData.wkt,
-            project_id: projectId,
-            Name: projectName.trim(),
-            grid: parseFloat(gridSize),
-            min_samples: DEFAULT_MIN_SAMPLES,
-          };
-
-          const breakdownRes = await areaBreakdownApi.getAreaBreakdown(
-            breakdownPayload
-          );
-
-          if (breakdownRes?.status === "success") {
-            const details = breakdownRes.details || [];
-            toast.success(
-              `Area analysis complete: ${details.length} items processed`
-            );
-            completedSteps.push("breakdown_processed");
-          }
-        } catch (err) {
-          toast.warn(
-            "Area breakdown failed: " + (err.message || "Unknown error")
-          );
         }
       }
 
-      if (siteFile) {
+      if (siteFile && !setupCancelled) {
         setCurrentStep(`Saving ${siteFile.name} to site prediction...`);
+        showExtraStage("site", "Saving site file");
 
         try {
           const formData = new FormData();
@@ -739,7 +860,7 @@ export const ProjectForm = ({
         }
       }
 
-      if (selectedSessions.length > 0) {
+      if (selectedSessions.length > 0 && !setupJobHandled && !setupCancelled) {
         setCurrentStep(`Processing ${selectedSessions.length} sessions...`);
 
         try {
@@ -764,8 +885,9 @@ export const ProjectForm = ({
         }
       }
 
-      if (runPrediction && selectedSessions.length > 0) {
+      if (runPrediction && selectedSessions.length > 0 && !setupCancelled) {
         setCurrentStep(`Running LTE prediction (${predictionGrid}m grid)...`);
+        showExtraStage("prediction", "Running LTE prediction");
 
         try {
           const predictionPayload = {
@@ -792,7 +914,31 @@ export const ProjectForm = ({
       }
 
       setCurrentStep("");
-      toast.success("🎉 Project created successfully!", { autoClose: 5000 });
+      if (setupToastId !== null) {
+        const finalPercent = setupCancelled ? Math.round(lastSetupProgress?.percent || 0) : 100;
+        toast.update(setupToastId, {
+          render: (
+            <ReportProgressToast
+              percent={finalPercent}
+              label={
+                setupCancelled
+                  ? "Setup cancelled. Finished steps were kept."
+                  : setupHadIssues
+                    ? "Project created with some steps incomplete"
+                    : "Project processing completed"
+              }
+              elapsedSeconds={Math.floor((Date.now() - setupStartedAt) / 1000)}
+              etaSeconds={null}
+            />
+          ),
+          type: setupCancelled || setupHadIssues ? "warning" : "success",
+          isLoading: false,
+          autoClose: 8000,
+        });
+        setupToastId = null;
+      } else {
+        toast.success("🎉 Project created successfully!", { autoClose: 5000 });
+      }
 
       setProjectName("");
       setSelectedPolygon(null);
@@ -822,6 +968,10 @@ export const ProjectForm = ({
         toast.dismiss(buildingProcessingToastId);
         buildingProcessingToastId = null;
       }
+      if (setupToastId !== null) {
+        toast.dismiss(setupToastId);
+        setupToastId = null;
+      }
 
       let errorMessage = "Failed to create project";
       if (err.response?.data?.Message) {
@@ -836,6 +986,9 @@ export const ProjectForm = ({
     } finally {
       if (buildingProcessingToastId) {
         toast.dismiss(buildingProcessingToastId);
+      }
+      if (setupToastId !== null) {
+        toast.dismiss(setupToastId);
       }
       setLoading(false);
       setCurrentStep("");

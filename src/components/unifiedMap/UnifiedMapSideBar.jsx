@@ -715,6 +715,9 @@ const UnifiedMapSidebar = ({
   setShowPolygons,
   showClutterTiles = false,
   setShowClutterTiles,
+  clutterSetupLocked = false,
+  buildingsSetupLocked = false,
+  clutterSetupIncomplete = "",
   clutterTilesAvailable = false,
   clutterTileCount = 0,
   clutterTileLoading = false,
@@ -3643,6 +3646,7 @@ const UnifiedMapSidebar = ({
               useSwitch={true}
             />
 
+            <div className={clutterSetupLocked ? "pointer-events-none select-none opacity-50 blur-[1px]" : ""}>
             <ToggleRow
               label="Clutter Tiles"
               description={
@@ -3666,11 +3670,24 @@ const UnifiedMapSidebar = ({
               }
               checked={Boolean(showClutterTiles)}
               onChange={setShowClutterTiles}
-              disabled={!clutterTilesAvailable || !canLoadClutterTiles}
+              disabled={!clutterTilesAvailable || !canLoadClutterTiles || clutterSetupLocked}
               useSwitch={true}
             />
+            </div>
+            {clutterSetupLocked && (
+              <div className="pb-1 text-xs text-amber-300/90">
+                Clutter is still processing. Available when setup finishes.
+              </div>
+            )}
+            {!clutterSetupLocked && clutterSetupIncomplete && (
+              <div className="pb-1 text-xs text-amber-300/90">
+                {clutterSetupIncomplete === "cancelled"
+                  ? "Project setup was cancelled, so clutter tiles may be missing."
+                  : "Project setup did not finish, so clutter tiles may be missing."}
+              </div>
+            )}
 
-            <div className="rounded-lg border border-slate-700/60 bg-slate-900/40 p-2">
+            <div className={`rounded-lg border border-slate-700/60 bg-slate-900/40 p-2 ${buildingsSetupLocked ? "pointer-events-none select-none opacity-50" : ""}`}>
               <div className="mb-1.5 flex items-center justify-between gap-2">
                 <span className="text-xs font-semibold text-slate-300">Real Source Layers</span>
                 <span className="text-[10px] text-slate-500">
@@ -3709,10 +3726,15 @@ const UnifiedMapSidebar = ({
                       [key]: checked,
                     }))
                   }
-                  disabled={!projectId}
+                  disabled={!projectId || buildingsSetupLocked}
                   useSwitch={true}
                 />
               ))}
+              {buildingsSetupLocked && (
+                <div className="mt-1 text-[11px] text-amber-300/90">
+                  Still processing. Available when setup finishes.
+                </div>
+              )}
             </div>
 
             {Boolean(deltaGridApiState?.gridVisible) && ( 

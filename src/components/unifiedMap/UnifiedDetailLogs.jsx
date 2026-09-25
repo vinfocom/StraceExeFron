@@ -2001,6 +2001,27 @@ function UnifiedDetailLogs({
         const deadline = reportStartedAtMs + REPORT_TIMEOUT_MS;
         let statusResponse = null;
         let transientStatusErrors = 0;
+        let reportCancelled = false;
+        let reportCancelling = false;
+        let lastProgressInfo = null;
+        // Cancel: the backend reports "cancelled" at once and stops the report at its next step.
+        const cancelReport = async () => {
+          if (reportCancelling) return;
+          reportCancelling = true;
+          if (lastProgressInfo) {
+            toast.update(toastId, {
+              render: <ReportProgressToast {...lastProgressInfo} onCancel={cancelReport} cancelling />,
+              type: "info",
+              isLoading: true,
+            });
+          }
+          try {
+            await apiClient.cancelReport(reportId);
+          } catch (cancelError) {
+            reportCancelling = false;
+            toast.warn("Could not cancel the report. It is still running.");
+          }
+        };
 
         while (Date.now() < deadline) {
           try {
@@ -2039,8 +2060,9 @@ function UnifiedDetailLogs({
               etaSeconds: statusResponse.eta_seconds,
             };
             setReportProgress(progressInfo);
+            lastProgressInfo = progressInfo;
             toast.update(toastId, {
-              render: <ReportProgressToast {...progressInfo} />,
+              render: <ReportProgressToast {...progressInfo} onCancel={cancelReport} cancelling={reportCancelling} />,
               type: "info",
               isLoading: true,
             });
@@ -2050,11 +2072,27 @@ function UnifiedDetailLogs({
             break;
           }
 
+          if (reportStatus === "cancelled") {
+            reportCancelled = true;
+            break;
+          }
+
           if (reportStatus === "failed") {
             throw new Error(statusResponse?.error || "Report generation failed");
           }
 
           await new Promise((resolve) => setTimeout(resolve, REPORT_POLL_INTERVAL_MS));
+        }
+
+        if (reportCancelled) {
+          toast.update(toastId, {
+            render: "Report generation cancelled.",
+            type: "info",
+            isLoading: false,
+            autoClose: 4000,
+            closeButton: true,
+          });
+          return;
         }
 
         if (statusResponse?.status !== "ready") {
