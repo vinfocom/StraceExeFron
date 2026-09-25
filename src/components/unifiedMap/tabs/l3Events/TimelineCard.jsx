@@ -79,6 +79,14 @@ function TimelineCardComponent({ item }) {
                 {item.domain}
               </span>
             )}
+            {item.serviceIndicators?.map((service) => (
+              <span
+                key={service}
+                className="rounded-full border border-cyan-500/30 bg-cyan-500/10 px-1.5 py-0.5 text-[10px] text-cyan-200"
+              >
+                {service}
+              </span>
+            ))}
             <span className="text-xs text-white ml-auto font-mono shrink-0">{item.timestampLabel}</span>
           </div>
           {item.summary && <p className="text-xs text-white mt-1 truncate">{item.summary}</p>}

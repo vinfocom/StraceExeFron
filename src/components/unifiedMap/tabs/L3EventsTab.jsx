@@ -394,6 +394,7 @@ function DiagnosticApiOverview({ summary, timeline = [] }) {
   const mobility = Array.isArray(summary.mobility) ? summary.mobility : [];
   const parameters = Array.isArray(summary.parameters) ? summary.parameters : [];
   const dashboardValues = [...kpis, ...mobility, ...parameters];
+  const detectedServices = summary.detectedServices;
   const technologies = [];
   const technologyIndexes = new Map();
   (Array.isArray(summary.technologies) ? summary.technologies : []).forEach((item) => {
@@ -415,11 +416,14 @@ function DiagnosticApiOverview({ summary, timeline = [] }) {
   });
   technologies.sort((left, right) => right.rows - left.rows || left.name.localeCompare(right.name));
   const [activeTechnology, setActiveTechnology] = useState("");
+  const [parameterColumnWidth, setParameterColumnWidth] = useState(230);
+  const overviewTableRef = useRef(null);
+  const resizeStartRef = useRef(null);
   const selectedTechnology = activeTechnology === "All"
     ? null
     : technologies.find((item) => item.name.toLocaleLowerCase() === activeTechnology.toLocaleLowerCase()) || technologies[0] || null;
   const showAll = activeTechnology === "All" || !selectedTechnology;
-  const hasOverview = dashboardValues.length || technologies.length || summary.totalRows != null || summary.l3Rows != null || summary.eventRows != null;
+  const hasOverview = dashboardValues.length || technologies.length || summary.totalRows != null || summary.l3Rows != null || summary.eventRows != null || detectedServices;
   if (!hasOverview) return null;
 
   const getParameter = (item) => String(item.parameter ?? item.Parameter ?? "");
@@ -458,6 +462,21 @@ function DiagnosticApiOverview({ summary, timeline = [] }) {
   const tableValues = showAll
     ? [
       ...dashboardValues,
+      ...(detectedServices ? [
+        { parameter: "VoLTE detected", result: detectedServices.hasVolte ? "Yes" : "No" },
+        { parameter: "VoLTE text rows", result: String(detectedServices.volteTextRows) },
+        { parameter: "VoLTE network rows", result: String(detectedServices.volteNetworkRows) },
+        { parameter: "VoLTE call -1 rows", result: String(detectedServices.volteCallMinusOneRows) },
+        { parameter: "VoLTE active rows", result: String(detectedServices.volteCallActiveRows) },
+        { parameter: "VoLTE blank rows", result: String(detectedServices.volteCallBlankRows) },
+        { parameter: "VoNR detected", result: detectedServices.hasVonr ? "Yes" : "No" },
+        { parameter: "VoNR text rows", result: String(detectedServices.vonrTextRows) },
+        { parameter: "TMSI detected", result: detectedServices.hasTmsi ? "Yes" : "No" },
+        { parameter: "TMSI rows", result: String(detectedServices.tmsiRows) },
+        { parameter: "RRC/SIB Parameters detected", result: detectedServices.hasRrcSibParameters ? "Yes" : "No" },
+        { parameter: "RRC/SIB Parameter rows", result: String(detectedServices.rrcSibParameterRows) },
+        { parameter: "Network log rows", result: String(detectedServices.networkLogRows) },
+      ] : []),
       ...(!backendObservedEvents ? [
         { parameter: "Observed EN-DC setup rows", result: String(allObservedEvents.endcSetupRows) },
         { parameter: "Observed handover rows", result: String(allObservedEvents.handoverRows) },
@@ -472,6 +491,30 @@ function DiagnosticApiOverview({ summary, timeline = [] }) {
       ...technologyMobility,
       ...scopedValues,
     ];
+  const startParameterColumnResize = (event) => {
+    event.preventDefault();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    resizeStartRef.current = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startWidth: parameterColumnWidth,
+    };
+  };
+  const moveParameterColumnResize = (event) => {
+    const start = resizeStartRef.current;
+    if (!start || start.pointerId !== event.pointerId) return;
+    const tableWidth = overviewTableRef.current?.clientWidth || 520;
+    const maxWidth = Math.max(180, tableWidth - 180);
+    setParameterColumnWidth(Math.min(maxWidth, Math.max(160, start.startWidth + event.clientX - start.startX)));
+  };
+  const stopParameterColumnResize = (event) => {
+    if (resizeStartRef.current?.pointerId === event.pointerId) resizeStartRef.current = null;
+  };
+  const handleParameterColumnResizeKey = (event) => {
+    if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+    event.preventDefault();
+    setParameterColumnWidth((width) => Math.max(160, width + (event.key === "ArrowRight" ? 20 : -20)));
+  };
 
   return (
     <section className="mt-4 rounded-lg border border-slate-700 bg-slate-950/30 p-3">
@@ -503,9 +546,10 @@ function DiagnosticApiOverview({ summary, timeline = [] }) {
             );
           })}
         </nav>
-        <div className="min-w-0 overflow-x-auto rounded border border-slate-700">
-          <table className="w-full min-w-[520px] border-collapse text-xs">
-            <thead className="bg-slate-800/90 text-left text-[10px] uppercase tracking-wide text-slate-400"><tr><th className="border-b border-r border-slate-700 px-2 py-2">Parameter</th><th className="border-b border-slate-700 px-2 py-2">Result</th></tr></thead>
+        <div className="min-w-0 overflow-x-auto rounded border border-slate-700" onPointerMove={moveParameterColumnResize} onPointerUp={stopParameterColumnResize} onPointerCancel={stopParameterColumnResize}>
+          <table ref={overviewTableRef} className="w-full min-w-[520px] table-fixed border-collapse text-xs">
+            <colgroup><col style={{ width: `${parameterColumnWidth}px` }} /><col /></colgroup>
+            <thead className="bg-slate-800/90 text-left text-[10px] uppercase tracking-wide text-slate-400"><tr><th className="relative border-b border-r border-slate-700 px-2 py-2">Parameter<button type="button" role="separator" aria-orientation="vertical" aria-label="Resize Parameter column" title="Drag to resize column" onPointerDown={startParameterColumnResize} onKeyDown={handleParameterColumnResizeKey} className="absolute inset-y-0 right-0 z-10 w-2 cursor-col-resize touch-none bg-slate-600/40 hover:bg-blue-400/70 focus-visible:outline focus-visible:outline-1 focus-visible:outline-blue-300" /></th><th className="border-b border-slate-700 px-2 py-2">Result</th></tr></thead>
             <tbody>{tableValues.map((item, index) => <tr key={getParameter(item) + "-" + index} className="border-b border-slate-800/90 last:border-b-0"><td className="border-r border-slate-800 px-2 py-1.5 text-slate-200">{getParameter(item) || "—"}</td><td className="px-2 py-1.5 text-slate-300">{getResult(item)}</td></tr>)}</tbody>
           </table>
         </div>

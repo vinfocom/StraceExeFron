@@ -947,14 +947,15 @@ function formatExcelDetailForPdf(row = {}) {
 
 export function createSignalingMessageTable(rows = [], { includeLocation = false } = {}) {
   const headers = includeLocation
-    ? ["Timestamp", "Direction", "Channel", "Lat", "Lon", "Interface", "Message", "Detail"]
-    : ["Timestamp", "Direction", "Channel", "Interface", "Message", "Detail"];
+    ? ["Timestamp", "Direction", "Channel", "Lat", "Lon", "Interface", "Cause", "Message", "Detail"]
+    : ["Timestamp", "Direction", "Channel", "Interface", "Cause", "Message", "Detail"];
   return { headers, rows: rows.map((row) => [
     row.timestampLabel || formatClock(row.timestamp),
     row.direction && row.direction !== "—" ? row.direction : "-",
     row.channel || "",
     ...(includeLocation ? [formatPdfCoordinate(row.latitude), formatPdfCoordinate(row.longitude)] : []),
     row.interface || "Unknown",
+    row.cause || "-",
     row.message || "-",
     formatExcelDetailForPdf(row),
   ]) };
@@ -964,8 +965,8 @@ function addExcelSignalingTable(layout, rows = [], { includeLocation = false } =
   const table = createSignalingMessageTable(rows, { includeLocation });
   const { headers } = table;
   const widths = includeLocation
-    ? [12, 8, 10, 8, 8, 10, 16, 28]
-    : [14, 8, 12, 12, 20, 34];
+    ? [12, 8, 10, 8, 8, 10, 16, 16, 28]
+    : [14, 8, 12, 12, 16, 20, 34];
   const formatRow = (values) => values
     .map((value, index) => truncate(value, widths[index]).padEnd(widths[index], " "))
     .join("  ");

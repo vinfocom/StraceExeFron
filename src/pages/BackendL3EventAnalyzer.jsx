@@ -50,6 +50,12 @@ function normalizeTimelineRow(row = {}, forcedType = null) {
   const category = valueOf(row, "category", "sourceCategory", "Category", "SourceCategory") || (sourceType === "l3" ? "L3" : "Event");
   const sourceCategory = valueOf(row, "sourceCategory", "SourceCategory") || category;
   const raw = valueOf(row, "raw", "metadata", "rawJson", "Raw", "Metadata", "RawJson") || row;
+  const rawServiceIndicators = valueOf(row, "serviceIndicators", "ServiceIndicators");
+  const serviceIndicators = Array.isArray(rawServiceIndicators)
+    ? [...new Set(rawServiceIndicators.map((indicator) => String(indicator || "").trim()).filter(Boolean))]
+    : typeof rawServiceIndicators === "string" && rawServiceIndicators.trim()
+      ? [rawServiceIndicators.trim()]
+      : [];
   const decoded = sourceType === "l3"
     ? decodeL3Item({
       layer: sourceCategory,
@@ -92,6 +98,7 @@ function normalizeTimelineRow(row = {}, forcedType = null) {
     protocol: valueOf(row, "protocol", "Protocol") || category,
     interface: valueOf(row, "interface", "Interface") || category,
     procedure: valueOf(row, "procedure", "Procedure") || category,
+    serviceIndicators,
     latitude: valueOf(row, "latitude", "Latitude"),
     longitude: valueOf(row, "longitude", "Longitude"),
     direction: valueOf(row, "direction", "Direction") || null,
@@ -147,6 +154,32 @@ function normalizeCall(call = {}) {
   return normalized;
 }
 
+function normalizeDetectedServices(services) {
+  if (!services || typeof services !== "object" || Array.isArray(services)) return null;
+  const count = (key) => {
+    const value = Number(valueOf(services, key));
+    return Number.isFinite(value) ? value : 0;
+  };
+  const values = valueOf(services, "volteCallValues");
+  return {
+    hasVolte: Boolean(valueOf(services, "hasVolte")),
+    hasVonr: Boolean(valueOf(services, "hasVonr")),
+    hasTmsi: Boolean(valueOf(services, "hasTmsi")),
+    hasRrcSibParameters: Boolean(valueOf(services, "hasRrcSibParameters")),
+    volteTextRows: count("volteTextRows"),
+    vonrTextRows: count("vonrTextRows"),
+    tmsiRows: count("tmsiRows"),
+    rrcSibParameterRows: count("rrcSibParameterRows"),
+    networkLogRows: count("networkLogRows"),
+    volteNetworkRows: count("volteNetworkRows"),
+    volteCallMinusOneRows: count("volteCallMinusOneRows"),
+    volteCallActiveRows: count("volteCallActiveRows"),
+    volteCallBlankRows: count("volteCallBlankRows"),
+    volteCallValues: values && typeof values === "object" && !Array.isArray(values) ? values : {},
+    evidence: Array.isArray(valueOf(services, "evidence")) ? valueOf(services, "evidence") : [],
+  };
+}
+
 function unwrapDiagnosticSummary(response) {
   if (Array.isArray(response)) return { rows: response };
   if (!response || typeof response !== "object") return null;
@@ -200,6 +233,7 @@ function normalizeSummary(summary) {
     totalDurationMs: valueOf(summary, "totalDurationMs") ?? 0,
     totalConnectedDurationMs: valueOf(summary, "totalConnectedDurationMs") ?? 0,
     totalAttemptDurationMs: valueOf(summary, "totalAttemptDurationMs", "total_attempt_duration_ms") ?? 0,
+    detectedServices: normalizeDetectedServices(valueOf(summary, "detectedServices")),
     successRate: valueOf(summary, "successRate", "success_rate"),
     busy: valueOf(summary, "busy"),
     rejected: valueOf(summary, "rejected"),
@@ -702,7 +736,7 @@ function BackendAnalyzer({ sessionIds, analysisId, projectName, onBack }) {
   const visibleRawRows = useMemo(() => {
     const needle = search.trim().toLowerCase();
     if (!needle) return rawRows;
-    return rawRows.filter((row) => [row.timestampLabel, row.title, row.category, row.summary, row.rawMessage, row.sourceFile].filter(Boolean).join(" ").toLowerCase().includes(needle));
+    return rawRows.filter((row) => [row.timestampLabel, row.title, row.category, row.summary, row.rawMessage, row.sourceFile, ...(row.serviceIndicators || [])].filter(Boolean).join(" ").toLowerCase().includes(needle));
   }, [rawRows, search]);
 
   const downloadPdf = async (kind) => {
