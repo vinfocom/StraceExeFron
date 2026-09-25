@@ -46,6 +46,9 @@ export const getInsightCoordinates = (insight) => {
 export const getInsightSeverity = (insight) =>
   String(getInsightValue(insight, "severity", "Severity") || "UNKNOWN").toUpperCase();
 
+export const getInsightId = (insight, index = 0) =>
+  String(getInsightValue(insight, "id", "Id") ?? `insight-${index}`);
+
 export const getInsightSeverityColor = (severity) => {
   const colors = {
     HIGH: "#dc2626",

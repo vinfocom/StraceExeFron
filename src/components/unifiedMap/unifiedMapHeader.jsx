@@ -854,6 +854,7 @@ function UnifiedHeader({
                     item.checked !== undefined ? (
                       <DropdownMenuCheckboxItem
                         key={item.label}
+                        className="pr-8 pl-2 [&>span]:right-2 [&>span]:left-auto"
                         disabled={item.disabled}
                         checked={item.checked}
                         onSelect={(e) => {

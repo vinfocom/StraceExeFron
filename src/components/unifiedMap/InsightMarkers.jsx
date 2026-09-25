@@ -4,6 +4,7 @@ import { useGoogleMap } from "@react-google-maps/api";
 import { useDeckLayerGroup } from "@/components/maps/deckLayerRegistry.jsx";
 import {
   getInsightCoordinates,
+  getInsightId,
   getInsightSeverity,
   getInsightSeverityColor,
 } from "./insightUtils";
@@ -23,7 +24,12 @@ const hexToRgba = (hex, alpha = 230) => {
   ];
 };
 
-const InsightMarkers = ({ insights = [], show = false, radius = 10 }) => {
+const InsightMarkers = ({
+  insights = [],
+  show = false,
+  radius = 10,
+  selectedInsightId = null,
+}) => {
   const map = useGoogleMap();
 
   const markerRows = useMemo(
@@ -34,7 +40,7 @@ const InsightMarkers = ({ insights = [], show = false, radius = 10 }) => {
           if (!position) return null;
           return {
             ...position,
-            id: insight?.id ?? insight?.Id ?? `insight-${index}`,
+            id: getInsightId(insight, index),
             severity: getInsightSeverity(insight),
           };
         })
@@ -67,6 +73,11 @@ const InsightMarkers = ({ insights = [], show = false, radius = 10 }) => {
     [severityPaths],
   );
 
+  const selectedMarkers = useMemo(
+    () => markerRows.filter((marker) => marker.id === selectedInsightId),
+    [markerRows, selectedInsightId],
+  );
+
   const markerLayer = useMemo(
     () => new ScatterplotLayer({
       id: "unified-map-insight-markers",
@@ -93,7 +104,34 @@ const InsightMarkers = ({ insights = [], show = false, radius = 10 }) => {
     [markerRows, radius],
   );
 
-  useDeckLayerGroup("events", show ? [connectionLayer, markerLayer] : [], 40);
+  const selectedMarkerLayer = useMemo(
+    () => new ScatterplotLayer({
+      id: "unified-map-selected-insight-marker",
+      data: selectedMarkers,
+      getPosition: (marker) => [marker.lng, marker.lat],
+      getRadius: radius * 2,
+      getFillColor: [255, 215, 0, 45],
+      getLineColor: [255, 215, 0, 255],
+      getLineWidth: 3,
+      radiusUnits: "pixels",
+      radiusMinPixels: 10,
+      radiusMaxPixels: 48,
+      lineWidthUnits: "pixels",
+      lineWidthMinPixels: 3,
+      stroked: true,
+      filled: true,
+      pickable: false,
+      parameters: { depthTest: false },
+      updateTriggers: { getRadius: [radius] },
+    }),
+    [selectedMarkers, radius],
+  );
+
+  useDeckLayerGroup(
+    "events",
+    show ? [connectionLayer, markerLayer, selectedMarkerLayer] : [],
+    40,
+  );
 
   useEffect(() => {
     if (!show || !map || !window.google?.maps || markerRows.length === 0) return;
@@ -108,6 +146,13 @@ const InsightMarkers = ({ insights = [], show = false, radius = 10 }) => {
     markerRows.forEach((marker) => bounds.extend({ lat: marker.lat, lng: marker.lng }));
     map.fitBounds(bounds, 80);
   }, [map, markerRows, show]);
+
+  useEffect(() => {
+    if (!show || !map || selectedMarkers.length === 0) return;
+    const [selected] = selectedMarkers;
+    map.panTo({ lat: selected.lat, lng: selected.lng });
+    map.setZoom(Math.max(map.getZoom?.() || 13, 16));
+  }, [map, selectedMarkers, show]);
 
   return null;
 };

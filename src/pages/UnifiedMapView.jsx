@@ -1848,6 +1848,7 @@ const UnifiedMapView = () => {
   const [showInsights, setShowInsights] = useState(false);
   const [insights, setInsights] = useState([]);
   const [insightsLoading, setInsightsLoading] = useState(false);
+  const [selectedInsightId, setSelectedInsightId] = useState(null);
   const [selectedMetric, setSelectedMetricState] = useState("rsrp");
   const [viewport, setViewport] = useState(null);
   const [mapZoom, setMapZoom] = useState(DEFAULT_MAP_ZOOM);
@@ -7660,6 +7661,8 @@ const UnifiedMapView = () => {
             onActiveTabExternalChange={setAnalyticsActiveTab}
             showInsights={showInsights}
             insights={insights}
+            selectedInsightId={selectedInsightId}
+            onInsightSelect={setSelectedInsightId}
             sitePredictionVersion={sitePredictionVersion}
             enableGrid={enableGrid}
             gridCellStats={gridCellStats}
@@ -8238,6 +8241,7 @@ const UnifiedMapView = () => {
               <InsightMarkers
                 show={showInsights}
                 insights={insights}
+                selectedInsightId={selectedInsightId}
                 radius={logRadius}
               />
 

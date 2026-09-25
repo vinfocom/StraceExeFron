@@ -1344,6 +1344,8 @@ function UnifiedDetailLogs({
   gridViewSummary = null,
   showInsights = false,
   insights = [],
+  selectedInsightId = null,
+  onInsightSelect,
 }) {
   const [collapsed, setCollapsed] = useState(false);
   const [expanded, setExpanded] = useState(false);
@@ -2563,7 +2565,13 @@ function UnifiedDetailLogs({
           )}
 
 
-          {activeTab === "insights" && <InsightsTab insights={insights} />}
+          {activeTab === "insights" && (
+            <InsightsTab
+              insights={insights}
+              selectedInsightId={selectedInsightId}
+              onInsightSelect={onInsightSelect}
+            />
+          )}
 
           {activeTab === "n78" && (
             <N78AnalysisTab

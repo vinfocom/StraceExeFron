@@ -4,6 +4,7 @@ import { Badge } from "@/components/ui/badge";
 import {
   getInsightSeverity,
   getInsightSeverityColor,
+  getInsightId,
   getInsightValue,
 } from "../insightUtils";
 
@@ -15,7 +16,11 @@ const severityVariant = (severity) => {
   return "secondary";
 };
 
-const InsightsTab = ({ insights = [] }) => {
+const InsightsTab = ({
+  insights = [],
+  selectedInsightId = null,
+  onInsightSelect,
+}) => {
   const [expandedRows, setExpandedRows] = useState(() => new Set());
 
   const toggleRow = (rowKey) => {
@@ -25,6 +30,15 @@ const InsightsTab = ({ insights = [] }) => {
       else next.add(rowKey);
       return next;
     });
+  };
+
+  const handleRowToggle = (rowKey, expanded) => {
+    toggleRow(rowKey);
+    if (!expanded) {
+      onInsightSelect?.(rowKey);
+    } else if (selectedInsightId === rowKey) {
+      onInsightSelect?.(null);
+    }
   };
 
   if (!insights.length) {
@@ -48,7 +62,7 @@ const InsightsTab = ({ insights = [] }) => {
           </thead>
           <tbody className="divide-y divide-slate-800">
             {insights.map((insight, index) => {
-              const rowKey = String(getInsightValue(insight, "id", "Id") ?? index);
+              const rowKey = getInsightId(insight, index);
               const expanded = expandedRows.has(rowKey);
               const severity = getInsightSeverity(insight);
               const title = getInsightValue(insight, "title", "Title") || "Untitled insight";
@@ -60,7 +74,7 @@ const InsightsTab = ({ insights = [] }) => {
                     <td className="px-3 py-3 align-middle">
                       <button
                         type="button"
-                        onClick={() => toggleRow(rowKey)}
+                        onClick={() => handleRowToggle(rowKey, expanded)}
                         className="rounded p-1 text-slate-400 transition hover:bg-slate-700 hover:text-white"
                         aria-label={`${expanded ? "Collapse" : "Expand"} insight ${title}`}
                         title={expanded ? "Collapse insight" : "Expand insight"}
