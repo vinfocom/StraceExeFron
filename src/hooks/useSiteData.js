@@ -7,6 +7,8 @@ import {
   isProjectSessionCacheFresh,
   writeProjectSessionCache,
 } from '@/utils/projectSessionCache';
+import { useRequestGeneration } from '@/features/unified-map/data/useRequestGeneration.js';
+import { getPolygonRequestIdentity } from '@/features/unified-map/data/mapRequestIdentity.js';
 
 const SITE_PREDICTION_PAGE_SIZE = 50000;
 const MAX_SITE_PREDICTION_PAGES = 200;
@@ -112,27 +114,25 @@ const extractSitePredictionPaginationMeta = (response = {}) => {
   return { page, pageSize, totalPages, totalCount };
 };
 
-const getSitePredictionRowKey = (row = {}, index = 0) =>
-  [
-    row?.id ??
-      row?.original_id ??
-      row?.cell_id ??
-      row?.cellId ??
-      row?.cell_id_representative ??
-      row?.cellIdRepresentative ??
-      "",
+const getSitePredictionRowKey = (row = {}, index = 0) => {
+  const fields = [
     row?.site ??
       row?.site_id ??
       row?.siteId ??
       row?.site_key_inferred ??
       row?.siteKeyInferred ??
       "",
-      row?.siteName,
     row?.sector ?? row?.sector_id ?? row?.sectorId ?? "",
+    row?.cell_id ?? row?.cellId ?? row?.cell_id_representative ?? row?.cellIdRepresentative ?? "",
+    row?.band ?? row?.frequency_band ?? row?.earfcn ?? row?.earfcn_or_narfcn ?? "",
+    row?.provider ?? row?.operator_name ?? row?.operatorName ?? "",
+    row?.id ?? row?.original_id ?? "",
     row?.lat_pred ?? row?.lat ?? row?.latitude ?? "",
     row?.lon_pred ?? row?.lng ?? row?.lon ?? row?.longitude ?? "",
-    index,
-  ].join("|");
+  ];
+  const hasSourceIdentity = fields.some((field) => String(field ?? "").trim() !== "");
+  return [...fields, hasSourceIdentity ? "" : index].join("|");
+};
 
 const getSitePredictionMergeKey = (row = {}) => {
   const backendKey = String(
@@ -215,7 +215,7 @@ const nowMs = () =>
     ? performance.now()
     : Date.now();
 
-const fetchAllSitePredictionRows = async (params = {}) => {
+const fetchAllSitePredictionRows = async (params = {}, signal) => {
   const aggregatedRows = [];
   const seenRows = new Set();
   const totalStartMs = nowMs();
@@ -223,8 +223,10 @@ const fetchAllSitePredictionRows = async (params = {}) => {
   let page = 1;
   let totalPagesHint = null;
   let totalCountHint = null;
+  let complete = false;
 
   while (page <= MAX_SITE_PREDICTION_PAGES) {
+    if (signal?.aborted) throw new DOMException("Request cancelled", "AbortError");
     const offset = (page - 1) * SITE_PREDICTION_PAGE_SIZE;
     const requestParams = {
       ...params,
@@ -233,7 +235,7 @@ const fetchAllSitePredictionRows = async (params = {}) => {
       simple: 1,
     };
     const pageStartMs = nowMs();
-    const response = await sitePredictionApi.get(requestParams);
+    const response = await sitePredictionApi.get(requestParams, { signal });
     const pageElapsedMs = nowMs() - pageStartMs;
 
     const pageRows = extractRowsFromResponse(response);
@@ -252,7 +254,10 @@ const fetchAllSitePredictionRows = async (params = {}) => {
         polygonIds: requestParams.polygon_ids || "all",
       },
     );
-    if (pageRows.length === 0) break;
+    if (pageRows.length === 0) {
+      complete = true;
+      break;
+    }
 
     let addedThisPage = 0;
     pageRows.forEach((row, index) => {
@@ -269,10 +274,19 @@ const fetchAllSitePredictionRows = async (params = {}) => {
     totalPagesHint = meta.totalPages ?? totalPagesHint;
     totalCountHint = meta.totalCount ?? totalCountHint;
 
-    if (totalPagesHint && effectivePage >= totalPagesHint) break;
-    if (totalCountHint && aggregatedRows.length >= totalCountHint) break;
+    if (totalPagesHint && effectivePage >= totalPagesHint) {
+      complete = true;
+      break;
+    }
+    if (totalCountHint && aggregatedRows.length >= totalCountHint) {
+      complete = true;
+      break;
+    }
     if (addedThisPage === 0) break;
-    if (pageRows.length < effectivePageSize) break;
+    if (pageRows.length < effectivePageSize) {
+      complete = true;
+      break;
+    }
 
     page += 1;
   }
@@ -290,7 +304,7 @@ const fetchAllSitePredictionRows = async (params = {}) => {
     },
   );
 
-  return aggregatedRows;
+  return { rows: aggregatedRows, complete };
 };
 
 const normalizeSitePredictionRows = (rows = [], options = {}) => {
@@ -431,28 +445,36 @@ export const useSiteData = ({
   const [siteData, setSiteData] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+  const [outcome, setOutcome] = useState('empty');
+  const [complete, setComplete] = useState(false);
   
-  const isMounted = useRef(true);
   // Track successful requests without making auto-fetch depend on the loaded row count.
   const lastSuccessfulParams = useRef(null);
-
-  // DEBUG: Log current state on every render
-  useEffect(() => {
-  }, [enableSiteToggle, siteToggle, sitePredictionVersion, siteData.length]);
-
-  useEffect(() => {
-    isMounted.current = true;
-    return () => { isMounted.current = false; };
-  }, []);
+  const requestIdentity = JSON.stringify({
+    enabled: Boolean(enableSiteToggle), siteToggle, sitePredictionVersion,
+    sitePredictionScenarioId, defaultBeamwidth, projectId,
+    sessionIds: sessionIds ? [...sessionIds].map(String).sort() : [],
+    filterEnabled, polygons: getPolygonRequestIdentity(polygons),
+  });
+  const requestGeneration = useRequestGeneration(requestIdentity);
 
   const fetchSiteData = useCallback(async (forceRefresh = false) => {
     const normalizedDefaultBeamwidth = normalizeBeamwidth(defaultBeamwidth, 30);
+    const lease = requestGeneration.begin({ force: forceRefresh });
+    if (!lease.started) return;
+    const { request } = lease;
+    const isCurrent = () => requestGeneration.isCurrent(request);
+    const signal = request.controller.signal;
 
     // If the toggle is not enabled, we clear data and stop
     if (!enableSiteToggle) {
       setSiteData([]);
       setLoading(false);
+      setError(null);
+      setOutcome('empty');
+      setComplete(false);
       lastSuccessfulParams.current = null;
+      requestGeneration.finish(request);
       return;
     }
 
@@ -475,13 +497,14 @@ export const useSiteData = ({
       projectId,
       sessionIds,
       filterEnabled,
-      polygons,
+      polygons: getPolygonRequestIdentity(polygons),
     });
     if (
       shouldUseLocalCache &&
       !forceRefresh &&
       lastSuccessfulParams.current === currentParams
     ) {
+      requestGeneration.finish(request);
       return;
     }
 
@@ -489,25 +512,38 @@ export const useSiteData = ({
       resource: 'unified-site-data',
       projectId: projectId || 'global',
       sessionIds,
-      variant: `${String(siteToggle || '').toLowerCase()}_${String(sitePredictionVersion || 'original').toLowerCase()}_scn${Number(sitePredictionScenarioId) || 0}_bw${normalizedDefaultBeamwidth}`,
+      variant: `schema2_${String(siteToggle || '').toLowerCase()}_${String(sitePredictionVersion || 'original').toLowerCase()}_scn${Number(sitePredictionScenarioId) || 0}_bw${normalizedDefaultBeamwidth}`,
     });
 
     if (shouldUseLocalCache && !forceRefresh) {
-      const cacheEntry = readProjectSessionCacheEntry(cacheKey);
-      if (Array.isArray(cacheEntry?.data)) {
-        setSiteData(cacheEntry.data);
+      let cacheEntry = null;
+      try {
+        cacheEntry = readProjectSessionCacheEntry(cacheKey);
+      } catch {
+        cacheEntry = null;
+      }
+      if (cacheEntry?.data?.cacheSchemaVersion === 2 && Array.isArray(cacheEntry.data?.rows)) {
+        if (!isCurrent()) return;
+        setSiteData(cacheEntry.data.rows);
         setError(null);
 
         if (isProjectSessionCacheFresh(cacheEntry, SITE_DATA_CACHE_MAX_AGE_MS)) {
+          setOutcome(cacheEntry.data.outcome || (cacheEntry.data.rows.length ? 'complete' : 'empty'));
+          setComplete(cacheEntry.data.complete !== false);
           lastSuccessfulParams.current = currentParams;
           setLoading(false);
+          requestGeneration.finish(request);
           return;
         }
       }
     }
 
+    if (!isCurrent()) return;
+    if (!forceRefresh && lastSuccessfulParams.current !== currentParams) setSiteData([]);
     setLoading(true);
     setError(null);
+    setOutcome('loading');
+    setComplete(false);
     lastSuccessfulParams.current = null;
     
     try {
@@ -540,7 +576,7 @@ export const useSiteData = ({
               scenario_id: deltaScenarioId,
               site_prediction_scenario_id: deltaScenarioId,
               limit: SITE_PREDICTION_PAGE_SIZE,
-            });
+            }, { signal });
           } else {
             const scenarioId =
               normalizedVersion === "combined" &&
@@ -553,17 +589,20 @@ export const useSiteData = ({
               ...params,
               version: normalizedVersion,
               scenario: scenarioId,
-            });
+            }, signal);
           }
           break;
-        case 'NoML': response = await sitePredictionApi.getNoMl(params); break;
-        case 'ML': response = await sitePredictionApi.getMl(params); break;
+        case 'NoML': response = await sitePredictionApi.getNoMl(params, { signal }); break;
+        case 'ML': response = await sitePredictionApi.getMl(params, { signal }); break;
         default: response = { data: [] };
       }
 
-      if (!isMounted.current) return;
+      if (!isCurrent()) return;
 
-      const rawData = Array.isArray(response)
+      const siteRowsComplete = normalizedVersion !== "combined" || response?.complete !== false;
+      const rawData = normalizedVersion === "combined" && Array.isArray(response?.rows)
+        ? response.rows
+        : Array.isArray(response)
         ? response
         : response?.data?.Data || response?.data?.data || response?.Data || response?.data || [];
       const normalizedData =
@@ -587,20 +626,33 @@ export const useSiteData = ({
       }
 
       setSiteData(finalData);
-      lastSuccessfulParams.current = currentParams;
-      if (shouldUseLocalCache && (!filterEnabled || polygons?.length === 0)) {
-        writeProjectSessionCache(cacheKey, finalData);
+      const resultOutcome = !siteRowsComplete ? (finalData.length ? 'partial' : 'failed') : finalData.length ? 'complete' : 'empty';
+      setOutcome(resultOutcome);
+      setComplete(siteRowsComplete);
+      if (siteRowsComplete) lastSuccessfulParams.current = currentParams;
+      if (siteRowsComplete && shouldUseLocalCache && (!filterEnabled || polygons?.length === 0)) {
+        writeProjectSessionCache(cacheKey, {
+          cacheSchemaVersion: 2,
+          outcome: resultOutcome,
+          complete: siteRowsComplete,
+          rows: finalData,
+        });
       }
 
     } catch (err) {
-      if (isMounted.current) {
+      if (signal.aborted || !isCurrent()) return;
+      if (isCurrent()) {
         setError(err);
-        setSiteData([]);
+        setOutcome('failed');
+        setComplete(false);
       }
     } finally {
-      if (isMounted.current) setLoading(false);
+      if (isCurrent()) {
+        setLoading(false);
+        requestGeneration.finish(request);
+      }
     }
-  }, [enableSiteToggle, siteToggle, sitePredictionVersion, sitePredictionScenarioId, defaultBeamwidth, projectId, sessionIds, filterEnabled, polygons]);
+  }, [enableSiteToggle, siteToggle, sitePredictionVersion, sitePredictionScenarioId, defaultBeamwidth, projectId, sessionIds, filterEnabled, polygons, requestIdentity, requestGeneration]);
 
   useEffect(() => {
     if (autoFetch) {
@@ -608,5 +660,5 @@ export const useSiteData = ({
     }
   }, [fetchSiteData, autoFetch]);
 
-  return { siteData, loading, error, fetchSiteData, refetch: fetchSiteData };
+  return { siteData, loading, error, outcome, complete, fetchSiteData, refetch: fetchSiteData };
 };

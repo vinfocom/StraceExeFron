@@ -602,6 +602,7 @@ export const ApplicationTab = ({
           sortConfig={sortConfig}
           onSort={handleSort}
           expanded={expanded}
+          metricLabels={metricLabels}
         />
       )}
 
@@ -614,7 +615,7 @@ export const ApplicationTab = ({
 };
 
 // ==================== TABLE VIEW COMPONENT ====================
-const AppTableView = ({ data, sortConfig, onSort, expanded }) => {
+const AppTableView = ({ data, sortConfig, onSort, expanded, metricLabels = {} }) => {
   if (!data?.length) {
     return (
       <div className="bg-slate-800 rounded-lg p-8 text-center border border-slate-700">

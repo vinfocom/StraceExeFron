@@ -230,10 +230,15 @@ export const hexToRgbaArray = (hexColor, alpha = 190) => {
 
 export const debounce = (fn, wait) => {
   let timeout;
-  return (...args) => {
+  const debounced = (...args) => {
     clearTimeout(timeout);
     timeout = setTimeout(() => fn(...args), wait);
   };
+  debounced.cancel = () => {
+    clearTimeout(timeout);
+    timeout = null;
+  };
+  return debounced;
 };
 
 export const toFiniteNumber = (value) => {

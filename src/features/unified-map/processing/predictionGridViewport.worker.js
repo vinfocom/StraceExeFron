@@ -27,18 +27,33 @@ const toCell = (row) => {
   };
 };
 
+let datasetRevision = 0;
+let normalizedRows = [];
+
 self.onmessage = ({ data }) => {
-  const { requestId, rows = [], bounds, maxRows } = data || {};
+  const { type = "viewport", requestId, rows = [], bounds, maxRows } = data || {};
   try {
-    const visible = rows.map(toCell).filter(Boolean).filter((row) => {
+    if (type === "dataset") {
+      datasetRevision = data.datasetRevision;
+      normalizedRows = rows.map(toCell).filter(Boolean);
+      self.postMessage({ type: "dataset-ready", datasetRevision, rowCount: normalizedRows.length });
+      return;
+    }
+
+    if (data.datasetRevision !== datasetRevision) return;
+    const visible = normalizedRows.filter((row) => {
       if (!bounds) return true;
       const b = row.bounds;
       return b.north >= bounds.south && b.south <= bounds.north && b.east >= bounds.west && b.west <= bounds.east;
     });
     const limit = Number.isFinite(maxRows) && maxRows > 0 ? maxRows : visible.length;
     const step = Math.max(1, Math.ceil(visible.length / limit));
-    self.postMessage({ requestId, rows: visible.filter((_, index) => index % step === 0).slice(0, limit) });
+    self.postMessage({
+      requestId,
+      datasetRevision,
+      rows: visible.filter((_, index) => index % step === 0).slice(0, limit),
+    });
   } catch (error) {
-    self.postMessage({ requestId, error: error?.message || String(error) });
+    self.postMessage({ requestId, datasetRevision, error: error?.message || String(error) });
   }
 };

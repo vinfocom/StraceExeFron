@@ -3,6 +3,7 @@ import { settingApi } from "@/api/apiEndpoints";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { applyTechnologyColorSettings, getLogColor } from "@/utils/colorUtils"; 
 import { getPciColor } from "@/utils/metrics";
+import { readStoredUser } from "@/utils/authSession";
 import {
     createEmptyScalarBuckets,
     createEmptyThresholdBuckets,
@@ -154,14 +155,23 @@ const withTimeout = (promise, timeoutMs = 8000) =>
         }),
     ]);
 
+const sharedThresholdSources = new Map();
+const sharedThresholdRequests = new Map();
+const EMPTY_THRESHOLD_SOURCE = {
+    id: null,
+    userId: null,
+    isDefault: false,
+    technologyColorSettings: EMPTY_THRESHOLD_STATE.technologyColorSettings,
+    bucketed: EMPTY_BUCKETED_THRESHOLDS,
+};
+
+const getThresholdScope = () => {
+    const user = readStoredUser();
+    return String(user?.id ?? user?.Id ?? user?.user_id ?? user?.UserId ?? user?.email ?? user?.Email ?? "guest");
+};
+
 function useColorForLog() {
-    const [thresholdSource, setThresholdSource] = useState({
-        id: null,
-        userId: null,
-        isDefault: false,
-        technologyColorSettings: EMPTY_THRESHOLD_STATE.technologyColorSettings,
-        bucketed: EMPTY_BUCKETED_THRESHOLDS,
-    });
+    const [thresholdSource, setThresholdSource] = useState(EMPTY_THRESHOLD_SOURCE);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
 
@@ -171,10 +181,36 @@ function useColorForLog() {
     );
 
     const fetchThreshold = useCallback(async () => {
+        const scope = getThresholdScope();
         try {
+            const cachedSource = sharedThresholdSources.get(scope);
+            if (cachedSource) {
+                setThresholdSource(cachedSource);
+                applyTechnologyColorSettings(cachedSource.technologyColorSettings);
+                setLoading(false);
+                setError(null);
+                return;
+            }
             setLoading(true);
             setError(null);
-            const res = await withTimeout(settingApi.getThresholdSettings());
+            let request = sharedThresholdRequests.get(scope);
+            if (!request) {
+                request = withTimeout(settingApi.getThresholdSettings());
+                sharedThresholdRequests.set(scope, request);
+            }
+            let res;
+            try {
+                res = await request;
+            } finally {
+                if (sharedThresholdRequests.get(scope) === request) sharedThresholdRequests.delete(scope);
+            }
+            const sourceLoadedBySibling = sharedThresholdSources.get(scope);
+            if (sourceLoadedBySibling) {
+                setThresholdSource(sourceLoadedBySibling);
+                applyTechnologyColorSettings(sourceLoadedBySibling.technologyColorSettings);
+                setError(null);
+                return;
+            }
             const payload = res?.data || res;
 
             if (payload?.Status === 1 && payload?.Data) {
@@ -268,18 +304,13 @@ function useColorForLog() {
                     technologyColorSettings,
                     bucketed,
                 };
-                
+                sharedThresholdSources.set(scope, parsed);
                 applyTechnologyColorSettings(technologyColorSettings);
                 setThresholdSource(parsed);
             } else {
                 applyTechnologyColorSettings({});
-                setThresholdSource({
-                    id: null,
-                    userId: null,
-                    isDefault: false,
-                    technologyColorSettings: EMPTY_THRESHOLD_STATE.technologyColorSettings,
-                    bucketed: EMPTY_BUCKETED_THRESHOLDS,
-                });
+                sharedThresholdSources.set(scope, EMPTY_THRESHOLD_SOURCE);
+                setThresholdSource(EMPTY_THRESHOLD_SOURCE);
             }
         } catch (err) {
             console.error("Error fetching thresholds:", err);
@@ -302,6 +333,7 @@ function useColorForLog() {
 
         if (typeof window === "undefined") return undefined;
         const handleThresholdUpdate = () => {
+            sharedThresholdSources.delete(getThresholdScope());
             fetchThreshold();
         };
 

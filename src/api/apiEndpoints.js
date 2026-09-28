@@ -1702,8 +1702,9 @@ export const sitePredictionApi = {
     }),
   saveClusterColor: (payload, config = {}) =>
     api.post("/api/MapView/SaveSitePredictionClusterColor", payload, config),
-  get: (params) =>
+  get: (params, config = {}) =>
     api.get("/api/MapView/GetSitePrediction", {
+      ...config,
       params: { ...params, _ts: Date.now() },
       dedupe: false,
     }),
@@ -1775,8 +1776,8 @@ export const sitePredictionApi = {
       `/api/MapView/AssignExistingSitePredictionToProject?${params.toString()}`
     );
   },
-  getNoMl: (params) => api.get("/api/MapView/GetSiteNoMl", { params }),
-  getMl: (params) => api.get("/api/MapView/GetSiteMl", { params }),
+  getNoMl: (params, config = {}) => api.get("/api/MapView/GetSiteNoMl", { ...config, params }),
+  getMl: (params, config = {}) => api.get("/api/MapView/GetSiteMl", { ...config, params }),
 };
 
 export const mapViewApi = {
@@ -2316,8 +2317,8 @@ export const mapViewApi = {
   getBands: () => api.get("/api/MapView/GetBands"),
 
   // ==================== Prediction Data ====================
-  getPredictionLog: (params) =>
-    api.get("/api/MapView/GetPredictionLog", { params }),
+  getPredictionLog: ({ signal, ...params }, config = {}) =>
+    api.get("/api/MapView/GetPredictionLog", { ...config, signal: config.signal ?? signal, params }),
 
   getPredictionLogPost: (payload) =>
     api.post("/api/MapView/GetPredictionLog", payload),

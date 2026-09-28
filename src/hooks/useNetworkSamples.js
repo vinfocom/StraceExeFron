@@ -1,9 +1,11 @@
 import { getTechnologyMetricValue, is2GTechnology } from "@/utils/technologyMetricLabels";
 // src/hooks/useNetworkSamples.js
-import { useState, useRef, useCallback, useEffect, startTransition } from 'react';
+import { useState, useRef, useCallback, useEffect, useMemo, startTransition } from 'react';
 import { toast } from 'react-toastify';
 import { mapViewApi } from '@/api/apiEndpoints'; 
 import { isCancelledError } from '@/api/apiService';
+import { useRequestGeneration } from '@/features/unified-map/data/useRequestGeneration.js';
+import { getPolygonRequestIdentity } from '@/features/unified-map/data/mapRequestIdentity.js';
 import { normalizeTechName, normalizeProviderName } from '@/utils/colorUtils';
 import {
   makeProjectCacheKey,
@@ -18,18 +20,47 @@ import {
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 const NETWORK_SAMPLES_TIMEOUT_MS = 120000;
+const MAX_PROGRESSIVE_SAMPLE_ROWS = 100000;
 
-const withTimeout = (promise, timeoutMs = NETWORK_SAMPLES_TIMEOUT_MS) =>
-  Promise.race([
-    promise,
-    new Promise((_, reject) => {
-      const timer = setTimeout(
-        () => reject(new Error("Network samples request timed out")),
-        timeoutMs,
-      );
-      if (typeof timer?.unref === "function") timer.unref();
-    }),
-  ]);
+const withTimeout = (promise, timeoutMs = NETWORK_SAMPLES_TIMEOUT_MS, signal) =>
+  new Promise((resolve, reject) => {
+    let settled = false;
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      cleanUp();
+      reject(new Error("Network samples request timed out"));
+    }, timeoutMs);
+    const cleanUp = () => {
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", onAbort);
+    };
+    const onAbort = () => {
+      if (settled) return;
+      settled = true;
+      cleanUp();
+      reject(new DOMException("Request cancelled", "AbortError"));
+    };
+    if (signal?.aborted) {
+      onAbort();
+      return;
+    }
+    signal?.addEventListener("abort", onAbort, { once: true });
+    promise.then(
+      (value) => {
+        if (settled) return;
+        settled = true;
+        cleanUp();
+        resolve(value);
+      },
+      (error) => {
+        if (settled) return;
+        settled = true;
+        cleanUp();
+        reject(error);
+      },
+    );
+  });
 
 
 function indout(value) {
@@ -493,75 +524,121 @@ export const useNetworkSamples = (
   projectId = null,
 ) => {
   const [locations, setLocations] = useState([]);
+  const [locationChunks, setLocationChunks] = useState([]);
   const [appSummary, setAppSummary] = useState({});
   const [inpSummary, setInpSummary] = useState({});
   const [tptVolume, setTptVolume] = useState({});
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [progress, setProgress] = useState({ current: 0, total: 0, page: 0, totalPages: 0 });
-
-  const abortControllerRef = useRef(null);
-  const isFetchingRef = useRef(false);
-  const activeFetchKeyRef = useRef('');
-  const mountedRef = useRef(true);
+  const [outcome, setOutcome] = useState('empty');
+  const [complete, setComplete] = useState(false);
   const lastFetchedKeyRef = useRef(null);
-  const fetchIdRef = useRef(0);
+
+  const safeMaxRows =
+    Number.isFinite(Number(maxRows)) && Number(maxRows) > 0
+      ? Math.floor(Number(maxRows))
+      : null;
+  const canUsePersistentCache = !filterEnabled || polygons?.length === 0;
+  const cacheKey = makeProjectCacheKey({
+    resource: 'unified-network-samples',
+    sessionIds: sessionIds || [],
+    variant: `typed-network-wifi-v14-ci:${safeMaxRows ? `max-${safeMaxRows}` : 'all'}:project-${projectId || 'none'}`,
+  });
+  const requestIdentity = JSON.stringify({
+    cacheKey,
+    sessionIds: sessionIds ? [...sessionIds].map(String).sort() : [],
+    projectId: projectId ?? null,
+    enabled: Boolean(enabled),
+    filterEnabled: Boolean(filterEnabled),
+    polygons: getPolygonRequestIdentity(polygons),
+    maxRows: safeMaxRows,
+  });
+  const requestGeneration = useRequestGeneration(requestIdentity);
 
   const fetchData = useCallback(async (forceRefresh = false) => {
-    const fetchKey = sessionIds ? [...sessionIds].sort().join(',') : '';
-    const safeMaxRows =
-      Number.isFinite(Number(maxRows)) && Number(maxRows) > 0
-        ? Math.floor(Number(maxRows))
-        : null;
-    const canUsePersistentCache = !filterEnabled || polygons?.length === 0;
-    const cacheKey = makeProjectCacheKey({
-      resource: 'unified-network-samples',
-      sessionIds: sessionIds || [],
-      variant: `typed-network-wifi-v13-ci:${safeMaxRows ? `max-${safeMaxRows}` : 'all'}:project-${projectId || 'none'}`,
-    });
+    const lease = requestGeneration.begin({ force: forceRefresh });
+    if (!lease.started) return;
+    const { request } = lease;
+    const isCurrent = () => requestGeneration.isCurrent(request);
+    const signal = request.controller.signal;
 
-
-    if (!forceRefresh && fetchKey === lastFetchedKeyRef.current) return;
-    if (!sessionIds?.length || !enabled) {
-      if (abortControllerRef.current) abortControllerRef.current.abort();
-      isFetchingRef.current = false;
-      activeFetchKeyRef.current = '';
-      setLoading(false);
+    if (requestIdentity !== lastFetchedKeyRef.current) {
+      lastFetchedKeyRef.current = null;
       setLocations([]);
+      setLocationChunks([]);
       setAppSummary({});
       setInpSummary({});
       setTptVolume({});
+    }
+
+    if (!sessionIds?.length || !enabled) {
+      setLoading(false);
+      setError(null);
+      setLocations([]);
+      setLocationChunks([]);
+      setAppSummary({});
+      setInpSummary({});
+      setTptVolume({});
+      setProgress({ current: 0, total: 0, page: 0, totalPages: 0 });
+      setOutcome('empty');
+      setComplete(false);
+      lastFetchedKeyRef.current = requestIdentity;
+      requestGeneration.finish(request);
       return;
     }
+
+    if (!forceRefresh && requestIdentity === lastFetchedKeyRef.current) {
+      requestGeneration.finish(request);
+      return;
+    }
+
+    setLoading(true);
+    setError(null);
+    setOutcome('loading');
+    setComplete(false);
+    setProgress({ current: 0, total: 0, page: 0, totalPages: 0 });
+
     if (!forceRefresh && canUsePersistentCache) {
-      const cached =
-        (await readIndexedDbCache(cacheKey)) || readProjectSessionCache(cacheKey);
-      if (cached && Array.isArray(cached?.locations)) {
+      let cached = null;
+      try {
+        cached = await readIndexedDbCache(cacheKey);
+      } catch {
+        cached = null;
+      }
+      if (!isCurrent()) return;
+      if (!cached) {
+        try {
+          cached = readProjectSessionCache(cacheKey);
+        } catch {
+          cached = null;
+        }
+      }
+      if (!isCurrent()) return;
+      if (
+        cached?.cacheSchemaVersion === 2 &&
+        ['complete', 'empty', 'capped'].includes(cached?.outcome) &&
+        typeof cached?.complete === 'boolean' &&
+        Array.isArray(cached?.locations)
+      ) {
         setLocations(cached.locations);
+        setLocationChunks([]);
         setAppSummary(cached.appSummary || {});
         setInpSummary(cached.inpSummary || {});
         setTptVolume(cached.tptVolume || {});
         setProgress({ current: cached.locations.length, total: cached.locations.length, page: 1, totalPages: 1 });
-        lastFetchedKeyRef.current = fetchKey;
+        setOutcome(cached.outcome);
+        setComplete(cached.complete);
+        lastFetchedKeyRef.current = requestIdentity;
         setLoading(false);
         setError(null);
+        requestGeneration.finish(request);
         return;
       }
     }
-    if (!forceRefresh && isFetchingRef.current && fetchKey === activeFetchKeyRef.current) return;
 
-    if (abortControllerRef.current) abortControllerRef.current.abort();
-    abortControllerRef.current = new AbortController();
-    const currentFetchId = ++fetchIdRef.current;
-
-    isFetchingRef.current = true;
-    activeFetchKeyRef.current = fetchKey;
-    setLoading(true);
-    setError(null);
-    setProgress({ current: 0, total: 0, page: 0, totalPages: 0 });
-
-    const PAGE_SIZE = 20000;  // Reduced from 20000 to limit memory
-    const MAX_PAGES = 100;      // Hard cap: max 100k rows (was 100 pages = 2M rows)
+    const PAGE_SIZE = 20000;
+    const MAX_PAGES = 100; // Bound a request to at most two million source rows.
     const allParsedLogs = [];
     let summaryData = { app: {}, io: {}, tpt: null };
     const startTime = performance.now();
@@ -569,11 +646,13 @@ export const useNetworkSamples = (
     try {
       let currentPage = 1;
       let totalCount = 0;
-      let totalPages = 1;
+      let totalPages = 0;
+      let hasAuthoritativeCount = false;
       let hasMoreData = true;
+      let wasCapped = false;
 
       while (hasMoreData) {
-        if (fetchIdRef.current !== currentFetchId || !mountedRef.current) break;
+        if (!isCurrent()) return;
 
         let response;
         try {
@@ -584,16 +663,18 @@ export const useNetworkSamples = (
               page: currentPage,
               limit: PAGE_SIZE,
               force_refresh: forceRefresh,
-              signal: abortControllerRef.current.signal,
+              signal,
             }),
+            NETWORK_SAMPLES_TIMEOUT_MS,
+            signal,
           );
 
         } catch (fetchErr) {
-          if (isCancelledError(fetchErr)) break;
+          if (isCancelledError(fetchErr) || signal.aborted || !isCurrent()) return;
           throw fetchErr;
         }
 
-        if (fetchIdRef.current !== currentFetchId || !mountedRef.current) break;
+        if (!isCurrent()) return;
 
         let apiBody;
         let logsArray;
@@ -637,8 +718,10 @@ export const useNetworkSamples = (
             apiBody?.count ||
             apiBody?.Count ||
             0;
-          if (totalCount === 0 && logsArray.length > 0) totalCount = logsArray.length;
-          totalPages = Math.min(Math.ceil(totalCount / PAGE_SIZE) || 1, MAX_PAGES);
+          hasAuthoritativeCount = Number.isFinite(Number(totalCount)) && Number(totalCount) > 0;
+          const backendPageCount = hasAuthoritativeCount ? Math.ceil(totalCount / PAGE_SIZE) : null;
+          totalPages = backendPageCount ? Math.min(backendPageCount, MAX_PAGES) : 0;
+          if (backendPageCount && backendPageCount > MAX_PAGES) wasCapped = true;
           if (apiBody?.app_summary) summaryData.app = apiBody.app_summary;
           if (apiBody?.io_summary) summaryData.io = apiBody.io_summary;
           if (apiBody?.tpt_volume) summaryData.tpt = apiBody.tpt_volume;
@@ -646,17 +729,32 @@ export const useNetworkSamples = (
 
         if (!Array.isArray(logsArray)) break;
 
+        const priorParsedRowCount = allParsedLogs.length;
+        const parsedPage = [];
         logsArray.forEach((log) => {
           const parsed = parseLogEntry(log, log.session_id);
-          if (parsed) allParsedLogs.push(parsed);
+          if (parsed) {
+            allParsedLogs.push(parsed);
+            parsedPage.push(parsed);
+          }
         });
 
         if (safeMaxRows && allParsedLogs.length >= safeMaxRows) {
           allParsedLogs.length = safeMaxRows;
           hasMoreData = false;
+          if (totalCount > safeMaxRows || (!hasAuthoritativeCount && logsArray.length >= PAGE_SIZE)) wasCapped = true;
         }
 
-        if (mountedRef.current && fetchIdRef.current === currentFetchId) {
+        if (safeMaxRows) {
+          parsedPage.length = Math.max(0, Math.min(parsedPage.length, safeMaxRows - priorParsedRowCount));
+        }
+        if (parsedPage.length > 0 && (!filterEnabled || polygons?.length === 0)) {
+          const progressiveRows = Math.max(0, MAX_PROGRESSIVE_SAMPLE_ROWS - priorParsedRowCount);
+          const progressivePage = parsedPage.slice(0, progressiveRows);
+          if (progressivePage.length) setLocationChunks((chunks) => [...chunks, progressivePage]);
+        }
+
+        if (isCurrent()) {
           setProgress({
             current: allParsedLogs.length,
             total: totalCount,
@@ -665,11 +763,16 @@ export const useNetworkSamples = (
           });
         }
 
-        if (currentPage >= totalPages || logsArray.length < PAGE_SIZE || currentPage >= MAX_PAGES) {
+        const reachedBackendEnd =
+          (hasAuthoritativeCount && currentPage >= totalPages) || logsArray.length < PAGE_SIZE;
+        const reachedPageCap = currentPage >= MAX_PAGES && !reachedBackendEnd;
+        if (reachedPageCap) wasCapped = true;
+        if (reachedBackendEnd || reachedPageCap || !hasMoreData) {
           hasMoreData = false;
         } else {
           currentPage++;
           await delay(0);
+          if (!isCurrent()) return;
         }
       }
 
@@ -691,9 +794,12 @@ export const useNetworkSamples = (
           const ciResponse = await withTimeout(
             mapViewApi.get2GCiAnalysis({
               sessionIds,
-              signal: abortControllerRef.current.signal,
+              signal,
             }),
+            NETWORK_SAMPLES_TIMEOUT_MS,
+            signal,
           );
+          if (!isCurrent()) return;
           const ciRows =
             ciResponse?.data ||
             ciResponse?.Data ||
@@ -702,22 +808,30 @@ export const useNetworkSamples = (
             [];
           finalLogs = merge2GCiAnalysis(finalLogs, Array.isArray(ciRows) ? ciRows : []);
         } catch (ciErr) {
-          if (!isCancelledError(ciErr)) {
-            console.warn("2G C/I analysis unavailable:", ciErr);
-          }
+          if (isCancelledError(ciErr) || signal.aborted || !isCurrent()) return;
+          console.warn("2G C/I analysis unavailable:", ciErr);
         }
       }
 
+      if (!isCurrent()) return;
       const fetchTime = ((performance.now() - startTime) / 1000).toFixed(2);
       startTransition(() => {
         setLocations(finalLogs);
+        setLocationChunks([]);
         setAppSummary(summaryData.app);
         setInpSummary(summaryData.io);
         setTptVolume(summaryData.tpt);
       });
-      lastFetchedKeyRef.current = fetchKey;
+      const resultOutcome = wasCapped ? 'capped' : allParsedLogs.length > 0 ? 'complete' : 'empty';
+      const resultComplete = !wasCapped;
+      setOutcome(resultOutcome);
+      setComplete(resultComplete);
+      lastFetchedKeyRef.current = requestIdentity;
       if (canUsePersistentCache) {
         const cachePayload = {
+          cacheSchemaVersion: 2,
+          outcome: resultOutcome,
+          complete: resultComplete,
           locations: finalLogs,
           appSummary: summaryData.app,
           inpSummary: summaryData.io,
@@ -745,45 +859,58 @@ export const useNetworkSamples = (
 
 
     } catch (err) {
-      if (isCancelledError(err)) return;
-      if (mountedRef.current && fetchIdRef.current === currentFetchId) {
+      if (isCancelledError(err) || signal.aborted || !isCurrent()) return;
+      if (isCurrent()) {
         setError(err.message);
-        toast.error(`Error: ${err.message}`);
+        setOutcome(allParsedLogs.length > 0 ? 'partial' : 'failed');
+        setComplete(false);
         if (allParsedLogs.length > 0) {
           setLocations(allParsedLogs);
+          setLocationChunks([]);
+          toast.warn(`Loaded partial network data: ${err.message}`);
+        } else {
+          toast.error(`Error: ${err.message}`);
         }
       }
     } finally {
-      if (fetchIdRef.current === currentFetchId) {
-        isFetchingRef.current = false;
-        activeFetchKeyRef.current = '';
-        if (mountedRef.current) setLoading(false);
+      if (isCurrent()) {
+        setLoading(false);
+        requestGeneration.finish(request);
       }
     }
-  }, [sessionIds, enabled, filterEnabled, polygons, maxRows, projectId]);
-
-  
-  useEffect(() => {
-    mountedRef.current = true;
-    return () => {
-      mountedRef.current = false;
-      if (abortControllerRef.current) abortControllerRef.current.abort();
-    };
-  }, []);
+  }, [
+    sessionIds,
+    enabled,
+    filterEnabled,
+    polygons,
+    safeMaxRows,
+    projectId,
+    canUsePersistentCache,
+    cacheKey,
+    requestIdentity,
+    requestGeneration,
+  ]);
 
   useEffect(() => {
     const timeoutId = setTimeout(() => fetchData(), 50);
     return () => clearTimeout(timeoutId);
   }, [fetchData]);
 
+  const progressiveLocations = useMemo(
+    () => (locationChunks.length ? locationChunks.flat() : locations),
+    [locationChunks, locations],
+  );
+
   return {
-    locations,
+    locations: loading && locationChunks.length ? progressiveLocations : locations,
     appSummary,
     inpSummary,
     tptVolume,
     loading,
     error,
     progress,
+    outcome,
+    complete,
     refetch: useCallback(() => {
       lastFetchedKeyRef.current = null;
       fetchData(true);

@@ -39,12 +39,14 @@ export const sampleLogIndices = ({
   zoom = 12,
   cellPixels = 16,
   selectedIndex = -1,
+  preserveIndexes = [],
   maxRows = null,
 }) => {
   const stride = getLogSamplingStride(totalLogs);
   const safeZoom = Number.isFinite(zoom) ? Math.max(0, Math.min(24, zoom)) : 12;
   const bucketCounts = stride > 1 ? new Map() : null;
   const result = [];
+  const preserveSet = new Set(preserveIndexes);
   const coordinateCount = Math.floor((coordinates?.length || 0) / 2);
 
   for (let index = 0; index < coordinateCount; index += 1) {
@@ -53,7 +55,8 @@ export const sampleLogIndices = ({
     if (!Number.isFinite(lng) || !Number.isFinite(lat) || !isInsideBounds(lng, lat, bounds)) continue;
 
     let keep = true;
-    if (stride > 1 && index !== selectedIndex) {
+    const isPreserved = index === selectedIndex || preserveSet.has(index);
+    if (stride > 1 && !isPreserved) {
       const bucketKey = getSpatialBucketKey(lng, lat, safeZoom, cellPixels);
       const bucketCount = bucketCounts.get(bucketKey) || 0;
       keep = bucketCount % stride === 0;
@@ -64,8 +67,20 @@ export const sampleLogIndices = ({
   }
 
   if (Number.isFinite(maxRows) && maxRows > 0 && result.length > maxRows) {
-    const limitStride = Math.ceil(result.length / maxRows);
-    return Uint32Array.from(result.filter((_, index) => index % limitStride === 0).slice(0, maxRows));
+    const mandatory = result.filter((index) => index === selectedIndex || preserveSet.has(index));
+    const selectedMandatory = mandatory.includes(selectedIndex)
+      ? [selectedIndex, ...mandatory.filter((index) => index !== selectedIndex)]
+      : mandatory;
+    const kept = new Set(selectedMandatory.slice(0, maxRows));
+    const limitStride = Math.max(1, Math.ceil(result.length / maxRows));
+    for (let index = 0; index < result.length && kept.size < maxRows; index += limitStride) {
+      kept.add(result[index]);
+    }
+    for (const index of result) {
+      if (kept.size >= maxRows) break;
+      kept.add(index);
+    }
+    return Uint32Array.from([...kept].sort((left, right) => left - right));
   }
 
   return Uint32Array.from(result);

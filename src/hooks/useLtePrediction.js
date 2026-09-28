@@ -1,5 +1,8 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { mapViewApi } from '@/api/apiEndpoints';
+import { useRequestGeneration } from '@/features/unified-map/data/useRequestGeneration.js';
+import { isCancelledError } from '@/api/apiService';
+import { getPolygonRequestIdentity } from '@/features/unified-map/data/mapRequestIdentity.js';
 
 const isPointInPolygon = (point, polygon) => {
   const path = Array.isArray(polygon?.paths?.[0])
@@ -47,19 +50,27 @@ export const useLtePrediction = ({
   });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+  const [outcome, setOutcome] = useState('empty');
+  const [complete, setComplete] = useState(false);
+  const lastLoadedIdentityRef = useRef(null);
 
-  const isMountedRef = useRef(true);
-  const abortControllerRef = useRef(null);
-
-  useEffect(() => {
-    isMountedRef.current = true;
-    return () => {
-      isMountedRef.current = false;
-      if (abortControllerRef.current) abortControllerRef.current.abort();
-    };
-  }, []);
+  const requestIdentity = JSON.stringify({
+    enabled: Boolean(enabled), projectId: projectId ?? null, siteId,
+    metric, sitePredictionVersion, stat, filterEnabled,
+    polygons: getPolygonRequestIdentity(polygons), maxLocations,
+  });
+  const requestGeneration = useRequestGeneration(requestIdentity);
 
   const fetchLtePrediction = useCallback(async () => {
+    const lease = requestGeneration.begin({ force: true });
+    if (!lease.started) return;
+    const { request } = lease;
+    const isCurrent = () => requestGeneration.isCurrent(request);
+    const signal = request.controller.signal;
+    if (requestIdentity !== lastLoadedIdentityRef.current) {
+      lastLoadedIdentityRef.current = null;
+      setLocations([]);
+    }
     if (!enabled || !projectId) {
       setLocations([]);
       setMeta({
@@ -69,15 +80,20 @@ export const useLtePrediction = ({
         statRequested: null,
         totalLocations: 0,
       });
+      lastLoadedIdentityRef.current = requestIdentity;
+      setLoading(false);
+      setError(null);
+      setOutcome('empty');
+      setComplete(false);
+      requestGeneration.finish(request);
       return;
     }
 
-    if (abortControllerRef.current) abortControllerRef.current.abort();
-    abortControllerRef.current = new AbortController();
-    const signal = abortControllerRef.current.signal;
-
     setLoading(true);
     setError(null);
+    setOutcome('loading');
+    setComplete(false);
+    let failedSites = 0;
 
     try {
       const requestedMetricUpper = String(metric || '').trim().toUpperCase();
@@ -107,7 +123,15 @@ export const useLtePrediction = ({
       if (siteId && siteId.includes(",")) {
         const ids = siteId.split(",").map(id => id.trim()).filter(Boolean);
         for (const id of ids) {
-          const res = await fetchFn({ ...params, siteId: id }, { signal }).catch(() => null);
+          let res;
+          try {
+            res = await fetchFn({ ...params, siteId: id }, { signal });
+          } catch (error) {
+            if (isCancelledError(error) || signal.aborted || !isCurrent()) return;
+            failedSites += 1;
+            continue;
+          }
+          if (!isCurrent()) return;
           if (res && Array.isArray(res.Data)) {
             rawData = rawData.concat(res.Data);
             if (!combinedResponse && res.Status === 1) {
@@ -127,7 +151,7 @@ export const useLtePrediction = ({
         rawData = Array.isArray(combinedResponse?.Data) ? combinedResponse.Data : [];
       }
 
-      if (!isMountedRef.current) return;
+      if (!isCurrent()) return;
 
       const normalized = rawData
         .map((item) => {
@@ -177,6 +201,7 @@ export const useLtePrediction = ({
         .filter(Boolean);
 
       let finalLocations = normalized;
+      let wasCapped = false;
       if (filterEnabled && polygons?.length > 0) {
         finalLocations = normalized.filter((pt) =>
           polygons.some((poly) => isPointInPolygon(pt, poly)),
@@ -184,6 +209,7 @@ export const useLtePrediction = ({
       }
       const maxAllowed = Number(maxLocations);
       if (Number.isFinite(maxAllowed) && maxAllowed > 0 && finalLocations.length > maxAllowed) {
+        wasCapped = true;
         const step = Math.ceil(finalLocations.length / maxAllowed);
         finalLocations = finalLocations.filter((_, index) => index % step === 0).slice(0, maxAllowed);
       }
@@ -196,8 +222,21 @@ export const useLtePrediction = ({
         statRequested: combinedResponse?.StatRequested ?? stat,
         totalLocations: combinedResponse?.TotalLocations ?? finalLocations.length,
       });
+      const apiFailed = combinedResponse?.Status !== undefined && Number(combinedResponse.Status) !== 1;
+      const resultOutcome = apiFailed || (failedSites > 0 && !finalLocations.length)
+        ? 'failed'
+        : failedSites > 0
+          ? 'partial'
+          : wasCapped
+            ? 'capped'
+            : finalLocations.length
+              ? 'complete'
+              : 'empty';
+      setOutcome(resultOutcome);
+      setComplete(failedSites === 0 && !apiFailed && !wasCapped);
+      lastLoadedIdentityRef.current = requestIdentity;
     } catch (err) {
-      if (!isMountedRef.current) return;
+      if (isCancelledError(err) || signal.aborted || !isCurrent()) return;
       setError(err);
       setLocations([]);
       setMeta({
@@ -210,12 +249,15 @@ export const useLtePrediction = ({
         statRequested: stat,
         totalLocations: 0,
       });
+      setOutcome('failed');
+      setComplete(false);
     } finally {
-      if (isMountedRef.current) {
+      if (isCurrent()) {
         setLoading(false);
+        requestGeneration.finish(request);
       }
     }
-  }, [enabled, projectId, siteId, metric, sitePredictionVersion, stat, filterEnabled, polygons, maxLocations]);
+  }, [enabled, projectId, siteId, metric, sitePredictionVersion, stat, filterEnabled, polygons, maxLocations, requestIdentity, requestGeneration]);
 
   useEffect(() => {
     if (!autoFetch) return;
@@ -227,6 +269,8 @@ export const useLtePrediction = ({
     meta,
     loading,
     error,
+    outcome,
+    complete,
     fetchLtePrediction,
   };
 };

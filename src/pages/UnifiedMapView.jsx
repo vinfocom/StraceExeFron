@@ -3069,7 +3069,6 @@ const UnifiedMapView = () => {
 
   const sampleLocations = useMemo(() => {
     if (shouldFetchSamples) {
-      if (sampleLoading) return EMPTY_LIST;
       return Array.isArray(fetchedSamples) ? fetchedSamples : EMPTY_LIST;
     }
 

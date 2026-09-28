@@ -8,7 +8,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 
 // Resolve the app's Vite alias without a browser or additional test dependencies.
 const bundle = await build({
-  entryPoints: [fileURLToPath(new URL("./useUnifiedGridViewData.js", import.meta.url))],
+  entryPoints: [fileURLToPath(new URL("../features/unified-map/processing/useUnifiedGridViewData.js", import.meta.url))],
   alias: { "@": fileURLToPath(new URL("../", import.meta.url)) },
   bundle: true,
   platform: "node",

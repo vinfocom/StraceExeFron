@@ -3,6 +3,8 @@ import { useState, useCallback, useEffect, useRef } from 'react';
 import { toast } from 'react-toastify';
 import { mapViewApi } from '@/api/apiEndpoints';
 import { isCancelledError } from '@/api/apiService';
+import { useRequestGeneration } from '@/features/unified-map/data/useRequestGeneration.js';
+import { getPolygonRequestIdentity } from '@/features/unified-map/data/mapRequestIdentity.js';
 import { normalizeProviderName, normalizeTechName } from '@/utils/colorUtils';
 import {
   makeProjectCacheKey,
@@ -16,7 +18,6 @@ const parsePci = (value) => {
   return Number.isFinite(parsed) ? parsed : null;
 };
 
-// ✅ FIX 1: Robust cancellation check including Axios 'CanceledError'
 export const useSessionNeighbors = (
   sessionIds,
   enabled = true,
@@ -29,75 +30,109 @@ export const useSessionNeighbors = (
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [stats, setStats] = useState(null);
-  
-  const abortControllerRef = useRef(null);
-  const mountedRef = useRef(true);
-  const lastFetchKeyRef = useRef(null);
-  const isFetchingRef = useRef(false);
-  // ✅ FIX 2: Track the key currently being fetched to prevent race conditions
-  const currentFetchingKeyRef = useRef(null);
+  const [outcome, setOutcome] = useState('empty');
+  const [complete, setComplete] = useState(false);
+  const lastSuccessIdentityRef = useRef(null);
+
+  const safeMaxRows =
+    Number.isFinite(Number(maxRows)) && Number(maxRows) > 0
+      ? Math.floor(Number(maxRows))
+      : null;
+  const canUsePersistentCache = !filterEnabled || polygons?.length === 0;
+  const cacheKey = makeProjectCacheKey({
+    resource: 'unified-session-neighbors',
+    sessionIds: sessionIds || [],
+    projectId: projectId || 'global',
+    variant: `v2_${safeMaxRows || 'all'}_${filterEnabled ? 'filtered' : 'all'}_project-${projectId || 'none'}`,
+  });
+  const requestIdentity = JSON.stringify({
+    cacheKey,
+    sessionIds: sessionIds ? [...sessionIds].map(String).sort() : [],
+    projectId: projectId ?? null,
+    enabled: Boolean(enabled),
+    filterEnabled: Boolean(filterEnabled),
+    polygons: getPolygonRequestIdentity(polygons),
+    maxRows: safeMaxRows,
+  });
+  const requestGeneration = useRequestGeneration(requestIdentity);
 
   const fetchData = useCallback(async (force = false) => {
-    const fetchKey = sessionIds ? [...sessionIds].sort().join(',') : '';
-    const safeMaxRows =
-      Number.isFinite(Number(maxRows)) && Number(maxRows) > 0
-        ? Math.floor(Number(maxRows))
-        : null;
+    const lease = requestGeneration.begin({ force });
+    if (!lease.started) return;
+    const { request } = lease;
+    const isCurrent = () => requestGeneration.isCurrent(request);
+    const signal = request.controller.signal;
+
+    if (requestIdentity !== lastSuccessIdentityRef.current) {
+      lastSuccessIdentityRef.current = null;
+      setNeighborData([]);
+      setStats(null);
+    }
 
     if (!sessionIds?.length || !enabled) {
-      if (mountedRef.current) {
-        setNeighborData([]);
-        setStats(null);
-      }
+      setNeighborData([]);
+      setStats(null);
+      setLoading(false);
+      setError(null);
+      setOutcome('empty');
+      setComplete(false);
+      lastSuccessIdentityRef.current = requestIdentity;
+      requestGeneration.finish(request);
       return;
     }
     
-    // ✅ FIX 3: Check against currentFetchingKeyRef to prevent aborting identical pending requests
-    if (!force && fetchKey === lastFetchKeyRef.current && neighborData.length > 0) return;
-    if (isFetchingRef.current && fetchKey === currentFetchingKeyRef.current) return;
-
-    const cacheKey = makeProjectCacheKey({
-      resource: 'unified-session-neighbors',
-      sessionIds: sessionIds || [],
-      variant: `${safeMaxRows || 'all'}_${filterEnabled ? 'filtered' : 'all'}_project-${projectId || 'none'}`,
-    });
-
-    if (!force && (!filterEnabled || polygons?.length === 0)) {
-      const cached = readProjectSessionCache(cacheKey);
-      if (cached && Array.isArray(cached?.neighborData)) {
-        if (mountedRef.current) {
-          setNeighborData(cached.neighborData);
-          setStats(cached.stats || null);
-          setLoading(false);
-          setError(null);
-          lastFetchKeyRef.current = fetchKey;
-        }
-        return;
-      }
+    if (!force && requestIdentity === lastSuccessIdentityRef.current) {
+      requestGeneration.finish(request);
+      return;
     }
 
-    if (abortControllerRef.current) abortControllerRef.current.abort();
-    abortControllerRef.current = new AbortController();
-    
-    isFetchingRef.current = true;
-    currentFetchingKeyRef.current = fetchKey; // Mark this key as "in progress"
+    setLoading(true);
+    setError(null);
+    setOutcome('loading');
+    setComplete(false);
 
-    if (mountedRef.current) {
-      setLoading(true);
-      setError(null);
+    if (!force && canUsePersistentCache) {
+      let cached = null;
+      try {
+        cached = readProjectSessionCache(cacheKey);
+      } catch {
+        cached = null;
+      }
+      if (!isCurrent()) return;
+      if (
+        cached?.cacheSchemaVersion === 2 &&
+        ['complete', 'empty', 'capped'].includes(cached?.outcome) &&
+        typeof cached?.complete === 'boolean' &&
+        Array.isArray(cached?.neighborData)
+      ) {
+        setNeighborData(cached.neighborData);
+        setStats(cached.stats || null);
+        setOutcome(cached.outcome);
+        setComplete(cached.complete);
+        setLoading(false);
+        setError(null);
+        lastSuccessIdentityRef.current = requestIdentity;
+        requestGeneration.finish(request);
+        return;
+      }
     }
 
     try {
       const res = await mapViewApi.getSessionNeighbour({
         sessionIds: sessionIds,
         project_id: projectId,
-        signal: abortControllerRef.current.signal,
+        signal,
       });
 
-      if (!mountedRef.current) return;
+      if (!isCurrent()) return;
 
-      if (res?.Status === 1 && res?.Data) {
-        const formattedData = res.Data.map((item) => {
+      const responseRows = Array.isArray(res?.Data)
+        ? res.Data
+        : res?.success && Array.isArray(res?.data)
+          ? res.data
+          : null;
+      if ((res?.Status === 1 || res?.success === true) && Array.isArray(responseRows)) {
+        const formattedData = responseRows.map((item) => {
             const lat = parseFloat(item.lat);
             const lng = parseFloat(item.lon);
             if (!isFinite(lat) || !isFinite(lng)) return null;
@@ -126,7 +161,8 @@ export const useSessionNeighbors = (
         // Polygon filtering is handled by backend GetN78Neighbours using project raw filter.
         let finalNeighbors = formattedData;
 
-        if (safeMaxRows && finalNeighbors.length > safeMaxRows) {
+        const wasCapped = Boolean(safeMaxRows && finalNeighbors.length > safeMaxRows);
+        if (wasCapped) {
           const step = Math.ceil(finalNeighbors.length / safeMaxRows);
           finalNeighbors = finalNeighbors
             .filter((_, index) => index % step === 0)
@@ -138,52 +174,69 @@ export const useSessionNeighbors = (
           uniquePCIs: new Set(finalNeighbors.map(d => d.primaryPci)).size
         }; 
 
-        if (mountedRef.current) {
-          // ✅ FIX: Set finalNeighbors to state
-          setNeighborData(finalNeighbors);
-          setStats(statsObj);
-          lastFetchKeyRef.current = fetchKey;
-          if (!filterEnabled || polygons?.length === 0) {
-            writeProjectSessionCache(cacheKey, {
-              neighborData: finalNeighbors,
-              stats: statsObj,
-            });
-          }
+        if (!isCurrent()) return;
+        const resultOutcome = finalNeighbors.length === 0 ? 'empty' : wasCapped ? 'capped' : 'complete';
+        const resultComplete = !wasCapped;
+        setNeighborData(finalNeighbors);
+        setStats(statsObj);
+        setOutcome(resultOutcome);
+        setComplete(resultComplete);
+        lastSuccessIdentityRef.current = requestIdentity;
+        if (canUsePersistentCache) {
+          writeProjectSessionCache(cacheKey, {
+            cacheSchemaVersion: 2,
+            outcome: resultOutcome,
+            complete: resultComplete,
+            neighborData: finalNeighbors,
+            stats: statsObj,
+          });
         }
       } else {
-        if (mountedRef.current) setNeighborData([]);
+        if (!isCurrent()) return;
+        setNeighborData([]);
+        setStats(null);
+        setOutcome('failed');
+        setComplete(false);
+        setError('Neighbor request returned an invalid response.');
       }
     } catch (err) {
-      // ✅ FIX 4: Use the improved check so we don't toast errors for cancellations
-      if (isCancelledError(err)) return;
+      if (isCancelledError(err) || signal.aborted || !isCurrent()) return;
       
-      if (mountedRef.current) {
-        setError(err.message);
-        toast.error(`Failed to fetch neighbor data: ${err.message}`);
-      }
+      setError(err.message);
+      setOutcome('failed');
+      setComplete(false);
+      toast.error(`Failed to fetch neighbor data: ${err.message}`);
     } finally {
-      // Only clear fetching flags if this was the request that finished
-      if (currentFetchingKeyRef.current === fetchKey) {
-        isFetchingRef.current = false;
-        currentFetchingKeyRef.current = null;
-        if (mountedRef.current) setLoading(false);
+      if (isCurrent()) {
+        setLoading(false);
+        requestGeneration.finish(request);
       }
     }
-  }, [sessionIds, enabled, maxRows, projectId, filterEnabled, polygons, neighborData.length]);
-
-  // ... (rest of useEffects remain the same)
-  useEffect(() => {
-    mountedRef.current = true;
-    return () => {
-      mountedRef.current = false;
-      if (abortControllerRef.current) abortControllerRef.current.abort();
-    };
-  }, []);
+  }, [
+    sessionIds,
+    enabled,
+    safeMaxRows,
+    projectId,
+    filterEnabled,
+    polygons,
+    canUsePersistentCache,
+    cacheKey,
+    requestIdentity,
+    requestGeneration,
+  ]);
 
   useEffect(() => {
     const timeoutId = setTimeout(() => fetchData(), 100);
     return () => clearTimeout(timeoutId);
   }, [sessionIds?.join(','), enabled, fetchData]);
 
-  return { neighborData, stats, loading, error, refetch: () => fetchData(true) };
+  return {
+    neighborData,
+    stats,
+    loading,
+    error,
+    outcome,
+    complete,
+    refetch: () => fetchData(true),
+  };
 };

@@ -9,6 +9,7 @@ import { assertCategorizedLayerEntries, categorizeMapLayer, getMapLayerMetadata,
 import { getDrawingHoverTarget, getPolygonDrawingHitData, getPolylineDrawingHitData } from '@/components/maps/drawingShapeInteractions.js';
 import { logMapPlot } from '@/utils/mapPlotDebug';
 import { debounce } from '@/utils/unifiedMapConfig';
+import { normalizeMapBounds } from '@/features/unified-map/map/viewport.js';
 
 const pickFirstNonEmpty = (obj, keys = []) => {
   for (const key of keys) {
@@ -31,7 +32,6 @@ const getImageRenderLimit = (total) => {
   return 4000;
 };
 
-const VIEWPORT_PADDING_RATIO = 0.18;
 const LOG_SAMPLE_CELL_PIXELS = 16;
 
 const parseColorToRGB = (colorStr) => {
@@ -161,27 +161,6 @@ const downsample = (rows, maxRows) => {
   return rows.filter((_, index) => index % step === 0).slice(0, maxRows);
 };
 
-const normalizeMapBounds = (bounds) => {
-  if (!bounds) return null;
-  const northEast = bounds.getNorthEast?.();
-  const southWest = bounds.getSouthWest?.();
-  const north = Number(northEast?.lat?.());
-  const east = Number(northEast?.lng?.());
-  const south = Number(southWest?.lat?.());
-  const west = Number(southWest?.lng?.());
-  if (![north, east, south, west].every(Number.isFinite)) return null;
-
-  const latPadding = Math.max(0.0005, Math.abs(north - south) * VIEWPORT_PADDING_RATIO);
-  const lngPadding = Math.max(0.0005, Math.abs(east - west) * VIEWPORT_PADDING_RATIO);
-
-  return {
-    north: Math.min(90, north + latPadding),
-    south: Math.max(-90, south - latPadding),
-    east: Math.min(180, east + lngPadding),
-    west: Math.max(-180, west - lngPadding),
-  };
-};
-
 const DeckGLOverlay = ({
   onHover,
   onDrawingHover,
@@ -233,6 +212,14 @@ const DeckGLOverlay = ({
   const samplingRequestRef = useRef(0);
   const predictionWorkerRef = useRef(null);
   const predictionRequestRef = useRef(0);
+  const predictionDatasetRevisionRef = useRef(0);
+  const predictionRowsRef = useRef(predictionGridData);
+  const predictionViewportRef = useRef({ bounds: viewportBounds, zoom: mapZoom });
+  const predictionInFlightRequestRef = useRef(null);
+  const predictionPendingViewportRef = useRef(null);
+  const predictionWorkerRecoveriesRef = useRef(0);
+  const [predictionWorkerEpoch, setPredictionWorkerEpoch] = useState(0);
+  const [predictionWorkerFailed, setPredictionWorkerFailed] = useState(false);
   const [visiblePredictionRows, setVisiblePredictionRows] = useState([]);
   const isCleanedUpRef = useRef(false);
   const attachedMapRef = useRef(null);
@@ -380,6 +367,7 @@ const DeckGLOverlay = ({
     const idleListener = map.addListener('idle', updateMapViewport);
     const dragListener = map.addListener('dragend', updateMapViewport);
     return () => {
+      debouncedUpdateMapViewport.cancel?.();
       if (window.google?.maps?.event?.removeListener) {
         window.google.maps.event.removeListener(zoomListener);
         window.google.maps.event.removeListener(idleListener);
@@ -437,6 +425,26 @@ const DeckGLOverlay = ({
     return coordinates;
   }, [locations]);
 
+  const significantPrimaryIndexes = useMemo(() => {
+    const significantEventPattern = /handover|call.?drop|dropped|disconnect|emergency|setup.?failure/i;
+    const indexes = [];
+    locations.forEach((location, index) => {
+      const eventText = [
+        location?.event_name,
+        location?.eventName,
+        location?.event_type,
+        location?.eventType,
+        location?.call_state,
+        location?.callState,
+        location?.raw_event?.event_name,
+        location?.raw_event?.category,
+        location?.raw_event?.detail,
+      ].filter(Boolean).join(" ");
+      if (significantEventPattern.test(eventText)) indexes.push(index);
+    });
+    return indexes;
+  }, [locations]);
+
   useEffect(() => {
     const requestId = samplingRequestRef.current + 1;
     samplingRequestRef.current = requestId;
@@ -453,6 +461,7 @@ const DeckGLOverlay = ({
       zoom: mapZoom,
       cellPixels: LOG_SAMPLE_CELL_PIXELS,
       selectedIndex: Number.isInteger(selectedIndex) ? selectedIndex : -1,
+      preserveIndexes: significantPrimaryIndexes,
       maxRows: Number.isFinite(primaryRenderLimit) ? primaryRenderLimit : null,
     };
     const worker = samplingWorkerRef.current;
@@ -481,7 +490,7 @@ const DeckGLOverlay = ({
 
     // Older browsers without Worker support retain the same behavior.
     setSampledPrimaryIndexes(sampleLogIndices({ ...options, coordinates: samplingCoordinates }));
-  }, [locations, samplingCoordinates, showPrimaryLogs, viewportBounds, mapZoom, selectedIndex, primaryRenderLimit]);
+  }, [locations, samplingCoordinates, significantPrimaryIndexes, showPrimaryLogs, viewportBounds, mapZoom, selectedIndex, primaryRenderLimit]);
 
   const handlePrimaryClick = useCallback((info) => {
     if (!info?.object) {
@@ -1070,49 +1079,144 @@ const DeckGLOverlay = ({
   }, []);
 
   useEffect(() => {
-    if (typeof Worker === 'undefined') return undefined;
-    const worker = new Worker(new URL('../../workers/predictionGridViewport.worker.js', import.meta.url), { type: 'module' });
-    predictionWorkerRef.current = worker;
-    worker.onmessage = ({ data }) => {
-      if (data.requestId !== predictionRequestRef.current) return;
-      if (data.error) {
-        console.warn('[UnifiedMapView] Prediction grid worker failed:', data.error);
+    let disposed = false;
+    let worker = null;
+
+    const postCurrentDatasetAndViewport = (target) => {
+      target.postMessage({
+        type: 'dataset',
+        datasetRevision: predictionDatasetRevisionRef.current,
+        rows: predictionRowsRef.current || [],
+      });
+      const requestId = ++predictionRequestRef.current;
+      target.postMessage({
+        type: 'viewport',
+        requestId,
+        datasetRevision: predictionDatasetRevisionRef.current,
+        ...predictionViewportRef.current,
+        maxRows: getPredictionRenderLimit(predictionRowsRef.current?.length || 0),
+      });
+      predictionInFlightRequestRef.current = requestId;
+    };
+
+    const createWorker = () => {
+      worker = new Worker(new URL('../../features/unified-map/processing/predictionGridViewport.worker.js', import.meta.url), { type: 'module' });
+      predictionWorkerRef.current = worker;
+      worker.onmessage = ({ data }) => {
+        if (data.type === 'dataset-ready') return;
+        if (data.requestId === predictionInFlightRequestRef.current) {
+          predictionInFlightRequestRef.current = null;
+          const pending = predictionPendingViewportRef.current;
+          predictionPendingViewportRef.current = null;
+          if (pending && pending.datasetRevision === predictionDatasetRevisionRef.current) {
+            predictionInFlightRequestRef.current = pending.requestId;
+            worker.postMessage(pending);
+          }
+        }
+        if (
+          data.requestId !== predictionRequestRef.current ||
+          data.datasetRevision !== predictionDatasetRevisionRef.current
+        ) return;
+        if (data.error) {
+          recoverWorker(data.error);
+          return;
+        }
+        setVisiblePredictionRows(Array.isArray(data.rows) ? data.rows : []);
+      };
+      worker.onerror = (error) => recoverWorker(error?.message || 'worker error');
+      setPredictionWorkerFailed(false);
+    };
+
+    const recoverWorker = (reason) => {
+      if (disposed) return;
+      worker?.terminate();
+      if (predictionWorkerRef.current === worker) predictionWorkerRef.current = null;
+      if (predictionWorkerRecoveriesRef.current >= 1) {
+        console.warn('[UnifiedMapView] Prediction grid worker recovery limit reached:', reason);
+        setPredictionWorkerFailed(true);
         return;
       }
-      setVisiblePredictionRows(Array.isArray(data.rows) ? data.rows : []);
+      predictionWorkerRecoveriesRef.current += 1;
+      try {
+        predictionInFlightRequestRef.current = null;
+        predictionPendingViewportRef.current = null;
+        createWorker();
+        postCurrentDatasetAndViewport(worker);
+        setPredictionWorkerEpoch((epoch) => epoch + 1);
+      } catch (error) {
+        console.warn('[UnifiedMapView] Prediction grid worker restart failed:', error?.message || reason);
+        setPredictionWorkerFailed(true);
+      }
     };
-    worker.onerror = (error) => console.warn('[UnifiedMapView] Prediction grid worker error:', error.message);
+
+    if (typeof Worker === 'undefined') {
+      setPredictionWorkerFailed(true);
+      return undefined;
+    }
+    try {
+      createWorker();
+    } catch (error) {
+      console.warn('[UnifiedMapView] Prediction grid worker could not start:', error?.message);
+      setPredictionWorkerFailed(true);
+    }
     return () => {
-      worker.terminate();
+      disposed = true;
+      worker?.terminate();
       if (predictionWorkerRef.current === worker) predictionWorkerRef.current = null;
     };
   }, []);
 
   useEffect(() => {
-    const requestId = predictionRequestRef.current + 1;
-    predictionRequestRef.current = requestId;
-    if (!predictionGridData?.length) {
+    predictionRowsRef.current = predictionGridData || [];
+    predictionDatasetRevisionRef.current += 1;
+    predictionRequestRef.current += 1;
+    setVisiblePredictionRows([]);
+    if (!predictionRowsRef.current.length) {
       setVisiblePredictionRows([]);
       return;
     }
-    const payload = {
-      requestId,
-      rows: predictionGridData,
-      bounds: viewportBounds,
-      zoom: mapZoom,
-      maxRows: getPredictionRenderLimit(predictionGridData.length),
-    };
-    if (predictionWorkerRef.current) {
-      predictionWorkerRef.current.postMessage(payload);
+    const worker = predictionWorkerRef.current;
+    if (worker) {
+      worker.postMessage({
+        type: 'dataset',
+        datasetRevision: predictionDatasetRevisionRef.current,
+        rows: predictionRowsRef.current,
+      });
       return;
     }
-    const visible = predictionGridData.filter((row) => {
+    if (predictionWorkerFailed && predictionRowsRef.current.length > 20000) return;
+  }, [predictionGridData, predictionWorkerEpoch, predictionWorkerFailed]);
+
+  useEffect(() => {
+    const requestId = ++predictionRequestRef.current;
+    predictionViewportRef.current = { bounds: viewportBounds, zoom: mapZoom };
+    if (!predictionRowsRef.current?.length) return;
+    const payload = {
+      type: 'viewport',
+      requestId,
+      datasetRevision: predictionDatasetRevisionRef.current,
+      bounds: viewportBounds,
+      zoom: mapZoom,
+      maxRows: getPredictionRenderLimit(predictionRowsRef.current.length),
+    };
+    const worker = predictionWorkerRef.current;
+    if (worker) {
+      if (predictionInFlightRequestRef.current !== null) {
+        predictionPendingViewportRef.current = payload;
+      } else {
+        predictionInFlightRequestRef.current = requestId;
+        worker.postMessage(payload);
+      }
+      return;
+    }
+    if (predictionRowsRef.current.length > 20000) return;
+    const visible = predictionRowsRef.current.filter((row) => {
       const lat = Number(row?.lat ?? row?.latitude);
       const lng = Number(row?.lng ?? row?.longitude ?? row?.lon);
       return !viewportBounds || (lat >= viewportBounds.south && lat <= viewportBounds.north && lng >= viewportBounds.west && lng <= viewportBounds.east);
     });
     setVisiblePredictionRows(visible.slice(0, getPredictionRenderLimit(visible.length)));
-  }, [predictionGridData, viewportBounds, mapZoom]);
+  }, [predictionGridData, viewportBounds, mapZoom, predictionWorkerEpoch, predictionWorkerFailed]);
 
   return null;
 };
