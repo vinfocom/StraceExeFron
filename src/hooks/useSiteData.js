@@ -160,8 +160,9 @@ const getSitePredictionMergeKey = (row = {}) => {
       "",
   ).trim();
 
-  if (site && cellId) return `site:${site}|cell:${cellId}`;
-  if (site && sector) return `site:${site}|sector:${sector}`;
+  if (site && (cellId || sector)) {
+    return `site:${site}|sector:${sector}|cell:${cellId}`;
+  }
   const sourceId = String(row?.original_id ?? row?.site_prediction_id ?? row?.id ?? "").trim();
   if (sourceId) return `id:${sourceId}`;
   return `site:${site}|sector:${sector}|cell:${cellId}`;

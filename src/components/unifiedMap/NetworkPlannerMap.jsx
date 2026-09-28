@@ -2008,48 +2008,126 @@ const NetworkPlannerMap = ({
       getDisplaySiteId(selectedSectorInfo) || selectedSectorInfo.siteId || "",
     ).trim();
     if (!currentSiteId) return [];
+    const normalizedCurrentSiteId = normalizeComparableSiteId(currentSiteId);
+    const currentNodeId = normalizeMatchValue(extractStrictNodebId(selectedSectorInfo?.rawSite));
+    const currentSiteName = normalizeMatchValue(getSiteName(selectedSectorInfo));
+    const belongsToSelectedSite = (sector) => {
+      const directSiteIds = [getSiteId(sector), getSiteId(sector?.rawSite)]
+        .map(normalizeComparableSiteId)
+        .filter(Boolean);
+      if (directSiteIds.includes(normalizedCurrentSiteId)) return true;
 
-    return allSectors
-      .filter((sector, index) => {
-        const sectorSiteId = String(getDisplaySiteId(sector) || sector.siteId || "").trim();
-        if (sectorSiteId !== currentSiteId) return false;
-        return getSitePredictionSourceRowId(sector) !== null || `${sector.id || ""}-${index}` !== "";
-      })
-      .map((sector, index) => {
-        const renderKey = sector.renderKey || buildSectorRenderKey(sector, index);
-        const sectorValue = String(
-          sector.sector ??
-            sector.rawSite?.sector ??
-            sector.rawSite?.sector_id ??
-            "",
-        ).trim();
-        const cellValue = String(
-          sector.cellId ??
-            sector.rawSite?.cell_id ??
-            sector.rawSite?.cellId ??
-            sector.cellIdRepresentative ??
-            "",
-        ).trim();
-        const bandValue = String(
-          sector.band ??
-            sector.rawSite?.band ??
-            sector.rawSite?.frequency_band ??
-            "",
-        ).trim();
-        const labelParts = [`Sector ${sectorValue || index + 1}`];
-        if (cellValue) labelParts.push(`Cell ${cellValue}`);
-        if (bandValue) labelParts.push(`Band ${bandValue}`);
-        return {
-          value: renderKey,
-          label: labelParts.join(" · "),
-          sector: {
-            ...sector,
-            renderKey,
-            infoPos: { lat: Number(sector.lat), lng: Number(sector.lng) },
+      const candidateNodeId = normalizeMatchValue(
+        extractStrictNodebId(sector?.rawSite || sector),
+      );
+      if (currentNodeId && candidateNodeId === currentNodeId) return true;
+
+      const candidateSiteName = normalizeMatchValue(getSiteName(sector?.rawSite || sector));
+      return Boolean(currentSiteName && candidateSiteName === currentSiteName);
+    };
+    const cachedSiteSectors = selectedSiteDataById?.[currentSiteId]?.sectors || [];
+    const sourceSiteSectors = (Array.isArray(siteData) ? siteData : [])
+      .filter(belongsToSelectedSite)
+      .flatMap((site, index) =>
+        generateSectorsFromSite(site, index, colorMode, {
+          forceSingleSector: String(siteToggle || "").toLowerCase() === "cell",
+          defaultBeamwidth,
+          siteLabelField,
+          sitePredictionVersion,
+          siteColorOverrides,
+        }),
+      );
+    const sectorPool = [
+      ...cachedSiteSectors,
+      ...allSectors,
+      ...sourceSiteSectors,
+      selectedSectorInfo,
+    ].filter(belongsToSelectedSite);
+    const seenSectors = new Set();
+    const uniqueSiteSectors = sectorPool.filter((sector) => {
+      const sourceRowId = getSitePredictionSourceRowId(sector);
+      const sectorValue = String(
+        sector.sector ?? sector.rawSite?.sector ?? sector.rawSite?.sector_id ?? "",
+      ).trim();
+      const cellValue = String(
+        sector.cellId ??
+          sector.rawSite?.cell_id ??
+          sector.rawSite?.cellId ??
+          sector.cellIdRepresentative ??
+          sector.rawSite?.cell_id_representative ??
+          "",
+      ).trim();
+      const sectorKey = [
+        sourceRowId ? `row:${sourceRowId}` : "",
+        `sector:${sectorValue}`,
+        `cell:${cellValue}`,
+        sector.band ?? sector.rawSite?.band ?? sector.rawSite?.frequency_band ?? "",
+        sector.technology ?? sector.rawSite?.technology ?? sector.rawSite?.Technology ?? "",
+        Number(sector.lat).toFixed(7),
+        Number(sector.lng).toFixed(7),
+        Number(sector.azimuth).toFixed(2),
+      ].join("|");
+      if (seenSectors.has(sectorKey)) return false;
+      seenSectors.add(sectorKey);
+      return true;
+    });
+
+    return uniqueSiteSectors.map((sector, index) => {
+      const renderKey = sector.renderKey || buildSectorRenderKey(sector, index);
+      const sectorValue = String(
+        sector.sector ??
+          sector.rawSite?.sector ??
+          sector.rawSite?.sector_id ??
+          "",
+      ).trim();
+      const cellValue = String(
+        sector.cellId ??
+          sector.rawSite?.cell_id ??
+          sector.rawSite?.cellId ??
+          sector.cellIdRepresentative ??
+          "",
+      ).trim();
+      const bandValue = String(
+        sector.band ??
+          sector.rawSite?.band ??
+          sector.rawSite?.frequency_band ??
+          "",
+      ).trim();
+      const labelParts = [`Sector ${sectorValue || index + 1}`];
+      if (cellValue) labelParts.push(`Cell ${cellValue}`);
+      if (bandValue) labelParts.push(`Band ${bandValue}`);
+      return {
+        value: renderKey,
+        label: labelParts.join(" · "),
+        sector: {
+          ...sector,
+          siteId: getSiteId(sector) || currentSiteId,
+          rawSite: {
+            ...(sector.rawSite || {}),
+            site:
+              sector.rawSite?.site ||
+              sector.rawSite?.site_id ||
+              sector.rawSite?.siteId ||
+              getSiteId(sector) ||
+              currentSiteId,
           },
-        };
-      });
-  }, [allSectors, selectedSectorInfo]);
+          renderKey,
+          infoPos: { lat: Number(sector.lat), lng: Number(sector.lng) },
+        },
+      };
+    });
+  }, [
+    allSectors,
+    colorMode,
+    defaultBeamwidth,
+    selectedSectorInfo,
+    selectedSiteDataById,
+    siteColorOverrides,
+    siteData,
+    siteLabelField,
+    sitePredictionVersion,
+    siteToggle,
+  ]);
 
   const siteMarkers = useMemo(() => {
     const isDeltaMode = String(sitePredictionVersion || "").trim().toLowerCase() === "delta";
@@ -4812,7 +4890,7 @@ const NetworkPlannerMap = ({
               />
             )}
 
-            {!isEditDialogOpen && selectedSectorInfo?.infoPos && (
+            {!isEditDialogOpen && !dragMode && selectedSectorInfo?.infoPos && (
               <InfoWindowF
                 position={selectedSectorInfo.infoPos}
                 onCloseClick={closeSectorTooltipOnly}
@@ -5004,7 +5082,7 @@ const NetworkPlannerMap = ({
                 zIndex={5000}
                 icon={{
                   path: window.google.maps.SymbolPath.CIRCLE,
-                  scale: 8,
+                  scale: 5,
                   fillColor: "#f97316",
                   fillOpacity: 0.95,
                   strokeColor: "#ffffff",

@@ -1324,33 +1324,34 @@ export function L3EventsMapView({ points, onNeedRsrpAnalysis, active = true }) {
           style={{ right: messagePanelWidth + 12 }}
           onClick={(event) => event.stopPropagation()}
         >
-          <div className="shrink-0 rounded-lg border border-slate-600/80 bg-slate-950/90 p-2 shadow-xl backdrop-blur-sm">
-            <div className="mb-1.5 font-semibold text-white">Event Legend</div>
-            <div className="grid grid-cols-2 gap-1 text-[10px]">
-              <div className="flex items-center justify-between gap-1 rounded bg-slate-950 px-1.5 py-1">
+          <div className="flex min-h-0 max-h-[48%] shrink-0 flex-col rounded-lg border border-slate-600/80 bg-slate-950/90 p-2 shadow-xl backdrop-blur-sm">
+            <div className="mb-1.5 shrink-0 font-semibold text-white">Event Legend</div>
+            <div className="min-h-0 overflow-y-auto pr-0.5">
+              <div className="grid grid-cols-1 gap-1 text-[10px]">
+              {eventMarkerStats.handover > 0 && <div className="flex items-center justify-between gap-1 rounded bg-slate-950 px-1.5 py-1">
                 <span className="flex items-center gap-1 text-amber-400"><Hand className="h-3 w-3" /> HO</span>
                 <span className="font-mono text-slate-200">{eventMarkerStats.handover.toLocaleString()}</span>
-              </div>
-              <div className="flex items-center justify-between gap-1 rounded bg-slate-950 px-1.5 py-1">
+              </div>}
+              {eventMarkerStats.handoverFailure > 0 && <div className="flex items-center justify-between gap-1 rounded bg-slate-950 px-1.5 py-1">
                 <span className="flex items-center gap-1 text-red-400"><Hand className="h-3 w-3" /> Fail</span>
                 <span className="font-mono text-slate-200">{eventMarkerStats.handoverFailure.toLocaleString()}</span>
-              </div>
-              <div className="flex items-center justify-between gap-1 rounded bg-slate-950 px-1.5 py-1">
+              </div>}
+              {eventMarkerStats.callStart > 0 && <div className="flex items-center justify-between gap-1 rounded bg-slate-950 px-1.5 py-1">
                 <span className="flex items-center gap-1 text-emerald-400"><PhoneCall className="h-3 w-3" /> Start</span>
                 <span className="font-mono text-slate-200">{eventMarkerStats.callStart.toLocaleString()}</span>
-              </div>
-              <div className="flex items-center justify-between gap-1 rounded bg-slate-950 px-1.5 py-1">
+              </div>}
+              {eventMarkerStats.disconnect > 0 && <div className="flex items-center justify-between gap-1 rounded bg-slate-950 px-1.5 py-1">
                 <span className="flex items-center gap-1 text-red-400"><PhoneOff className="h-3 w-3" /> End</span>
                 <span className="font-mono text-slate-200">{eventMarkerStats.disconnect.toLocaleString()}</span>
-              </div>
-              <div className="flex items-center justify-between gap-1 rounded bg-slate-950 px-1.5 py-1">
+              </div>}
+              {eventMarkerStats.dropped > 0 && <div className="flex items-center justify-between gap-1 rounded bg-slate-950 px-1.5 py-1">
                 <span className="flex items-center gap-1 text-red-400"><PhoneOff className="h-3 w-3" /> Drop</span>
                 <span className="font-mono text-slate-200">{eventMarkerStats.dropped.toLocaleString()}</span>
-              </div>
-              <div className="flex items-center justify-between gap-1 rounded bg-slate-950 px-1.5 py-1">
+              </div>}
+              {eventMarkerStats.notConnected > 0 && <div className="flex items-center justify-between gap-1 rounded bg-slate-950 px-1.5 py-1">
                 <span className="flex items-center gap-1 text-yellow-300"><PhoneOff className="h-3 w-3" /> NC</span>
                 <span className="font-mono text-slate-200">{eventMarkerStats.notConnected.toLocaleString()}</span>
-              </div>
+              </div>}
               {[
                 ["VoNR", "vonrStart", "#8b5cf6"],
                 ["VoLTE", "volteStart", "#06b6d4"],
@@ -1361,7 +1362,7 @@ export function L3EventsMapView({ points, onNeedRsrpAnalysis, active = true }) {
                 ["EN-DC Fail", "endcFailure", "#ef4444"],
                 ["RACH", "rach", "#eab308"],
                 ["RACH Fail", "rachFailure", "#ef4444"],
-              ].map(([label, countKey, color]) => (
+              ].filter(([, countKey]) => eventMarkerStats[countKey] > 0).map(([label, countKey, color]) => (
                 <div key={countKey} className="flex items-center justify-between gap-1 rounded bg-slate-950 px-1.5 py-1">
                   <span className="flex min-w-0 items-center gap-1 truncate" style={{ color }}>
                     <span className="inline-flex h-3 w-4 shrink-0 items-center justify-center rounded-sm border border-current text-[8px] font-bold">
@@ -1375,6 +1376,7 @@ export function L3EventsMapView({ points, onNeedRsrpAnalysis, active = true }) {
                   <span className="font-mono text-slate-200">{eventMarkerStats[countKey].toLocaleString()}</span>
                 </div>
               ))}
+              </div>
             </div>
           </div>
           <div className="min-h-0 overflow-y-auto rounded-lg border border-slate-600/80 bg-slate-950/90 p-2 shadow-xl backdrop-blur-sm">

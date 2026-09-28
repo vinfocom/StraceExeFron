@@ -25,11 +25,17 @@ const NetworkSectorGLLayer = ({
   onSiteClick,
 }) => {
   const handleSectorClick = useCallback(
-    (info) => {
-      if (!onSectorClick || !info?.object) return;
-      onSectorClick(info.object.source, info.object.infoPos);
+    (info, event) => {
+      if ((!onSectorClick && !onSectorRightClick) || !info?.object) return;
+      const sourceEvent = event?.srcEvent;
+      const isRightClick =
+        sourceEvent?.domEvent?.button === 2 ||
+        sourceEvent?.button === 2 ||
+        sourceEvent?.type === "rightclick";
+      const callback = isRightClick ? onSectorRightClick : onSectorClick;
+      callback?.(info.object.source, info.object.infoPos);
     },
-    [onSectorClick],
+    [onSectorClick, onSectorRightClick],
   );
 
   const handleSiteClick = useCallback(
@@ -38,14 +44,6 @@ const NetworkSectorGLLayer = ({
       onSiteClick(info.object.source);
     },
     [onSiteClick],
-  );
-
-  const handleSectorContextMenu = useCallback(
-    (info) => {
-      if (!onSectorRightClick || !info?.object) return;
-      onSectorRightClick(info.object.source, info.object.infoPos);
-    },
-    [onSectorRightClick],
   );
 
   const sortedSectorFeatures = useMemo(() => {
@@ -75,7 +73,6 @@ const NetworkSectorGLLayer = ({
           pickable: true,
           autoHighlight: false,
           onClick: handleSectorClick,
-          onContextMenu: handleSectorContextMenu,
           updateTriggers: {
             getFillColor: [sortedSectorFeatures],
             getLineColor: [sortedSectorFeatures],
@@ -177,7 +174,6 @@ const NetworkSectorGLLayer = ({
     sectorLabelFeatures,
     siteLabelFeatures,
     handleSectorClick,
-    handleSectorContextMenu,
     handleSiteClick,
   ]);
 
