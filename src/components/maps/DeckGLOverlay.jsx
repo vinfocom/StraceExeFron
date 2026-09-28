@@ -7,6 +7,7 @@ import { sampleLogIndices } from '@/utils/logSpatialSampling';
 import { useDeckLayerRegistry } from '@/components/maps/deckLayerRegistry.jsx';
 import { assertCategorizedLayerEntries, categorizeMapLayer, getMapLayerMetadata, sortMapLayerEntries } from '@/components/maps/mapLayerPolicy.js';
 import { getDrawingHoverTarget, getPolygonDrawingHitData, getPolylineDrawingHitData } from '@/components/maps/drawingShapeInteractions.js';
+import { logMapPlot } from '@/utils/mapPlotDebug';
 
 const pickFirstNonEmpty = (obj, keys = []) => {
   for (const key of keys) {
@@ -234,6 +235,11 @@ const DeckGLOverlay = ({
   const [visiblePredictionRows, setVisiblePredictionRows] = useState([]);
   const isCleanedUpRef = useRef(false);
   const attachedMapRef = useRef(null);
+  // Overlay attachment to the Google Map can complete asynchronously (the
+  // map's projection isn't always ready in the same tick as `onLoad`). The
+  // layer-building effect below needs to know when that happens so it can
+  // re-run and actually draw the layers instead of silently no-op'ing.
+  const [attachedMap, setAttachedMap] = useState(null);
   const idleListenerRef = useRef(null);
   const attachTimerRef = useRef(null);
   const isValidMapInstance = useCallback((m) => {
@@ -262,9 +268,16 @@ const DeckGLOverlay = ({
 
     if (!overlayRef.current) {
       overlayRef.current = new GoogleMapsOverlay({
-        // Composite with Google's vector renderer so map DOM tooltips stay
-        // above the WebGL log canvas.
-        interleaved: true,
+        // interleaved:true composites into Google's own vector-map WebGL
+        // context. That context can be evicted by the browser's WebGL
+        // context limit after enough session switches ("Too many active
+        // WebGL contexts" warning), which silently breaks deck.gl's
+        // rendering while setProps()/data flow keep succeeding with no
+        // error. A standalone context (interleaved:false) survives that.
+        // Tradeoff: DOM tooltips may render under this canvas instead of
+        // above it, unlike with the interleaved renderer — recheck tooltip
+        // stacking if that regresses.
+        interleaved: false,
         // Keep WebGL memory bounded. preserveDrawingBuffer causes large persistent buffers.
         glOptions: { preserveDrawingBuffer: false }
       });
@@ -284,20 +297,29 @@ const DeckGLOverlay = ({
     const attachOverlay = () => {
       if (!overlayRef.current || isCleanedUpRef.current) return;
       if (attachedMapRef.current === map) return;
-      if (!canAttachOverlay(map)) return;
+      if (!canAttachOverlay(map)) {
+        logMapPlot("attachOverlay: not ready yet", {
+          hasProjection: Boolean(map.getProjection?.()),
+        });
+        return;
+      }
       try {
         overlayRef.current.setMap(map);
         attachedMapRef.current = map;
+        setAttachedMap(map);
         clearPendingAttach();
+        logMapPlot("attachOverlay: attached", { zoom: map.getZoom?.() });
       } catch (err) {
         console.warn("Could not attach DeckGL to map instance:", err);
       }
     };
 
+    logMapPlot("attach effect running for map instance");
     attachOverlay();
 
     // Map may exist but still be mid-initialization; retry after first idle tick.
     if (attachedMapRef.current !== map && typeof map.addListener === 'function') {
+      logMapPlot("attachOverlay: not attached synchronously, arming idle/timeout retry");
       idleListenerRef.current = map.addListener('idle', attachOverlay);
       attachTimerRef.current = window.setTimeout(attachOverlay, 150);
     }
@@ -317,13 +339,17 @@ const DeckGLOverlay = ({
       if (attachedMapRef.current === map) {
         attachedMapRef.current = null;
       }
+      setAttachedMap((prev) => (prev === map ? null : prev));
     };
   }, [map, isValidMapInstance, canAttachOverlay]);
 
   const updateMapViewport = useCallback(() => {
     if (!isValidMapInstance(map)) return;
-    setMapZoom(map.getZoom());
-    setViewportBounds(normalizeMapBounds(map.getBounds?.()));
+    const zoom = map.getZoom();
+    const bounds = normalizeMapBounds(map.getBounds?.());
+    setMapZoom(zoom);
+    setViewportBounds(bounds);
+    logMapPlot("updateMapViewport", { zoom, bounds, rawBoundsAvailable: Boolean(map.getBounds?.()) });
   }, [map, isValidMapInstance]);
 
   useEffect(() => {
@@ -352,12 +378,23 @@ const DeckGLOverlay = ({
     workerCoordinatesRef.current = null;
 
     worker.onmessage = ({ data }) => {
-      if (data.requestId !== samplingRequestRef.current) return;
+      if (data.requestId !== samplingRequestRef.current) {
+        logMapPlot("sampling worker: dropped stale response", {
+          responseRequestId: data.requestId,
+          currentRequestId: samplingRequestRef.current,
+        });
+        return;
+      }
       if (data.error) {
         console.warn('[UnifiedMapView] Log sampling worker failed:', data.error);
         return;
       }
-      setSampledPrimaryIndexes(new Uint32Array(data.indexesBuffer));
+      const indexes = new Uint32Array(data.indexesBuffer);
+      logMapPlot("sampling worker: response applied", {
+        requestId: data.requestId,
+        sampledCount: indexes.length,
+      });
+      setSampledPrimaryIndexes(indexes);
     };
 
     worker.onerror = (error) => {
@@ -398,11 +435,20 @@ const DeckGLOverlay = ({
       maxRows: Number.isFinite(primaryRenderLimit) ? primaryRenderLimit : null,
     };
     const worker = samplingWorkerRef.current;
+    const sendingFreshCoordinates = workerCoordinatesRef.current !== samplingCoordinates;
+    logMapPlot("sampling request sent", {
+      requestId,
+      totalLogs: locations.length,
+      bounds: viewportBounds,
+      zoom: mapZoom,
+      sendingFreshCoordinates,
+      usingWorker: Boolean(worker),
+    });
 
     if (worker) {
       // Transfer coordinates once per dataset; viewport updates reuse the
       // worker's copy instead of rebuilding and transferring every log.
-      if (workerCoordinatesRef.current !== samplingCoordinates) {
+      if (sendingFreshCoordinates) {
         const buffer = samplingCoordinates.slice().buffer;
         worker.postMessage({ ...options, coordinatesBuffer: buffer }, [buffer]);
         workerCoordinatesRef.current = samplingCoordinates;
@@ -671,8 +717,19 @@ const DeckGLOverlay = ({
   }, [showPrimaryLogs, showMetricLabels, primaryData, selectedMetric]);
 
   useEffect(() => {
-    if (!overlayRef.current || !isValidMapInstance(map)) return;
-    if (attachedMapRef.current !== map) return;
+    if (!overlayRef.current || !isValidMapInstance(map)) {
+      logMapPlot("layer-build effect: skipped (overlay/map not valid)", {
+        hasOverlay: Boolean(overlayRef.current),
+        mapValid: isValidMapInstance(map),
+      });
+      return;
+    }
+    if (attachedMap !== map) {
+      logMapPlot("layer-build effect: skipped (overlay not attached to this map yet)", {
+        mapZoom: map?.getZoom?.(),
+      });
+      return;
+    }
 
     const layers = [];
     const addLayer = (category, layer, order = 0) => layers.push(categorizeMapLayer(layer, category, order));
@@ -948,10 +1005,19 @@ const DeckGLOverlay = ({
         });
       });
       overlayRef.current.setProps({ layers: orderedLayers });
+      logMapPlot("layer-build effect: setProps committed", {
+        totalLayers: orderedLayers.length,
+        layerIds: orderedLayers.map((layer) => layer.id),
+        primaryDataCount: primaryData.length,
+        neighborDataCount: neighborData.length,
+        gridDataCount: gridData.length,
+        mapZoom: map?.getZoom?.(),
+      });
     } catch (e) {
       // Overlay can detach during map teardown; skip this update.
+      logMapPlot("layer-build effect: setProps threw", { error: e?.message || String(e) });
     }
-  }, [map, primaryData, neighborData, gridData, imageLogData, metricLabelData, drawingData, drawingPolygonHitData, drawingPolylineHitData, drawingOpacity, nativeOutlineData, predictionRenderData, siteRenderData, registeredGroups, registryVersion, showPrimaryLogs, showNeighbors, showGrid, gridOpacity, handleGridHover, handleDrawingHover, showImageLogs, selectedIndex, radius, radiusMinPixels, radiusMaxPixels, opacity, neighborOpacity, showNumCells, showMetricLabels, getColor, getNeighborColor, handleImageLogClick, handlePrimaryHover, isValidMapInstance, pickable, autoHighlight, mapZoom, interactionsDisabled]);
+  }, [map, attachedMap, primaryData, neighborData, gridData, imageLogData, metricLabelData, drawingData, drawingPolygonHitData, drawingPolylineHitData, drawingOpacity, nativeOutlineData, predictionRenderData, siteRenderData, registeredGroups, registryVersion, showPrimaryLogs, showNeighbors, showGrid, gridOpacity, handleGridHover, handleDrawingHover, showImageLogs, selectedIndex, radius, radiusMinPixels, radiusMaxPixels, opacity, neighborOpacity, showNumCells, showMetricLabels, getColor, getNeighborColor, handleImageLogClick, handlePrimaryHover, isValidMapInstance, pickable, autoHighlight, mapZoom, interactionsDisabled]);
 
   useEffect(() => {
     return () => {

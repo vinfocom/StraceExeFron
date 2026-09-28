@@ -40,6 +40,7 @@ import LtePredictionLocationLayer from "@/components/unifiedMap/LtePredictionLoc
 import ClutterTilesLayer from "@/components/unifiedMap/ClutterTilesLayer";
 import SavedSourceGeometryLayer from "@/components/unifiedMap/SavedSourceGeometryLayer";
 import { normalizeBandName } from "@/utils/colorUtils";
+import { logMapPlot } from "@/utils/mapPlotDebug";
 
 // Hooks
 import { useSiteData } from "@/hooks/useSiteData";
@@ -2513,6 +2514,25 @@ const UnifiedMapView = () => {
     return () => {
       window.removeEventListener(MAP_ZOOM_LOCK_EVENT, handleMapZoomLockChange);
     };
+  }, []);
+
+  // Fires whenever the map component is about to frame a (possibly brand
+  // new) dataset via fitBounds/setCenter+setZoom. A zoom lock armed for the
+  // previous dataset must not fight that: Google resets the zoom to fit the
+  // new data, the zoom_changed listener below reverts it back to the stale
+  // locked value, and the new log ends up framed at the wrong zoom instead
+  // of fitted to its own extent. Clearing the lock here lets the new fit win;
+  // the user can re-enable "Map Lock" once the new data is framed.
+  const handleMapAutoFit = useCallback(() => {
+    logMapPlot("handleMapAutoFit called", {
+      zoomLockWasEnabled: zoomLockEnabledRef.current,
+      lockedZoom: lockedZoomRef.current,
+    });
+    if (!zoomLockEnabledRef.current) return;
+    zoomLockEnabledRef.current = false;
+    lockedZoomRef.current = null;
+    setIsZoomLocked(false);
+    logMapPlot("handleMapAutoFit: cleared stale zoom lock so the new fit can win");
   }, []);
 
   // --- Add Site Mode ---
@@ -6341,6 +6361,10 @@ const UnifiedMapView = () => {
             Number.isFinite(lockedZoomRef.current) &&
             currentZoom !== lockedZoomRef.current
           ) {
+            logMapPlot("updateViewport: zoom-lock reverting zoom", {
+              currentZoom,
+              lockedZoom: lockedZoomRef.current,
+            });
             map.setZoom(lockedZoomRef.current);
           } else {
             setMapZoom((prev) => (prev === currentZoom ? prev : currentZoom));
@@ -6357,10 +6381,15 @@ const UnifiedMapView = () => {
           Number.isFinite(lockedZoomRef.current) &&
           currentZoom !== lockedZoomRef.current
         ) {
+          logMapPlot("zoom_changed: zoom-lock reverting zoom", {
+            currentZoom,
+            lockedZoom: lockedZoomRef.current,
+          });
           map.setZoom(lockedZoomRef.current);
           return;
         }
 
+        logMapPlot("zoom_changed: passthrough", { currentZoom });
         setMapZoom((prev) => (prev === currentZoom ? prev : currentZoom));
       }));
 
@@ -6378,6 +6407,10 @@ const UnifiedMapView = () => {
             Number.isFinite(currentZoom) &&
             currentZoom !== lockedZoomRef.current
           ) {
+            logMapPlot("click: zoom-lock reverting zoom", {
+              currentZoom,
+              lockedZoom: lockedZoomRef.current,
+            });
             map.setZoom(lockedZoomRef.current);
           }
         }
@@ -8003,6 +8036,7 @@ const UnifiedMapView = () => {
               siteData={siteData}
               predictionGridData={lteLayerLocations}
               onLoad={handleMapLoad}
+              onAutoFit={handleMapAutoFit}
               pointRadius={logRadius}
               projectId={projectId}
               polygonSource={polygonSource}

@@ -14,6 +14,7 @@ import useColorForLog from "@/hooks/useColorForLog";
 import { getMetricValueFromLog, getMacDetailValueFromLog, getPciColor, getEarfcnColor } from "@/utils/metrics";
 import { normalizeProviderName, normalizeTechName, normalizeBandName, getLogColor, getRegisteredColor, generateColorFromHash, resolveMacDetailMetricKey } from "@/utils/colorUtils";
 import { DEBUG_L3, traceL3Effect } from "@/utils/l3Debug";
+import { logMapPlot } from "@/utils/mapPlotDebug";
 
 const DEFAULT_CENTER = { lat: 28.64453086, lng: 77.37324242 };
 const isElectronRuntime =
@@ -1542,6 +1543,7 @@ const MapWithMultipleCircles = ({
   fitToLocations = true,
   onLoad: onLoadProp,
   onUnmount: onUnmountProp,
+  onAutoFit: onAutoFitProp,
   pointRadius = 10,
   children,
   projectId = null,
@@ -2467,6 +2469,12 @@ const MapWithMultipleCircles = ({
   const applyAutoViewport = useCallback((mapInstance) => {
     if (!mapInstance) return;
 
+    // Switching to a new dataset must win over a "keep my zoom" lock the
+    // caller may have armed for the previous dataset — otherwise a stale
+    // locked zoom fights fitBounds (Google resets it, the lock immediately
+    // reverts it) and the new data ends up framed at the wrong zoom level.
+    onAutoFitProp?.(mapInstance);
+
     const allPoints = [...locationsToRender, ...processedNeighbors];
     const locs = allPoints.length > 0 ? allPoints : locations;
     if (fitToLocations && locs?.length && window.google) {
@@ -2477,15 +2485,30 @@ const MapWithMultipleCircles = ({
         bounds.extend({ lat: locs[i].lat, lng: locs[i].lng });
       }
       mapInstance.fitBounds(bounds, 50);
+      logMapPlot("applyAutoViewport:fitBounds", {
+        locsUsed: locs.length,
+        sampleSize,
+        step,
+        boundsNE: bounds.getNorthEast()?.toJSON?.(),
+        boundsSW: bounds.getSouthWest()?.toJSON?.(),
+        zoomBeforeFit: mapInstance.getZoom?.(),
+      });
       return;
     }
 
     mapInstance.setCenter(computedCenter);
     mapInstance.setZoom(defaultZoom);
-  }, [locationsToRender, processedNeighbors, locations, fitToLocations, computedCenter, defaultZoom]);
+    logMapPlot("applyAutoViewport:setCenter+setZoom", {
+      reason: !fitToLocations ? "fitToLocations=false" : "no locations",
+      locsAvailable: locs?.length || 0,
+      computedCenter,
+      defaultZoom,
+    });
+  }, [locationsToRender, processedNeighbors, locations, fitToLocations, computedCenter, defaultZoom, onAutoFitProp]);
 
   const handleMapLoad = useCallback((mapInstance) => {
     setMap(mapInstance);
+    logMapPlot("handleMapLoad", { autoFitSignature });
     applyAutoViewport(mapInstance);
     lastAutoFitSignatureRef.current = autoFitSignature;
     onLoadProp?.(mapInstance);
@@ -2496,6 +2519,10 @@ const MapWithMultipleCircles = ({
     if (autoFitSignature === "empty") return;
     if (lastAutoFitSignatureRef.current === autoFitSignature) return;
 
+    logMapPlot("autoFitSignature changed -> re-fit", {
+      previousSignature: lastAutoFitSignatureRef.current,
+      nextSignature: autoFitSignature,
+    });
     applyAutoViewport(map);
     lastAutoFitSignatureRef.current = autoFitSignature;
   }, [map, autoFitSignature, applyAutoViewport]);
