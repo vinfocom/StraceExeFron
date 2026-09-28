@@ -716,35 +716,113 @@ const buildFieldRuns = (entries, field, maxGapMs) => {
   return runs;
 };
 
-const findNeighborEvidence = ({ neighborLogs, sourceCell, targetCell, targetEntry, lookbackMs }) => {
-  if (!neighborLogs?.length || !targetCell?.pci) return null;
-  const targetTime = targetEntry.timestampMs;
-  const sessionKey = targetEntry.sessionKey;
+// findNeighborEvidence used to re-map every row of neighborLogs (parsing a
+// fresh Date.parse per row via getHandoverTimestampMs), re-filter, and
+// re-sort the ENTIRE array on every single call — and it's called once per
+// candidate transition found in buildFieldTransitions/the PCI-run loop
+// below. For N transitions and M neighbor rows that's O(N x M) re-parsing
+// and re-sorting of the same data. buildNeighborLogIndex below does the
+// per-row parsing exactly once per buildHandoverTransitionsFromOrdered call,
+// bucketed by (session, neighbor PCI) and time-sorted, so each transition's
+// lookup becomes a small binary search + bounded backward scan instead of a
+// full array scan/sort.
+const NEIGHBOR_INDEX_KEY_SEPARATOR = "\u0000";
 
-  const matches = neighborLogs
-    .map((row) => ({ row, timestampMs: getHandoverTimestampMs(row) }))
-    .filter(({ row, timestampMs }) => {
-      if (getSessionKey(row) !== sessionKey) return false;
-      const neighborPci = readText(row, [
-        "neighbourPci",
-        "neighborPci",
-        "neighbour_pci",
-        "neighbor_pci",
-      ]);
-      if (!neighborPci || String(neighborPci) !== String(targetCell.pci)) return false;
+const getNeighborBucketKey = (sessionKey, neighborPci) =>
+  `${sessionKey}${NEIGHBOR_INDEX_KEY_SEPARATOR}${neighborPci}`;
 
-      const primaryPci = readText(row, ["primaryPci", "primary_pci", "servingPci", "serving_pci"]);
-      if (primaryPci && sourceCell.pci && String(primaryPci) !== String(sourceCell.pci)) return false;
+const buildNeighborLogIndex = (neighborLogs = []) => {
+  const buckets = new Map();
 
-      if (targetTime != null && timestampMs != null) {
-        return timestampMs <= targetTime && targetTime - timestampMs <= lookbackMs;
-      }
-      return true;
-    })
-    .sort((a, b) => compareNullableNumbers(b.timestampMs, a.timestampMs));
+  neighborLogs.forEach((row) => {
+    const neighborPci = readText(row, [
+      "neighbourPci",
+      "neighborPci",
+      "neighbour_pci",
+      "neighbor_pci",
+    ]);
+    if (!neighborPci) return;
 
-  if (!matches.length) return null;
-  const row = matches[0].row;
+    const bucketKey = getNeighborBucketKey(getSessionKey(row), neighborPci);
+    let bucket = buckets.get(bucketKey);
+    if (!bucket) {
+      bucket = { timed: [], undated: [] };
+      buckets.set(bucketKey, bucket);
+    }
+
+    const entry = {
+      row,
+      timestampMs: getHandoverTimestampMs(row),
+      primaryPci: readText(row, ["primaryPci", "primary_pci", "servingPci", "serving_pci"]),
+    };
+    (entry.timestampMs == null ? bucket.undated : bucket.timed).push(entry);
+  });
+
+  buckets.forEach((bucket) => {
+    bucket.timed.sort((a, b) => a.timestampMs - b.timestampMs);
+  });
+
+  return buckets;
+};
+
+const neighborPrimaryPciMatches = (entry, sourcePci) =>
+  !entry.primaryPci || !sourcePci || String(entry.primaryPci) === String(sourcePci);
+
+// Rows whose own timestamp never parsed were treated by the original scan
+// as unconditionally in-window regardless of target time, and (because
+// compareNullableNumbers sorts null "greatest") ended up preferred over
+// every dated row. Checking `undated` first preserves that exact ordering.
+const findLatestNeighborEntry = (bucket, sourcePci, targetTime, lookbackMs) => {
+  if (!bucket) return null;
+
+  for (const entry of bucket.undated) {
+    if (neighborPrimaryPciMatches(entry, sourcePci)) return entry;
+  }
+
+  const { timed } = bucket;
+  if (!timed.length) return null;
+
+  if (targetTime == null) {
+    for (let index = timed.length - 1; index >= 0; index -= 1) {
+      if (neighborPrimaryPciMatches(timed[index], sourcePci)) return timed[index];
+    }
+    return null;
+  }
+
+  // Binary search for the rightmost entry with timestampMs <= targetTime.
+  let low = 0;
+  let high = timed.length - 1;
+  let matchIndex = -1;
+  while (low <= high) {
+    const mid = (low + high) >> 1;
+    if (timed[mid].timestampMs <= targetTime) {
+      matchIndex = mid;
+      low = mid + 1;
+    } else {
+      high = mid - 1;
+    }
+  }
+
+  for (let index = matchIndex; index >= 0; index -= 1) {
+    const entry = timed[index];
+    // timed is time-ascending, so once we're outside the lookback window
+    // nothing earlier in the bucket can qualify either.
+    if (targetTime - entry.timestampMs > lookbackMs) break;
+    if (neighborPrimaryPciMatches(entry, sourcePci)) return entry;
+  }
+  return null;
+};
+
+const findNeighborEvidence = ({ neighborLogIndex, sourceCell, targetCell, targetEntry, lookbackMs }) => {
+  if (!neighborLogIndex?.size || !targetCell?.pci) return null;
+
+  const bucket = neighborLogIndex.get(
+    getNeighborBucketKey(targetEntry.sessionKey, String(targetCell.pci)),
+  );
+  const match = findLatestNeighborEntry(bucket, sourceCell?.pci, targetEntry.timestampMs, lookbackMs);
+  if (!match) return null;
+
+  const row = match.row;
   return {
     targetSeenAsNeighbor: true,
     targetNeighborTimestamp: readValue(row, ["timestamp", "time_stamp", "timeStamp"]),
@@ -841,7 +919,8 @@ const buildFieldTransitions = ({
   entries,
   field,
   type,
-  neighborLogs,
+  neighborLogIndex,
+  neighborDataAvailable,
   maxGapMs,
   neighborLookbackMs,
   minTargetSamples,
@@ -870,7 +949,7 @@ const buildFieldTransitions = ({
     const sourceCell = getServingCell(sourceEntry.loc) || stableRun.cell;
     const targetCell = getServingCell(targetEntry.loc) || candidateRun.cell;
     const neighborEvidence = findNeighborEvidence({
-      neighborLogs,
+      neighborLogIndex,
       sourceCell,
       targetCell,
       targetEntry,
@@ -883,7 +962,7 @@ const buildFieldTransitions = ({
       targetCell,
       eventStatus,
       neighborEvidence,
-      neighborDataAvailable: neighborLogs.length > 0,
+      neighborDataAvailable,
     });
 
     if (Number.isFinite(meta.lat) && Number.isFinite(meta.lng)) {
@@ -914,6 +993,11 @@ export const buildHandoverTransitionsFromOrdered = (
   const pciTransitions = [];
   if (ordered.length < 2) return { technologyTransitions, bandTransitions, pciTransitions };
 
+  // Built once per call (not per transition/session) — see the comment on
+  // findNeighborEvidence above for why this replaced a per-lookup rescan.
+  const neighborLogIndex = buildNeighborLogIndex(neighborLogs);
+  const neighborDataAvailable = neighborLogs.length > 0;
+
   const sessions = new Map();
   ordered.forEach((entry) => {
     if (!sessions.has(entry.sessionKey)) sessions.set(entry.sessionKey, []);
@@ -928,7 +1012,8 @@ export const buildHandoverTransitionsFromOrdered = (
         entries,
         field: "technology",
         type: "technology",
-        neighborLogs,
+        neighborLogIndex,
+        neighborDataAvailable,
         maxGapMs: sessionMaxGapMs,
         neighborLookbackMs,
         minTargetSamples,
@@ -939,7 +1024,8 @@ export const buildHandoverTransitionsFromOrdered = (
         entries,
         field: "band",
         type: "band",
-        neighborLogs,
+        neighborLogIndex,
+        neighborDataAvailable,
         maxGapMs: sessionMaxGapMs,
         neighborLookbackMs,
         minTargetSamples,
@@ -969,7 +1055,7 @@ export const buildHandoverTransitionsFromOrdered = (
       if (isSameServingCell(stableRun.cell, candidateRun.cell)) continue;
 
       const neighborEvidence = findNeighborEvidence({
-        neighborLogs,
+        neighborLogIndex,
         sourceCell: stableRun.cell,
         targetCell: candidateRun.cell,
         targetEntry,
@@ -982,7 +1068,7 @@ export const buildHandoverTransitionsFromOrdered = (
         targetCell: candidateRun.cell,
         eventStatus,
         neighborEvidence,
-        neighborDataAvailable: neighborLogs.length > 0,
+        neighborDataAvailable,
       });
 
       if (!Number.isFinite(meta.lat) || !Number.isFinite(meta.lng)) {

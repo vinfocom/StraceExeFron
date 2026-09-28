@@ -4463,6 +4463,25 @@ const UnifiedMapView = () => {
     areaLoading ||
     (shouldFetchNeighbors && sessionNeighborLoading);
 
+  // Once the map has mounted for the first time, it must stay mounted.
+  // Swapping it for a spinner on every later session/log switch (whenever
+  // a query key change briefly empties locations/siteData while isLoading
+  // is true) unmounts <GoogleMap>, its WebGL context and the deck.gl
+  // overlay, then rebuilds all of it from scratch on the next load — which
+  // is the root cause behind the WebGL-context churn, duplicate
+  // useColorForLog() threshold fetches, and growing DOM node/listener
+  // counts seen while profiling. The spinner should only ever gate the
+  // genuine first load.
+  const hasMountedMapRef = useRef(false);
+  const showInitialMapSpinner =
+    isLoading &&
+    (locations?.length || 0) === 0 &&
+    (siteData?.length || 0) === 0 &&
+    !hasMountedMapRef.current;
+  if (!showInitialMapSpinner) {
+    hasMountedMapRef.current = true;
+  }
+
   useEffect(() => {
     if (!isRestoringFromStorage) return undefined;
     if (isLoading) return undefined;
@@ -7991,9 +8010,7 @@ const UnifiedMapView = () => {
         )}
 
         <div ref={mapSnapshotContainerRef} className="relative h-full w-full">
-          {isLoading &&
-            (locations?.length || 0) === 0 &&
-            (siteData?.length || 0) === 0 ? (
+          {showInitialMapSpinner ? (
             <div className="flex items-center justify-center h-full bg-gray-100 dark:bg-gray-700">
               <Spinner />
             </div>

@@ -8,6 +8,7 @@ import { useDeckLayerRegistry } from '@/components/maps/deckLayerRegistry.jsx';
 import { assertCategorizedLayerEntries, categorizeMapLayer, getMapLayerMetadata, sortMapLayerEntries } from '@/components/maps/mapLayerPolicy.js';
 import { getDrawingHoverTarget, getPolygonDrawingHitData, getPolylineDrawingHitData } from '@/components/maps/drawingShapeInteractions.js';
 import { logMapPlot } from '@/utils/mapPlotDebug';
+import { debounce } from '@/utils/unifiedMapConfig';
 
 const pickFirstNonEmpty = (obj, keys = []) => {
   for (const key of keys) {
@@ -268,16 +269,23 @@ const DeckGLOverlay = ({
 
     if (!overlayRef.current) {
       overlayRef.current = new GoogleMapsOverlay({
-        // interleaved:true composites into Google's own vector-map WebGL
-        // context. That context can be evicted by the browser's WebGL
-        // context limit after enough session switches ("Too many active
-        // WebGL contexts" warning), which silently breaks deck.gl's
-        // rendering while setProps()/data flow keep succeeding with no
-        // error. A standalone context (interleaved:false) survives that.
-        // Tradeoff: DOM tooltips may render under this canvas instead of
-        // above it, unlike with the interleaved renderer — recheck tooltip
-        // stacking if that regresses.
-        interleaved: false,
+        // interleaved:true composites directly into Google's own vector-map
+        // WebGL frame each tick (zero extra cost). interleaved:false gives
+        // deck.gl its own canvas, but @deck.gl/google-maps then calls an
+        // unconditional deck.redraw() on every one of Google's continuous
+        // internal onDraw ticks (~60fps, always-on for vector maps) instead
+        // of piggybacking — a full extra layer redraw every frame forever,
+        // regardless of whether data/camera changed. We temporarily used
+        // interleaved:false because repeated <GoogleMap> remounts on every
+        // session switch were evicting Google's vector-map WebGL context
+        // ("Too many active WebGL contexts"), which silently broke
+        // interleaved rendering. Now that the map mounts once per page visit
+        // (see UnifiedMapView.jsx's hasMountedMapRef), that context churn
+        // shouldn't recur, so interleaved:true is safe again and avoids the
+        // continuous per-frame redraw cost. If invisible-plotting symptoms
+        // return, that's a sign context eviction is happening from another
+        // source (e.g. Multi Map view holding several maps at once).
+        interleaved: true,
         // Keep WebGL memory bounded. preserveDrawingBuffer causes large persistent buffers.
         glOptions: { preserveDrawingBuffer: false }
       });
@@ -352,10 +360,23 @@ const DeckGLOverlay = ({
     logMapPlot("updateMapViewport", { zoom, bounds, rawBoundsAvailable: Boolean(map.getBounds?.()) });
   }, [map, isValidMapInstance]);
 
+  // zoom_changed fires on every frame of Google's zoom-easing animation —
+  // a single fitBounds transition can emit 15-20+ of these before settling.
+  // Each one flows into mapZoom -> gridData/primaryData recompute -> a full
+  // deck.gl setProps rebuild, which gets expensive fast on large datasets
+  // (e.g. a 15k-cell grid rebuilt on every intermediate tick). Debouncing
+  // this listener collapses that burst into one rebuild after the zoom
+  // actually settles. idle/dragend already only fire once settled, so they
+  // stay undebounced for immediate feedback after a real interaction ends.
+  const debouncedUpdateMapViewport = useMemo(
+    () => debounce(updateMapViewport, 120),
+    [updateMapViewport],
+  );
+
   useEffect(() => {
     if (!isValidMapInstance(map) || typeof map.addListener !== 'function') return;
     updateMapViewport();
-    const zoomListener = map.addListener('zoom_changed', updateMapViewport);
+    const zoomListener = map.addListener('zoom_changed', debouncedUpdateMapViewport);
     const idleListener = map.addListener('idle', updateMapViewport);
     const dragListener = map.addListener('dragend', updateMapViewport);
     return () => {
@@ -365,7 +386,7 @@ const DeckGLOverlay = ({
         window.google.maps.event.removeListener(dragListener);
       }
     };
-  }, [map, isValidMapInstance, updateMapViewport]);
+  }, [map, isValidMapInstance, updateMapViewport, debouncedUpdateMapViewport]);
 
   useEffect(() => {
     if (typeof Worker === 'undefined') return undefined;
@@ -924,7 +945,8 @@ const DeckGLOverlay = ({
         getWidth: 2,
         widthUnits: 'pixels',
         widthMinPixels: 2,
-        rounded: true,
+        jointRounded: true,
+        capRounded: true,
         pickable: false,
         parameters: { depthTest: false },
       }));
@@ -957,7 +979,8 @@ const DeckGLOverlay = ({
         getWidth: 14,
         widthUnits: 'pixels',
         widthMinPixels: 14,
-        rounded: true,
+        jointRounded: true,
+        capRounded: true,
         opacity: 0,
         pickable: Boolean(pickable && !interactionsDisabled),
         onHover: handleDrawingHover,
@@ -976,7 +999,8 @@ const DeckGLOverlay = ({
         getWidth: 2,
         widthUnits: 'pixels',
         widthMinPixels: 1,
-        rounded: true,
+        jointRounded: true,
+        capRounded: true,
         pickable: false,
       }));
     }

@@ -197,6 +197,91 @@ test("uses secondary logs only as corroborating target-neighbor evidence", () =>
   assert.equal(result.pciTransitions[0].targetNeighborRsrp, -91);
 });
 
+test("picks the most recent neighbor observation within the lookback window, not just any match", () => {
+  const logs = [
+    row(1, 101, 0),
+    row(2, 101, 1),
+    row(3, 205, 2),
+    row(4, 205, 3),
+  ];
+  const neighborLogs = [
+    {
+      sessionId: 7,
+      timestamp: new Date(baseTime - 5000).toISOString(),
+      primaryPci: 101,
+      neighbourPci: 205,
+      neighbourRsrp: -110,
+    },
+    {
+      sessionId: 7,
+      timestamp: new Date(baseTime - 1000).toISOString(),
+      primaryPci: 101,
+      neighbourPci: 205,
+      neighbourRsrp: -80,
+    },
+  ];
+
+  const result = buildHandoverTransitions(logs, { neighborLogs });
+
+  assert.equal(result.pciTransitions.length, 1);
+  assert.equal(result.pciTransitions[0].targetSeenAsNeighbor, true);
+  assert.equal(result.pciTransitions[0].targetNeighborRsrp, -80);
+});
+
+test("skips a primaryPci mismatch on the latest neighbor row and falls back to an earlier matching row", () => {
+  const logs = [
+    row(1, 101, 0),
+    row(2, 101, 1),
+    row(3, 205, 2),
+    row(4, 205, 3),
+  ];
+  const neighborLogs = [
+    {
+      sessionId: 7,
+      timestamp: new Date(baseTime - 5000).toISOString(),
+      primaryPci: 101,
+      neighbourPci: 205,
+      neighbourRsrp: -95,
+    },
+    {
+      // Most recent row, but from a different serving cell - must not win.
+      sessionId: 7,
+      timestamp: new Date(baseTime - 1000).toISOString(),
+      primaryPci: 999,
+      neighbourPci: 205,
+      neighbourRsrp: -80,
+    },
+  ];
+
+  const result = buildHandoverTransitions(logs, { neighborLogs });
+
+  assert.equal(result.pciTransitions.length, 1);
+  assert.equal(result.pciTransitions[0].targetSeenAsNeighbor, true);
+  assert.equal(result.pciTransitions[0].targetNeighborRsrp, -95);
+});
+
+test("excludes a neighbor observation outside the lookback window", () => {
+  const logs = [
+    row(1, 101, 0),
+    row(2, 101, 1),
+    row(3, 205, 2),
+    row(4, 205, 3),
+  ];
+  const neighborLogs = [{
+    sessionId: 7,
+    // 40s before the target row; default lookback is 30s.
+    timestamp: new Date(baseTime - 40000).toISOString(),
+    primaryPci: 101,
+    neighbourPci: 205,
+    neighbourRsrp: -91,
+  }];
+
+  const result = buildHandoverTransitions(logs, { neighborLogs });
+
+  assert.equal(result.pciTransitions.length, 1);
+  assert.equal(result.pciTransitions[0].targetSeenAsNeighbor, false);
+});
+
 test("marks an explicit successful event as confirmed", () => {
   const result = buildHandoverTransitions([
     row(1, 101, 0),
