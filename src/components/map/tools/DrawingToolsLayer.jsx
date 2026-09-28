@@ -2153,6 +2153,13 @@ function DrawingToolsLayerComponent({
           completeRouteSelection();
         }),
       );
+      listeners.push(
+        gm.event.addDomListener(window, "mouseup", () => {
+          // Google Maps may not emit its map-level mouseup if the drag ends
+          // outside the map container. Complete from the last map mousemove.
+          if (selectionRect) completeRouteSelection();
+        }),
+      );
 
       toast.info("Drag a selection box around the log route to create an offset route polygon.", {
         position: "bottom-right",
