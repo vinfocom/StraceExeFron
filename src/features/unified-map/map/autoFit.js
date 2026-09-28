@@ -1,11 +1,12 @@
 export const resolveAutoFitAction = (state, {
   identity,
+  revision = 0,
   hasCoordinates,
   complete,
   explicitFit = false,
 }) => {
   if (state.identity !== identity) {
-    Object.assign(state, { identity, initialFit: false, finalFit: false, userNavigated: false });
+    Object.assign(state, { identity, revision, initialFit: false, finalFit: false, userNavigated: false });
   }
   if (explicitFit) Object.assign(state, { initialFit: false, finalFit: false, userNavigated: false });
   if (!hasCoordinates) return "none";
@@ -13,6 +14,10 @@ export const resolveAutoFitAction = (state, {
     state.initialFit = true;
     state.finalFit = Boolean(complete);
     return "initial";
+  }
+  if (state.revision !== revision) {
+    state.revision = revision;
+    if (complete && !state.userNavigated) return "revision";
   }
   if (complete && !state.finalFit && !state.userNavigated) {
     state.finalFit = true;

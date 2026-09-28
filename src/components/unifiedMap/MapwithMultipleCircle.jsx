@@ -1543,6 +1543,7 @@ const MapWithMultipleCircles = ({
   defaultZoom = 14,
   fitToLocations = true,
   datasetIdentity = "default",
+  datasetRevision = 0,
   datasetLoading = false,
   datasetComplete = true,
   fitRequestId = 0,
@@ -2508,6 +2509,7 @@ const MapWithMultipleCircles = ({
     lastFitRequestRef.current = fitRequestId;
     const action = resolveAutoFitAction(current, {
       identity: datasetIdentity,
+      revision: datasetRevision,
       hasCoordinates: hasValidCoordinates,
       complete: !datasetLoading && datasetComplete,
       explicitFit,
@@ -2724,7 +2726,7 @@ const MapWithMultipleCircles = ({
             autoHighlight={!disableDeckInteractions && !drawingEnabled && !projectPolygonEditEnabled}
             interactionsDisabled={disableDeckInteractions || drawingEnabled || projectPolygonEditEnabled}
             onPrimarySamplingState={setPrimarySamplingStatus}
-            primaryDatasetIdentity={datasetIdentity}
+            primaryDatasetIdentity={`${datasetIdentity}:${datasetRevision}`}
           />
         )}
 

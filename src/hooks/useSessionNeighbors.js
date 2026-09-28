@@ -26,12 +26,10 @@ export const useSessionNeighbors = (
   maxRows = 300000,
   projectId = null,
 ) => {
-  const [neighborData, setNeighborData] = useState([]);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState(null);
-  const [stats, setStats] = useState(null);
-  const [outcome, setOutcome] = useState('empty');
-  const [complete, setComplete] = useState(false);
+  const [datasetSnapshot, setDatasetSnapshot] = useState({
+    rows: [], stats: null, identity: null, revision: 0, complete: false, loading: false, error: null, outcome: 'empty',
+  });
+  const datasetRevisionRef = useRef(0);
   const lastSuccessIdentityRef = useRef(null);
 
   const safeMaxRows =
@@ -43,7 +41,7 @@ export const useSessionNeighbors = (
     resource: 'unified-session-neighbors',
     sessionIds: sessionIds || [],
     projectId: projectId || 'global',
-    variant: `v2_${safeMaxRows || 'all'}_${filterEnabled ? 'filtered' : 'all'}_project-${projectId || 'none'}`,
+    variant: `v3_atomic_${safeMaxRows || 'all'}_${filterEnabled ? 'filtered' : 'all'}_project-${projectId || 'none'}`,
   });
   const requestIdentity = JSON.stringify({
     cacheKey,
@@ -65,17 +63,10 @@ export const useSessionNeighbors = (
 
     if (requestIdentity !== lastSuccessIdentityRef.current) {
       lastSuccessIdentityRef.current = null;
-      setNeighborData([]);
-      setStats(null);
     }
 
     if (!sessionIds?.length || !enabled) {
-      setNeighborData([]);
-      setStats(null);
-      setLoading(false);
-      setError(null);
-      setOutcome('empty');
-      setComplete(false);
+      setDatasetSnapshot({ rows: [], stats: null, identity: requestIdentity, revision: ++datasetRevisionRef.current, complete: false, loading: false, error: null, outcome: 'empty' });
       lastSuccessIdentityRef.current = requestIdentity;
       requestGeneration.finish(request);
       return;
@@ -86,10 +77,9 @@ export const useSessionNeighbors = (
       return;
     }
 
-    setLoading(true);
-    setError(null);
-    setOutcome('loading');
-    setComplete(false);
+    setDatasetSnapshot((previous) => previous.identity === requestIdentity
+      ? { ...previous, loading: true, error: null }
+      : { rows: [], stats: null, identity: requestIdentity, revision: ++datasetRevisionRef.current, complete: false, loading: true, error: null, outcome: 'loading' });
 
     if (!force && canUsePersistentCache) {
       let cached = null;
@@ -100,17 +90,12 @@ export const useSessionNeighbors = (
       }
       if (!isCurrent()) return;
       if (
-        cached?.cacheSchemaVersion === 2 &&
-        ['complete', 'empty', 'capped'].includes(cached?.outcome) &&
-        typeof cached?.complete === 'boolean' &&
+        cached?.cacheSchemaVersion === 3 &&
+        ['complete', 'empty'].includes(cached?.outcome) &&
+        cached?.complete === true &&
         Array.isArray(cached?.neighborData)
       ) {
-        setNeighborData(cached.neighborData);
-        setStats(cached.stats || null);
-        setOutcome(cached.outcome);
-        setComplete(cached.complete);
-        setLoading(false);
-        setError(null);
+        setDatasetSnapshot({ rows: cached.neighborData, stats: cached.stats || null, identity: requestIdentity, revision: ++datasetRevisionRef.current, complete: true, loading: false, error: null, outcome: cached.outcome });
         lastSuccessIdentityRef.current = requestIdentity;
         requestGeneration.finish(request);
         return;
@@ -162,12 +147,7 @@ export const useSessionNeighbors = (
         let finalNeighbors = formattedData;
 
         const wasCapped = Boolean(safeMaxRows && finalNeighbors.length > safeMaxRows);
-        if (wasCapped) {
-          const step = Math.ceil(finalNeighbors.length / safeMaxRows);
-          finalNeighbors = finalNeighbors
-            .filter((_, index) => index % step === 0)
-            .slice(0, safeMaxRows);
-        }
+        if (wasCapped) throw new Error(`Neighbor dataset exceeded the ${safeMaxRows.toLocaleString()} row limit. Narrow the selection and retry.`);
 
         const statsObj = { 
           total: finalNeighbors.length,
@@ -175,40 +155,38 @@ export const useSessionNeighbors = (
         }; 
 
         if (!isCurrent()) return;
-        const resultOutcome = finalNeighbors.length === 0 ? 'empty' : wasCapped ? 'capped' : 'complete';
-        const resultComplete = !wasCapped;
-        setNeighborData(finalNeighbors);
-        setStats(statsObj);
-        setOutcome(resultOutcome);
-        setComplete(resultComplete);
+        const resultOutcome = finalNeighbors.length === 0 ? 'empty' : 'complete';
+        setDatasetSnapshot({ rows: finalNeighbors, stats: statsObj, identity: requestIdentity, revision: ++datasetRevisionRef.current, complete: true, loading: false, error: null, outcome: resultOutcome });
         lastSuccessIdentityRef.current = requestIdentity;
         if (canUsePersistentCache) {
           writeProjectSessionCache(cacheKey, {
-            cacheSchemaVersion: 2,
+            cacheSchemaVersion: 3,
             outcome: resultOutcome,
-            complete: resultComplete,
+            complete: true,
             neighborData: finalNeighbors,
             stats: statsObj,
           });
         }
       } else {
         if (!isCurrent()) return;
-        setNeighborData([]);
-        setStats(null);
-        setOutcome('failed');
-        setComplete(false);
-        setError('Neighbor request returned an invalid response.');
+        setDatasetSnapshot((previous) => {
+          const retain = previous.identity === requestIdentity && previous.complete;
+          return { ...previous, rows: retain ? previous.rows : [], stats: retain ? previous.stats : null, identity: requestIdentity, revision: retain ? previous.revision : ++datasetRevisionRef.current, complete: retain, loading: false, outcome: retain ? previous.outcome : 'failed', error: 'Neighbor request returned an invalid response.' };
+        });
       }
     } catch (err) {
       if (isCancelledError(err) || signal.aborted || !isCurrent()) return;
       
-      setError(err.message);
-      setOutcome('failed');
-      setComplete(false);
+      setDatasetSnapshot((previous) => {
+        const retain = previous.identity === requestIdentity && previous.complete;
+        return { ...previous, rows: retain ? previous.rows : [], stats: retain ? previous.stats : null, identity: requestIdentity, revision: retain ? previous.revision : ++datasetRevisionRef.current, complete: retain, loading: false, outcome: retain ? previous.outcome : 'failed', error: err.message };
+      });
       toast.error(`Failed to fetch neighbor data: ${err.message}`);
     } finally {
       if (isCurrent()) {
-        setLoading(false);
+        setDatasetSnapshot((previous) => previous.identity === requestIdentity && previous.loading
+          ? { ...previous, loading: false }
+          : previous);
         requestGeneration.finish(request);
       }
     }
@@ -230,13 +208,19 @@ export const useSessionNeighbors = (
     return () => clearTimeout(timeoutId);
   }, [sessionIds?.join(','), enabled, fetchData]);
 
+  const requestedDatasetEnabled = Boolean(enabled && sessionIds?.length);
+  const visibleSnapshot = datasetSnapshot.identity === requestIdentity
+    ? datasetSnapshot
+    : { rows: [], stats: null, identity: requestIdentity, revision: datasetRevisionRef.current + 1, complete: false, loading: requestedDatasetEnabled, error: null, outcome: requestedDatasetEnabled ? 'loading' : 'empty' };
+
   return {
-    neighborData,
-    stats,
-    loading,
-    error,
-    outcome,
-    complete,
+    neighborData: visibleSnapshot.rows,
+    dataset: visibleSnapshot,
+    stats: visibleSnapshot.stats,
+    loading: visibleSnapshot.loading,
+    error: visibleSnapshot.error,
+    outcome: visibleSnapshot.outcome,
+    complete: visibleSnapshot.complete,
     refetch: () => fetchData(true),
   };
 };

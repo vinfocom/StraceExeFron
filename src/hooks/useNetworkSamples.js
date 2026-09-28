@@ -1,6 +1,6 @@
 import { getTechnologyMetricValue, is2GTechnology } from "@/utils/technologyMetricLabels";
 // src/hooks/useNetworkSamples.js
-import { useState, useRef, useCallback, useEffect, useMemo, startTransition } from 'react';
+import { useState, useRef, useCallback, useEffect } from 'react';
 import { toast } from 'react-toastify';
 import { mapViewApi } from '@/api/apiEndpoints'; 
 import { isCancelledError } from '@/api/apiService';
@@ -16,11 +16,15 @@ import {
   readIndexedDbCache,
   writeIndexedDbCache,
 } from '@/utils/indexedDbCache';
-
-const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+import {
+  beginNetworkLogSnapshot,
+  createCompleteNetworkLogSnapshot,
+  createNetworkLogCacheSnapshot,
+  fetchCompleteNetworkLogDataset,
+  getVisibleNetworkLogSnapshot,
+} from '@/features/unified-map/data/networkLogDataset.js';
 
 const NETWORK_SAMPLES_TIMEOUT_MS = 120000;
-const MAX_PROGRESSIVE_SAMPLE_ROWS = 100000;
 
 const withTimeout = (promise, timeoutMs = NETWORK_SAMPLES_TIMEOUT_MS, signal) =>
   new Promise((resolve, reject) => {
@@ -523,16 +527,14 @@ export const useNetworkSamples = (
   maxRows = 2000000,
   projectId = null,
 ) => {
-  const [locations, setLocations] = useState([]);
-  const [locationChunks, setLocationChunks] = useState([]);
+  const [datasetSnapshot, setDatasetSnapshot] = useState({
+    rows: [], identity: null, revision: 0, complete: false, loading: false, outcome: 'empty', error: null,
+  });
+  const datasetRevisionRef = useRef(0);
   const [appSummary, setAppSummary] = useState({});
   const [inpSummary, setInpSummary] = useState({});
   const [tptVolume, setTptVolume] = useState({});
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState(null);
-  const [progress, setProgress] = useState({ current: 0, total: 0, page: 0, totalPages: 0 });
-  const [outcome, setOutcome] = useState('empty');
-  const [complete, setComplete] = useState(false);
+  const [progress, setProgress] = useState({ identity: null, current: 0, total: null, page: 0, totalPages: null, percent: null });
   const lastFetchedKeyRef = useRef(null);
 
   const safeMaxRows =
@@ -543,7 +545,7 @@ export const useNetworkSamples = (
   const cacheKey = makeProjectCacheKey({
     resource: 'unified-network-samples',
     sessionIds: sessionIds || [],
-    variant: `typed-network-wifi-v14-ci:${safeMaxRows ? `max-${safeMaxRows}` : 'all'}:project-${projectId || 'none'}`,
+    variant: `typed-network-wifi-v15-atomic-ci:${safeMaxRows ? `max-${safeMaxRows}` : 'all'}:project-${projectId || 'none'}`,
   });
   const requestIdentity = JSON.stringify({
     cacheKey,
@@ -565,24 +567,18 @@ export const useNetworkSamples = (
 
     if (requestIdentity !== lastFetchedKeyRef.current) {
       lastFetchedKeyRef.current = null;
-      setLocations([]);
-      setLocationChunks([]);
       setAppSummary({});
       setInpSummary({});
       setTptVolume({});
     }
 
     if (!sessionIds?.length || !enabled) {
-      setLoading(false);
-      setError(null);
-      setLocations([]);
-      setLocationChunks([]);
+      const revision = ++datasetRevisionRef.current;
+      setDatasetSnapshot({ rows: [], identity: requestIdentity, revision, complete: false, loading: false, outcome: 'empty', error: null });
       setAppSummary({});
       setInpSummary({});
       setTptVolume({});
-      setProgress({ current: 0, total: 0, page: 0, totalPages: 0 });
-      setOutcome('empty');
-      setComplete(false);
+      setProgress({ identity: requestIdentity, current: 0, total: null, page: 0, totalPages: null, percent: null });
       lastFetchedKeyRef.current = requestIdentity;
       requestGeneration.finish(request);
       return;
@@ -593,11 +589,11 @@ export const useNetworkSamples = (
       return;
     }
 
-    setLoading(true);
-    setError(null);
-    setOutcome('loading');
-    setComplete(false);
-    setProgress({ current: 0, total: 0, page: 0, totalPages: 0 });
+    setDatasetSnapshot((previous) => {
+      const revision = previous.identity === requestIdentity ? previous.revision : ++datasetRevisionRef.current;
+      return beginNetworkLogSnapshot(previous, requestIdentity, revision);
+    });
+    setProgress({ identity: requestIdentity, current: 0, total: null, page: 0, totalPages: null, percent: null });
 
     if (!forceRefresh && canUsePersistentCache) {
       let cached = null;
@@ -615,23 +611,15 @@ export const useNetworkSamples = (
         }
       }
       if (!isCurrent()) return;
-      if (
-        cached?.cacheSchemaVersion === 2 &&
-        ['complete', 'empty', 'capped'].includes(cached?.outcome) &&
-        typeof cached?.complete === 'boolean' &&
-        Array.isArray(cached?.locations)
-      ) {
-        setLocations(cached.locations);
-        setLocationChunks([]);
-        setAppSummary(cached.appSummary || {});
-        setInpSummary(cached.inpSummary || {});
-        setTptVolume(cached.tptVolume || {});
-        setProgress({ current: cached.locations.length, total: cached.locations.length, page: 1, totalPages: 1 });
-        setOutcome(cached.outcome);
-        setComplete(cached.complete);
+      const cachedDataset = createNetworkLogCacheSnapshot(cached, requestIdentity, datasetRevisionRef.current + 1);
+      if (cachedDataset) {
+        const revision = ++datasetRevisionRef.current;
+        setDatasetSnapshot({ ...cachedDataset.snapshot, revision });
+        setAppSummary(cachedDataset.appSummary);
+        setInpSummary(cachedDataset.inpSummary);
+        setTptVolume(cachedDataset.tptVolume);
+        setProgress({ identity: requestIdentity, current: cached.locations.length, total: cached.locations.length, page: 1, totalPages: 1, percent: 100 });
         lastFetchedKeyRef.current = requestIdentity;
-        setLoading(false);
-        setError(null);
         requestGeneration.finish(request);
         return;
       }
@@ -639,142 +627,50 @@ export const useNetworkSamples = (
 
     const PAGE_SIZE = 20000;
     const MAX_PAGES = 100; // Bound a request to at most two million source rows.
-    const allParsedLogs = [];
-    let summaryData = { app: {}, io: {}, tpt: null };
     const startTime = performance.now();
 
     try {
-      let currentPage = 1;
-      let totalCount = 0;
-      let totalPages = 0;
-      let hasAuthoritativeCount = false;
-      let hasMoreData = true;
-      let wasCapped = false;
-
-      while (hasMoreData) {
-        if (!isCurrent()) return;
-
-        let response;
-        try {
-          response = await withTimeout(
-            mapViewApi.getNetworkLog({
-              session_ids: sessionIds,
-              project_id: projectId,
-              page: currentPage,
-              limit: PAGE_SIZE,
-              force_refresh: forceRefresh,
-              signal,
-            }),
-            NETWORK_SAMPLES_TIMEOUT_MS,
+      const loadedDataset = await fetchCompleteNetworkLogDataset({
+        fetchPage: (page) => withTimeout(
+          mapViewApi.getNetworkLog({
+            session_ids: sessionIds,
+            project_id: projectId,
+            page,
+            limit: PAGE_SIZE,
+            force_refresh: forceRefresh,
             signal,
-          );
-
-        } catch (fetchErr) {
-          if (isCancelledError(fetchErr) || signal.aborted || !isCurrent()) return;
-          throw fetchErr;
-        }
-
-        if (!isCurrent()) return;
-
-        let apiBody;
-        let logsArray;
-
-
-        if (
-          response?.data &&
-          typeof response.data === 'object' &&
-          !Array.isArray(response.data) &&
-          response.data.data
-        ) {
-          apiBody = response.data;
-          logsArray = apiBody.data || [];
-        } else if (response?.data && Array.isArray(response.data)) {
-          apiBody = response;
-          logsArray = response.data;
-        } else if (Array.isArray(response)) {
-          apiBody = { data: response };
-          logsArray = response;
-        } else {
-          apiBody = response?.data || response || {};
-          logsArray =
-            apiBody?.data ||
-            apiBody?.Data ||
-            apiBody?.logs ||
-            apiBody?.result ||
-            apiBody?.Result ||
-            (Array.isArray(apiBody) ? apiBody : []);
-        }
-
-        if (!Array.isArray(logsArray) && apiBody?.data && typeof apiBody.data === 'object') {
-          logsArray = apiBody.data.data || apiBody.data.Data || [];
-        }
-        if (!Array.isArray(logsArray)) logsArray = [];
-
-        if (currentPage === 1) {
-          totalCount =
-            apiBody?.total_count ||
-            apiBody?.totalCount ||
-            apiBody?.TotalCount ||
-            apiBody?.count ||
-            apiBody?.Count ||
-            0;
-          hasAuthoritativeCount = Number.isFinite(Number(totalCount)) && Number(totalCount) > 0;
-          const backendPageCount = hasAuthoritativeCount ? Math.ceil(totalCount / PAGE_SIZE) : null;
-          totalPages = backendPageCount ? Math.min(backendPageCount, MAX_PAGES) : 0;
-          if (backendPageCount && backendPageCount > MAX_PAGES) wasCapped = true;
-          if (apiBody?.app_summary) summaryData.app = apiBody.app_summary;
-          if (apiBody?.io_summary) summaryData.io = apiBody.io_summary;
-          if (apiBody?.tpt_volume) summaryData.tpt = apiBody.tpt_volume;
-        }
-
-        if (!Array.isArray(logsArray)) break;
-
-        const priorParsedRowCount = allParsedLogs.length;
-        const parsedPage = [];
-        logsArray.forEach((log) => {
-          const parsed = parseLogEntry(log, log.session_id);
-          if (parsed) {
-            allParsedLogs.push(parsed);
-            parsedPage.push(parsed);
-          }
-        });
-
-        if (safeMaxRows && allParsedLogs.length >= safeMaxRows) {
-          allParsedLogs.length = safeMaxRows;
-          hasMoreData = false;
-          if (totalCount > safeMaxRows || (!hasAuthoritativeCount && logsArray.length >= PAGE_SIZE)) wasCapped = true;
-        }
-
-        if (safeMaxRows) {
-          parsedPage.length = Math.max(0, Math.min(parsedPage.length, safeMaxRows - priorParsedRowCount));
-        }
-        if (parsedPage.length > 0 && (!filterEnabled || polygons?.length === 0)) {
-          const progressiveRows = Math.max(0, MAX_PROGRESSIVE_SAMPLE_ROWS - priorParsedRowCount);
-          const progressivePage = parsedPage.slice(0, progressiveRows);
-          if (progressivePage.length) setLocationChunks((chunks) => [...chunks, progressivePage]);
-        }
-
-        if (isCurrent()) {
-          setProgress({
-            current: allParsedLogs.length,
-            total: totalCount,
-            page: currentPage,
-            totalPages: totalPages,
-          });
-        }
-
-        const reachedBackendEnd =
-          (hasAuthoritativeCount && currentPage >= totalPages) || logsArray.length < PAGE_SIZE;
-        const reachedPageCap = currentPage >= MAX_PAGES && !reachedBackendEnd;
-        if (reachedPageCap) wasCapped = true;
-        if (reachedBackendEnd || reachedPageCap || !hasMoreData) {
-          hasMoreData = false;
-        } else {
-          currentPage++;
-          await delay(0);
+          }),
+          NETWORK_SAMPLES_TIMEOUT_MS,
+          signal,
+        ),
+        parseRow: (row) => parseLogEntry(row, row.session_id),
+        pageSize: PAGE_SIZE,
+        maxPages: MAX_PAGES,
+        maxRows: safeMaxRows,
+        signal,
+        isCurrent,
+        onProgress: (pageProgress) => {
           if (!isCurrent()) return;
-        }
-      }
+          setProgress({
+            identity: requestIdentity,
+            current: pageProgress.received,
+            total: pageProgress.total,
+            page: pageProgress.page,
+            totalPages: pageProgress.totalPages,
+            percent: pageProgress.percent,
+          });
+        },
+      });
+      const allParsedLogs = loadedDataset.rows;
+      const summaryData = loadedDataset.summary;
+      setProgress({
+        identity: requestIdentity,
+        current: loadedDataset.received,
+        total: loadedDataset.total,
+        page: loadedDataset.page,
+        totalPages: loadedDataset.totalPages,
+        percent: loadedDataset.total === null ? null : 100,
+      });
 
       let finalLogs = allParsedLogs;
 
@@ -782,11 +678,6 @@ export const useNetworkSamples = (
         finalLogs = allParsedLogs.filter(log =>
           polygons.some(poly => isPointInPolygon(log, poly))
         );
-      }
-
-      if (safeMaxRows && finalLogs.length > safeMaxRows) {
-        const step = Math.ceil(finalLogs.length / safeMaxRows);
-        finalLogs = finalLogs.filter((_, index) => index % step === 0).slice(0, safeMaxRows);
       }
 
       if (finalLogs.some((log) => String(log?.network ?? log?.technology ?? "").toUpperCase().includes("2G"))) {
@@ -815,23 +706,20 @@ export const useNetworkSamples = (
 
       if (!isCurrent()) return;
       const fetchTime = ((performance.now() - startTime) / 1000).toFixed(2);
-      startTransition(() => {
-        setLocations(finalLogs);
-        setLocationChunks([]);
-        setAppSummary(summaryData.app);
-        setInpSummary(summaryData.io);
-        setTptVolume(summaryData.tpt);
-      });
-      const resultOutcome = wasCapped ? 'capped' : allParsedLogs.length > 0 ? 'complete' : 'empty';
-      const resultComplete = !wasCapped;
-      setOutcome(resultOutcome);
-      setComplete(resultComplete);
+      const resultOutcome = finalLogs.length > 0 ? 'complete' : 'empty';
+      const revision = ++datasetRevisionRef.current;
+      setDatasetSnapshot(createCompleteNetworkLogSnapshot({
+        rows: finalLogs, identity: requestIdentity, revision, outcome: resultOutcome,
+      }));
+      setAppSummary(summaryData.app);
+      setInpSummary(summaryData.io);
+      setTptVolume(summaryData.tpt);
       lastFetchedKeyRef.current = requestIdentity;
       if (canUsePersistentCache) {
         const cachePayload = {
-          cacheSchemaVersion: 2,
+          cacheSchemaVersion: 3,
           outcome: resultOutcome,
-          complete: resultComplete,
+          complete: true,
           locations: finalLogs,
           appSummary: summaryData.app,
           inpSummary: summaryData.io,
@@ -859,22 +747,28 @@ export const useNetworkSamples = (
 
 
     } catch (err) {
-      if (isCancelledError(err) || signal.aborted || !isCurrent()) return;
+      if (isCancelledError(err) || err?.name === 'AbortError' || signal.aborted || !isCurrent()) return;
       if (isCurrent()) {
-        setError(err.message);
-        setOutcome(allParsedLogs.length > 0 ? 'partial' : 'failed');
-        setComplete(false);
-        if (allParsedLogs.length > 0) {
-          setLocations(allParsedLogs);
-          setLocationChunks([]);
-          toast.warn(`Loaded partial network data: ${err.message}`);
-        } else {
-          toast.error(`Error: ${err.message}`);
-        }
+        setDatasetSnapshot((previous) => {
+          const preserveCompleted = previous.identity === requestIdentity && previous.complete;
+          const revision = preserveCompleted ? previous.revision : ++datasetRevisionRef.current;
+          return {
+            rows: preserveCompleted ? previous.rows : [],
+            identity: requestIdentity,
+            revision,
+            complete: preserveCompleted,
+            loading: false,
+            outcome: preserveCompleted ? previous.outcome : 'failed',
+            error: err.message || 'Unable to load the complete network log dataset.',
+          };
+        });
+        toast.error(`Network log load failed: ${err.message || 'Unknown error'}. Retry to load the complete dataset.`);
       }
     } finally {
       if (isCurrent()) {
-        setLoading(false);
+        setDatasetSnapshot((previous) => previous.identity === requestIdentity && previous.loading
+          ? { ...previous, loading: false }
+          : previous);
         requestGeneration.finish(request);
       }
     }
@@ -896,23 +790,24 @@ export const useNetworkSamples = (
     return () => clearTimeout(timeoutId);
   }, [fetchData]);
 
-  const progressiveLocations = useMemo(
-    () => (locationChunks.length ? locationChunks.flat() : locations),
-    [locationChunks, locations],
-  );
+  const hasRequestedDataset = Boolean(enabled && sessionIds?.length);
+  const visibleSnapshot = getVisibleNetworkLogSnapshot(datasetSnapshot, requestIdentity, hasRequestedDataset);
+  const visibleProgress = progress.identity === requestIdentity
+    ? progress
+    : { identity: requestIdentity, current: 0, total: null, page: 0, totalPages: null, percent: null };
 
   return {
-    locations: loading && locationChunks.length ? progressiveLocations : locations,
+    locations: visibleSnapshot.rows,
+    dataset: visibleSnapshot,
     appSummary,
     inpSummary,
     tptVolume,
-    loading,
-    error,
-    progress,
-    outcome,
-    complete,
+    loading: visibleSnapshot.loading,
+    error: visibleSnapshot.error,
+    progress: visibleProgress,
+    outcome: visibleSnapshot.outcome,
+    complete: visibleSnapshot.complete,
     refetch: useCallback(() => {
-      lastFetchedKeyRef.current = null;
       fetchData(true);
     }, [fetchData]),
   };

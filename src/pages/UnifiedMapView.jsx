@@ -3053,14 +3053,13 @@ const UnifiedMapView = () => {
 
   const {
     locations: fetchedSamples,
+    dataset: fetchedSampleDataset,
     appSummary,
     inpSummary,
     tptVolume,
     loading: sampleLoading,
     progress: sampleProgress,
     error: sampleError,
-    outcome: sampleOutcome,
-    complete: sampleComplete,
     refetch: refetchSample,
   } = useNetworkSamples(
     sessionIds,
@@ -3071,9 +3070,24 @@ const UnifiedMapView = () => {
     projectId,
   );
 
+  const deferredSampleDataset = useDeferredValue(fetchedSampleDataset);
+  const renderedSampleDataset = deferredSampleDataset.identity === fetchedSampleDataset.identity
+    ? deferredSampleDataset
+    : {
+        rows: EMPTY_LIST,
+        identity: fetchedSampleDataset.identity,
+        revision: fetchedSampleDataset.revision,
+        complete: false,
+        loading: fetchedSampleDataset.loading,
+        outcome: fetchedSampleDataset.outcome,
+        error: fetchedSampleDataset.error,
+      };
+  const sampleOutcome = renderedSampleDataset.outcome;
+  const sampleComplete = renderedSampleDataset.complete;
+
   const sampleLocations = useMemo(() => {
     if (shouldFetchSamples) {
-      return Array.isArray(fetchedSamples) ? fetchedSamples : EMPTY_LIST;
+      return Array.isArray(renderedSampleDataset.rows) ? renderedSampleDataset.rows : EMPTY_LIST;
     }
 
     if (Array.isArray(fetchedSamples) && fetchedSamples.length > 0) {
@@ -3081,7 +3095,7 @@ const UnifiedMapView = () => {
     }
 
     return hasPassedLocations ? passedLocations : fetchedSamples;
-  }, [shouldFetchSamples, sampleLoading, fetchedSamples, hasPassedLocations, passedLocations]);
+  }, [shouldFetchSamples, sampleLoading, fetchedSamples, hasPassedLocations, passedLocations, renderedSampleDataset]);
 
   const getCachedNetworkLogsForPrediction = useCallback(
     ({ projectId: requestedProjectId, sessionIds: requestedSessionIds } = {}) => {
@@ -4052,8 +4066,7 @@ const UnifiedMapView = () => {
   const shouldFetchNeighbors = !hasPassedNeighbors && sessionIds.length > 0;
 
   const {
-    neighborData: fetchedNeighbors,
-    stats: sessionNeighborStats,
+    dataset: fetchedNeighborDataset,
     loading: sessionNeighborLoading,
     error: sessionNeighborError,
     refetch: refetchSessionNeighbors,
@@ -4066,9 +4079,17 @@ const UnifiedMapView = () => {
     projectId,
   );
 
+  const deferredNeighborDataset = useDeferredValue(fetchedNeighborDataset);
+  const renderedNeighborDataset = deferredNeighborDataset.identity === fetchedNeighborDataset.identity
+    ? deferredNeighborDataset
+    : { ...deferredNeighborDataset, rows: [], stats: null, identity: fetchedNeighborDataset.identity, complete: false };
+
   const sessionNeighborData = hasPassedNeighbors
     ? passedNeighbors
-    : fetchedNeighbors;
+    : renderedNeighborDataset.rows;
+  const sessionNeighborStats = hasPassedNeighbors
+    ? passedState?.neighborStats || null
+    : renderedNeighborDataset.stats;
 
   const ioFallbackFromLogs = useMemo(
     () => buildIndoorOutdoorFromLogs(sampleLocations || EMPTY_LIST),
@@ -4498,6 +4519,7 @@ const UnifiedMapView = () => {
     : shouldFetchSamples ? sampleComplete : true;
   const activeDatasetLoading = isDataPredictionMode ? predictionLoading : sampleLoading;
   const activeDatasetOutcome = isDataPredictionMode ? predictionOutcome : sampleOutcome;
+  const activeDatasetRevision = isDataPredictionMode ? 0 : renderedSampleDataset.revision;
 
   useEffect(() => {
     if (!isRestoringFromStorage) return undefined;
@@ -4873,7 +4895,30 @@ const UnifiedMapView = () => {
   // Deferred so filter clicks paint the sidebar/legend immediately; the
   // expensive raster/grid rebuild (generateGridCellsOptimized, grid
   // aggregation) then runs as a lower-priority, interruptible update.
-  const deferredGridDisplayLocations = useDeferredValue(mapEventDisplayLocations);
+  // Defer coordinates and their completion metadata as one value. Deferring
+  // these independently can let a sampling worker see old coordinates with a
+  // new dataset revision/completion flag.
+  const mapDisplayDataset = useMemo(() => ({
+    rows: mapEventDisplayLocations,
+    identity: mapDatasetIdentity,
+    revision: activeDatasetRevision,
+    complete: activeDatasetComplete,
+  }), [
+    mapEventDisplayLocations,
+    mapDatasetIdentity,
+    activeDatasetRevision,
+    activeDatasetComplete,
+  ]);
+  const deferredMapDisplayDataset = useDeferredValue(mapDisplayDataset);
+  const renderedMapDisplayDataset = deferredMapDisplayDataset.identity === mapDatasetIdentity
+    ? deferredMapDisplayDataset
+    : {
+      rows: EMPTY_LIST,
+      identity: mapDatasetIdentity,
+      revision: activeDatasetRevision,
+      complete: false,
+    };
+  const deferredGridDisplayLocations = renderedMapDisplayDataset.rows;
   const deferredGridFilteredLocations = useDeferredValue(filteredLocations);
 
   const renderedLegendFilteredLocations = useMemo(() => {
@@ -7954,6 +7999,7 @@ const UnifiedMapView = () => {
         <LoadingProgress
           progress={sampleProgress}
           loading={sampleLoading && enableDataToggle && dataToggle === "sample"}
+          updating={fetchedSampleDataset.loading && fetchedSampleDataset.complete && fetchedSampleDataset.rows.length > 0}
         />
 
         {shouldShowLegend && !bestNetworkEnabled && (
@@ -8053,8 +8099,9 @@ const UnifiedMapView = () => {
               defaultZoom={mapZoom}
               fitToLocations={(locationsToDisplay?.length || 0) > 0}
               datasetIdentity={mapDatasetIdentity}
+              datasetRevision={renderedMapDisplayDataset.revision}
               datasetLoading={activeDatasetLoading}
-              datasetComplete={activeDatasetComplete}
+              datasetComplete={renderedMapDisplayDataset.complete}
               fitRequestId={mapFitRequestId}
               showNumCells={showNumCells}
               showMetricLabels={showMetricLabels}
@@ -8321,7 +8368,7 @@ const UnifiedMapView = () => {
 
             </MapWithMultipleCircles>
           )}
-          {!showInitialMapSpinner && (error || siteError || (!activeDatasetComplete && !activeDatasetLoading)) && (
+          {!showInitialMapSpinner && (error || siteError || sessionNeighborError || (!activeDatasetComplete && !activeDatasetLoading)) && (
             <div className="absolute left-4 bottom-4 z-[700] flex max-w-[min(90%,560px)] flex-col gap-2">
               {error && (
                 <div role="status" className="rounded-lg border border-red-400/40 bg-slate-950/90 px-3 py-2 text-sm text-red-200 shadow-lg">
@@ -8352,6 +8399,19 @@ const UnifiedMapView = () => {
                   </button>
                 </div>
               )}
+              {sessionNeighborError && (
+                <div role="status" className="rounded-lg border border-red-400/40 bg-slate-950/90 px-3 py-2 text-sm text-red-200 shadow-lg">
+                  <span>Secondary log data: {sanitizeUnifiedMapError(sessionNeighborError, "Failed to load secondary log data.")}</span>
+                  <button type="button" className="ml-3 underline" onClick={() => refetchSessionNeighbors?.()}>
+                    Retry
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+          {!showInitialMapSpinner && showSessionNeighbors && sessionNeighborLoading && renderedNeighborDataset.rows.length > 0 && (
+            <div role="status" className="absolute left-4 top-4 z-[700] rounded-lg border border-blue-400/40 bg-slate-950/90 px-3 py-2 text-sm text-blue-100 shadow-lg">
+              Updating secondary log data…
             </div>
           )}
           {ui.basemapStyle === "terrain" && (
