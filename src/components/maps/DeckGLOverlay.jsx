@@ -3,7 +3,7 @@ import React, { useEffect, useRef, useMemo, useCallback, useState } from 'react'
 import { GoogleMapsOverlay } from '@deck.gl/google-maps';
 import { PathLayer, ScatterplotLayer, PolygonLayer, TextLayer } from '@deck.gl/layers';
 import { getMetricConfig, getMetricValueFromLog } from '@/utils/metrics';
-import { sampleLogIndices } from '@/utils/logSpatialSampling';
+import { createLogSamplingWorkerRuntime } from '@/features/unified-map/processing/logSamplingWorkerRuntime.js';
 import { useDeckLayerRegistry } from '@/components/maps/deckLayerRegistry.jsx';
 import { assertCategorizedLayerEntries, categorizeMapLayer, getMapLayerMetadata, sortMapLayerEntries } from '@/components/maps/mapLayerPolicy.js';
 import { getDrawingHoverTarget, getPolygonDrawingHitData, getPolylineDrawingHitData } from '@/components/maps/drawingShapeInteractions.js';
@@ -33,6 +33,7 @@ const getImageRenderLimit = (total) => {
 };
 
 const LOG_SAMPLE_CELL_PIXELS = 16;
+const EMPTY_INDEXES = new Uint32Array();
 
 const parseColorToRGB = (colorStr) => {
   if (!colorStr || typeof colorStr !== 'string') return [128, 128, 128, 200];
@@ -201,15 +202,18 @@ const DeckGLOverlay = ({
   nativeOutlinePaths = [],
   siteData = [],
   predictionGridData = [],
+  onPrimarySamplingState,
+  primaryDatasetIdentity = "default",
 }) => {
   const { groups: registeredGroups, version: registryVersion } = useDeckLayerRegistry();
   const overlayRef = useRef(null);
   const [mapZoom, setMapZoom] = useState(null);
   const [viewportBounds, setViewportBounds] = useState(null);
-  const [sampledPrimaryIndexes, setSampledPrimaryIndexes] = useState(() => new Uint32Array());
+  const [sampledPrimaryResult, setSampledPrimaryResult] = useState(null);
   const samplingWorkerRef = useRef(null);
-  const workerCoordinatesRef = useRef(null);
   const samplingRequestRef = useRef(0);
+  const samplingDatasetRevisionRef = useRef(0);
+  const samplingDatasetCoordinatesRef = useRef({ coordinates: null, identity: null });
   const predictionWorkerRef = useRef(null);
   const predictionRequestRef = useRef(0);
   const predictionDatasetRevisionRef = useRef(0);
@@ -377,44 +381,25 @@ const DeckGLOverlay = ({
   }, [map, isValidMapInstance, updateMapViewport, debouncedUpdateMapViewport]);
 
   useEffect(() => {
-    if (typeof Worker === 'undefined') return undefined;
-
-    const worker = new Worker(
-      new URL('../../workers/logSpatialSampling.worker.js', import.meta.url),
-      { type: 'module' },
-    );
-    samplingWorkerRef.current = worker;
-    workerCoordinatesRef.current = null;
-
-    worker.onmessage = ({ data }) => {
-      if (data.requestId !== samplingRequestRef.current) {
-        logMapPlot("sampling worker: dropped stale response", {
-          responseRequestId: data.requestId,
-          currentRequestId: samplingRequestRef.current,
-        });
-        return;
-      }
-      if (data.error) {
-        console.warn('[UnifiedMapView] Log sampling worker failed:', data.error);
-        return;
-      }
-      const indexes = new Uint32Array(data.indexesBuffer);
-      logMapPlot("sampling worker: response applied", {
-        requestId: data.requestId,
-        sampledCount: indexes.length,
-      });
-      setSampledPrimaryIndexes(indexes);
-    };
-
-    worker.onerror = (error) => {
-      console.warn('[UnifiedMapView] Log sampling worker error:', error.message);
-    };
-
+    const runtime = createLogSamplingWorkerRuntime({
+      createWorker: () => {
+        if (typeof Worker === 'undefined') throw new Error('Web workers are unavailable');
+        return new Worker(new URL('../../workers/logSpatialSampling.worker.js', import.meta.url), { type: 'module' });
+      },
+      onResult: (result) => {
+        if (result.datasetRevision !== samplingDatasetRevisionRef.current) return;
+        setSampledPrimaryResult({ coordinates: result.coordinates, identity: result.identity, indexes: result.indexes });
+        logMapPlot('sampling worker: response applied', { requestId: result.requestId, sampledCount: result.indexes.length, fallback: result.fallback });
+      },
+      onStatus: (status) => onPrimarySamplingState?.(status),
+    });
+    samplingWorkerRef.current = runtime;
     return () => {
-      worker.terminate();
-      if (samplingWorkerRef.current === worker) samplingWorkerRef.current = null;
+      runtime.dispose();
+      if (samplingWorkerRef.current === runtime) samplingWorkerRef.current = null;
+      onPrimarySamplingState?.(null);
     };
-  }, []);
+  }, [onPrimarySamplingState]);
 
   const samplingCoordinates = useMemo(() => {
     const coordinates = new Float64Array(locations.length * 2);
@@ -424,6 +409,14 @@ const DeckGLOverlay = ({
     });
     return coordinates;
   }, [locations]);
+
+  useEffect(() => {
+    const current = samplingDatasetCoordinatesRef.current;
+    if (current.coordinates === samplingCoordinates && current.identity === primaryDatasetIdentity) return;
+    samplingDatasetCoordinatesRef.current = { coordinates: samplingCoordinates, identity: primaryDatasetIdentity };
+    samplingDatasetRevisionRef.current += 1;
+    samplingRequestRef.current += 1;
+  }, [samplingCoordinates, primaryDatasetIdentity]);
 
   const significantPrimaryIndexes = useMemo(() => {
     const significantEventPattern = /handover|call.?drop|dropped|disconnect|emergency|setup.?failure/i;
@@ -446,16 +439,17 @@ const DeckGLOverlay = ({
   }, [locations]);
 
   useEffect(() => {
-    const requestId = samplingRequestRef.current + 1;
-    samplingRequestRef.current = requestId;
-
     if (!showPrimaryLogs || !locations?.length) {
-      setSampledPrimaryIndexes(new Uint32Array());
+      setSampledPrimaryResult(null);
+      onPrimarySamplingState?.(null);
       return;
     }
 
+    const requestId = samplingRequestRef.current + 1;
+    samplingRequestRef.current = requestId;
     const options = {
       requestId,
+      datasetRevision: samplingDatasetRevisionRef.current,
       totalLogs: locations.length,
       bounds: viewportBounds,
       zoom: mapZoom,
@@ -464,33 +458,22 @@ const DeckGLOverlay = ({
       preserveIndexes: significantPrimaryIndexes,
       maxRows: Number.isFinite(primaryRenderLimit) ? primaryRenderLimit : null,
     };
-    const worker = samplingWorkerRef.current;
-    const sendingFreshCoordinates = workerCoordinatesRef.current !== samplingCoordinates;
     logMapPlot("sampling request sent", {
       requestId,
       totalLogs: locations.length,
       bounds: viewportBounds,
       zoom: mapZoom,
-      sendingFreshCoordinates,
-      usingWorker: Boolean(worker),
+      datasetRevision: samplingDatasetRevisionRef.current,
+      usingWorkerRuntime: Boolean(samplingWorkerRef.current),
     });
-
-    if (worker) {
-      // Transfer coordinates once per dataset; viewport updates reuse the
-      // worker's copy instead of rebuilding and transferring every log.
-      if (sendingFreshCoordinates) {
-        const buffer = samplingCoordinates.slice().buffer;
-        worker.postMessage({ ...options, coordinatesBuffer: buffer }, [buffer]);
-        workerCoordinatesRef.current = samplingCoordinates;
-      } else {
-        worker.postMessage(options);
-      }
-      return;
-    }
-
-    // Older browsers without Worker support retain the same behavior.
-    setSampledPrimaryIndexes(sampleLogIndices({ ...options, coordinates: samplingCoordinates }));
-  }, [locations, samplingCoordinates, significantPrimaryIndexes, showPrimaryLogs, viewportBounds, mapZoom, selectedIndex, primaryRenderLimit]);
+    samplingWorkerRef.current?.request({
+      coordinates: samplingCoordinates,
+      totalLogs: locations.length,
+      datasetRevision: samplingDatasetRevisionRef.current,
+      identity: primaryDatasetIdentity,
+      options,
+    });
+  }, [locations, samplingCoordinates, significantPrimaryIndexes, showPrimaryLogs, viewportBounds, mapZoom, selectedIndex, primaryRenderLimit, onPrimarySamplingState, primaryDatasetIdentity]);
 
   const handlePrimaryClick = useCallback((info) => {
     if (!info?.object) {
@@ -535,7 +518,10 @@ const DeckGLOverlay = ({
 
   const primaryData = useMemo(() => {
     if (!showPrimaryLogs || !locations?.length) return [];
-    return Array.from(sampledPrimaryIndexes, (idx) => {
+    const activeIndexes = sampledPrimaryResult?.coordinates === samplingCoordinates && sampledPrimaryResult?.identity === primaryDatasetIdentity
+      ? sampledPrimaryResult.indexes
+      : EMPTY_INDEXES;
+    return Array.from(activeIndexes, (idx) => {
       const loc = locations[idx];
       if (!loc) return null;
       const position = [
@@ -554,7 +540,7 @@ const DeckGLOverlay = ({
       };
     })
       .filter(Boolean);
-  }, [locations, showPrimaryLogs, getColor, sampledPrimaryIndexes]);
+  }, [locations, showPrimaryLogs, getColor, sampledPrimaryResult, samplingCoordinates, primaryDatasetIdentity]);
 
   const gridData = useMemo(() => {
     if (!showGrid || !gridCells?.length) return [];

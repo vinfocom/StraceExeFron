@@ -41,6 +41,7 @@ import ClutterTilesLayer from "@/components/unifiedMap/ClutterTilesLayer";
 import SavedSourceGeometryLayer from "@/components/unifiedMap/SavedSourceGeometryLayer";
 import { normalizeBandName } from "@/utils/colorUtils";
 import { logMapPlot } from "@/utils/mapPlotDebug";
+import { shouldShowInitialMapSpinner } from "@/features/unified-map/map/autoFit.js";
 
 // Hooks
 import { useSiteData } from "@/hooks/useSiteData";
@@ -2463,6 +2464,7 @@ const UnifiedMapView = () => {
   const mapRef = useRef(null);
   const viewportRef = useRef(null);
   const zoomLockEnabledRef = useRef(false);
+  const [mapFitRequestId, setMapFitRequestId] = useState(0);
   const lockedZoomRef = useRef(null);
   const pciDistributionRequestRef = useRef(0);
   const dominanceRequestRef = useRef(0);
@@ -3057,6 +3059,8 @@ const UnifiedMapView = () => {
     loading: sampleLoading,
     progress: sampleProgress,
     error: sampleError,
+    outcome: sampleOutcome,
+    complete: sampleComplete,
     refetch: refetchSample,
   } = useNetworkSamples(
     sessionIds,
@@ -4008,6 +4012,8 @@ const UnifiedMapView = () => {
     colorSettings: predictionColorSettings,
     loading: predictionLoading,
     error: predictionError,
+    outcome: predictionOutcome,
+    complete: predictionComplete,
     hasFetched: predictionHasFetched,
     hasData: predictionHasData,
     refetch: refetchPrediction,
@@ -4121,6 +4127,8 @@ const UnifiedMapView = () => {
     siteData: rawSiteData,
     loading: siteLoading,
     error: siteError,
+    outcome: siteOutcome,
+    complete: siteComplete,
     refetch: refetchSites,
   } = useSiteData({
     enableSiteToggle,
@@ -4472,14 +4480,24 @@ const UnifiedMapView = () => {
   // counts seen while profiling. The spinner should only ever gate the
   // genuine first load.
   const hasMountedMapRef = useRef(false);
-  const showInitialMapSpinner =
-    isLoading &&
-    (locations?.length || 0) === 0 &&
-    (siteData?.length || 0) === 0 &&
-    !hasMountedMapRef.current;
+  const showInitialMapSpinner = shouldShowInitialMapSpinner({
+    isLoading,
+    hasRows: (locations?.length || 0) > 0 || (siteData?.length || 0) > 0,
+    hasMounted: hasMountedMapRef.current,
+  });
   if (!showInitialMapSpinner) {
     hasMountedMapRef.current = true;
   }
+
+  const mapDatasetIdentity = useMemo(
+    () => JSON.stringify([projectId, (Array.isArray(sessionIds) ? sessionIds : []).map(String).sort(), dataToggle, isDataPredictionMode]),
+    [projectId, sessionIds, dataToggle, isDataPredictionMode],
+  );
+  const activeDatasetComplete = isDataPredictionMode
+    ? predictionComplete
+    : shouldFetchSamples ? sampleComplete : true;
+  const activeDatasetLoading = isDataPredictionMode ? predictionLoading : sampleLoading;
+  const activeDatasetOutcome = isDataPredictionMode ? predictionOutcome : sampleOutcome;
 
   useEffect(() => {
     if (!isRestoringFromStorage) return undefined;
@@ -6601,6 +6619,7 @@ const UnifiedMapView = () => {
   }, [teardownZoomLockControl]);
 
   const handleResetZoom = useCallback(() => {
+    setMapFitRequestId((current) => current + 1);
     const map = mapRef.current;
     if (!map) {
       setMapZoom(DEFAULT_MAP_ZOOM);
@@ -8013,17 +8032,6 @@ const UnifiedMapView = () => {
             <div className="flex items-center justify-center h-full bg-gray-100 dark:bg-gray-700">
               <Spinner />
             </div>
-          ) : error || siteError ? (
-            <div className="flex items-center justify-center h-full bg-gray-100 dark:bg-gray-700">
-              <div className="text-center space-y-2">
-                {error && <p className="text-red-500">Data Error: {displayDataError}</p>}
-                {siteError && (
-                  <p className="text-red-500">
-                    Site Error: {displaySiteError}
-                  </p>
-                )}
-              </div>
-            </div>
           ) : (
             <MapWithMultipleCircles
               isLoaded={isLoaded}
@@ -8044,6 +8052,10 @@ const UnifiedMapView = () => {
               center={mapCenter}
               defaultZoom={mapZoom}
               fitToLocations={(locationsToDisplay?.length || 0) > 0}
+              datasetIdentity={mapDatasetIdentity}
+              datasetLoading={activeDatasetLoading}
+              datasetComplete={activeDatasetComplete}
+              fitRequestId={mapFitRequestId}
               showNumCells={showNumCells}
               showMetricLabels={showMetricLabels}
               overlapDrawOrder={ui.overlapDrawOrder}
@@ -8308,6 +8320,39 @@ const UnifiedMapView = () => {
               />
 
             </MapWithMultipleCircles>
+          )}
+          {!showInitialMapSpinner && (error || siteError || (!activeDatasetComplete && !activeDatasetLoading)) && (
+            <div className="absolute left-4 bottom-4 z-[700] flex max-w-[min(90%,560px)] flex-col gap-2">
+              {error && (
+                <div role="status" className="rounded-lg border border-red-400/40 bg-slate-950/90 px-3 py-2 text-sm text-red-200 shadow-lg">
+                  <span>Map data: {displayDataError}</span>
+                  <button type="button" className="ml-3 underline" onClick={() => (predictionError ? refetchPrediction : refetchSample)?.()}>
+                    Retry
+                  </button>
+                </div>
+              )}
+              {!error && !activeDatasetComplete && !activeDatasetLoading && (locations?.length > 0) && (
+                <div role="status" className="rounded-lg border border-amber-400/40 bg-slate-950/90 px-3 py-2 text-sm text-amber-100 shadow-lg">
+                  {activeDatasetOutcome === "partial" ? "Showing partial map data. Some rows could not be loaded." : "Map data is incomplete."}
+                </div>
+              )}
+              {siteError && (
+                <div role="status" className="rounded-lg border border-red-400/40 bg-slate-950/90 px-3 py-2 text-sm text-red-200 shadow-lg">
+                  <span>Site data: {displaySiteError}</span>
+                  <button type="button" className="ml-3 underline" onClick={() => refetchSites?.()}>
+                    Retry
+                  </button>
+                </div>
+              )}
+              {!siteError && !siteComplete && !siteLoading && siteOutcome === "partial" && (
+                <div role="status" className="rounded-lg border border-amber-400/40 bg-slate-950/90 px-3 py-2 text-sm text-amber-100 shadow-lg">
+                  Showing partial site data.
+                  <button type="button" className="ml-3 underline" onClick={() => refetchSites?.()}>
+                    Retry
+                  </button>
+                </div>
+              )}
+            </div>
           )}
           {ui.basemapStyle === "terrain" && (
             <TerrainElevationProfile

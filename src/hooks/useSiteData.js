@@ -406,6 +406,25 @@ const normalizeCompareSitePredictionPayload = (payload, options = {}) => {
   ];
 };
 
+export const processSitePredictionResponse = (response, version, defaultBeamwidth) => {
+  const normalizedVersion = String(version || "original").toLowerCase();
+  const isPagedResponse = response && Array.isArray(response.rows) && typeof response.complete === "boolean";
+  const rawRows = isPagedResponse
+    ? response.rows
+    : Array.isArray(response)
+      ? response
+      : response?.data?.Data || response?.data?.data || response?.Data || response?.data || [];
+  const normalizedRows = normalizedVersion === "delta"
+    ? normalizeCompareSitePredictionPayload(response, { defaultBeamwidth })
+    : normalizeSitePredictionRows(Array.isArray(rawRows) ? rawRows : [], { defaultBeamwidth });
+  return {
+    rows: normalizedVersion === "combined"
+      ? mergeCombinedSitePredictionRows(normalizedRows)
+      : normalizedRows,
+    complete: isPagedResponse ? response.complete : true,
+  };
+};
+
 const isPointInPolygon = (point, polygon) => {
   const path = Array.isArray(polygon?.paths?.[0])
     ? polygon.paths[0]
@@ -599,25 +618,12 @@ export const useSiteData = ({
 
       if (!isCurrent()) return;
 
-      const siteRowsComplete = normalizedVersion !== "combined" || response?.complete !== false;
-      const rawData = normalizedVersion === "combined" && Array.isArray(response?.rows)
-        ? response.rows
-        : Array.isArray(response)
-        ? response
-        : response?.data?.Data || response?.data?.data || response?.Data || response?.data || [];
-      const normalizedData =
-        normalizedVersion === "delta"
-          ? normalizeCompareSitePredictionPayload(response, {
-              defaultBeamwidth: normalizedDefaultBeamwidth,
-            })
-          : normalizeSitePredictionRows(Array.isArray(rawData) ? rawData : [], {
-              defaultBeamwidth: normalizedDefaultBeamwidth,
-            });
-
-      let finalData =
-        normalizedVersion === "combined"
-          ? mergeCombinedSitePredictionRows(normalizedData)
-          : normalizedData;
+      const { rows: responseRows, complete: siteRowsComplete } = processSitePredictionResponse(
+        response,
+        normalizedVersion,
+        normalizedDefaultBeamwidth,
+      );
+      let finalData = responseRows;
       // Fallback to client-side filtering only when polygon IDs are not available for backend filtering.
       if (filterEnabled && polygons?.length > 0 && polygonIds.length === 0) {
         finalData = finalData.filter((site) =>

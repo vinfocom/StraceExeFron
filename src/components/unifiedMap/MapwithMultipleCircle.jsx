@@ -15,6 +15,7 @@ import { getMetricValueFromLog, getMacDetailValueFromLog, getPciColor, getEarfcn
 import { normalizeProviderName, normalizeTechName, normalizeBandName, getLogColor, getRegisteredColor, generateColorFromHash, resolveMacDetailMetricKey } from "@/utils/colorUtils";
 import { DEBUG_L3, traceL3Effect } from "@/utils/l3Debug";
 import { logMapPlot } from "@/utils/mapPlotDebug";
+import { getValidMapCoordinates, resolveAutoFitAction } from "@/features/unified-map/map/autoFit.js";
 
 const DEFAULT_CENTER = { lat: 28.64453086, lng: 77.37324242 };
 const isElectronRuntime =
@@ -1541,6 +1542,10 @@ const MapWithMultipleCircles = ({
   center = DEFAULT_CENTER,
   defaultZoom = 14,
   fitToLocations = true,
+  datasetIdentity = "default",
+  datasetLoading = false,
+  datasetComplete = true,
+  fitRequestId = 0,
   onLoad: onLoadProp,
   onUnmount: onUnmountProp,
   onAutoFit: onAutoFitProp,
@@ -1605,6 +1610,7 @@ const MapWithMultipleCircles = ({
   } = useColorForLog();
 
   const [map, setMap] = useState(null);
+  const [primarySamplingStatus, setPrimarySamplingStatus] = useState(null);
   const [hoveredCell, setHoveredCell] = useState(null);
   const [hoveredCellTooltipPos, setHoveredCellTooltipPos] = useState(null);
   const [hoveredDrawingAction, setHoveredDrawingAction] = useState(null);
@@ -2448,23 +2454,10 @@ const MapWithMultipleCircles = ({
     return { lat: sumLat / count, lng: sumLng / count };
   }, [locationsToRender, processedNeighbors, locations, center]);
 
-  const autoFitSignature = useMemo(() => {
-    const allPoints = [...locationsToRender, ...processedNeighbors];
-    const locs = allPoints.length > 0 ? allPoints : locations;
-    if (!Array.isArray(locs) || locs.length === 0) return "empty";
-
-    const first = locs[0];
-    const last = locs[locs.length - 1];
-    return [
-      locs.length,
-      Number(first?.lat).toFixed(5),
-      Number(first?.lng).toFixed(5),
-      Number(last?.lat).toFixed(5),
-      Number(last?.lng).toFixed(5),
-    ].join("|");
-  }, [locationsToRender, processedNeighbors, locations]);
-
-  const lastAutoFitSignatureRef = useRef("");
+  const fitStateRef = useRef({ identity: null, initialFit: false, finalFit: false, userNavigated: false });
+  const lastFitRequestRef = useRef(fitRequestId);
+  const programmaticViewportRef = useRef(false);
+  const programmaticViewportTimerRef = useRef(null);
 
   const applyAutoViewport = useCallback((mapInstance) => {
     if (!mapInstance) return;
@@ -2475,20 +2468,20 @@ const MapWithMultipleCircles = ({
     // reverts it) and the new data ends up framed at the wrong zoom level.
     onAutoFitProp?.(mapInstance);
 
-    const allPoints = [...locationsToRender, ...processedNeighbors];
+    const allPoints = [...normalizedLocations, ...processedNeighbors];
     const locs = allPoints.length > 0 ? allPoints : locations;
-    if (fitToLocations && locs?.length && window.google) {
+    const validPoints = getValidMapCoordinates(locs);
+    if (fitToLocations && validPoints.length && window.google?.maps?.LatLngBounds) {
       const bounds = new window.google.maps.LatLngBounds();
-      const sampleSize = Math.min(locs.length, 500);
-      const step = Math.max(1, Math.floor(locs.length / sampleSize));
-      for (let i = 0; i < locs.length; i += step) {
-        bounds.extend({ lat: locs[i].lat, lng: locs[i].lng });
-      }
+      validPoints.forEach((point) => bounds.extend(point));
+      programmaticViewportRef.current = true;
+      window.clearTimeout(programmaticViewportTimerRef.current);
+      programmaticViewportTimerRef.current = window.setTimeout(() => {
+        programmaticViewportRef.current = false;
+      }, 1500);
       mapInstance.fitBounds(bounds, 50);
       logMapPlot("applyAutoViewport:fitBounds", {
-        locsUsed: locs.length,
-        sampleSize,
-        step,
+        locsUsed: validPoints.length,
         boundsNE: bounds.getNorthEast()?.toJSON?.(),
         boundsSW: bounds.getSouthWest()?.toJSON?.(),
         zoomBeforeFit: mapInstance.getZoom?.(),
@@ -2496,36 +2489,52 @@ const MapWithMultipleCircles = ({
       return;
     }
 
-    mapInstance.setCenter(computedCenter);
-    mapInstance.setZoom(defaultZoom);
-    logMapPlot("applyAutoViewport:setCenter+setZoom", {
-      reason: !fitToLocations ? "fitToLocations=false" : "no locations",
-      locsAvailable: locs?.length || 0,
-      computedCenter,
-      defaultZoom,
-    });
-  }, [locationsToRender, processedNeighbors, locations, fitToLocations, computedCenter, defaultZoom, onAutoFitProp]);
+  }, [normalizedLocations, processedNeighbors, locations, fitToLocations, onAutoFitProp]);
 
   const handleMapLoad = useCallback((mapInstance) => {
     setMap(mapInstance);
-    logMapPlot("handleMapLoad", { autoFitSignature });
-    applyAutoViewport(mapInstance);
-    lastAutoFitSignatureRef.current = autoFitSignature;
+    logMapPlot("handleMapLoad");
     onLoadProp?.(mapInstance);
-  }, [applyAutoViewport, autoFitSignature, onLoadProp]);
+  }, [onLoadProp]);
 
   useEffect(() => {
     if (!map) return;
-    if (autoFitSignature === "empty") return;
-    if (lastAutoFitSignatureRef.current === autoFitSignature) return;
-
-    logMapPlot("autoFitSignature changed -> re-fit", {
-      previousSignature: lastAutoFitSignatureRef.current,
-      nextSignature: autoFitSignature,
+    const current = fitStateRef.current;
+    if (!fitToLocations) return;
+    const candidates = [...normalizedLocations, ...processedNeighbors];
+    const candidatesToFit = candidates.length ? candidates : locations;
+    const hasValidCoordinates = getValidMapCoordinates(candidatesToFit).length > 0;
+    const explicitFit = lastFitRequestRef.current !== fitRequestId;
+    lastFitRequestRef.current = fitRequestId;
+    const action = resolveAutoFitAction(current, {
+      identity: datasetIdentity,
+      hasCoordinates: hasValidCoordinates,
+      complete: !datasetLoading && datasetComplete,
+      explicitFit,
     });
-    applyAutoViewport(map);
-    lastAutoFitSignatureRef.current = autoFitSignature;
-  }, [map, autoFitSignature, applyAutoViewport]);
+    // `resolveAutoFitAction` owns the initial/final state transitions. Chunks,
+    // metric changes, and filters therefore cannot trigger another fit.
+    if (action !== "none") applyAutoViewport(map);
+  }, [map, datasetIdentity, datasetLoading, datasetComplete, fitToLocations, fitRequestId, applyAutoViewport, normalizedLocations, processedNeighbors, locations]);
+
+  useEffect(() => {
+    if (!map || typeof map.addListener !== "function") return undefined;
+    const markUserNavigation = () => {
+      if (!programmaticViewportRef.current) fitStateRef.current.userNavigated = true;
+    };
+    const dragListener = map.addListener("dragstart", () => { fitStateRef.current.userNavigated = true; });
+    const zoomListener = map.addListener("zoom_changed", markUserNavigation);
+    const idleListener = map.addListener("idle", () => {
+      programmaticViewportRef.current = false;
+      window.clearTimeout(programmaticViewportTimerRef.current);
+    });
+    return () => {
+      window.clearTimeout(programmaticViewportTimerRef.current);
+      window.google?.maps?.event?.removeListener?.(dragListener);
+      window.google?.maps?.event?.removeListener?.(zoomListener);
+      window.google?.maps?.event?.removeListener?.(idleListener);
+    };
+  }, [map]);
 
   const handleMapUnmount = useCallback(() => {
     setMap(null);
@@ -2657,6 +2666,14 @@ const MapWithMultipleCircles = ({
 
   return (
     <div ref={mapContainerRef} className="relative w-full h-full">
+      {primarySamplingStatus?.status === "error" && (
+        <div role="alert" className="absolute left-4 top-4 z-[800] rounded-lg border border-red-400/40 bg-slate-950/95 px-3 py-2 text-sm text-red-100 shadow-lg">
+          <span>Primary log layer unavailable: {primarySamplingStatus.error}</span>
+          <button type="button" className="ml-3 underline" onClick={() => primarySamplingStatus.retry?.()}>
+            Retry
+          </button>
+        </div>
+      )}
       <DeckLayerRegistryProvider>
       <GoogleMap
         mapContainerStyle={containerStyle}
@@ -2706,6 +2723,8 @@ const MapWithMultipleCircles = ({
             pickable={!disableDeckInteractions && !drawingEnabled && !projectPolygonEditEnabled}
             autoHighlight={!disableDeckInteractions && !drawingEnabled && !projectPolygonEditEnabled}
             interactionsDisabled={disableDeckInteractions || drawingEnabled || projectPolygonEditEnabled}
+            onPrimarySamplingState={setPrimarySamplingStatus}
+            primaryDatasetIdentity={datasetIdentity}
           />
         )}
 

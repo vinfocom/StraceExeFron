@@ -3,7 +3,7 @@ import { sampleLogIndices } from '../utils/logSpatialSampling';
 let coordinates = new Float64Array();
 
 self.onmessage = ({ data }) => {
-  const { requestId, coordinatesBuffer, ...options } = data;
+  const { requestId, datasetRevision, coordinatesBuffer, ...options } = data;
 
   try {
     if (coordinatesBuffer) coordinates = new Float64Array(coordinatesBuffer);
@@ -11,10 +11,11 @@ self.onmessage = ({ data }) => {
       ...options,
       coordinates,
     });
-    self.postMessage({ requestId, indexesBuffer: indexes.buffer }, [indexes.buffer]);
+    self.postMessage({ requestId, datasetRevision, indexesBuffer: indexes.buffer }, [indexes.buffer]);
   } catch (error) {
     self.postMessage({
       requestId,
+      datasetRevision,
       error: error instanceof Error ? error.message : 'Unable to sample map logs',
     });
   }
