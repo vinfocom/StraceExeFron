@@ -2,6 +2,10 @@ import React, { useEffect, useRef, useCallback, useState, memo } from "react";
 import { toast } from "react-toastify";
 import { createAdvancedMarker, getAdvancedMarkerLatLngEvent, isSatelliteMapType, orientAdvancedMarkerLabel, refreshAdvancedMarkerLabelTheme, setAdvancedMarkerLabel } from "@/lib/advancedMarkers";
 import { handleShapeOverlayRightClick, removeDrawingEntryById, removeShapeById } from "@/components/maps/drawingShapeInteractions.js";
+import {
+  getElevationSampleCoordinates,
+  isTerrainHoverTargetCurrent,
+} from "@/features/unified-map/map/terrainElevationProfile.js";
 
 // --- Helper Functions (Same as before, collapsed for brevity) ---
 function toLatLng(item) {
@@ -1303,6 +1307,7 @@ function DrawingToolsLayerComponent({
   logPolygonOffsetMeters = 50,
   onUIChange,
   terrainEnabled = false,
+  terrainHoverControllerRef,
   showSegmentLabels = false,
 }) {
   const [activeDraft, setActiveDraft] = useState(null);
@@ -1322,6 +1327,7 @@ function DrawingToolsLayerComponent({
   const deleteActionsRef = useRef(null);
   const undoActiveDrawingRef = useRef(null);
   const isSatelliteRef = useRef(isSatellite);
+  const terrainHoverMarkerRef = useRef(null);
   isSatelliteRef.current = isSatellite;
   const showSegmentLabelsRef = useRef(showSegmentLabels);
   showSegmentLabelsRef.current = showSegmentLabels;
@@ -1332,6 +1338,8 @@ function DrawingToolsLayerComponent({
   deleteActionsRef.current = {
     remove: (shapeObj) => {
       if (!shapeObj) return;
+      terrainHoverControllerRef?.current?.clearHover?.(shapeObj.id);
+      terrainHoverControllerRef?.current?.clearChartHover?.(shapeObj.id);
       const removal = removeShapeById(
         shapesRef.current,
         shapeObj.id,
@@ -1418,6 +1426,7 @@ function DrawingToolsLayerComponent({
       elevationProfile.push({
         distance: 0,
         elevation: Number(results[0].elevation),
+        ...getElevationSampleCoordinates(results[0]?.location),
       });
     }
 
@@ -1428,10 +1437,7 @@ function DrawingToolsLayerComponent({
       const currentElevation = Number(current?.elevation);
       if (!Number.isFinite(previousElevation) || !Number.isFinite(currentElevation)) continue;
 
-      const segmentHorizontal = gm.geometry.spherical.computeDistanceBetween(
-        previous.location,
-        current.location,
-      );
+      const segmentHorizontal = gm.geometry.spherical.computeDistanceBetween(previous.location, current.location);
       const elevationDelta = currentElevation - previousElevation;
       terrainDistance += Math.sqrt(
         segmentHorizontal ** 2 + elevationDelta ** 2,
@@ -1440,6 +1446,7 @@ function DrawingToolsLayerComponent({
       elevationProfile.push({
         distance: cumulativeDistance,
         elevation: currentElevation,
+        ...getElevationSampleCoordinates(current?.location),
       });
       if (elevationDelta > 0) elevationGain += elevationDelta;
       if (elevationDelta < 0) elevationLoss += Math.abs(elevationDelta);
@@ -1467,10 +1474,15 @@ function DrawingToolsLayerComponent({
 
     const requestId = (shapeObj.terrainRequestId || 0) + 1;
     shapeObj.terrainRequestId = requestId;
+    const geometryRevision = shapeObj.geometryRevision || 0;
     try {
       const metrics = await requestTerrainMetrics(path);
-      if (!metrics || shapeObj.terrainRequestId !== requestId) return;
-      const updatedEntry = { ...entry, ...metrics, terrainMode: true };
+      if (!metrics || shapeObj.terrainRequestId !== requestId || shapeObj.geometryRevision !== geometryRevision) return;
+      const profileRevision = (shapeObj.terrainProfileRevision || 0) + 1;
+      shapeObj.terrainProfileRevision = profileRevision;
+      terrainHoverControllerRef?.current?.clearHover?.(shapeObj.id);
+      terrainHoverControllerRef?.current?.clearChartHover?.(shapeObj.id);
+      const updatedEntry = { ...entry, ...metrics, terrainMode: true, geometryRevision, profileRevision };
       const index = collectedDrawingRef.current.findIndex((drawing) => drawing.id === shapeObj.id);
       if (index < 0) return;
       shapeObj.terrainMetrics = updatedEntry;
@@ -1483,11 +1495,78 @@ function DrawingToolsLayerComponent({
         console.warn("[UnifiedMap] Terrain elevation request failed:", error);
       }
     }
-  }, [requestTerrainMetrics, terrainEnabled]);
+  }, [requestTerrainMetrics, terrainEnabled, terrainHoverControllerRef]);
 
   useEffect(() => {
     callbacksRef.current = { onSummary, onDrawingsChange, onActiveDrawingChange, onUIChange };
   }, [onSummary, onDrawingsChange, onActiveDrawingChange, onUIChange]);
+
+  useEffect(() => {
+    const gm = window.google?.maps;
+    const controller = terrainHoverControllerRef?.current;
+    if (!map || !gm?.Marker || !controller) return undefined;
+
+    const marker = new gm.Marker({
+      map: null,
+      clickable: false,
+      draggable: false,
+      optimized: true,
+      zIndex: DRAWING_VERTEX_Z_INDEX + 10,
+      icon: {
+        path: gm.SymbolPath.CIRCLE,
+        scale: 8,
+        fillColor: "#fef08a",
+        fillOpacity: 1,
+        strokeColor: "#0f172a",
+        strokeOpacity: 1,
+        strokeWeight: 3,
+      },
+    });
+    terrainHoverMarkerRef.current = marker;
+    const clearHover = (drawingId) => {
+      if (drawingId !== undefined && controller.activeTarget &&
+          String(controller.activeTarget.drawingId) !== String(drawingId)) return;
+      marker.setMap(null);
+      controller.activeTarget = null;
+    };
+    const setHover = (target, sample, sampleIndex) => {
+      const shape = shapesRef.current.find(
+        (item) => String(item?.id) === String(target?.drawingId),
+      );
+      const drawing = collectedDrawingRef.current.find(
+        (entry) => String(entry?.id) === String(target?.drawingId),
+      );
+      if (!shape || !isTerrainHoverTargetCurrent(target, {
+        id: shape.id,
+        geometryRevision: shape.geometryRevision || 0,
+        profileRevision: shape.terrainProfileRevision || 0,
+      }) || !isTerrainHoverTargetCurrent(target, drawing)) {
+        clearHover(target?.drawingId);
+        return false;
+      }
+      const expected = drawing.elevationProfile?.[sampleIndex];
+      if (!expected || expected.distance !== sample?.distance || expected.elevation !== sample?.elevation ||
+          expected.lat !== sample?.lat || expected.lng !== sample?.lng ||
+          !Number.isFinite(sample?.lat) || !Number.isFinite(sample?.lng)) {
+        clearHover(target?.drawingId);
+        return false;
+      }
+      marker.setPosition({ lat: sample.lat, lng: sample.lng });
+      marker.setMap(map);
+      controller.activeTarget = target;
+      return true;
+    };
+    controller.setHover = setHover;
+    controller.clearHover = clearHover;
+
+    return () => {
+      clearHover();
+      marker.setMap(null);
+      if (terrainHoverMarkerRef.current === marker) terrainHoverMarkerRef.current = null;
+      if (controller.setHover === setHover) delete controller.setHover;
+      if (controller.clearHover === clearHover) delete controller.clearHover;
+    };
+  }, [map, terrainHoverControllerRef]);
 
   useEffect(() => {
     const id = deleteRequest?.id;
@@ -1554,6 +1633,8 @@ function DrawingToolsLayerComponent({
       session: uniqueSessionsFromLogs, intersectingSessions, sessionCount: uniqueSessionsFromLogs.length,
       logs: insideLogs, grid: gridInfo, createdAt: shapeObj.createdAt || new Date().toISOString(), updatedAt: new Date().toISOString(),
       area: areaInMeters, areaInSqKm: (areaInMeters / 1e6).toFixed(4), length: lengthInMeters, lengthInKm: (lengthInMeters / 1000).toFixed(3),
+      geometryRevision: shapeObj.geometryRevision || 0,
+      profileRevision: shapeObj.terrainProfileRevision || 0,
     };
 
     const idx = collectedDrawingRef.current.findIndex(d => d.id === id);
@@ -1612,6 +1693,8 @@ function DrawingToolsLayerComponent({
       vertexMarkers: [],
       midpointMarkers: [],
       midpointDragIndex: null,
+      geometryRevision: 0,
+      terrainProfileRevision: 0,
       analysisLogs: options.analysisLogs,
       suppressVertexMarkers: options.suppressVertexMarkers === true,
       suppressGridAnalysis: options.suppressGridAnalysis === true,
@@ -1713,7 +1796,10 @@ function DrawingToolsLayerComponent({
     shapeObj.updateTotalDistanceLabel = updateTotalDistanceLabel;
     const invalidateTerrainMetrics = () => {
       shapeObj.terrainRequestId = (shapeObj.terrainRequestId || 0) + 1;
+      shapeObj.geometryRevision = (shapeObj.geometryRevision || 0) + 1;
       shapeObj.terrainMetrics = null;
+      terrainHoverControllerRef?.current?.clearHover?.(shapeObj.id);
+      terrainHoverControllerRef?.current?.clearChartHover?.(shapeObj.id);
       updateTotalDistanceLabel();
     };
     // Optional per-segment lengths, only at street-level zoom so they never clutter the map.
@@ -1928,12 +2014,14 @@ function DrawingToolsLayerComponent({
       if (!terrainEnabled) {
         shapeObj.terrainRequestId = (shapeObj.terrainRequestId || 0) + 1;
         shapeObj.terrainMetrics = null;
+        terrainHoverControllerRef?.current?.clearHover?.(shapeObj.id);
+        terrainHoverControllerRef?.current?.clearChartHover?.(shapeObj.id);
         shapeObj.updateTotalDistanceLabel?.();
         return;
       }
       void reAnalyzeShapeRef.current?.(shapeObj);
     });
-  }, [terrainEnabled]);
+  }, [terrainEnabled, terrainHoverControllerRef]);
 
   useEffect(() => {
     registerCompletedShapeRef.current = registerCompletedShape;
@@ -2510,6 +2598,8 @@ function DrawingToolsLayerComponent({
   useEffect(() => {
     if (clearSignal === 0 || clearSignal === lastClearSignalRef.current) return;
     lastClearSignalRef.current = clearSignal;
+    terrainHoverControllerRef?.current?.clearHover?.();
+    terrainHoverControllerRef?.current?.clearChartHover?.();
     cleanupActiveDrawing(false);
     clearActiveDrawingPreview();
     shapesRef.current.forEach(cleanupCompletedShape);
@@ -2518,7 +2608,7 @@ function DrawingToolsLayerComponent({
     callbacksRef.current.onDrawingsChange?.([]);
     callbacksRef.current.onSummary?.(null);
     toast.info("All drawings cleared", { position: "bottom-right", autoClose: 2000 });
-  }, [clearSignal, cleanupActiveDrawing, clearActiveDrawingPreview]);
+  }, [clearSignal, cleanupActiveDrawing, clearActiveDrawingPreview, terrainHoverControllerRef]);
 
   useEffect(() => () => {
     cleanupActiveDrawing(false);
