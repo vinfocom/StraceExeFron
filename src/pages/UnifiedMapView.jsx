@@ -3215,17 +3215,27 @@ const UnifiedMapView = () => {
   );
 
   const deferredSampleDataset = useDeferredValue(fetchedSampleDataset);
-  const renderedSampleDataset = deferredSampleDataset.identity === fetchedSampleDataset.identity
-    ? deferredSampleDataset
-    : {
-        rows: EMPTY_LIST,
-        identity: fetchedSampleDataset.identity,
-        revision: fetchedSampleDataset.revision,
-        complete: false,
-        loading: fetchedSampleDataset.loading,
-        outcome: fetchedSampleDataset.outcome,
-        error: fetchedSampleDataset.error,
-      };
+  const renderedSampleDataset = useMemo(() => {
+    if (deferredSampleDataset.identity === fetchedSampleDataset.identity) {
+      return deferredSampleDataset;
+    }
+    return {
+      rows: EMPTY_LIST,
+      identity: fetchedSampleDataset.identity,
+      revision: fetchedSampleDataset.revision,
+      complete: false,
+      loading: fetchedSampleDataset.loading,
+      outcome: fetchedSampleDataset.outcome,
+      error: fetchedSampleDataset.error,
+    };
+  }, [
+    deferredSampleDataset,
+    fetchedSampleDataset.identity,
+    fetchedSampleDataset.revision,
+    fetchedSampleDataset.loading,
+    fetchedSampleDataset.outcome,
+    fetchedSampleDataset.error,
+  ]);
   const sampleOutcome = renderedSampleDataset.outcome;
   const sampleComplete = renderedSampleDataset.complete;
 
@@ -4224,9 +4234,18 @@ const UnifiedMapView = () => {
   );
 
   const deferredNeighborDataset = useDeferredValue(fetchedNeighborDataset);
-  const renderedNeighborDataset = deferredNeighborDataset.identity === fetchedNeighborDataset.identity
-    ? deferredNeighborDataset
-    : { ...deferredNeighborDataset, rows: [], stats: null, identity: fetchedNeighborDataset.identity, complete: false };
+  const renderedNeighborDataset = useMemo(() => {
+    if (deferredNeighborDataset.identity === fetchedNeighborDataset.identity) {
+      return deferredNeighborDataset;
+    }
+    return {
+      ...deferredNeighborDataset,
+      rows: EMPTY_LIST,
+      stats: null,
+      identity: fetchedNeighborDataset.identity,
+      complete: false,
+    };
+  }, [deferredNeighborDataset, fetchedNeighborDataset.identity]);
 
   const sessionNeighborData = hasPassedNeighbors
     ? passedNeighbors
@@ -5047,14 +5066,17 @@ const UnifiedMapView = () => {
     activeDatasetComplete,
   ]);
   const deferredMapDisplayDataset = useDeferredValue(mapDisplayDataset);
-  const renderedMapDisplayDataset = deferredMapDisplayDataset.identity === mapDatasetIdentity
-    ? deferredMapDisplayDataset
-    : {
+  const renderedMapDisplayDataset = useMemo(() => {
+    if (deferredMapDisplayDataset.identity === mapDatasetIdentity) {
+      return deferredMapDisplayDataset;
+    }
+    return {
       rows: EMPTY_LIST,
       identity: mapDatasetIdentity,
       revision: activeDatasetRevision,
       complete: false,
     };
+  }, [deferredMapDisplayDataset, mapDatasetIdentity, activeDatasetRevision]);
   const deferredGridDisplayLocations = renderedMapDisplayDataset.rows;
   const deferredGridFilteredLocations = useDeferredValue(filteredLocations);
 

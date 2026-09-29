@@ -875,14 +875,24 @@ const UnifiedMapSidebar = ({
 
   useEffect(() => {
     const current = availableFilterOptions || {};
-    setAccumulatedFilterOptions({
+    const next = {
       providers: current.providers || [],
       bands: current.bands || [],
       technologies: current.technologies || [],
       cellIds: current.cellIds || [],
       apps: current.apps || [],
       macDetailFields: current.macDetailFields || [],
+    };
+    setAccumulatedFilterOptions((prev) => {
+      const keys = Object.keys(next);
+      const unchanged = keys.every((key) => {
+        const a = prev[key] || [];
+        const b = next[key];
+        return a.length === b.length && a.every((value, index) => value === b[index]);
+      });
+      return unchanged ? prev : next;
     });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId, sessionIds]);
 
   useEffect(() => {
