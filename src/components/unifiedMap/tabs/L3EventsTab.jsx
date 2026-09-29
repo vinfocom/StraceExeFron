@@ -22,6 +22,7 @@ import { ProtocolAnalyzerView } from "./l3Events/ProtocolAnalyzerView";
 import { TimelineCard } from "./l3Events/TimelineCard";
 import { ExcelSignalingView } from "./l3Events/ExcelSignalingView";
 import { buildUnifiedSignalingRows } from "@/utils/l3Events/signalingModel";
+import { CELL_MEASUREMENT_METRICS, getVisibleCellMeasurements, parseCellMeasurements } from "@/utils/l3Events/cellMeasurementParser.js";
 import {
   buildPlaybackPoints,
   getFiniteRsrpValue,
@@ -78,7 +79,18 @@ const MAP_INTERFACE_COLOR_PALETTE = [
   "#64748b",
 ];
 const MAP_UNKNOWN_RSRP_COLOR = "#64748b";
+const CELL_MEASUREMENT_COLOR_STOPS = ["#2563eb", "#06b6d4", "#facc15", "#ef4444"];
 const HANDOVER_FAILURE_TEXT_RE = /\b(?:hand(?:\s|-)?over|ho)\b.{0,120}\b(?:fail(?:ed|ure|uire)?|reject(?:ed)?|drop|timeout|abort(?:ed)?)\b|\bhandover\s*fail(?:ure|uire)?\b/i;
+
+function measurementColor(value, min, max) {
+  const ratio = max > min ? Math.max(0, Math.min(1, (value - min) / (max - min))) : 0.5;
+  const scaled = ratio * (CELL_MEASUREMENT_COLOR_STOPS.length - 1);
+  const segment = Math.min(CELL_MEASUREMENT_COLOR_STOPS.length - 2, Math.floor(scaled));
+  const fraction = scaled - segment;
+  const left = CELL_MEASUREMENT_COLOR_STOPS[segment].slice(1).match(/.{2}/g).map((part) => parseInt(part, 16));
+  const right = CELL_MEASUREMENT_COLOR_STOPS[segment + 1].slice(1).match(/.{2}/g).map((part) => parseInt(part, 16));
+  return `#${left.map((channel, index) => Math.round(channel + (right[index] - channel) * fraction).toString(16).padStart(2, "0")).join("")}`;
+}
 
 const normalizeMapLabel = (value = "") => String(value)
   .replace(/^\(new\)\s*/i, "")
@@ -712,7 +724,7 @@ export function enrichCallSummaryTechnology(summary, procedures = []) {
   };
 }
 
-export function getMapEventMarker(item = {}) {
+function getMapEventMarker(item = {}) {
   const milestone = String(item.milestone || "").trim().toUpperCase();
   const eventKey = String(item.eventKey || "").trim().toUpperCase();
   const handoverClassification = String(item.handoverClassification || "").trim().toLowerCase();
@@ -913,7 +925,19 @@ function isFailurePoint(point) {
   return HANDOVER_FAILURE_TEXT_RE.test(text) || /\b(fail(?:ed|ure|uire)?|reject(?:ed)?|timeout|error|rlf|radio link failure|dropped|forbidden|unavailable)\b|\b[45]\d{2}\b/i.test(text);
 }
 
-export function L3EventsMapView({ points, onNeedRsrpAnalysis, active = true, datasetKey = null, autoCenter = true }) {
+export function L3EventsMapView({
+  points,
+  onNeedRsrpAnalysis,
+  active = true,
+  datasetKey = null,
+  showCellMeasurementControls = false,
+  cellMeasurementMapRows = [],
+  cellMeasurementFallbackRows = null,
+  cellMeasurementFallbackDatasetKey = null,
+  cellMeasurementLoading = false,
+  cellMeasurementError = "",
+  onRequestCellMeasurementRows,
+}) {
   const { isLoaded, loadError } = useJsApiLoader(GOOGLE_MAPS_LOADER_OPTIONS);
   const { getThresholdInfo, getThresholdsForMetric } = useColorForLog();
   const [isPlaying, setIsPlaying] = useState(false);
@@ -929,6 +953,10 @@ export function L3EventsMapView({ points, onNeedRsrpAnalysis, active = true, dat
   const [messageViewportHeight, setMessageViewportHeight] = useState(420);
   const [mapInstance, setMapInstance] = useState(null);
   const [selectedEventMarker, setSelectedEventMarker] = useState(null);
+  const [cellMeasurementsEnabled, setCellMeasurementsEnabled] = useState(false);
+  const [selectedCellMetric, setSelectedCellMetric] = useState("");
+  const [hoveredCellMeasurementId, setHoveredCellMeasurementId] = useState(null);
+  const [selectedCellMeasurementId, setSelectedCellMeasurementId] = useState(null);
   const [colorMode, setColorMode] = useState(() => {
     try {
       const savedMode = window.localStorage.getItem(MAP_COLOR_MODE_STORAGE_KEY);
@@ -955,7 +983,72 @@ export function L3EventsMapView({ points, onNeedRsrpAnalysis, active = true, dat
   const mapsError = getGoogleMapsConfigError() || (loadError ? getGoogleMapsErrorMessage(loadError) : null);
   const currentPoint = points[currentIndex] || points[0] || null;
   const handleEventMarkerClick = useCallback((point) => setSelectedEventMarker(point), []);
+  const handleCellMeasurementHover = useCallback((measurement) => setHoveredCellMeasurementId(measurement?.sourceRowId ?? null), []);
+  const handleCellMeasurementClick = useCallback((measurement) => {
+    if (!measurement?.sourceRowId) return;
+    setSelectedCellMeasurementId(measurement.sourceRowId);
+    const sourceIndex = points.findIndex((point) => String(point.sourceRowId ?? point.id) === String(measurement.sourceRowId));
+    if (sourceIndex >= 0) {
+      setIsPlaying(false);
+      setCurrentIndex(sourceIndex);
+    }
+  }, [points]);
   const currentRawMessage = useMemo(() => formatMapRawMessage(currentPoint), [currentPoint]);
+  const mapCellMeasurements = useMemo(() => parseCellMeasurements(cellMeasurementMapRows), [cellMeasurementMapRows, datasetKey]);
+  const fallbackCellMeasurements = useMemo(() => (
+    cellMeasurementFallbackDatasetKey === datasetKey && Array.isArray(cellMeasurementFallbackRows)
+      ? parseCellMeasurements(cellMeasurementFallbackRows)
+      : []
+  ), [cellMeasurementFallbackDatasetKey, cellMeasurementFallbackRows, datasetKey]);
+  const cellMeasurementSource = mapCellMeasurements.length ? mapCellMeasurements : fallbackCellMeasurements;
+  const cellMeasurementMetrics = useMemo(() => {
+    const availableKeys = new Set(cellMeasurementSource
+      .map((measurement) => measurement.metricKey)
+      .filter(Boolean));
+    return CELL_MEASUREMENT_METRICS.filter((metric) => availableKeys.has(metric.key));
+  }, [cellMeasurementSource]);
+  useEffect(() => {
+    if (!cellMeasurementMetrics.length) return;
+    setSelectedCellMetric((current) => (
+      cellMeasurementMetrics.some((metric) => metric.key === current)
+        ? current
+        : cellMeasurementMetrics.find((metric) => metric.key === "lte_rsrp")?.key || cellMeasurementMetrics[0].key
+    ));
+  }, [cellMeasurementMetrics]);
+  const selectedCellMetricInfo = cellMeasurementMetrics.find((metric) => metric.key === selectedCellMetric) || null;
+  const selectedMetricRows = useMemo(() => cellMeasurementSource.filter((measurement) => measurement.metricKey === selectedCellMetric), [cellMeasurementSource, selectedCellMetric]);
+  const cellMetricValues = useMemo(() => selectedMetricRows.flatMap((measurement) => [measurement.preValue, measurement.postValue].filter((value) => value !== null)), [selectedMetricRows]);
+  const cellMetricMin = cellMetricValues.length ? Math.min(...cellMetricValues) : 0;
+  const cellMetricMax = cellMetricValues.length ? Math.max(...cellMetricValues) : 0;
+  const cellMeasurementsWithColors = useMemo(() => selectedMetricRows
+    .filter((measurement) => measurement.gpsValid && (measurement.preValue !== null || measurement.postValue !== null))
+    .map((measurement) => ({
+      ...measurement,
+      preColorHex: measurement.preValue === null ? null : measurementColor(measurement.preValue, cellMetricMin, cellMetricMax),
+      postColorHex: measurement.postValue === null ? null : measurementColor(measurement.postValue, cellMetricMin, cellMetricMax),
+    })), [cellMetricMax, cellMetricMin, selectedMetricRows]);
+  const visibleCellMeasurements = useMemo(() => getVisibleCellMeasurements(
+    cellMeasurementsWithColors,
+    points,
+    { currentIndex, showAllPoints, datasetKey: resolvedDatasetKey, sourceDatasetKey: resolvedDatasetKey },
+  ), [cellMeasurementsWithColors, currentIndex, datasetKey, points, resolvedDatasetKey, showAllPoints]);
+  const cellMeasurementCounts = useMemo(() => ({
+    plotted: visibleCellMeasurements.length,
+    missingGps: selectedMetricRows.filter((measurement) => !measurement.gpsValid).length,
+    unavailable: selectedMetricRows.filter((measurement) => measurement.gpsValid && measurement.preValue === null && measurement.postValue === null).length,
+    unsupported: cellMeasurementSource.filter((measurement) => measurement.status === "unsupported").length,
+  }), [cellMeasurementSource, selectedMetricRows, visibleCellMeasurements.length]);
+  const selectedCellMeasurement = cellMeasurementsWithColors.find((measurement) => measurement.sourceRowId === selectedCellMeasurementId) || null;
+  const hoveredCellMeasurement = visibleCellMeasurements.find((measurement) => measurement.sourceRowId === hoveredCellMeasurementId) || null;
+  const cellMeasurementCandidates = selectedCellMeasurement
+    ? cellMeasurementsWithColors.filter((measurement) => measurement.latitude === selectedCellMeasurement.latitude && measurement.longitude === selectedCellMeasurement.longitude)
+    : [];
+  const handleCellMeasurementToggle = (enabled) => {
+    setCellMeasurementsEnabled(enabled);
+    setHoveredCellMeasurementId(null);
+    if (!enabled) setSelectedCellMeasurementId(null);
+    else if (!mapCellMeasurements.length && cellMeasurementFallbackDatasetKey !== datasetKey) onRequestCellMeasurementRows?.();
+  };
   const progressPercent = points.length > 1 ? (currentIndex / (points.length - 1)) * 100 : 100;
   const interfaceLegend = useMemo(() => {
     const counts = new Map();
@@ -1113,8 +1206,6 @@ export function L3EventsMapView({ points, onNeedRsrpAnalysis, active = true, dat
         lng: currentPoint?.lng ?? points.reduce((sum, point) => sum + point.lng, 0) / points.length,
       }
     : DEFAULT_MAP_CENTER;
-  const initialCenterRef = useRef(center);
-
   useEffect(() => {
     if (shouldResetMapNavigation(previousDatasetKeyRef.current, resolvedDatasetKey)) {
       previousDatasetKeyRef.current = resolvedDatasetKey;
@@ -1155,10 +1246,10 @@ export function L3EventsMapView({ points, onNeedRsrpAnalysis, active = true, dat
     if (!active || !mapInstance || !window.google?.maps?.event) return undefined;
     const frame = window.requestAnimationFrame(() => {
       window.google.maps.event.trigger(mapInstance, "resize");
-      if (autoCenter && currentPoint) mapInstance.setCenter({ lat: currentPoint.lat, lng: currentPoint.lng });
+      if (currentPoint) mapInstance.setCenter({ lat: currentPoint.lat, lng: currentPoint.lng });
     });
     return () => window.cancelAnimationFrame(frame);
-  }, [active, autoCenter, currentPoint, mapInstance]);
+  }, [active, currentPoint, mapInstance]);
 
   useEffect(() => {
     if (!active || !isPlaying || points.length <= 1) return undefined;
@@ -1313,7 +1404,7 @@ export function L3EventsMapView({ points, onNeedRsrpAnalysis, active = true, dat
           ) : (
             <GoogleMap
               mapContainerStyle={MAP_CONTAINER_STYLE}
-              center={autoCenter ? center : initialCenterRef.current}
+              center={center}
               zoom={points.length > 1 ? 13 : 15}
               onLoad={setMapInstance}
               onUnmount={() => setMapInstance(null)}
@@ -1333,6 +1424,9 @@ export function L3EventsMapView({ points, onNeedRsrpAnalysis, active = true, dat
                 trailEndIndex={showAllPoints ? points.length - 1 : currentIndex - 1}
                 eventMarkers={deckEventMarkers}
                 onEventMarkerClick={handleEventMarkerClick}
+                cellMeasurements={cellMeasurementsEnabled ? visibleCellMeasurements : []}
+                onCellMeasurementClick={handleCellMeasurementClick}
+                onCellMeasurementHover={handleCellMeasurementHover}
               />
               {selectedEventMarker && (
                 <InfoWindow
@@ -1343,6 +1437,29 @@ export function L3EventsMapView({ points, onNeedRsrpAnalysis, active = true, dat
                   <L3EventMarkerInfo point={selectedEventMarker} />
                 </InfoWindow>
               )}
+              {cellMeasurementsEnabled && selectedCellMeasurement && (
+                <InfoWindow
+                  position={{ lat: selectedCellMeasurement.latitude, lng: selectedCellMeasurement.longitude }}
+                  onCloseClick={() => setSelectedCellMeasurementId(null)}
+                  options={{ pixelOffset: new window.google.maps.Size(0, -18) }}
+                >
+                  <div className="max-w-[22rem] space-y-2 text-xs text-slate-900">
+                    <div className="font-semibold">{selectedCellMeasurement.metricLabel}{selectedCellMeasurement.unit ? ` (${selectedCellMeasurement.unit})` : " (unit not declared)"}</div>
+                    {cellMeasurementCandidates.length > 1 && <label className="block">Colocated measurements<select aria-label="Colocated cell measurement candidates" value={selectedCellMeasurementId || ""} onChange={(event) => {
+                      const candidate = cellMeasurementCandidates.find((item) => item.sourceRowId === event.target.value);
+                      if (candidate) handleCellMeasurementClick(candidate);
+                    }} className="mt-1 block w-full rounded border border-slate-300 bg-white px-2 py-1">{cellMeasurementCandidates.map((candidate, index) => <option key={`${candidate.sourceRowId}:${index}`} value={candidate.sourceRowId}>{candidate.timestampLabel || "Time unavailable"} · row {candidate.sourceRowId} · {candidate.preValue ?? "Unavailable"} → {candidate.postValue ?? "Unavailable"}</option>)}</select></label>}
+                    <div>Pre: {selectedCellMeasurement.preValue === null ? (selectedCellMeasurement.preStatus === "missing" ? "Not recorded" : "Unavailable") : `${selectedCellMeasurement.preValue}${selectedCellMeasurement.unit ? ` ${selectedCellMeasurement.unit}` : ""}`}</div>
+                    <div>Post: {selectedCellMeasurement.postValue === null ? (selectedCellMeasurement.postStatus === "missing" ? "Not recorded" : "Unavailable") : `${selectedCellMeasurement.postValue}${selectedCellMeasurement.unit ? ` ${selectedCellMeasurement.unit}` : ""}`}</div>
+                    {selectedCellMeasurement.preValue !== null && selectedCellMeasurement.postValue !== null && selectedCellMeasurement.comparable && <div>Delta (Post − Pre): {selectedCellMeasurement.postValue - selectedCellMeasurement.preValue}{selectedCellMeasurement.unit ? ` ${selectedCellMeasurement.unit}` : ""}</div>}
+                    <div>Time: {selectedCellMeasurement.timestampLabel || "Unavailable"}</div>
+                    <div>Source row: {selectedCellMeasurement.sourceRowId} · File: {selectedCellMeasurement.sourceFile || "Unavailable"}</div>
+                    <div>Session: {selectedCellMeasurement.sessionId || "Unavailable"} · Cell: {selectedCellMeasurement.cellIdentity ?? "Unavailable"}</div>
+                    <div>Status: {selectedCellMeasurement.provisional ? "Provisional" : selectedCellMeasurement.status}{selectedCellMeasurement.preStatus === "unavailable" || selectedCellMeasurement.postStatus === "unavailable" ? " · one or more source values unavailable" : ""}</div>
+                    <pre className="max-h-28 overflow-auto whitespace-pre-wrap break-words rounded bg-slate-100 p-2">{selectedCellMeasurement.originalText || "No original message text"}</pre>
+                  </div>
+                </InfoWindow>
+              )}
             </GoogleMap>
           )}
           {!mapsError && isLoaded && !points.length && (
@@ -1351,6 +1468,14 @@ export function L3EventsMapView({ points, onNeedRsrpAnalysis, active = true, dat
             </div>
           )}
         </div>
+        {cellMeasurementsEnabled && (selectedCellMeasurement || hoveredCellMeasurement) && (() => {
+          const measurement = selectedCellMeasurement || hoveredCellMeasurement;
+          const preText = measurement.preValue === null ? "Unavailable" : measurement.preValue;
+          const postText = measurement.postValue === null ? "Unavailable" : measurement.postValue;
+          return <div className="pointer-events-none absolute left-3 top-3 z-[4] max-w-[calc(100%-24px)] rounded-lg border border-slate-500/80 bg-slate-950/90 px-3 py-2 text-xs text-white shadow-lg backdrop-blur-sm">
+            <span className="font-semibold">{measurement.metricLabel}</span> · {measurement.timestampLabel || "Time unavailable"} · {preText} → {postText}{measurement.unit ? ` ${measurement.unit}` : ""}
+          </div>;
+        })()}
         <div
           className="absolute top-3 z-[5] flex max-h-[calc(100%-24px)] w-48 flex-col gap-2 text-xs text-slate-200"
           style={{ right: messagePanelWidth + 12 }}
@@ -1473,6 +1598,19 @@ export function L3EventsMapView({ points, onNeedRsrpAnalysis, active = true, dat
               </div>
             )}
           </div>
+          {cellMeasurementsEnabled && <div className="rounded-lg border border-cyan-500/40 bg-slate-950/90 p-2 text-[10px] shadow-xl backdrop-blur-sm">
+            <div className="mb-1 font-semibold text-cyan-100">Cell Measurements</div>
+            {selectedCellMetricInfo && <div className="mb-1 text-slate-300">{selectedCellMetricInfo.label}{selectedCellMetricInfo.unit ? ` · ${selectedCellMetricInfo.unit}` : " · unit not declared"}</div>}
+            <div className="mb-1 flex flex-wrap gap-x-3 gap-y-1 text-slate-300">
+              <span className="inline-flex items-center gap-1"><span className="h-3 w-3 rounded-full border-2 border-cyan-300" />Pre</span>
+              <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-cyan-300" />Post</span>
+            </div>
+            <div className="text-slate-400">Plotted {cellMeasurementCounts.plotted.toLocaleString()} · no GPS {cellMeasurementCounts.missingGps.toLocaleString()} · unavailable {cellMeasurementCounts.unavailable.toLocaleString()}</div>
+            {cellMeasurementCounts.unsupported > 0 && <div className="text-amber-300">Unsupported formats {cellMeasurementCounts.unsupported.toLocaleString()}</div>}
+            {cellMeasurementLoading && <div role="status" className="text-cyan-200">Loading diagnostic cell rows…</div>}
+            {cellMeasurementError && <div role="alert" className="text-amber-200">{cellMeasurementError}</div>}
+            {!cellMeasurementLoading && !cellMeasurementError && !cellMeasurementSource.length && <div className="text-slate-400">No CELL_MEAS rows found in this dataset.</div>}
+          </div>}
         </div>
         <Rnd
           size={{ width: messagePanelWidth, height: "100%" }}
@@ -1629,6 +1767,16 @@ export function L3EventsMapView({ points, onNeedRsrpAnalysis, active = true, dat
             />
             Plot All
           </label>
+          {showCellMeasurementControls && <label className="inline-flex h-8 shrink-0 items-center gap-1 rounded-full border border-cyan-500/50 bg-slate-900 px-2 text-cyan-100">
+            <input type="checkbox" checked={cellMeasurementsEnabled} onChange={(event) => handleCellMeasurementToggle(event.target.checked)} className="accent-cyan-500" />
+            Cell Measurements
+          </label>}
+          {cellMeasurementsEnabled && <>
+            <select aria-label="Cell measurement metric" value={selectedCellMetric} onChange={(event) => setSelectedCellMetric(event.target.value)} disabled={!cellMeasurementMetrics.length} className="h-8 max-w-48 shrink-0 rounded-full border border-slate-600 bg-slate-900 px-2 text-slate-200 disabled:opacity-50">
+              {cellMeasurementMetrics.length ? cellMeasurementMetrics.map((metric) => <option key={metric.key} value={metric.key}>{metric.label}</option>) : <option value="">No supported metrics</option>}
+            </select>
+            {cellMeasurementError && <button type="button" onClick={onRequestCellMeasurementRows} className="h-8 shrink-0 rounded-full border border-amber-500/60 bg-slate-900 px-2 text-amber-200">Retry cell rows</button>}
+          </>}
           <button
             type="button"
             onClick={() => setShowCallMarkers((value) => !value)}
@@ -1757,8 +1905,10 @@ function L3EventMarkerInfo({ point }) {
   );
 }
 
-function L3MapDeckOverlay({ map, trailPoints, activePoints, trailEndIndex, eventMarkers, onEventMarkerClick }) {
+function L3MapDeckOverlay({ map, trailPoints, activePoints, trailEndIndex, eventMarkers, onEventMarkerClick, cellMeasurements = [], onCellMeasurementClick, onCellMeasurementHover }) {
   const overlayRef = useRef(null);
+  const preMeasurements = useMemo(() => cellMeasurements.filter((measurement) => measurement.preValue !== null), [cellMeasurements]);
+  const postMeasurements = useMemo(() => cellMeasurements.filter((measurement) => measurement.postValue !== null), [cellMeasurements]);
 
   useEffect(() => {
     if (!map) return undefined;
@@ -1797,6 +1947,45 @@ function L3MapDeckOverlay({ map, trailPoints, activePoints, trailEndIndex, event
       filled: true,
       pickable: false,
       updateTriggers: { getFillColor: [trailPoints] },
+    }),
+    new ScatterplotLayer({
+      id: "l3-cell-measurements-pre-rings",
+      data: preMeasurements,
+      getPosition: (measurement) => [measurement.longitude, measurement.latitude],
+      getLineColor: (measurement) => hexToRgbArray(measurement.preColorHex || MAP_UNKNOWN_RSRP_COLOR, 255),
+      getLineWidth: 2,
+      getRadius: 10,
+      lineWidthUnits: "pixels",
+      radiusUnits: "pixels",
+      stroked: true,
+      filled: false,
+      pickable: true,
+      onClick: ({ object }) => {
+        if (object) onCellMeasurementClick?.(object);
+        return Boolean(object);
+      },
+      onHover: ({ object }) => onCellMeasurementHover?.(object || null),
+      updateTriggers: { getLineColor: [preMeasurements] },
+    }),
+    new ScatterplotLayer({
+      id: "l3-cell-measurements-post-dots",
+      data: postMeasurements,
+      getPosition: (measurement) => [measurement.longitude, measurement.latitude],
+      getFillColor: (measurement) => hexToRgbArray(measurement.postColorHex || MAP_UNKNOWN_RSRP_COLOR, 255),
+      getLineColor: [255, 255, 255, 255],
+      getLineWidth: 1,
+      getRadius: 4,
+      lineWidthUnits: "pixels",
+      radiusUnits: "pixels",
+      stroked: true,
+      filled: true,
+      pickable: true,
+      onClick: ({ object }) => {
+        if (object) onCellMeasurementClick?.(object);
+        return Boolean(object);
+      },
+      onHover: ({ object }) => onCellMeasurementHover?.(object || null),
+      updateTriggers: { getFillColor: [postMeasurements] },
     }),
     new ScatterplotLayer({
       id: "l3-events-active-point",
@@ -1855,7 +2044,7 @@ function L3MapDeckOverlay({ map, trailPoints, activePoints, trailEndIndex, event
       pickable: false,
       characterSet: "auto",
     }),
-  ], [activePoints, eventMarkers, onEventMarkerClick, trailEndIndex, trailPoints]);
+  ], [activePoints, cellMeasurements, eventMarkers, onCellMeasurementClick, onCellMeasurementHover, onEventMarkerClick, postMeasurements, preMeasurements, trailEndIndex, trailPoints]);
 
   useEffect(() => {
     if (!overlayRef.current) return;

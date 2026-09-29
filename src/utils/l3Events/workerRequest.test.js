@@ -56,9 +56,9 @@ test("failed RSRP worker requests can be retried and stale replies are rejected"
 
 test("cancelling obsolete worker work rejects it and terminates the worker", async () => {
   const worker = createFakeWorker();
-  const task = startWorkerRequest(() => worker, { id: "rf:old" }, "rf:old");
+  const task = startWorkerRequest(() => worker, { id: "obsolete" }, "obsolete");
   task.cancel();
   await assert.rejects(task.promise, /cancelled/);
   assert.equal(worker.terminated, true);
-  worker.onmessage({ data: { id: "rf:old", analysis: {} } });
+  worker.onmessage({ data: { id: "obsolete", analysis: {} } });
 });
