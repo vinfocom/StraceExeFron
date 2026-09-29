@@ -1943,7 +1943,7 @@ export const mapViewApi = {
     }),
 
   // src/api/apiEndpoints.js
-  getPciDistribution: async (sessionIds) => {
+  getPciDistribution: async (sessionIds, { signal } = {}) => {
     try {
       const ids = Array.isArray(sessionIds)
         ? sessionIds.map((x) => String(x).trim()).filter(Boolean).join(",")
@@ -1953,7 +1953,8 @@ export const mapViewApi = {
       debugUnifiedMapApi("getPciDistribution:start", { ids });
 
       const response = await api.get(`/api/MapView/GetPciDistribution`, {
-        params: { session_ids: ids }
+        params: { session_ids: ids },
+        signal,
       });
       debugUnifiedMapApi("getPciDistribution:success", {
         success: response?.success,
@@ -1962,11 +1963,12 @@ export const mapViewApi = {
       // REMOVE .data here because api.get already returns the JSON body
       return response;
     } catch (error) {
+      if (isCancelledError(error) || isRequestCancelled(error)) throw error;
       debugUnifiedMapApi("getPciDistribution:error", {
         message: error?.message || String(error),
       });
       console.error("Error fetching PCI distribution:", error);
-      return null;
+      throw error;
     }
   },
 

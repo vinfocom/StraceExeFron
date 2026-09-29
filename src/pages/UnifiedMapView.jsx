@@ -15,6 +15,12 @@ import { useJsApiLoader, Polygon, Polyline } from "@react-google-maps/api";
 import { toast } from "react-toastify";
 
 import { l3EventApi, mapViewApi, gridAnalyticsApi, sitePredictionApi } from "../api/apiEndpoints";
+import {
+  areMapSessionIdsEqual,
+  createSessionSaveCoordinator,
+  normalizeMapSessionIds,
+} from "@/features/unified-map/data/sessionUpdates";
+import { runPciDistributionRequest } from "@/features/unified-map/data/pciDistributionRequest";
 
 // Components
 import Spinner from "../components/common/Spinner";
@@ -2953,6 +2959,7 @@ const UnifiedMapView = () => {
     [stateSessionParam, projectSessionParam],
   );
   const [manualSessionIds, setManualSessionIds] = useState(null);
+  const sessionSaveInFlightRef = useRef(null);
 
   const inferredSessionIdsFromPassedLogs = useMemo(() => {
     if (!hasPassedLocations) return [];
@@ -2971,7 +2978,7 @@ const UnifiedMapView = () => {
 
   const sessionIds = useMemo(() => {
     if (Array.isArray(manualSessionIds)) {
-      return manualSessionIds;
+      return normalizeMapSessionIds(manualSessionIds);
     }
     const explicit = parseSessionIds(querySessionParam || fallbackSessionParam);
     if (explicit.length > 0) return explicit;
@@ -3030,44 +3037,67 @@ const UnifiedMapView = () => {
 
   const handleSessionIdsChange = useCallback(
     async (nextSessionIds) => {
-      const normalized = parseSessionIds(nextSessionIds);
+      const normalized = normalizeMapSessionIds(nextSessionIds);
       const nextSessionParam = normalized.join(",");
-      setManualSessionIds(normalized);
+      if (sessionSaveInFlightRef.current) return false;
+      const sessionsUnchanged = areMapSessionIdsEqual(sessionIds, normalized);
 
-      setSearchParams(
-        (prevParams) => {
-          const nextParams = new URLSearchParams(prevParams);
-          SESSION_QUERY_KEYS.forEach((key) => nextParams.delete(key));
-
-          if (nextSessionParam) {
-            nextParams.set("session", nextSessionParam);
-          }
-
-          return nextParams;
+      const saveSessions = createSessionSaveCoordinator({
+        getAppliedIds: () => sessionIds,
+        persist: async (ids) => {
+          if (!projectId) return;
+          const response = await mapViewApi.updateProjectSessions({
+            ProjectId: Number(projectId),
+            SessionIds: ids.map((id) => Number(id)).filter((id) => Number.isFinite(id) && id > 0),
+          });
+          return response?.Data || response?.data || null;
         },
-        { replace: true },
-      );
+        commit: (ids, updatedProject) => {
+          setManualSessionIds((previous) =>
+            areMapSessionIdsEqual(previous ?? sessionIds, ids) ? previous : ids,
+          );
+          setSearchParams((previousParams) => {
+            const currentValue = SESSION_QUERY_KEYS
+              .map((key) => previousParams.get(key))
+              .find((value) => value?.trim()) || "";
+            if (areMapSessionIdsEqual(currentValue, ids)) return previousParams;
+            const nextParams = new URLSearchParams(previousParams);
+            SESSION_QUERY_KEYS.forEach((key) => nextParams.delete(key));
+            if (nextSessionParam) nextParams.set("session", nextSessionParam);
+            return nextParams;
+          }, { replace: true });
 
-      if (!projectId) return;
+          if (projectId) {
+            setProject((previous) => {
+              const nextProject = {
+                ...(previous || project || {}),
+                ...(updatedProject || {}),
+                id: projectId,
+                ref_session_id: nextSessionParam,
+              };
+              upsertProjectInProjectsCache(nextProject);
+              return nextProject;
+            });
+          }
+        },
+      });
 
+      const savePromise = saveSessions(normalized);
+      sessionSaveInFlightRef.current = savePromise;
       try {
-        const response = await mapViewApi.updateProjectSessions({
-          ProjectId: Number(projectId),
-          SessionIds: normalized.map((id) => Number(id)).filter((id) => Number.isFinite(id) && id > 0),
-        });
-        const updatedProject = response?.Data || response?.data || null;
-        const nextProject = updatedProject
-          ? { ...(project || {}), ...updatedProject }
-          : { ...(project || {}), id: projectId, ref_session_id: nextSessionParam };
-
-        setProject(nextProject);
-        upsertProjectInProjectsCache(nextProject);
-        toast.success("Project sessions saved.");
+        const saved = await savePromise;
+        if (saved && projectId && !sessionsUnchanged) toast.success("Project sessions saved.");
+        return saved;
       } catch (error) {
         toast.error(error?.message || "Could not save project sessions.");
+        return false;
+      } finally {
+        if (sessionSaveInFlightRef.current === savePromise) {
+          sessionSaveInFlightRef.current = null;
+        }
       }
     },
-    [project, projectId, setSearchParams],
+    [project, projectId, sessionIds, setSearchParams],
   );
 
   const { isLoaded, loadError } = useJsApiLoader(GOOGLE_MAPS_LOADER_OPTIONS);
@@ -4443,28 +4473,21 @@ const UnifiedMapView = () => {
     const currentSessionIds = sessionKey.split(",").filter(Boolean);
     let active = true;
     const requestId = ++pciDistributionRequestRef.current;
-
-    const fetchDist = async () => {
-      try {
-        const data = await mapViewApi.getPciDistribution(currentSessionIds);
-        if (!active || requestId !== pciDistributionRequestRef.current) return;
-
-        if (data?.success) {
-          // Store only the primary_yes data as requested
-          setPciDistData(data.primary_yes || null);
-        } else {
-          setPciDistData(null);
-        }
-      } catch (error) {
-        if (!active || requestId !== pciDistributionRequestRef.current) return;
+    const controller = new AbortController();
+    runPciDistributionRequest({
+      sessionIds: currentSessionIds,
+      signal: controller.signal,
+      load: (ids, signal) => mapViewApi.getPciDistribution(ids, { signal }),
+      isCurrent: () => active && requestId === pciDistributionRequestRef.current,
+      onData: setPciDistData,
+      onError: (error) => {
         setPciDistData(null);
         console.error("Failed to fetch PCI distribution", error);
-      }
-    };
-
-    fetchDist();
+      },
+    });
     return () => {
       active = false;
+      controller.abort();
     };
   }, [sessionKey, isSampleMode]);
 

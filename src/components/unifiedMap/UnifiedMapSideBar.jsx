@@ -860,6 +860,8 @@ const UnifiedMapSidebar = ({
   const [activeSidebarTab, setActiveSidebarTab] = useState("filter");
   const [isEditingSessions, setIsEditingSessions] = useState(false);
   const [sessionInputValue, setSessionInputValue] = useState("");
+  const [isSavingSessions, setIsSavingSessions] = useState(false);
+  const [sessionSaveError, setSessionSaveError] = useState("");
   
   // Accumulate all filter options seen across the session so they don't disappear on single selection
   const [accumulatedFilterOptions, setAccumulatedFilterOptions] = useState({
@@ -3478,33 +3480,49 @@ const UnifiedMapSidebar = ({
                           <>
                             <Input
                               value={sessionInputValue}
-                              onChange={(e) => setSessionInputValue(e.target.value)}
+                              onChange={(e) => {
+                                setSessionInputValue(e.target.value);
+                                setSessionSaveError("");
+                              }}
                               placeholder="Enter session ids: 1001,1002"
                               className="h-8 bg-slate-900 border-slate-700 text-xs text-white"
+                              disabled={isSavingSessions}
                             />
                             <div className="grid grid-cols-2 gap-2">
                               <Button
                                 type="button"
                                 size="sm"
                                 className="h-8 min-w-0 justify-center gap-1.5 px-2 text-xs bg-blue-600 hover:bg-blue-500"
-                                onClick={() => {
+                                disabled={isSavingSessions}
+                                onClick={async () => {
                                   const nextSessionIds = String(sessionInputValue || "")
                                     .split(/[;,|]/)
                                     .map((id) => id.trim())
                                     .filter(Boolean);
-                                  onSessionIdsChange?.(nextSessionIds);
-                                  setIsEditingSessions(false);
+                                  setIsSavingSessions(true);
+                                  setSessionSaveError("");
+                                  try {
+                                    const saved = await onSessionIdsChange?.(nextSessionIds);
+                                    if (saved !== false) setIsEditingSessions(false);
+                                    else setSessionSaveError("Could not save sessions. Your draft is still available to retry.");
+                                  } catch (error) {
+                                    setSessionSaveError(error?.message || "Could not save sessions. Your draft is still available to retry.");
+                                  } finally {
+                                    setIsSavingSessions(false);
+                                  }
                                 }}
                               >
                                 <Check className="h-3.5 w-3.5 shrink-0" />
-                                Save
+                                {isSavingSessions ? "Saving…" : "Save"}
                               </Button>
                               <Button
                                 type="button"
                                 size="sm"
                                 variant="outline"
                                 className="h-8 min-w-0 justify-center gap-1.5 px-2 text-xs border-slate-600 bg-slate-900/70 text-slate-200 hover:bg-slate-800 hover:text-white"
+                                disabled={isSavingSessions}
                                 onClick={() => {
+                                  setSessionSaveError("");
                                   setSessionInputValue(
                                     Array.isArray(sessionIds) ? sessionIds.join(", ") : "",
                                   );
@@ -3515,6 +3533,9 @@ const UnifiedMapSidebar = ({
                                 Cancel
                               </Button>
                             </div>
+                            {sessionSaveError && (
+                              <p role="alert" className="text-xs text-red-300">{sessionSaveError}</p>
+                            )}
                           </>
                         ) : (
                           <Button

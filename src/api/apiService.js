@@ -2,6 +2,12 @@
 import axios from 'axios';
 import { clearProjectSessionCache } from '../utils/projectSessionCache';
 import {
+  canDeduplicateRequest,
+  createRequestCancelledError,
+  dedupeRequest,
+  RequestQueue,
+} from './requestQueue';
+import {
   clearStoredUser,
   getCurrentAppLocation,
   isElectronRuntime,
@@ -68,43 +74,6 @@ export const setAuthErrorHandler = (handler) => {
 // yeh function is used to set a global handler for authentication errors (like 401/403). When such an error occurs, the handler will be called to, for example, redirect the user to the login page. This allows us to centralize auth error handling in one place (like AuthProvider) instead of having to handle it in every API call.
 
 
-class RequestQueue {
-  constructor(maxConcurrent = 4) {
-    this.maxConcurrent = maxConcurrent;
-    this.running = 0;
-    this.queue = [];
-  }
-
-  async add(fn, priority = 0) {
-    return new Promise((resolve, reject) => {
-      this.queue.push({ fn, resolve, reject, priority });
-      this.queue.sort((a, b) => b.priority - a.priority); // Higher priority first
-      this.process();
-    });
-  }
-
-  async process() {
-    if (this.running >= this.maxConcurrent || this.queue.length === 0) return;
-
-    const { fn, resolve, reject } = this.queue.shift();
-    this.running++;
-
-    try {
-      const result = await fn();
-      resolve(result);
-    } catch (error) {
-      reject(error);
-    } finally {
-      this.running--;
-      this.process();
-    }
-  }
-
-  clear() {
-    this.queue = [];
-  }
-}
-
 const requestQueue = new RequestQueue(4); // Max 4 concurrent requests
 const activeAbortControllers = new Set();
 
@@ -112,19 +81,6 @@ const activeAbortControllers = new Set();
 // REQUEST CACHE - Prevents duplicate in-flight requests
 // ============================================
 const inFlightRequests = new Map();
-
-const dedupeRequest = async (key, fn) => {
-  if (inFlightRequests.has(key)) {
-    return inFlightRequests.get(key);
-  }
-
-  const promise = fn().finally(() => {
-    inFlightRequests.delete(key);
-  });
-
-  inFlightRequests.set(key, promise);
-  return promise;
-};
 
 // ============================================
 // AXIOS INSTANCE
@@ -316,15 +272,12 @@ const apiService = async (endpoint, options = {}) => {
     if (cancelOnNavigation) activeAbortControllers.add(controller);
 
     // Preserve caller-provided abort signal while allowing global cancellation.
+    const forwardCallerAbort = () => controller.abort();
     if (axiosOptions.signal) {
       if (axiosOptions.signal.aborted) {
         controller.abort();
       } else {
-        axiosOptions.signal.addEventListener(
-          'abort',
-          () => controller.abort(),
-          { once: true }
-        );
+        axiosOptions.signal.addEventListener('abort', forwardCallerAbort, { once: true });
       }
     }
 
@@ -337,6 +290,7 @@ const apiService = async (endpoint, options = {}) => {
       return response.status === 204 ? null : response.data;
     } finally {
       activeAbortControllers.delete(controller);
+      axiosOptions.signal?.removeEventListener('abort', forwardCallerAbort);
     }
   };
 
@@ -354,11 +308,11 @@ const apiService = async (endpoint, options = {}) => {
       data: axiosOptions.data
     });
 
-    if (dedupe) {
-      return dedupeRequest(cacheKey, () => requestQueue.add(makeRequest, priority));
+    if (canDeduplicateRequest(dedupe, axiosOptions.signal)) {
+      return dedupeRequest(inFlightRequests, cacheKey, () => requestQueue.add(makeRequest, priority));
     }
 
-    return requestQueue.add(makeRequest, priority);
+    return requestQueue.add(makeRequest, priority, { signal: axiosOptions.signal });
   }
 
   return makeRequest();
@@ -413,5 +367,7 @@ export const cancelAllRequests = () => {
   requestQueue.clear();
   inFlightRequests.clear();
 };
+
+export { createRequestCancelledError };
 
 export default api;
