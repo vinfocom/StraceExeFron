@@ -18,6 +18,7 @@ import { startWorkerRequest } from "@/utils/l3Events/workerRequest.js";
 import { ExcelSignalingView } from "@/components/unifiedMap/tabs/l3Events/ExcelSignalingView";
 import { ProtocolAnalyzerView } from "@/components/unifiedMap/tabs/l3Events/ProtocolAnalyzerView";
 import { TimelineCard } from "@/components/unifiedMap/tabs/l3Events/TimelineCard";
+import { RfInvestigationView } from "@/components/unifiedMap/tabs/l3Events/RfInvestigationView";
 import {
   HomeCallSummary,
   L3EventsMapView,
@@ -33,6 +34,7 @@ const VIEW_TABS = [
   { id: "analyzer", label: "Analyzer" },
   { id: "l3", label: "All L3 Messages" },
   { id: "events", label: "All Events" },
+  { id: "rf", label: "RF Investigation" },
 ];
 
 const valueOf = (row, ...keys) => {
@@ -225,6 +227,30 @@ function networkLogRowsFromResponse(response) {
   if (Array.isArray(payload.result)) return payload.result;
   if (Array.isArray(payload.Result)) return payload.Result;
   return [];
+}
+
+async function loadRfNetworkRows(scope, signal) {
+  const sessionIds = String(scope?.sessionIds || "").split(",").map((value) => value.trim()).filter(Boolean);
+  if (!sessionIds.length) return { rows: [], unavailable: true };
+  const pageSize = 20000;
+  const maxPages = 100;
+  const rows = [];
+  let reportedCount = null;
+  let explicitIncomplete = false;
+  for (let page = 1; page <= maxPages; page += 1) {
+    const response = await mapViewApi.getNetworkLog({ session_ids: sessionIds.join(","), page, limit: pageSize, signal });
+    const pageRows = networkLogRowsFromResponse(response);
+    const body = response?.data ?? response ?? {};
+    if (page === 1) {
+      const count = Number(response?.total_count ?? response?.totalCount ?? response?.TotalCount ?? body.total_count ?? body.totalCount ?? body.TotalCount ?? body.totalRows ?? body.total_rows);
+      reportedCount = Number.isFinite(count) && count >= 0 ? count : null;
+      explicitIncomplete = Boolean(response?.isPartial || response?.is_partial || response?.truncated || response?.isTruncated || response?.is_truncated || response?.hasMore || response?.has_more || response?.isComplete === false || response?.is_complete === false || body.isPartial || body.is_partial || body.truncated || body.isTruncated || body.is_truncated || body.hasMore || body.has_more || body.isComplete === false || body.is_complete === false);
+    }
+    rows.push(...pageRows);
+    if (pageRows.length < pageSize || (reportedCount !== null && rows.length >= reportedCount)) break;
+    if (page === maxPages) explicitIncomplete = true;
+  }
+  return { rows, reportedCount, explicitIncomplete, unavailable: false };
 }
 
 async function loadMapNetworkRows(scope, signal) {
@@ -740,6 +766,10 @@ function BackendAnalyzer({ sessionIds, analysisId, projectName, onBack }) {
   const [protocolAnalysis, setProtocolAnalysis] = useState(null);
   const [analysisError, setAnalysisError] = useState("");
   const [mapOpened, setMapOpened] = useState(false);
+  const [rfNetworkData, setRfNetworkData] = useState(null);
+  const [rfNetworkLoading, setRfNetworkLoading] = useState(false);
+  const [rfNetworkError, setRfNetworkError] = useState("");
+  const [rfNetworkRetry, setRfNetworkRetry] = useState(0);
   const [loadResponse] = useState(() => createBackendL3Loader(l3EventApi.getDiagnosticL3Summary));
   const [loadMapRows] = useState(() => createBackendScopedLoader(l3EventApi.getMapRows));
   const [loadExcelRows] = useState(() => createBackendScopedLoader(l3EventApi.getExcelRows));
@@ -777,6 +807,9 @@ function BackendAnalyzer({ sessionIds, analysisId, projectName, onBack }) {
     setViewLoadMeta({});
     setDetailsLoadMeta(null);
     setProtocolAnalysis(null);
+    setRfNetworkData(null);
+    setRfNetworkError("");
+    setRfNetworkLoading(false);
   }, [datasetKey]);
 
   useEffect(() => {
@@ -818,7 +851,7 @@ function BackendAnalyzer({ sessionIds, analysisId, projectName, onBack }) {
   }, [error, loadTabCounts, loading, scope, tabCounts]);
 
   useEffect(() => {
-    if (loading || error || !["analyzer", "l3", "events"].includes(activeView) || detailsLoaded) return;
+    if (loading || error || !["analyzer", "l3", "events", "rf"].includes(activeView) || detailsLoaded) return;
     let cancelled = false;
     setDetailsError("");
     loadResponse({ ...scope, includeRows: true }).then((response) => {
@@ -901,6 +934,49 @@ function BackendAnalyzer({ sessionIds, analysisId, projectName, onBack }) {
     return () => { cancelled = true; networkAbort.abort(); worker?.terminate(); };
   }, [activeView, error, excelRows, loadExcelRows, loadMapRows, loading, mapRows, scope, summary.calls, summary.detectedServices?.hasVolte, viewRetry]);
 
+  useEffect(() => {
+    if (activeView !== "rf" || loading || error || !detailsLoaded || rfNetworkData) return;
+    let cancelled = false;
+    const controller = new AbortController();
+    let task = null;
+    setRfNetworkLoading(true);
+    setRfNetworkError("");
+    const requestId = `rf:${datasetKey}:${rfNetworkRetry}`;
+    loadRfNetworkRows(scope, controller.signal).then((result) => {
+      if (cancelled) return;
+      if (result.unavailable) {
+        setRfNetworkData({ unavailable: true, samples: [], messages: [], complete: false });
+        return;
+      }
+      task = startWorkerRequest(
+        () => new Worker(new URL("../workers/rfInvestigation.worker.js", import.meta.url), { type: "module" }),
+        { id: requestId, datasetId: datasetKey, timeline, networkRows: result.rows },
+        requestId,
+      );
+      return task.promise.then(({ analysis }) => {
+        if (cancelled) return;
+        const capNotice = getCompletenessNotice(
+          result.rows.length,
+          result.rows.length >= 2_000_000 ? 2_000_000 : 0,
+          result.reportedCount,
+          result.explicitIncomplete,
+        );
+        const complete = !result.explicitIncomplete && result.reportedCount !== null && result.rows.length >= result.reportedCount;
+        const completenessNotice = capNotice || (!complete ? "RF row completeness is unknown because this response did not report a total row count or completion flag." : "");
+        setRfNetworkData({ ...analysis, unavailable: false, complete, completenessNotice });
+      });
+    }).catch((requestError) => {
+      if (!cancelled && requestError?.name !== "AbortError") setRfNetworkError(requestError?.response?.data?.message || requestError?.message || "Failed to load RF network measurements.");
+    }).finally(() => {
+      if (!cancelled) setRfNetworkLoading(false);
+    });
+    return () => {
+      cancelled = true;
+      controller.abort();
+      task?.cancel();
+    };
+  }, [activeView, datasetKey, detailsLoaded, error, loading, rfNetworkData, rfNetworkRetry, scope, timeline]);
+
   const protocolTimeline = useMemo(() => {
     if (!selectedCall) return timeline;
     const start = selectedCall.startTime?.getTime();
@@ -912,7 +988,7 @@ function BackendAnalyzer({ sessionIds, analysisId, projectName, onBack }) {
   }, [selectedCall, timeline]);
   const enrichedSummary = summary;
   useEffect(() => {
-    if (!detailsLoaded || activeView !== "analyzer") return;
+    if (!detailsLoaded || !["analyzer", "rf"].includes(activeView)) return;
     let cancelled = false;
     const worker = new Worker(new URL("../workers/backendProtocolAnalysis.worker.js", import.meta.url), { type: "module" });
     setAnalysisError("");
@@ -927,9 +1003,9 @@ function BackendAnalyzer({ sessionIds, analysisId, projectName, onBack }) {
       if (!cancelled) setAnalysisError(workerError.message || "Protocol analysis worker failed.");
       worker.terminate();
     };
-    worker.postMessage({ id: scope.sessionIds, timeline: protocolTimeline });
+    worker.postMessage({ id: `${scope.sessionIds}:${datasetKey}`, timeline: activeView === "rf" ? timeline : protocolTimeline });
     return () => { cancelled = true; worker.terminate(); };
-  }, [activeView, detailsLoaded, protocolTimeline, scope.sessionIds]);
+  }, [activeView, datasetKey, detailsLoaded, protocolTimeline, scope.sessionIds, timeline]);
   const mapPoints = useMemo(() => mapRows ? buildMapPoints(mapRows, mapRsrpByRowId || new Map()) : [], [mapRows, mapRsrpByRowId]);
   const mapCompletenessNotice = getCompletenessNotice(
     viewLoadMeta.map?.loadedCount,
@@ -993,8 +1069,9 @@ function BackendAnalyzer({ sessionIds, analysisId, projectName, onBack }) {
     if (tabId === "analyzer") return tabCounts?.analyzer_count ?? protocolAnalysis?.stats?.totalProcedures ?? null;
     if (tabId === "l3") return l3Messages.length || counts.l3_count || 0;
     if (tabId === "events") return eventMessages.length || counts.event_count || 0;
+    if (tabId === "rf") return rfNetworkData?.samples?.length ?? null;
     return 0;
-  }, [activeView, counts.event_count, counts.excel_view_count, counts.l3_count, enrichedSummary?.totalCalls, eventMessages.length, l3Messages.length, mapRows?.length, excelRows?.length, protocolAnalysis?.stats?.totalProcedures, tabCounts]);
+  }, [activeView, counts.event_count, counts.excel_view_count, counts.l3_count, enrichedSummary?.totalCalls, eventMessages.length, l3Messages.length, mapRows?.length, excelRows?.length, protocolAnalysis?.stats?.totalProcedures, rfNetworkData?.samples?.length, tabCounts]);
   const visibleRawRows = useMemo(() => {
     const needle = search.trim().toLowerCase();
     if (!needle) return rawRows;
@@ -1029,7 +1106,7 @@ function BackendAnalyzer({ sessionIds, analysisId, projectName, onBack }) {
         {activeView === "excel" && !excelRows && (viewErrors.excel
           ? <div className="p-4 text-red-300">{viewErrors.excel}<button type="button" onClick={() => setViewRetry((current) => ({ ...current, excel: (current.excel || 0) + 1 }))} className="ml-3 rounded border border-slate-600 px-3 py-1 text-white">Retry</button></div>
           : <div className="flex items-center justify-center p-8 text-blue-300"><Loader2 className="mr-2 h-5 w-5 animate-spin" />Loading Excel rows...</div>)}
-        {["analyzer", "l3", "events"].includes(activeView) && !detailsLoaded && (detailsError
+        {["analyzer", "l3", "events", "rf"].includes(activeView) && !detailsLoaded && (detailsError
           ? <div className="p-4 text-red-300">{detailsError}<button type="button" onClick={() => setDetailsRetry(value => value + 1)} className="ml-3 rounded border border-slate-600 px-3 py-1 text-white">Retry</button></div>
           : <div className="flex items-center justify-center p-8 text-blue-300"><Loader2 className="mr-2 h-5 w-5 animate-spin" />Loading detailed logs...</div>)}
         {activeView === "summary" && <div className="h-full overflow-auto p-3"><HomeCallSummary summary={enrichedSummary} timeline={timeline} /></div>}
@@ -1054,6 +1131,8 @@ function BackendAnalyzer({ sessionIds, analysisId, projectName, onBack }) {
           <ExcelSignalingView key={datasetKey} rows={excelRows} calls={enrichedSummary.calls} selectedCall={selectedCall} onSelectCall={setSelectedCall} sourceFileName={analysisId ? `l3-session-${analysisId}` : `sessions-${sessionIds.join("-")}`} active={activeView === "excel"} />
         </div>}
         {detailsCompletenessNotice && ["analyzer", "l3", "events"].includes(activeView) && <div role="status" className="shrink-0 border-b border-amber-500/30 bg-amber-950/40 px-3 py-2 text-xs text-amber-200">{detailsCompletenessNotice}</div>}
+        {detailsLoaded && activeView === "rf" && rfNetworkData?.completenessNotice && <div role="status" className="shrink-0 border-b border-amber-500/30 bg-amber-950/40 px-3 py-2 text-xs text-amber-200">{rfNetworkData.completenessNotice}</div>}
+        {detailsLoaded && activeView === "rf" && <RfInvestigationView datasetId={datasetKey} timeline={timeline} calls={enrichedSummary.calls} procedures={protocolAnalysis?.procedures || []} sessionIds={sessionIds.map(String)} completeness={rfNetworkData?.complete && !detailsCompletenessNotice ? "complete" : "unknown or partial"} completenessNotice={detailsCompletenessNotice} loading={rfNetworkLoading} error={rfNetworkError} onRetry={() => { setRfNetworkData(null); setRfNetworkRetry((value) => value + 1); }} networkData={rfNetworkData} />}
         {detailsLoaded && activeView === "analyzer" && <div className="flex h-full min-h-0 flex-col"><div className="flex shrink-0 gap-3 border-b border-slate-800 px-3 py-1.5 text-[11px] text-slate-300"><span>RRC: {protocolAnalysis?.states?.rrc || "—"}</span><span>NAS: {protocolAnalysis?.states?.nas || "—"}</span><span>IMS: {protocolAnalysis?.states?.ims || "—"}</span><span>Failures: {protocolAnalysis?.stats?.failures ?? 0}</span>{analysisError && <span className="text-red-300">{analysisError}</span>}</div><div className="min-h-0 flex-1">{protocolAnalysis ? <ProtocolAnalyzerView analysis={protocolAnalysis} calls={enrichedSummary.calls} callScoped={Boolean(selectedCall)} /> : <div className="flex h-full items-center justify-center text-blue-300"><Loader2 className="mr-2 h-5 w-5 animate-spin" />Analyzing protocol rows...</div>}</div></div>}
         {detailsLoaded && (activeView === "l3" || activeView === "events") && <div className="l3-glass flex h-full min-h-0 flex-col"><div className="l3-glass-subtle flex shrink-0 flex-wrap items-center justify-between gap-2 border-x-0 border-t-0 px-2 py-1"><div><h3 className="l3-ui-copy font-semibold text-white">{activeView === "l3" ? "All L3 Messages" : "All Event Rows"}</h3><p className="l3-meta-copy text-slate-400">Showing {visibleRawRows.length.toLocaleString()} of {rawRows.length.toLocaleString()} backend rows.</p></div><div className="relative w-full sm:w-80"><Search className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-slate-500" /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search timestamp, file, title, or raw text..." className="l3-glass-control l3-ui-copy w-full rounded-md py-2 pl-8 pr-2 text-white outline-none" /></div></div><div className="min-h-0 flex-1 space-y-2 overflow-auto">{visibleRawRows.length ? visibleRawRows.map((row) => <TimelineCard key={row.id} item={row} />) : <div className="py-10 text-center l3-ui-copy text-slate-400">No matching {activeView === "l3" ? "L3 messages" : "event rows"}.</div>}</div></div>}
       </main>

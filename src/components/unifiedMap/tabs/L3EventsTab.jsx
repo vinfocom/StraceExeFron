@@ -712,7 +712,7 @@ export function enrichCallSummaryTechnology(summary, procedures = []) {
   };
 }
 
-function getMapEventMarker(item = {}) {
+export function getMapEventMarker(item = {}) {
   const milestone = String(item.milestone || "").trim().toUpperCase();
   const eventKey = String(item.eventKey || "").trim().toUpperCase();
   const handoverClassification = String(item.handoverClassification || "").trim().toLowerCase();
@@ -913,7 +913,7 @@ function isFailurePoint(point) {
   return HANDOVER_FAILURE_TEXT_RE.test(text) || /\b(fail(?:ed|ure|uire)?|reject(?:ed)?|timeout|error|rlf|radio link failure|dropped|forbidden|unavailable)\b|\b[45]\d{2}\b/i.test(text);
 }
 
-export function L3EventsMapView({ points, onNeedRsrpAnalysis, active = true, datasetKey = null }) {
+export function L3EventsMapView({ points, onNeedRsrpAnalysis, active = true, datasetKey = null, autoCenter = true }) {
   const { isLoaded, loadError } = useJsApiLoader(GOOGLE_MAPS_LOADER_OPTIONS);
   const { getThresholdInfo, getThresholdsForMetric } = useColorForLog();
   const [isPlaying, setIsPlaying] = useState(false);
@@ -1113,6 +1113,7 @@ export function L3EventsMapView({ points, onNeedRsrpAnalysis, active = true, dat
         lng: currentPoint?.lng ?? points.reduce((sum, point) => sum + point.lng, 0) / points.length,
       }
     : DEFAULT_MAP_CENTER;
+  const initialCenterRef = useRef(center);
 
   useEffect(() => {
     if (shouldResetMapNavigation(previousDatasetKeyRef.current, resolvedDatasetKey)) {
@@ -1154,10 +1155,10 @@ export function L3EventsMapView({ points, onNeedRsrpAnalysis, active = true, dat
     if (!active || !mapInstance || !window.google?.maps?.event) return undefined;
     const frame = window.requestAnimationFrame(() => {
       window.google.maps.event.trigger(mapInstance, "resize");
-      if (currentPoint) mapInstance.setCenter({ lat: currentPoint.lat, lng: currentPoint.lng });
+      if (autoCenter && currentPoint) mapInstance.setCenter({ lat: currentPoint.lat, lng: currentPoint.lng });
     });
     return () => window.cancelAnimationFrame(frame);
-  }, [active, currentPoint, mapInstance]);
+  }, [active, autoCenter, currentPoint, mapInstance]);
 
   useEffect(() => {
     if (!active || !isPlaying || points.length <= 1) return undefined;
@@ -1312,7 +1313,7 @@ export function L3EventsMapView({ points, onNeedRsrpAnalysis, active = true, dat
           ) : (
             <GoogleMap
               mapContainerStyle={MAP_CONTAINER_STYLE}
-              center={center}
+              center={autoCenter ? center : initialCenterRef.current}
               zoom={points.length > 1 ? 13 : 15}
               onLoad={setMapInstance}
               onUnmount={() => setMapInstance(null)}
