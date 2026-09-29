@@ -1,4 +1,4 @@
-﻿// src/api/apiEndpoints.js
+// src/api/apiEndpoints.js
 import { CleaningServices } from "@mui/icons-material";
 import { api, CSHARP_BASE_URL } from "./apiService"; // C# Backend
 import { pythonApi, PYTHON_BASE_URL_EXPORT, getPythonApiBaseUrl } from "./pythonApiService"; // Python Backend
@@ -1345,6 +1345,15 @@ export const reportApi = {
       timeout: 600000,
       dedupe: false,
     }),
+  getExcelReportProgress: async (jobId) => {
+    if (!jobId) return null;
+    try {
+      const response = await api.get(`/api/ExcelReport/Progress/${encodeURIComponent(jobId)}`);
+      return response?.data || response;
+    } catch {
+      return null;
+    }
+  },
 };
 
 // "Per Technology" report (tools/New_pdf_report on the Python side) -- same
@@ -2766,6 +2775,15 @@ export const uniReport = {
       });
     } catch (error) {
       throw error;
+    }
+  },
+  getExcelReportProgress: async (jobId) => {
+    if (!jobId) return null;
+    try {
+      const response = await api.get(`/api/ExcelReport/Progress/${encodeURIComponent(jobId)}`);
+      return response?.data || response;
+    } catch {
+      return null;
     }
   },
 }
