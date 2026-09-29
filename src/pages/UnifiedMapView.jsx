@@ -42,6 +42,10 @@ import SavedSourceGeometryLayer from "@/components/unifiedMap/SavedSourceGeometr
 import { normalizeBandName } from "@/utils/colorUtils";
 import { logMapPlot } from "@/utils/mapPlotDebug";
 import { shouldShowInitialMapSpinner } from "@/features/unified-map/map/autoFit.js";
+import {
+  findNearestElevationSample,
+  normalizeElevationProfile,
+} from "@/features/unified-map/map/terrainElevationProfile.js";
 
 // Hooks
 import { useSiteData } from "@/hooks/useSiteData";
@@ -153,33 +157,119 @@ const getIndoorOutdoorBucket = (value) => {
   return formatIndoorOutdoorValue(value);
 };
 
-const TerrainElevationProfile = ({ drawing }) => {
-  const profile = Array.isArray(drawing?.elevationProfile)
-    ? drawing.elevationProfile
-    : [];
-  if (profile.length < 2) return null;
+const TerrainElevationProfile = ({ drawing, hoverControllerRef }) => {
+  const profile = normalizeElevationProfile(drawing?.elevationProfile);
+  const svgRef = useRef(null);
+  const pendingHoverFrameRef = useRef(null);
+  const pendingPointerRef = useRef(null);
+  const [hoveredSample, setHoveredSample] = useState(null);
 
   const width = 420;
   const height = 148;
   const pad = { top: 12, right: 14, bottom: 24, left: 48 };
   const plotWidth = width - pad.left - pad.right;
   const plotHeight = height - pad.top - pad.bottom;
-  const elevations = profile.map((point) => point.elevation);
+  const elevations = profile.length > 0
+    ? profile.map((point) => point.elevation)
+    : [0];
   const minElevation = Math.min(...elevations);
   const maxElevation = Math.max(...elevations);
   const elevationRange = Math.max(1, maxElevation - minElevation);
-  const totalDistance = Math.max(1, profile[profile.length - 1].distance);
-  const points = profile
-    .map((point) => {
+  const totalDistance = Math.max(1, Number(profile.at(-1)?.distance) || 0);
+  const pointLocations = profile.map((point) => {
       const x = pad.left + (point.distance / totalDistance) * plotWidth;
       const y = pad.top + ((maxElevation - point.elevation) / elevationRange) * plotHeight;
-      return `${x.toFixed(1)},${y.toFixed(1)}`;
-    })
-    .join(" ");
+      return { x, y };
+  });
+  const points = pointLocations.map(({ x, y }) => `${x.toFixed(1)},${y.toFixed(1)}`).join(" ");
   const horizontalLabel = totalDistance >= 1000
     ? `${(totalDistance / 1000).toFixed(2)} km`
     : `${Math.round(totalDistance)} m`;
   const terrainDistance = Number(drawing?.terrainDistance);
+  const target = useMemo(() => ({
+    drawingId: drawing?.id,
+    geometryRevision: drawing?.geometryRevision,
+    profileRevision: drawing?.profileRevision,
+  }), [drawing?.id, drawing?.geometryRevision, drawing?.profileRevision]);
+  const clearHover = useCallback(() => {
+    if (pendingHoverFrameRef.current !== null) {
+      cancelAnimationFrame(pendingHoverFrameRef.current);
+      pendingHoverFrameRef.current = null;
+    }
+    pendingPointerRef.current = null;
+    setHoveredSample(null);
+    hoverControllerRef?.current?.clearHover?.(target.drawingId);
+  }, [hoverControllerRef, target.drawingId]);
+
+  useEffect(() => {
+    const controller = hoverControllerRef?.current;
+    if (!controller) return undefined;
+    const clearChartHover = (drawingId) => {
+      if (drawingId !== undefined && String(drawingId) !== String(target.drawingId)) return;
+      clearHover();
+    };
+    controller.clearChartHover = clearChartHover;
+    clearHover();
+    return () => {
+      clearHover();
+      if (controller.clearChartHover === clearChartHover) delete controller.clearChartHover;
+    };
+  }, [clearHover, hoverControllerRef, target.drawingId, target.geometryRevision, target.profileRevision]);
+
+  const handlePointerMove = useCallback((event) => {
+    pendingPointerRef.current = { clientX: event.clientX, clientY: event.clientY };
+    if (pendingHoverFrameRef.current !== null) return;
+    pendingHoverFrameRef.current = requestAnimationFrame(() => {
+      pendingHoverFrameRef.current = null;
+      const pointer = pendingPointerRef.current;
+      pendingPointerRef.current = null;
+      const svg = svgRef.current;
+      const matrix = svg?.getScreenCTM?.();
+      if (!svg || !pointer) return;
+      let svgX;
+      let svgY;
+      if (matrix?.inverse && svg.createSVGPoint) {
+        const point = svg.createSVGPoint();
+        point.x = pointer.clientX;
+        point.y = pointer.clientY;
+        const local = point.matrixTransform(matrix.inverse());
+        svgX = local.x;
+        svgY = local.y;
+      } else {
+        const bounds = svg.getBoundingClientRect();
+        if (!bounds.width || !bounds.height) return;
+        svgX = ((pointer.clientX - bounds.left) / bounds.width) * width;
+        svgY = ((pointer.clientY - bounds.top) / bounds.height) * height;
+      }
+      if (svgX < pad.left || svgX > width - pad.right || svgY < pad.top || svgY > height - pad.bottom) {
+        clearHover();
+        return;
+      }
+      const fraction = (svgX - pad.left) / plotWidth;
+      const distance = Math.max(0, Math.min(totalDistance, fraction * totalDistance));
+      const sampleIndex = findNearestElevationSample(profile, distance);
+      if (sampleIndex < 0) {
+        clearHover();
+        return;
+      }
+      const sample = profile[sampleIndex];
+      setHoveredSample({ index: sampleIndex, sample });
+      hoverControllerRef?.current?.setHover?.(target, sample, sampleIndex);
+    });
+  }, [clearHover, height, hoverControllerRef, pad.bottom, pad.left, pad.right, pad.top, plotWidth, profile, target, totalDistance, width]);
+
+  const selectedPoint = hoveredSample ? pointLocations[hoveredSample.index] : null;
+  const tooltipX = selectedPoint
+    ? Math.max(pad.left, Math.min(selectedPoint.x + 9, width - pad.right - 112))
+    : 0;
+  const tooltipY = selectedPoint
+    ? Math.max(pad.top, Math.min(selectedPoint.y - 42, height - pad.bottom - 39))
+    : 0;
+  const formatDistance = (distance) => Number(distance) >= 1000
+    ? `${(Number(distance) / 1000).toFixed(2)} km`
+    : `${Math.round(Number(distance))} m`;
+
+  if (profile.length < 2) return null;
 
   return (
     <section className="absolute bottom-4 right-4 z-[650] w-[min(440px,calc(100%-2rem))] rounded-xl border border-slate-700 bg-slate-950/95 p-3 text-white shadow-2xl backdrop-blur-sm">
@@ -194,6 +284,7 @@ const TerrainElevationProfile = ({ drawing }) => {
         </div>
       </div>
       <svg
+        ref={svgRef}
         viewBox={`0 0 ${width} ${height}`}
         className="block w-full overflow-visible"
         role="img"
@@ -211,8 +302,30 @@ const TerrainElevationProfile = ({ drawing }) => {
         })}
         <line x1={pad.left} y1={height - pad.bottom} x2={width - pad.right} y2={height - pad.bottom} stroke="#64748b" />
         <polyline points={points} fill="none" stroke="#38bdf8" strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round" />
-        <circle cx={pad.left} cy={Number(points.split(" ")[0].split(",")[1])} r="3.5" fill="#22c55e" />
-        <circle cx={width - pad.right} cy={Number(points.split(" ").at(-1).split(",")[1])} r="3.5" fill="#f97316" />
+        <circle cx={pointLocations[0].x} cy={pointLocations[0].y} r="3.5" fill="#22c55e" />
+        <circle cx={pointLocations.at(-1).x} cy={pointLocations.at(-1).y} r="3.5" fill="#f97316" />
+        {selectedPoint && (
+          <g pointerEvents="none">
+            <line x1={selectedPoint.x} y1={pad.top} x2={selectedPoint.x} y2={height - pad.bottom} stroke="#fef08a" strokeDasharray="3 3" strokeWidth="1.5" />
+            <circle cx={selectedPoint.x} cy={selectedPoint.y} r="5" fill="#fef08a" stroke="#0f172a" strokeWidth="2" />
+            <g transform={`translate(${tooltipX} ${tooltipY})`}>
+              <rect width="106" height="36" rx="5" fill="#0f172a" stroke="#fef08a" strokeWidth="1" />
+              <text x="7" y="14" fill="#f8fafc" fontSize="10">{formatDistance(hoveredSample.sample.distance)}</text>
+              <text x="7" y="28" fill="#cbd5e1" fontSize="10">{Math.round(hoveredSample.sample.elevation)} m elevation</text>
+            </g>
+          </g>
+        )}
+        <rect
+          x={pad.left}
+          y={pad.top}
+          width={plotWidth}
+          height={plotHeight}
+          fill="transparent"
+          style={{ cursor: "crosshair", touchAction: "none" }}
+          onPointerMove={handlePointerMove}
+          onPointerLeave={clearHover}
+          onPointerCancel={clearHover}
+        />
         <text x={pad.left} y={height - 6} textAnchor="start" fill="#94a3b8" fontSize="10">0 km</text>
         <text x={width - pad.right} y={height - 6} textAnchor="end" fill="#94a3b8" fontSize="10">{horizontalLabel}</text>
       </svg>
@@ -2039,6 +2152,7 @@ const UnifiedMapView = () => {
   const [drawnShapeAnalytics, setDrawnShapeAnalytics] = useState([]);
   const [drawingDeleteRequest, setDrawingDeleteRequest] = useState(null);
   const drawingDeleteSequenceRef = useRef(0);
+  const terrainHoverControllerRef = useRef({});
   const [activeDrawingPreview, setActiveDrawingPreview] = useState([]);
   const [generatedMapLogs, setGeneratedMapLogs] = useState([]);
   const [newProjectPolygonName, setNewProjectPolygonName] = useState("");
@@ -6761,6 +6875,12 @@ const UnifiedMapView = () => {
         id: drawing?.id ?? null,
         type: drawing?.type ?? "shape",
         geometry: drawing?.geometry ?? null,
+        geometryRevision: Number.isFinite(Number(drawing?.geometryRevision))
+          ? Number(drawing.geometryRevision)
+          : 0,
+        profileRevision: Number.isFinite(Number(drawing?.profileRevision))
+          ? Number(drawing.profileRevision)
+          : 0,
         session: Array.isArray(drawing?.session) ? drawing.session : [],
         count: Number(drawing?.count) || 0,
         area: Number.isFinite(areaMeters) ? areaMeters : null,
@@ -6791,14 +6911,7 @@ const UnifiedMapView = () => {
         elevationSamples: Number.isFinite(Number(drawing?.samples))
           ? Number(drawing.samples)
           : null,
-        elevationProfile: Array.isArray(drawing?.elevationProfile)
-          ? drawing.elevationProfile
-              .map((point) => ({
-                distance: Number(point?.distance),
-                elevation: Number(point?.elevation),
-              }))
-              .filter((point) => Number.isFinite(point.distance) && Number.isFinite(point.elevation))
-          : [],
+        elevationProfile: normalizeElevationProfile(drawing?.elevationProfile),
         grid: grid
           ? {
             cells: Number.isFinite(gridCells) ? gridCells : 0,
@@ -8165,6 +8278,7 @@ const UnifiedMapView = () => {
                 deleteRequest={drawingDeleteRequest}
                 onActiveDrawingChange={setActiveDrawingPreview}
                 terrainEnabled={ui.basemapStyle === "terrain"}
+                terrainHoverControllerRef={terrainHoverControllerRef}
               />
 
               <SavedSourceGeometryLayer
@@ -8416,6 +8530,7 @@ const UnifiedMapView = () => {
           )}
           {ui.basemapStyle === "terrain" && (
             <TerrainElevationProfile
+              hoverControllerRef={terrainHoverControllerRef}
               drawing={[...(drawnShapeAnalytics || [])]
                 .reverse()
                 .find((item) => item?.type === "polyline" && item?.terrainMode && item?.elevationProfile?.length > 1)}
