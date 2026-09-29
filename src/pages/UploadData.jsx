@@ -140,6 +140,12 @@ const REPORT_TYPE_OPTIONS = {
   },
 };
 
+const formatElapsedSeconds = (totalSeconds) => {
+  const seconds = Math.max(0, Math.floor(Number(totalSeconds) || 0));
+  const minutes = Math.floor(seconds / 60);
+  return `${minutes}:${String(seconds % 60).padStart(2, "0")}`;
+};
+
 const normalizeSessionId = (value) => String(value ?? "").trim();
 
 const formatSessionCell = (sessionValue) => {
@@ -436,6 +442,9 @@ const UploadDataPage = () => {
   const [reportSheetNames, setReportSheetNames] = useState({});
   const [reportLoading, setReportLoading] = useState(false);
   const [reportError, setReportError] = useState(null);
+  const [reportProgress, setReportProgress] = useState(0);
+  const [reportStage, setReportStage] = useState("");
+  const [reportElapsedSeconds, setReportElapsedSeconds] = useState(0);
 
   const { loading, errorLog, uploadFile, setErrorLog } = useFileUpload();
 
@@ -777,9 +786,39 @@ const UploadDataPage = () => {
     }
     setReportLoading(true);
     setReportError(null);
+    setReportProgress(5);
+    setReportStage(reportType === "excel" ? "Uploading & preparing ZIP files..." : "Generating report...");
+    setReportElapsedSeconds(0);
+
+    const jobId = `zip_rep_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+    const startMs = Date.now();
+    const elapsedTimer = setInterval(() => {
+      setReportElapsedSeconds(Math.floor((Date.now() - startMs) / 1000));
+    }, 1000);
+
+    let pollTimer = null;
+    if (reportType === "excel") {
+      pollTimer = setInterval(async () => {
+        try {
+          const statusData = await uniReport.getExcelReportProgress(jobId);
+          if (statusData && typeof statusData.Progress === "number") {
+            setReportProgress(statusData.Progress);
+            if (statusData.Stage) setReportStage(statusData.Stage);
+          } else if (statusData && typeof statusData.progress === "number") {
+            setReportProgress(statusData.progress);
+            if (statusData.stage) setReportStage(statusData.stage);
+          }
+        } catch {
+          // ignore transient polling error
+        }
+      }, 500);
+    }
 
     try {
       const formData = new FormData();
+      formData.append("JobId", jobId);
+      formData.append("jobId", jobId);
+
       const fileField = reportType === "excel" ? "LogZips" : "LogZip";
       reportFiles.forEach((file) => formData.append(fileField, file));
       formData.append("Title", reportTitle || "");
@@ -814,7 +853,10 @@ const UploadDataPage = () => {
 
       if (discoveredBands.length > 0 && bandsToSubmit.length === 0) {
         toast.warn("Please select at least one file band.");
+        if (pollTimer) clearInterval(pollTimer);
+        clearInterval(elapsedTimer);
         setReportLoading(false);
+        setReportProgress(0);
         return;
       }
 
@@ -827,6 +869,12 @@ const UploadDataPage = () => {
 
       const reportHandler = REPORT_TYPE_OPTIONS[reportType] || REPORT_TYPE_OPTIONS.pdf;
       const blob = await reportHandler.generate(formData);
+
+      if (pollTimer) clearInterval(pollTimer);
+      clearInterval(elapsedTimer);
+      setReportProgress(100);
+      setReportStage("Completed! Downloading file...");
+
       const downloadUrl = window.URL.createObjectURL(blob);
       const link = document.createElement("a");
       const safeBands = bandsToSubmit.join("-") || "ALL";
@@ -851,11 +899,21 @@ const UploadDataPage = () => {
       window.URL.revokeObjectURL(downloadUrl);
       toast.success(`${reportHandler.label} report downloaded successfully!`);
     } catch (err) {
+      if (pollTimer) clearInterval(pollTimer);
+      clearInterval(elapsedTimer);
+      setReportProgress(0);
+      setReportStage("");
       const message = err?.message || "Failed to generate the report.";
       setReportError(message);
       toast.error(message);
     } finally {
+      if (pollTimer) clearInterval(pollTimer);
+      clearInterval(elapsedTimer);
       setReportLoading(false);
+      setTimeout(() => {
+        setReportProgress((prev) => (prev === 100 ? 0 : prev));
+        setReportStage("");
+      }, 4000);
     }
   };
 
@@ -1476,13 +1534,57 @@ const UploadDataPage = () => {
 
                 
 
+                {/* Progress Bar during generation */}
+                {(reportLoading || reportProgress > 0) && (
+                  <div className="w-full rounded-xl border border-emerald-500/40 bg-black/60 p-4 text-white shadow-2xl backdrop-blur-md transition-all duration-300">
+                    <div className="flex items-center justify-between gap-3 text-sm font-semibold mb-2">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <RefreshCw className={`h-4 w-4 shrink-0 text-emerald-400 ${reportLoading ? "animate-spin" : ""}`} />
+                        <span className="truncate text-emerald-200">
+                          {reportStage || (reportProgress >= 100 ? "Report Generated!" : "Processing report on server...")}
+                        </span>
+                      </div>
+                      <span className="text-base font-bold text-emerald-400 shrink-0 font-mono">
+                        {reportProgress}%
+                      </span>
+                    </div>
+
+                    {/* Progress Bar Track */}
+                    <div className="h-3 w-full overflow-hidden rounded-full bg-white/10 p-0.5 border border-white/10 shadow-inner">
+                      <div
+                        className="h-full rounded-full bg-gradient-to-r from-emerald-500 via-green-400 to-teal-300 shadow transition-all duration-300 ease-out"
+                        style={{ width: `${Math.max(5, Math.min(100, reportProgress))}%` }}
+                      />
+                    </div>
+
+                    {/* Footer Info */}
+                    <div className="mt-2 flex items-center justify-between text-xs text-gray-300">
+                      <span>⏱ Elapsed: {formatElapsedSeconds(reportElapsedSeconds)}</span>
+                      <span className="text-emerald-300 font-medium">
+                        {reportProgress >= 100
+                          ? "✅ Download ready!"
+                          : reportProgress >= 88
+                          ? "📦 Finalizing Excel file..."
+                          : reportProgress >= 50
+                          ? "📊 Generating sheets & legends..."
+                          : reportProgress >= 30
+                          ? "🧹 Cleaning network logs..."
+                          : "⏳ Extracting zip data..."}
+                      </span>
+                    </div>
+                  </div>
+                )}
+
                 <Button
                   onClick={handleGenerateReport}
                   disabled={reportLoading}
-                  className="w-full bg-green-600 hover:bg-green-700 text-white font-medium py-2 px-4 rounded-md transition"
+                  className="w-full bg-green-600 hover:bg-green-700 text-white font-medium py-2 px-4 rounded-md transition shadow"
                 >
                   {reportLoading ? (
-                    <><RefreshCw className="mr-2 h-4 w-4 animate-spin" /> Generating...</>
+                    <>
+                      <RefreshCw className="mr-2 h-4 w-4 animate-spin" />
+                      Generating Report ({reportProgress}%)...
+                    </>
                   ) : (
                     `Generate & Download ${REPORT_TYPE_OPTIONS[reportType]?.label || "PDF"} Report`
                   )}

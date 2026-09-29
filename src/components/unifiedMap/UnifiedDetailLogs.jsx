@@ -994,14 +994,52 @@ Technologies: ${dataFilters.technologies?.join(", ") || "None"}
     setIsExporting(true);
     setExportType("excel");
 
+    const jobId = `excel_map_${projectId}_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+    const startMs = Date.now();
+    const toastId = toast.info(
+      <ReportProgressToast
+        percent={5}
+        label="Preparing Excel report..."
+        elapsedSeconds={0}
+      />,
+      { autoClose: false, closeOnClick: false, draggable: false }
+    );
+
+    const pollInterval = setInterval(async () => {
+      try {
+        const data = await reportApi.getExcelReportProgress(jobId);
+        const elapsed = Math.floor((Date.now() - startMs) / 1000);
+        const pct = typeof data?.Progress === "number" ? data.Progress : typeof data?.progress === "number" ? data.progress : null;
+        const stage = data?.Stage || data?.stage || "Generating Excel report...";
+        if (pct !== null) {
+          toast.update(toastId, {
+            render: (
+              <ReportProgressToast
+                percent={pct}
+                label={stage}
+                elapsedSeconds={elapsed}
+              />
+            ),
+            type: "info",
+            isLoading: true,
+          });
+        }
+      } catch {
+        // ignore polling error
+      }
+    }, 600);
+
     try {
       const timestamp = getTimestampWithTime();
       const excelBlob = await reportApi.generateUnifiedMapExcel({
+        jobId: jobId,
         projectId: Number(projectId),
         sessionIds: sessionIds.map((id) => Number(id)).filter(Number.isFinite),
         reportMode: excelReportMode,
         filterByImageName: excelFilterByImageName,
       });
+
+      clearInterval(pollInterval);
 
       downloadBlob(
         excelBlob instanceof Blob
@@ -1012,11 +1050,25 @@ Technologies: ${dataFilters.technologies?.join(", ") || "None"}
         `${exportContextLabel}_report_${projectId}_${timestamp}.xlsx`,
       );
 
-      toast.success("Excel report downloaded successfully!");
+      toast.update(toastId, {
+        render: "Excel report downloaded successfully!",
+        type: "success",
+        isLoading: false,
+        autoClose: 4000,
+        closeOnClick: true,
+      });
     } catch (error) {
+      clearInterval(pollInterval);
       console.error("Export Excel report error:", error);
-      toast.error(error?.message || "Failed to generate Excel report");
+      toast.update(toastId, {
+        render: error?.message || "Failed to generate Excel report",
+        type: "error",
+        isLoading: false,
+        autoClose: 5000,
+        closeOnClick: true,
+      });
     } finally {
+      clearInterval(pollInterval);
       setIsExporting(false);
       setExportType(null);
     }
