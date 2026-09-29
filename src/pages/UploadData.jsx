@@ -436,6 +436,7 @@ const UploadDataPage = () => {
   const [reportTitle, setReportTitle] = useState("");
   const [reportType, setReportType] = useState("pdf");
   const [reportMode, setReportMode] = useState("separate");
+  const [earfcnMode, setEarfcnMode] = useState("earfcn_wise");
   const [filterByImageName, setFilterByImageName] = useState(false);
   const [showSampleCount, setShowSampleCount] = useState(false);
   const [reportFileGroups, setReportFileGroups] = useState({});
@@ -737,6 +738,10 @@ const UploadDataPage = () => {
       const fileField = reportType === "excel" ? "LogZips" : "LogZip";
       reportFiles.forEach((file) => formData.append(fileField, file));
       formData.append("FilterByImageName", String(filterByImageName));
+      if (reportType === "excel") {
+        formData.append("EarfcnMode", earfcnMode);
+        formData.append("EarfcnWise", String(earfcnMode === "earfcn_wise"));
+      }
 
       const reportHandler = REPORT_TYPE_OPTIONS[reportType] || REPORT_TYPE_OPTIONS.pdf;
       const response = await reportHandler.discover(formData);
@@ -828,6 +833,8 @@ const UploadDataPage = () => {
 
       if (reportType === "excel") {
         formData.append("ReportMode", reportMode);
+        formData.append("EarfcnMode", earfcnMode);
+        formData.append("EarfcnWise", String(earfcnMode === "earfcn_wise"));
         const fileGroups =
           reportMode === "combined" ? buildReportFileGroups(reportFiles, reportFileGroups) : [];
         const sheetNames = buildReportSheetNames(
@@ -1331,24 +1338,48 @@ const UploadDataPage = () => {
 
             <div className="space-y-4 rounded-md border border-white/20 bg-white/5 p-4">
               {reportType === "excel" && (
-                <div className="space-y-2">
-                  <label className="block text-sm font-semibold">Report Mode</label>
-                  <Select
-                    value={reportMode}
-                    onValueChange={setReportMode}
-                    disabled={reportLoading}
-                  >
-                    <SelectTrigger className="bg-white text-black">
-                      <SelectValue placeholder="Select report mode" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="separate">Separate</SelectItem>
-                      <SelectItem value="combined">Combined</SelectItem>
-                    </SelectContent>
-                  </Select>
-                  <p className="text-xs text-gray-200">
-                    Sends <code>ReportMode</code> as <code>separate</code> or <code>combined</code>.
-                  </p>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <label className="block text-sm font-semibold">Report Mode</label>
+                    <Select
+                      value={reportMode}
+                      onValueChange={setReportMode}
+                      disabled={reportLoading}
+                    >
+                      <SelectTrigger className="bg-white text-black">
+                        <SelectValue placeholder="Select report mode" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="separate">Separate</SelectItem>
+                        <SelectItem value="combined">Combined</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <p className="text-xs text-gray-200">
+                      Sends <code>ReportMode</code> as <code>separate</code> or <code>combined</code>.
+                    </p>
+                  </div>
+
+                  <div className="space-y-2">
+                    <label className="block text-sm font-semibold">EARFCN Option</label>
+                    <Select
+                      value={earfcnMode}
+                      onValueChange={setEarfcnMode}
+                      disabled={reportLoading}
+                    >
+                      <SelectTrigger className="bg-white text-black">
+                        <SelectValue placeholder="Select EARFCN option" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="earfcn_wise">EARFCN Wise</SelectItem>
+                        <SelectItem value="without_earfcn_wise">Without EARFCN Wise</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <p className="text-xs text-gray-200">
+                      {earfcnMode === "earfcn_wise"
+                        ? "Separate blocks/sheets by EARFCN; EARFCN plot uses unique values."
+                        : "Do not separate by EARFCN; EARFCN plot uses ColorSettings range."}
+                    </p>
+                  </div>
                 </div>
               )}
 
