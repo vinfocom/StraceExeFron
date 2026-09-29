@@ -461,6 +461,7 @@ const ExportDropdown = ({
   const [isExportDialogOpen, setIsExportDialogOpen] = useState(false);
   const [isExcelConfigDialogOpen, setIsExcelConfigDialogOpen] = useState(false);
   const [excelReportMode, setExcelReportMode] = useState("separate");
+  const [excelEarfcnMode, setExcelEarfcnMode] = useState("earfcn_wise");
   const [excelFilterByImageName, setExcelFilterByImageName] = useState(true);
   const dropdownRef = useRef(null);
 
@@ -1036,6 +1037,8 @@ Technologies: ${dataFilters.technologies?.join(", ") || "None"}
         projectId: Number(projectId),
         sessionIds: sessionIds.map((id) => Number(id)).filter(Number.isFinite),
         reportMode: excelReportMode,
+        earfcnMode: excelEarfcnMode,
+        earfcnWise: excelEarfcnMode === "earfcn_wise",
         filterByImageName: excelFilterByImageName,
       });
 
@@ -1234,6 +1237,39 @@ Technologies: ${dataFilters.technologies?.join(", ") || "None"}
                   );
                 })}
               </div>
+            </div>
+
+            <div>
+              <p className="mb-2 text-sm font-medium text-slate-200">EARFCN Option</p>
+              <div className="grid grid-cols-2 gap-3">
+                {[
+                  { value: "earfcn_wise", label: "EARFCN Wise" },
+                  { value: "without_earfcn_wise", label: "Without EARFCN Wise" },
+                ].map((option) => {
+                  const isSelected = excelEarfcnMode === option.value;
+                  return (
+                    <button
+                      key={option.value}
+                      type="button"
+                      aria-pressed={isSelected}
+                      onClick={() => setExcelEarfcnMode(option.value)}
+                      disabled={isExporting}
+                      className={`rounded-lg border px-3 py-3 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-60 ${
+                        isSelected
+                          ? "border-sky-400 bg-sky-500/20 text-sky-200"
+                          : "border-slate-600 bg-slate-800 text-slate-300 hover:bg-slate-700"
+                      }`}
+                    >
+                      {option.label}
+                    </button>
+                  );
+                })}
+              </div>
+              <p className="mt-1.5 text-xs text-slate-400">
+                {excelEarfcnMode === "earfcn_wise"
+                  ? "Separate blocks/sheets by EARFCN with unique value plots."
+                  : "Combined band data without EARFCN separation."}
+              </p>
             </div>
 
             <label
