@@ -928,7 +928,7 @@ const UnifiedMapSidebar = ({
   }, [logSizeMeters]);
   const logGridDirty = Math.round(Number(logGridDraft) || 0) !== Math.round(appliedLogGridSize);
   const normalizedLteGridAggregationMethod =
-    lteGridAggregationMethod === "avg" ? "mean" : lteGridAggregationMethod || "mean";
+    lteGridAggregationMethod === "avg" ? "mean" : lteGridAggregationMethod || "max";
   const hasValidProjectId = useMemo(() => {
     const numericProjectId = Number(projectId);
     return Number.isFinite(numericProjectId) && numericProjectId > 0;
@@ -992,7 +992,7 @@ const UnifiedMapSidebar = ({
       const allOptions = [
         { value: "rsrp", label: "RSRP/RSSI/RXLevel" },
         { value: "rsrq", label: "RSRQ" },
-        { value: "sinr", label: "SINR/RXQual" },
+        { value: "sinr", label: "SINR/RXQual/Ec/no" },
         { value: "ci_db", label: "C/I" },
         { value: "dl_thpt", label: "DL Throughput" },
         { value: "ul_thpt", label: "UL Throughput" },

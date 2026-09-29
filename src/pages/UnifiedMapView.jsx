@@ -2143,12 +2143,12 @@ const UnifiedMapView = () => {
   const [lteGridEnabled, setLteGridEnabled] = useState(false);
   const [lteGridSizeMeters, setLteGridSizeMeters] = useState(50);
   const [lteGridAggregationMethod, setLteGridAggregationMethod] =
-    useState("mean");
+    useState("max");
   const normalizedLteGridAggregationMethod = useMemo(() => {
-    const normalized = String(lteGridAggregationMethod || "mean").trim().toLowerCase();
+    const normalized = String(lteGridAggregationMethod || "max").trim().toLowerCase();
     return normalized === "median" || normalized === "min" || normalized === "max"
       ? normalized
-      : "mean";
+      : "max";
   }, [lteGridAggregationMethod]);
   const handleLteGridAggregationMethodChange = useCallback((nextMethod) => {
     const normalizedMethod = String(nextMethod || "mean").trim().toLowerCase();
