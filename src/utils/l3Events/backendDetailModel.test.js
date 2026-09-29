@@ -1,6 +1,16 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { buildBackendDetailModel, createBackendL3Loader } from "./backendDetailModel.js";
+import {
+  buildPlaybackPoints,
+  buildBackendDetailModel,
+  createBackendL3Loader,
+  getCompletenessNotice,
+  getFiniteRsrpValue,
+  shouldEnableMapShortcuts,
+  shouldKeepExcelViewMounted,
+  shouldResetMapNavigation,
+  sortTimelineChronologically,
+} from "./backendDetailModel.js";
 
 test("summary excludes rows; detail tabs share one later request", async () => {
   const requests = [];
@@ -72,4 +82,70 @@ test("empty details produce a valid shared model", () => {
   assert.deepEqual(model.signalingRows, []);
   assert.deepEqual(model.analysis.procedures, []);
   assert.equal(model.analysis.stats.totalProcedures, 0);
+});
+
+test("filtered playback indexes are contiguous and retain original row identity and index", () => {
+  const timeline = [
+    { id: "bad-gps-0", lat: null, lng: 10 },
+    { id: "source-row-1", lat: 11, lng: 10 },
+    { id: "bad-gps-2", lat: 91, lng: 10 },
+    { id: "source-row-3", lat: 12, lng: 10 },
+  ];
+  const points = buildPlaybackPoints(timeline, (row, originalIndex) => (
+    Number.isFinite(row.lat) && row.lat >= -90 && row.lat <= 90
+      ? { id: row.id, sourceRowId: row.id, originalIndex }
+      : null
+  ));
+  assert.deepEqual(points.map(({ index, playbackIndex, originalIndex, id, sourceRowId }) => [index, playbackIndex, originalIndex, id, sourceRowId]), [
+    [0, 0, 1, "source-row-1", "source-row-1"],
+    [1, 1, 3, "source-row-3", "source-row-3"],
+  ]);
+});
+
+test("missing or blank RSRP values remain unknown instead of becoming zero", () => {
+  for (const value of [null, undefined, "", "   ", Infinity, "not-a-number"]) {
+    assert.equal(getFiniteRsrpValue(value), null);
+  }
+  assert.equal(getFiniteRsrpValue("-103.5"), -103.5);
+  assert.equal(getFiniteRsrpValue(0), 0);
+});
+
+test("interleaved rows are sorted by timestamp with stable ties and missing times last", () => {
+  const rows = [
+    { id: "diagnostic-late", timestamp: new Date("2026-09-01T12:00:02Z"), sessionId: 1 },
+    { id: "network-early", timestamp: new Date("2026-09-01T12:00:01Z"), sessionId: 2 },
+    { id: "diagnostic-tie", timestamp: new Date("2026-09-01T12:00:01Z"), sessionId: 1 },
+    { id: "unknown-a", timestamp: null, sessionId: 1 },
+    { id: "unknown-b", timestamp: null, sessionId: 2 },
+  ];
+  const sorted = sortTimelineChronologically(rows);
+  assert.deepEqual(sorted.map(({ id }) => id), [
+    "network-early", "diagnostic-tie", "diagnostic-late", "unknown-a", "unknown-b",
+  ]);
+  assert.deepEqual(sorted.map(({ sessionId }) => sessionId), [2, 1, 1, 1, 2]);
+  assert.deepEqual(sorted.map(({ originalTimelineIndex }) => originalTimelineIndex), [1, 2, 0, 3, 4]);
+});
+
+test("map navigation resets only when the dataset identity changes", () => {
+  assert.equal(shouldResetMapNavigation("upload-42", "upload-42"), false);
+  assert.equal(shouldResetMapNavigation("upload-42", "upload-43"), true);
+});
+
+test("hidden maps do not register global playback shortcuts", () => {
+  assert.equal(shouldEnableMapShortcuts(false), false);
+  assert.equal(shouldEnableMapShortcuts(true), true);
+});
+
+test("loaded Excel view remains mounted across tab changes and remounts for a new dataset", () => {
+  assert.equal(shouldKeepExcelViewMounted(true), true);
+  assert.equal(shouldKeepExcelViewMounted(false), false);
+  assert.equal(shouldResetMapNavigation("sessions-1,2", "sessions-1,2"), false);
+  assert.equal(shouldResetMapNavigation("sessions-1,2", "sessions-3"), true);
+});
+
+test("row-cap metadata reports incomplete or potentially capped datasets", () => {
+  assert.match(getCompletenessNotice(100, 50000, 130), /loaded 100 of 130 rows/);
+  assert.match(getCompletenessNotice(50000, 50000), /may be incomplete/);
+  assert.equal(getCompletenessNotice(50000, 50000, 50000), "");
+  assert.equal(getCompletenessNotice(100, 50000, 100), "");
 });

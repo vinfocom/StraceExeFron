@@ -5,7 +5,16 @@ import { toast } from "react-toastify";
 import { l3EventApi, mapViewApi } from "@/api/apiEndpoints";
 import { parseTimestampValue } from "@/utils/l3Events/timelineBuilder";
 import { decodeEventItem, decodeL3Item } from "@/utils/l3Events/eventDecoder";
-import { createBackendL3Loader, createBackendScopedLoader } from "@/utils/l3Events/backendDetailModel";
+import {
+  createBackendL3Loader,
+  createBackendScopedLoader,
+  getCompletenessNotice,
+  hasExplicitlyIncompleteRows,
+  readReportedRowCount,
+  shouldKeepExcelViewMounted,
+  sortTimelineChronologically,
+} from "@/utils/l3Events/backendDetailModel.js";
+import { startWorkerRequest } from "@/utils/l3Events/workerRequest.js";
 import { ExcelSignalingView } from "@/components/unifiedMap/tabs/l3Events/ExcelSignalingView";
 import { ProtocolAnalyzerView } from "@/components/unifiedMap/tabs/l3Events/ProtocolAnalyzerView";
 import { TimelineCard } from "@/components/unifiedMap/tabs/l3Events/TimelineCard";
@@ -719,10 +728,15 @@ function BackendAnalyzer({ sessionIds, analysisId, projectName, onBack }) {
   const [mapRows, setMapRows] = useState(null);
   const [mapRsrpByRowId, setMapRsrpByRowId] = useState(null);
   const [mapRsrpRequested, setMapRsrpRequested] = useState(false);
+  const [mapRsrpRetry, setMapRsrpRetry] = useState(0);
+  const [mapRsrpStatus, setMapRsrpStatus] = useState("idle");
+  const [mapRsrpError, setMapRsrpError] = useState("");
   const [excelRows, setExcelRows] = useState(null);
   const [tabCounts, setTabCounts] = useState(null);
   const [viewErrors, setViewErrors] = useState({});
   const [viewRetry, setViewRetry] = useState({});
+  const [viewLoadMeta, setViewLoadMeta] = useState({});
+  const [detailsLoadMeta, setDetailsLoadMeta] = useState(null);
   const [protocolAnalysis, setProtocolAnalysis] = useState(null);
   const [analysisError, setAnalysisError] = useState("");
   const [mapOpened, setMapOpened] = useState(false);
@@ -734,7 +748,36 @@ function BackendAnalyzer({ sessionIds, analysisId, projectName, onBack }) {
   const [l3Messages, setL3Messages] = useState([]);
   const [eventMessages, setEventMessages] = useState([]);
   const sessionKey = sessionIds.join(",");
+  const datasetKey = analysisId ? `upload:${analysisId}` : `sessions:${sessionKey}`;
+  const previousDatasetKeyRef = useRef(datasetKey);
   const scope = useMemo(() => ({ sessionIds: sessionKey, uploadId: analysisId, take: TAKE }), [analysisId, sessionKey]);
+
+  useEffect(() => {
+    if (previousDatasetKeyRef.current === datasetKey) return;
+    previousDatasetKeyRef.current = datasetKey;
+    setLoading(true);
+    setError("");
+    setActiveView("summary");
+    setSearch("");
+    setSelectedCall(null);
+    setCounts({});
+    setSummary(normalizeSummary(null));
+    setTimeline([]);
+    setDetailsLoaded(false);
+    setDetailsError("");
+    setMapRows(null);
+    setMapOpened(false);
+    setMapRsrpByRowId(null);
+    setMapRsrpRequested(false);
+    setMapRsrpStatus("idle");
+    setMapRsrpError("");
+    setExcelRows(null);
+    setTabCounts(null);
+    setViewErrors({});
+    setViewLoadMeta({});
+    setDetailsLoadMeta(null);
+    setProtocolAnalysis(null);
+  }, [datasetKey]);
 
   useEffect(() => {
     let cancelled = false;
@@ -782,10 +825,17 @@ function BackendAnalyzer({ sessionIds, analysisId, projectName, onBack }) {
       if (cancelled) return;
       const payload = unwrapDiagnosticSummary(response);
       if (!Array.isArray(payload?.rows)) throw new Error("Invalid diagnostic response: timeline rows are missing.");
-      const rows = diagnosticRowsFromResponse(response).map(row => normalizeTimelineRow(row));
+      const rows = sortTimelineChronologically(
+        diagnosticRowsFromResponse(response).map(row => normalizeTimelineRow(row)),
+      );
       setTimeline(rows);
       setL3Messages(rows.filter((row) => row.type === "l3"));
       setEventMessages(rows.filter((row) => row.type === "event"));
+      setDetailsLoadMeta({
+        loadedCount: rows.length,
+        reportedCount: readReportedRowCount(payload),
+        explicitIncomplete: hasExplicitlyIncompleteRows(payload),
+      });
       setDetailsLoaded(true);
     }).catch((requestError) => {
       if (!cancelled) setDetailsError(requestError?.response?.data?.message || requestError?.message || "Failed to load detailed logs.");
@@ -811,12 +861,21 @@ function BackendAnalyzer({ sessionIds, analysisId, projectName, onBack }) {
     Promise.all([loader(scope), networkRowsRequest]).then(([response, networkRows]) => {
       if (cancelled) return;
       const payload = unwrapDiagnosticSummary(response) || {};
-      const rows = [
-        ...diagnosticRowsFromResponse(response).map((row) => normalizeTimelineRow(row)),
+      const diagnosticRows = diagnosticRowsFromResponse(response).map((row) => normalizeTimelineRow(row));
+      const rows = sortTimelineChronologically([
+        ...diagnosticRows,
         ...networkRows,
-      ];
+      ]);
       if (!Array.isArray(payload.rows)) throw new Error(`Invalid diagnostic response: ${activeView} rows are missing.`);
       const calls = (Array.isArray(payload.calls) ? payload.calls : summary.calls).map(normalizeCall);
+      setViewLoadMeta((current) => ({
+        ...current,
+        [activeView]: {
+          loadedCount: diagnosticRows.length,
+          reportedCount: readReportedRowCount(payload),
+          explicitIncomplete: hasExplicitlyIncompleteRows(payload),
+        },
+      }));
       worker = new Worker(new URL("../workers/backendProtocolAnalysis.worker.js", import.meta.url), { type: "module" });
       worker.onmessage = ({ data }) => {
         if (cancelled) return;
@@ -872,24 +931,60 @@ function BackendAnalyzer({ sessionIds, analysisId, projectName, onBack }) {
     return () => { cancelled = true; worker.terminate(); };
   }, [activeView, detailsLoaded, protocolTimeline, scope.sessionIds]);
   const mapPoints = useMemo(() => mapRows ? buildMapPoints(mapRows, mapRsrpByRowId || new Map()) : [], [mapRows, mapRsrpByRowId]);
-  const requestMapRsrpAnalysis = useCallback(() => setMapRsrpRequested(true), []);
+  const mapCompletenessNotice = getCompletenessNotice(
+    viewLoadMeta.map?.loadedCount,
+    TAKE,
+    viewLoadMeta.map?.reportedCount ?? tabCounts?.map_view_count,
+    viewLoadMeta.map?.explicitIncomplete,
+  );
+  const excelCompletenessNotice = getCompletenessNotice(
+    viewLoadMeta.excel?.loadedCount,
+    TAKE,
+    viewLoadMeta.excel?.reportedCount ?? tabCounts?.excel_view_count,
+    viewLoadMeta.excel?.explicitIncomplete,
+  );
+  const detailsCompletenessNotice = getCompletenessNotice(
+    detailsLoadMeta?.loadedCount,
+    TAKE,
+    detailsLoadMeta?.reportedCount,
+    detailsLoadMeta?.explicitIncomplete,
+  );
+  const requestMapRsrpAnalysis = useCallback(() => {
+    setMapRsrpError("");
+    setMapRsrpRequested(true);
+  }, []);
+  const retryMapRsrpAnalysis = useCallback(() => {
+    setMapRsrpByRowId(null);
+    setMapRsrpError("");
+    setMapRsrpRequested(true);
+    setMapRsrpRetry((current) => current + 1);
+  }, []);
   useEffect(() => {
     if (!mapRsrpRequested || !mapRows || mapRsrpByRowId) return;
     let cancelled = false;
-    const worker = new Worker(new URL("../workers/backendProtocolAnalysis.worker.js", import.meta.url), { type: "module" });
-    worker.onmessage = ({ data }) => {
+    setMapRsrpStatus("loading");
+    setMapRsrpError("");
+    const id = `map-rsrp:${scope.sessionIds}:${mapRsrpRetry}`;
+    const task = startWorkerRequest(
+      () => new Worker(new URL("../workers/backendProtocolAnalysis.worker.js", import.meta.url), { type: "module" }),
+      { id, timeline: mapRows },
+      id,
+    );
+    task.promise.then(({ analysis }) => {
       if (cancelled) return;
-      if (data.error) setViewErrors((current) => ({ ...current, map: data.error }));
-      else setMapRsrpByRowId(buildRsrpByRowId(data.analysis));
-      worker.terminate();
+      const rsrpByRowId = buildRsrpByRowId(analysis);
+      setMapRsrpByRowId(rsrpByRowId);
+      setMapRsrpStatus("ready");
+    }).catch((workerError) => {
+      if (cancelled) return;
+      setMapRsrpError(workerError?.message || "Map RSRP analysis failed.");
+      setMapRsrpStatus("error");
+    });
+    return () => {
+      cancelled = true;
+      task.cancel();
     };
-    worker.onerror = (workerError) => {
-      if (!cancelled) setViewErrors((current) => ({ ...current, map: workerError.message || "Map RSRP analysis failed." }));
-      worker.terminate();
-    };
-    worker.postMessage({ id: `map-rsrp:${scope.sessionIds}`, timeline: mapRows });
-    return () => { cancelled = true; worker.terminate(); };
-  }, [mapRows, mapRsrpByRowId, mapRsrpRequested, scope.sessionIds]);
+  }, [mapRows, mapRsrpByRowId, mapRsrpRequested, mapRsrpRetry, scope.sessionIds]);
   const rawRows = activeView === "events" ? eventMessages : l3Messages;
   const countForTab = useCallback((tabId) => {
     if (tabId === "summary") return enrichedSummary?.totalCalls ?? 0;
@@ -948,8 +1043,17 @@ function BackendAnalyzer({ sessionIds, analysisId, projectName, onBack }) {
             </button>
           </div>
         )}
-        {mapOpened && <div className={`flex h-full min-h-0 min-w-0 ${activeView === "map" ? "" : "hidden"}`}><L3EventsMapView points={mapPoints} onNeedRsrpAnalysis={requestMapRsrpAnalysis} active={activeView === "map"} /></div>}
-        {activeView === "excel" && excelRows && <ExcelSignalingView rows={excelRows} calls={enrichedSummary.calls} selectedCall={selectedCall} onSelectCall={setSelectedCall} sourceFileName={analysisId ? `l3-session-${analysisId}` : `sessions-${sessionIds.join("-")}`} />}
+        {mapOpened && <div className={`relative flex h-full min-h-0 min-w-0 ${activeView === "map" ? "" : "hidden"}`}>
+          <L3EventsMapView key={datasetKey} points={mapPoints} onNeedRsrpAnalysis={requestMapRsrpAnalysis} active={activeView === "map"} datasetKey={datasetKey} />
+          {(mapRsrpRequested && mapRsrpStatus === "loading") && <div role="status" className="absolute left-3 top-3 z-20 rounded border border-blue-500/40 bg-slate-950/95 px-3 py-2 text-xs text-blue-200 shadow-lg">Analyzing RSRP values…</div>}
+          {mapRsrpStatus === "error" && <div role="alert" className="absolute left-3 top-3 z-20 flex items-center gap-2 rounded border border-red-500/50 bg-slate-950/95 px-3 py-2 text-xs text-red-200 shadow-lg"><span>RSRP analysis failed: {mapRsrpError}</span><button type="button" onClick={retryMapRsrpAnalysis} className="shrink-0 rounded border border-slate-500 px-2 py-1 text-white hover:bg-slate-800">Retry RSRP</button></div>}
+          {mapCompletenessNotice && <div role="status" className="absolute bottom-3 left-3 z-20 max-w-[min(36rem,calc(100%-1.5rem))] rounded border border-amber-500/40 bg-slate-950/95 px-3 py-2 text-xs text-amber-200 shadow-lg">{mapCompletenessNotice}</div>}
+        </div>}
+        {shouldKeepExcelViewMounted(excelRows) && <div className={`relative h-full min-h-0 min-w-0 ${activeView === "excel" ? "flex" : "hidden"}`}>
+          {excelCompletenessNotice && <div role="status" className="absolute right-3 top-16 z-20 rounded border border-amber-500/40 bg-slate-950/95 px-3 py-2 text-xs text-amber-200 shadow-lg">{excelCompletenessNotice}</div>}
+          <ExcelSignalingView key={datasetKey} rows={excelRows} calls={enrichedSummary.calls} selectedCall={selectedCall} onSelectCall={setSelectedCall} sourceFileName={analysisId ? `l3-session-${analysisId}` : `sessions-${sessionIds.join("-")}`} active={activeView === "excel"} />
+        </div>}
+        {detailsCompletenessNotice && ["analyzer", "l3", "events"].includes(activeView) && <div role="status" className="shrink-0 border-b border-amber-500/30 bg-amber-950/40 px-3 py-2 text-xs text-amber-200">{detailsCompletenessNotice}</div>}
         {detailsLoaded && activeView === "analyzer" && <div className="flex h-full min-h-0 flex-col"><div className="flex shrink-0 gap-3 border-b border-slate-800 px-3 py-1.5 text-[11px] text-slate-300"><span>RRC: {protocolAnalysis?.states?.rrc || "—"}</span><span>NAS: {protocolAnalysis?.states?.nas || "—"}</span><span>IMS: {protocolAnalysis?.states?.ims || "—"}</span><span>Failures: {protocolAnalysis?.stats?.failures ?? 0}</span>{analysisError && <span className="text-red-300">{analysisError}</span>}</div><div className="min-h-0 flex-1">{protocolAnalysis ? <ProtocolAnalyzerView analysis={protocolAnalysis} calls={enrichedSummary.calls} callScoped={Boolean(selectedCall)} /> : <div className="flex h-full items-center justify-center text-blue-300"><Loader2 className="mr-2 h-5 w-5 animate-spin" />Analyzing protocol rows...</div>}</div></div>}
         {detailsLoaded && (activeView === "l3" || activeView === "events") && <div className="l3-glass flex h-full min-h-0 flex-col"><div className="l3-glass-subtle flex shrink-0 flex-wrap items-center justify-between gap-2 border-x-0 border-t-0 px-2 py-1"><div><h3 className="l3-ui-copy font-semibold text-white">{activeView === "l3" ? "All L3 Messages" : "All Event Rows"}</h3><p className="l3-meta-copy text-slate-400">Showing {visibleRawRows.length.toLocaleString()} of {rawRows.length.toLocaleString()} backend rows.</p></div><div className="relative w-full sm:w-80"><Search className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-slate-500" /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search timestamp, file, title, or raw text..." className="l3-glass-control l3-ui-copy w-full rounded-md py-2 pl-8 pr-2 text-white outline-none" /></div></div><div className="min-h-0 flex-1 space-y-2 overflow-auto">{visibleRawRows.length ? visibleRawRows.map((row) => <TimelineCard key={row.id} item={row} />) : <div className="py-10 text-center l3-ui-copy text-slate-400">No matching {activeView === "l3" ? "L3 messages" : "event rows"}.</div>}</div></div>}
       </main>

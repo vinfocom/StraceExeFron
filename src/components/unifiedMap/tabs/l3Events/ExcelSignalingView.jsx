@@ -279,11 +279,13 @@ function VirtualizedSignalingBody({
   includeLocation,
   includeRadio,
   includeCore,
+  active,
 }) {
   const [scrollTop, setScrollTop] = useState(0);
   const [viewportHeight, setViewportHeight] = useState(DEFAULT_VIEWPORT_HEIGHT);
 
   useEffect(() => {
+    if (!active) return undefined;
     const container = tableContainerRef.current;
     if (!container) return undefined;
 
@@ -307,7 +309,7 @@ function VirtualizedSignalingBody({
       if (frameId !== null) window.cancelAnimationFrame(frameId);
       resizeObserver?.disconnect();
     };
-  }, [tableContainerRef]);
+  }, [active, tableContainerRef]);
 
   useEffect(() => {
     const maxScrollTop = Math.max(0, SIGNALING_HEADER_HEIGHT + rows.length * SIGNALING_ROW_HEIGHT - viewportHeight);
@@ -378,7 +380,7 @@ function DetailPanel({ row }) {
   );
 }
 
-export function ExcelSignalingView({ rows = [], calls = [], selectedCall, onSelectCall, sourceFileName = "" }) {
+export function ExcelSignalingView({ rows = [], calls = [], selectedCall, onSelectCall, sourceFileName = "", active = true }) {
   const [callFilter, setCallFilter] = useState(selectedCall?.id || "all");
   const [technology, setTechnology] = useState("all");
   const [sources, setSources] = useState(new Set(SOURCE_OPTIONS));
@@ -762,6 +764,7 @@ export function ExcelSignalingView({ rows = [], calls = [], selectedCall, onSele
               includeLocation={includeLocation}
               includeRadio={includeRadio}
               includeCore={includeCore}
+              active={active}
             />
           </tbody>
         </table>

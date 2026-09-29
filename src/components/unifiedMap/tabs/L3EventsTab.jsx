@@ -22,6 +22,13 @@ import { ProtocolAnalyzerView } from "./l3Events/ProtocolAnalyzerView";
 import { TimelineCard } from "./l3Events/TimelineCard";
 import { ExcelSignalingView } from "./l3Events/ExcelSignalingView";
 import { buildUnifiedSignalingRows } from "@/utils/l3Events/signalingModel";
+import {
+  buildPlaybackPoints,
+  getFiniteRsrpValue,
+  shouldKeepExcelViewMounted,
+  shouldEnableMapShortcuts,
+  shouldResetMapNavigation,
+} from "@/utils/l3Events/backendDetailModel.js";
 import { getNrRrcPayloadInsights } from "@/utils/l3Events/nrRrcPayloadInsights";
 import useColorForLog from "@/hooks/useColorForLog";
 import {
@@ -121,12 +128,13 @@ function hexToRgbArray(hex, alpha = 255) {
 export function buildRsrpByRowId(analysis) {
   const byId = new Map();
   analysis?.procedures?.forEach((procedure) => {
-    if (!Number.isFinite(Number(procedure.rsrpValue))) return;
+    const value = getFiniteRsrpValue(procedure?.rsrpValue);
+    if (value === null) return;
     procedure.items?.forEach((item) => {
       if (!item?.id || byId.has(item.id)) return;
       byId.set(item.id, {
-        value: Number(procedure.rsrpValue),
-        label: procedure.rsrpSummary || procedure.rsrp || `${Number(procedure.rsrpValue).toFixed(0)} dBm`,
+        value,
+        label: procedure.rsrpSummary || procedure.rsrp || `${value.toFixed(0)} dBm`,
         matchedAt: procedure.rsrpMatchedAt || "",
       });
     });
@@ -140,6 +148,7 @@ export const L3EventsTab = () => {
   const [warningMessage, setWarningMessage] = useState("");
   const [fileName, setFileName] = useState("");
   const [timeline, setTimeline] = useState([]);
+  const [datasetRevision, setDatasetRevision] = useState(0);
   const [networkLogRows, setNetworkLogRows] = useState([]);
   const [selectedCall, setSelectedCall] = useState(null);
   const [activeView, setActiveView] = useState("summary");
@@ -153,6 +162,7 @@ export const L3EventsTab = () => {
     const selectedFiles = Array.from(files || []).filter(Boolean);
     if (!selectedFiles.length) return;
 
+    setDatasetRevision((revision) => revision + 1);
     setStatus("loading");
     setErrorMessage("");
     setWarningMessage("");
@@ -346,17 +356,23 @@ export const L3EventsTab = () => {
             </div>
           )}
 
-          {activeView === "map" ? (
-            <L3EventsMapView points={mapPoints} />
-          ) : activeView === "excel" ? (
-            <ExcelSignalingView
-              rows={signalingRows}
-              calls={enrichedCallSummary.calls}
-              selectedCall={selectedCall}
-              onSelectCall={handleSelectCall}
-              sourceFileName={fileName}
-            />
-          ) : activeView === "analyzer" ? (
+          {activeView === "map" && (
+            <L3EventsMapView points={mapPoints} active datasetKey={`local:${datasetRevision}`} />
+          )}
+          {shouldKeepExcelViewMounted(status === "ready") && (
+            <div className={`h-full min-h-0 min-w-0 ${activeView === "excel" ? "flex" : "hidden"}`}>
+              <ExcelSignalingView
+                key={`local:${datasetRevision}`}
+                rows={signalingRows}
+                calls={enrichedCallSummary.calls}
+                selectedCall={selectedCall}
+                onSelectCall={handleSelectCall}
+                sourceFileName={fileName}
+                active={activeView === "excel"}
+              />
+            </div>
+          )}
+          {activeView === "analyzer" ? (
             <ProtocolAnalyzerView analysis={protocolAnalysis} callScoped={Boolean(selectedCall)} />
           ) : activeView === "l3" || activeView === "events" ? (
             <div className="flex min-h-0 w-full max-w-full min-w-0 flex-1 flex-col overflow-hidden bg-slate-900/70">
@@ -822,8 +838,7 @@ export function buildMapPoints(timeline, rsrpByRowId = new Map()) {
     return Number.isFinite(numeric) && numeric >= min && numeric <= max ? numeric : null;
   };
 
-  return (timeline || [])
-    .map((item, index) => {
+  return buildPlaybackPoints(timeline || [], (item, index) => {
       const lat = toMapCoordinate(item?.latitude, -90, 90);
       const lng = toMapCoordinate(item?.longitude, -180, 180);
       if (lat === null || lng === null) return null;
@@ -834,7 +849,9 @@ export function buildMapPoints(timeline, rsrpByRowId = new Map()) {
         : baseEventMarker || getRadioMapEventMarker(item);
       return {
         id: item?.id || `l3-map-point-${index}`,
-        index,
+        sourceRowId: item?.id ?? null,
+        originalIndex: item?.originalTimelineIndex ?? index,
+        sourceRowIndex: item?.sourceIndex ?? item?.originalTimelineIndex ?? item?.rowNumber ?? index,
         lat,
         lng,
         type: item?.type || "event",
@@ -861,15 +878,14 @@ export function buildMapPoints(timeline, rsrpByRowId = new Map()) {
         markerLabel: eventMarker?.markerLabel || "",
         markerColor: eventMarker?.markerColor || "",
         state: getMapPointInterface(item),
-        rsrpValue: Number.isFinite(Number(rsrpMatch?.value)) ? Number(rsrpMatch.value) : null,
+        rsrpValue: getFiniteRsrpValue(rsrpMatch?.value),
         rsrpLabel: rsrpMatch?.label || "",
         rsrpMatchedAt: rsrpMatch?.matchedAt || "",
         timestampLabel: item?.timestampLabel || item?.timestamp?.toLocaleTimeString([], { hour12: false, timeZone: "UTC" }) || "",
         timestampMs: item?.timestamp instanceof Date ? item.timestamp.getTime() : null,
         sourceFile: item?.sourceFile || "",
       };
-    })
-    .filter(Boolean);
+    });
 }
 
 function formatMapRawMessage(point) {
@@ -897,7 +913,7 @@ function isFailurePoint(point) {
   return HANDOVER_FAILURE_TEXT_RE.test(text) || /\b(fail(?:ed|ure|uire)?|reject(?:ed)?|timeout|error|rlf|radio link failure|dropped|forbidden|unavailable)\b|\b[45]\d{2}\b/i.test(text);
 }
 
-export function L3EventsMapView({ points, onNeedRsrpAnalysis, active = true }) {
+export function L3EventsMapView({ points, onNeedRsrpAnalysis, active = true, datasetKey = null }) {
   const { isLoaded, loadError } = useJsApiLoader(GOOGLE_MAPS_LOADER_OPTIONS);
   const { getThresholdInfo, getThresholdsForMetric } = useColorForLog();
   const [isPlaying, setIsPlaying] = useState(false);
@@ -933,6 +949,8 @@ export function L3EventsMapView({ points, onNeedRsrpAnalysis, active = true }) {
   const messageListRef = useRef(null);
   const mapStageRef = useRef(null);
   const pointSetKey = useMemo(() => `${points.length}:${points[0]?.id || ""}:${points[points.length - 1]?.id || ""}`, [points]);
+  const resolvedDatasetKey = datasetKey ?? pointSetKey;
+  const previousDatasetKeyRef = useRef(resolvedDatasetKey);
   const [mapStageWidth, setMapStageWidth] = useState(0);
   const mapsError = getGoogleMapsConfigError() || (loadError ? getGoogleMapsErrorMessage(loadError) : null);
   const currentPoint = points[currentIndex] || points[0] || null;
@@ -1097,12 +1115,20 @@ export function L3EventsMapView({ points, onNeedRsrpAnalysis, active = true }) {
     : DEFAULT_MAP_CENTER;
 
   useEffect(() => {
-    setIsPlaying(false);
-    setCurrentIndex(0);
-    setShowAllPoints(false);
-    setMessageSearch("");
-    setSelectedEventMarker(null);
-  }, [points]);
+    if (shouldResetMapNavigation(previousDatasetKeyRef.current, resolvedDatasetKey)) {
+      previousDatasetKeyRef.current = resolvedDatasetKey;
+      setIsPlaying(false);
+      setCurrentIndex(0);
+      setShowAllPoints(false);
+      setMessageSearch("");
+      setSelectedEventMarker(null);
+      return;
+    }
+    if (selectedEventMarker) {
+      const updatedSelection = points.find((point) => point.id === selectedEventMarker.id) || null;
+      if (updatedSelection !== selectedEventMarker) setSelectedEventMarker(updatedSelection);
+    }
+  }, [points, resolvedDatasetKey, selectedEventMarker]);
 
   useEffect(() => {
     try {
@@ -1134,7 +1160,7 @@ export function L3EventsMapView({ points, onNeedRsrpAnalysis, active = true }) {
   }, [active, currentPoint, mapInstance]);
 
   useEffect(() => {
-    if (!isPlaying || points.length <= 1) return undefined;
+    if (!active || !isPlaying || points.length <= 1) return undefined;
     const timer = window.setInterval(() => {
       setCurrentIndex((index) => {
         if (index >= points.length - 1) {
@@ -1145,7 +1171,11 @@ export function L3EventsMapView({ points, onNeedRsrpAnalysis, active = true }) {
       });
     }, playbackSpeedMs);
     return () => window.clearInterval(timer);
-  }, [isPlaying, playbackSpeedMs, points.length]);
+  }, [active, isPlaying, playbackSpeedMs, points.length]);
+
+  useEffect(() => {
+    if (!active) setIsPlaying(false);
+  }, [active]);
 
   useEffect(() => {
     const listEl = messageListRef.current;
@@ -1235,6 +1265,7 @@ export function L3EventsMapView({ points, onNeedRsrpAnalysis, active = true }) {
   };
 
   useEffect(() => {
+    if (!shouldEnableMapShortcuts(active)) return undefined;
     const handleKeyDown = (event) => {
       const target = event.target;
       const isEditable = target instanceof HTMLElement && (
@@ -1261,7 +1292,7 @@ export function L3EventsMapView({ points, onNeedRsrpAnalysis, active = true }) {
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [currentIndex, points]);
+  }, [active, currentIndex, points]);
 
   return (
     <div className="flex min-h-0 flex-1 w-full max-w-full min-w-0 flex-col overflow-hidden bg-slate-900/70">
