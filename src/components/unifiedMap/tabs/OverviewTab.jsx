@@ -232,6 +232,8 @@ export const OverviewTab = ({
   const [lockedBand, setLockedBand] = useState("all");
   const [pptTemplate, setPptTemplate] = useState("");
   const [pptTechnologies, setPptTechnologies] = useState([]);
+  const [pptMapViewType, setPptMapViewType] = useState("grid");
+  const [pptAggregation, setPptAggregation] = useState("median");
   const { user } = useAuth();
   const isTaiwanUser = useMemo(
     () => String(user?.country_code ?? "").trim().toUpperCase() === "TW",
@@ -377,6 +379,8 @@ export const OverviewTab = ({
       locked_bands: lockedBand,
       template: pptTemplate,
       technology: pptTechnologies,
+      map_view_type: pptMapViewType,
+      ...(pptMapViewType === "grid" ? { aggregation: pptAggregation } : {}),
       ...(selectedSessionIds.length > 0 ? { session_ids: selectedSessionIds } : {}),
     };
 
@@ -501,13 +505,15 @@ export const OverviewTab = ({
       setIsGeneratingPpt(false);
       setPptPercent(null);
     }
-  }, [isGeneratingPpt, lockedBand, projectId, pptTechnologies, pptTemplate, sessionIds, user]);
+  }, [isGeneratingPpt, lockedBand, projectId, pptAggregation, pptMapViewType, pptTechnologies, pptTemplate, sessionIds, user]);
 
   const handlePptButtonClick = useCallback(() => {
     if (isGeneratingPpt) return;
     setLockedBand("all");
     setPptTemplate("");
     setPptTechnologies([]);
+    setPptMapViewType("grid");
+    setPptAggregation("median");
     setIsPptBandDialogOpen(true);
   }, [isGeneratingPpt]);
 
@@ -971,6 +977,52 @@ export const OverviewTab = ({
                 ))}
               </div>
             </fieldset>
+          )}
+
+          <div className="space-y-2">
+            <span className="text-sm font-medium text-slate-200">KPI map view</span>
+            <div className="grid grid-cols-2 gap-2">
+              {["grid", "raw"].map((viewType) => (
+                <button
+                  key={viewType}
+                  type="button"
+                  onClick={() => setPptMapViewType(viewType)}
+                  className={`rounded-md border px-3 py-2 text-sm font-medium capitalize transition ${
+                    pptMapViewType === viewType
+                      ? "border-purple-400 bg-purple-600/30 text-purple-100"
+                      : "border-slate-600 bg-slate-800 text-slate-300 hover:bg-slate-700"
+                  }`}
+                >
+                  {viewType}
+                </button>
+              ))}
+            </div>
+            <p className="text-xs text-slate-400">
+              Grid view aggregates numeric KPI samples into the project grid cells. Categorical and event maps remain point-based.
+            </p>
+          </div>
+
+          {pptMapViewType === "grid" && (
+            <div className="space-y-2">
+              <span className="text-sm font-medium text-slate-200">Grid Aggregation</span>
+              <div className="grid grid-cols-4 gap-2">
+                {["max", "mean", "min", "median"].map((method) => (
+                  <button
+                    key={method}
+                    type="button"
+                    aria-pressed={pptAggregation === method}
+                    onClick={() => setPptAggregation(method)}
+                    className={`rounded-md border px-2 py-2 text-xs font-medium capitalize transition ${
+                      pptAggregation === method
+                        ? "border-purple-400 bg-purple-600/30 text-purple-100"
+                        : "border-slate-600 bg-slate-800 text-slate-300 hover:bg-slate-700"
+                    }`}
+                  >
+                    {method}
+                  </button>
+                ))}
+              </div>
+            </div>
           )}
 
           <DialogFooter className="flex justify-end gap-2">
