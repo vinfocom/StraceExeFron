@@ -22,6 +22,7 @@ import { tryAutoSyncOfflineQueue } from "./api/apiEndpoints";
 import appLogo from "/favicon.svg";
 import comlog from "/logo.svg";
 import Spinner from "./components/common/Spinner";
+import ErrorBoundary from "./components/common/ErrorBoundary";
 
 const TRANSITION_INTENT_KEY = "authTransitionIntent";
 const getTransitionMode = () =>
@@ -258,7 +259,9 @@ function App() {
         <MapProvider>
           <SWRConfig value={swrConfig}>
             <SettingsDialogProvider>
-              <AppShell isElectronRuntime={isElectronRuntime} />
+              <ErrorBoundary>
+                <AppShell isElectronRuntime={isElectronRuntime} />
+              </ErrorBoundary>
             </SettingsDialogProvider>
           </SWRConfig>
         </MapProvider>
