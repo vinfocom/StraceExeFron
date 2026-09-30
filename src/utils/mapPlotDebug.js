@@ -14,8 +14,14 @@
 export const DEBUG_MAP_PLOT =
   typeof window !== "undefined" && window.localStorage?.getItem("debugMapPlot") === "1";
 
+const MAX_MAP_PLOT_EVENTS = 300;
+if (DEBUG_MAP_PLOT) window.__mapPlotDiagnostics = [];
+
 export const logMapPlot = (label, payload) => {
   if (!DEBUG_MAP_PLOT) return;
+  const events = window.__mapPlotDiagnostics;
+  events.push({ at: new Date().toISOString(), label, payload });
+  if (events.length > MAX_MAP_PLOT_EVENTS) events.shift();
   if (payload !== undefined) {
     console.log("[MapPlotDebug]", label, payload);
   } else {

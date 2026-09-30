@@ -15,7 +15,7 @@ import { getMetricValueFromLog, getMacDetailValueFromLog, getPciColor, getEarfcn
 import { normalizeProviderName, normalizeTechName, normalizeBandName, getLogColor, getRegisteredColor, generateColorFromHash, resolveMacDetailMetricKey } from "@/utils/colorUtils";
 import { DEBUG_L3, traceL3Effect } from "@/utils/l3Debug";
 import { logMapPlot } from "@/utils/mapPlotDebug";
-import { getValidMapCoordinates, resolveAutoFitAction } from "@/features/unified-map/map/autoFit.js";
+import { confirmAutoFit, getMapCoordinate, getValidMapCoordinates, isMapReadyForFit, resolveAutoFitAction } from "@/features/unified-map/map/autoFit.js";
 
 const DEFAULT_CENTER = { lat: 28.64453086, lng: 77.37324242 };
 const isElectronRuntime =
@@ -1248,17 +1248,14 @@ const getThroughputValue = (log, direction = "dl") => {
 };
 
 const getNumericLatLng = (log) => {
-  const lat = Number(log?.lat ?? log?.latitude ?? log?.Lat ?? log?.Latitude ?? log?.LAT);
-  const lng = Number(
-    log?.lng ?? log?.longitude ?? log?.lon ?? log?.Lng ?? log?.Longitude ?? log?.LNG
-  );
-  return { lat, lng };
+  return getMapCoordinate(log);
 };
 
 const normalizeRenderableLocation = (log) => {
   if (!log) return null;
-  const { lat, lng } = getNumericLatLng(log);
-  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+  const coordinate = getNumericLatLng(log);
+  if (!coordinate) return null;
+  const { lat, lng } = coordinate;
   return {
     ...log,
     lat,
@@ -1269,7 +1266,7 @@ const normalizeRenderableLocation = (log) => {
 };
 
 const getLogLatLng = (log) => {
-  return getNumericLatLng(log);
+  return getNumericLatLng(log) || { lat: NaN, lng: NaN };
 };
 
 const areLogsStacked = (a, b, tolerance = 0.000001) => {
@@ -1546,6 +1543,9 @@ const MapWithMultipleCircles = ({
   datasetRevision = 0,
   datasetLoading = false,
   datasetComplete = true,
+  secondaryRevision = 0,
+  secondaryReady = false,
+  fitSessionIds = EMPTY_ARRAY,
   fitRequestId = 0,
   onLoad: onLoadProp,
   onUnmount: onUnmountProp,
@@ -1995,16 +1995,9 @@ const MapWithMultipleCircles = ({
     if (!showNeighbors || !neighborData?.length) return EMPTY_ARRAY;
 
     let parsed = neighborData
-      .filter(n => {
-        const lat = parseFloat(n.lat ?? n.latitude ?? n.Lat);
-        const lng = parseFloat(n.lng ?? n.longitude ?? n.Lng ?? n.lon);
-        return !isNaN(lat) && !isNaN(lng) && 
-               lat >= -90 && lat <= 90 && 
-               lng >= -180 && lng <= 180;
-      })
+      .filter((n) => Boolean(getMapCoordinate(n)))
       .map((n, idx) => {
-        const lat = parseFloat(n.lat ?? n.latitude ?? n.Lat);
-        const lng = parseFloat(n.lng ?? n.longitude ?? n.Lng ?? n.lon);
+        const { lat, lng } = getMapCoordinate(n);
 
         const toFiniteNumber = (value) => {
           const parsed = Number.parseFloat(value);
@@ -2439,26 +2432,60 @@ const MapWithMultipleCircles = ({
     return resolveColor(value, type);
   }, [selectedMetric, colorBy, resolveColor]);
 
-  const computedCenter = useMemo(() => {
-    const allPoints = [...locationsToRender, ...processedNeighbors];
-    const locs = allPoints.length > 0 ? allPoints : 
-                 locations.length > 0 ? locations : null;
-    if (!locs?.length) return center;
-    const sampleSize = Math.min(locs.length, 1000);
-    const step = Math.max(1, Math.floor(locs.length / sampleSize));
-    let sumLat = 0, sumLng = 0, count = 0;
-    for (let i = 0; i < locs.length; i += step) {
-      sumLat += locs[i].lat;
-      sumLng += locs[i].lng;
-      count++;
-    }
-    return { lat: sumLat / count, lng: sumLng / count };
-  }, [locationsToRender, processedNeighbors, locations, center]);
+  // GoogleMap's center is an initial value here. Later camera changes belong to
+  // Google Maps and the explicit fit flow, including user pan and zoom.
+  const initialCenterRef = useRef(getMapCoordinate(center) || DEFAULT_CENTER);
 
   const fitStateRef = useRef({ identity: null, initialFit: false, finalFit: false, userNavigated: false });
   const lastFitRequestRef = useRef(fitRequestId);
-  const programmaticViewportRef = useRef(false);
-  const programmaticViewportTimerRef = useRef(null);
+  const fitIdleListenerRef = useRef(null);
+  const fitRecoveryTimerRef = useRef(null);
+  const fitAttemptsRef = useRef({ key: null, count: 0 });
+  const [mapSize, setMapSize] = useState({ width: 0, height: 0 });
+  const [fitRetry, setFitRetry] = useState(0);
+  const [fitSettledIdentity, setFitSettledIdentity] = useState(null);
+  const fitNeighbors = useMemo(() => {
+    if (!secondaryReady) return EMPTY_ARRAY;
+    const selected = new Set(fitSessionIds.map(String));
+    return processedNeighbors.filter((row) => row.sessionId == null || selected.has(String(row.sessionId)));
+  }, [processedNeighbors, secondaryReady, fitSessionIds]);
+
+  useEffect(() => {
+    const element = mapContainerRef.current;
+    if (!element) return undefined;
+    const updateSize = () => {
+      const { width, height } = element.getBoundingClientRect();
+      setMapSize((previous) => previous.width === width && previous.height === height ? previous : { width, height });
+      logMapPlot("map container size", { width, height, identity: datasetIdentity });
+    };
+    updateSize();
+    const observer = new ResizeObserver(updateSize);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [isLoaded, datasetIdentity]);
+
+  useEffect(() => {
+    if (!map) return undefined;
+    const resumePending = () => {
+      if (!fitStateRef.current.initialFit && !fitStateRef.current.pending) {
+        setFitRetry((value) => value + 1);
+      }
+    };
+    const projectionListener = map.addListener("projection_changed", resumePending);
+    const idleListener = map.addListener("idle", resumePending);
+    return () => {
+      projectionListener.remove();
+      idleListener.remove();
+    };
+  }, [map]);
+
+  const cancelPendingFit = useCallback(() => {
+    fitIdleListenerRef.current?.remove?.();
+    fitIdleListenerRef.current = null;
+    window.clearTimeout(fitRecoveryTimerRef.current);
+    fitRecoveryTimerRef.current = null;
+    fitStateRef.current.pending = null;
+  }, []);
 
   const applyAutoViewport = useCallback((mapInstance) => {
     if (!mapInstance) return;
@@ -2469,17 +2496,10 @@ const MapWithMultipleCircles = ({
     // reverts it) and the new data ends up framed at the wrong zoom level.
     onAutoFitProp?.(mapInstance);
 
-    const allPoints = [...normalizedLocations, ...processedNeighbors];
-    const locs = allPoints.length > 0 ? allPoints : locations;
-    const validPoints = getValidMapCoordinates(locs);
+    const validPoints = getValidMapCoordinates([...normalizedLocations, ...fitNeighbors]);
     if (fitToLocations && validPoints.length && window.google?.maps?.LatLngBounds) {
       const bounds = new window.google.maps.LatLngBounds();
       validPoints.forEach((point) => bounds.extend(point));
-      programmaticViewportRef.current = true;
-      window.clearTimeout(programmaticViewportTimerRef.current);
-      programmaticViewportTimerRef.current = window.setTimeout(() => {
-        programmaticViewportRef.current = false;
-      }, 1500);
       mapInstance.fitBounds(bounds, 50);
       logMapPlot("applyAutoViewport:fitBounds", {
         locsUsed: validPoints.length,
@@ -2487,10 +2507,10 @@ const MapWithMultipleCircles = ({
         boundsSW: bounds.getSouthWest()?.toJSON?.(),
         zoomBeforeFit: mapInstance.getZoom?.(),
       });
-      return;
+      return true;
     }
-
-  }, [normalizedLocations, processedNeighbors, locations, fitToLocations, onAutoFitProp]);
+    return false;
+  }, [normalizedLocations, fitNeighbors, fitToLocations, onAutoFitProp]);
 
   const handleMapLoad = useCallback((mapInstance) => {
     setMap(mapInstance);
@@ -2501,42 +2521,98 @@ const MapWithMultipleCircles = ({
   useEffect(() => {
     if (!map) return;
     const current = fitStateRef.current;
+    if (current.identity !== datasetIdentity) {
+      cancelPendingFit();
+      fitAttemptsRef.current = { key: null, count: 0 };
+      resolveAutoFitAction(current, { identity: datasetIdentity, revision: datasetRevision, hasCoordinates: false, complete: false });
+    }
     if (!fitToLocations) return;
-    const candidates = [...normalizedLocations, ...processedNeighbors];
-    const candidatesToFit = candidates.length ? candidates : locations;
-    const hasValidCoordinates = getValidMapCoordinates(candidatesToFit).length > 0;
+    if (current.pending && current.pending.revision !== datasetRevision) cancelPendingFit();
+    const hasValidCoordinates = getValidMapCoordinates(normalizedLocations).length > 0;
     const explicitFit = lastFitRequestRef.current !== fitRequestId;
+    if (explicitFit) {
+      cancelPendingFit();
+      fitAttemptsRef.current = { key: null, count: 0 };
+    }
     lastFitRequestRef.current = fitRequestId;
     const action = resolveAutoFitAction(current, {
       identity: datasetIdentity,
       revision: datasetRevision,
       hasCoordinates: hasValidCoordinates,
       complete: !datasetLoading && datasetComplete,
+      secondaryRevision,
+      secondaryReady: fitNeighbors.length > 0,
       explicitFit,
     });
-    // `resolveAutoFitAction` owns the initial/final state transitions. Chunks,
-    // metric changes, and filters therefore cannot trigger another fit.
-    if (action !== "none") applyAutoViewport(map);
-  }, [map, datasetIdentity, datasetLoading, datasetComplete, fitToLocations, fitRequestId, applyAutoViewport, normalizedLocations, processedNeighbors, locations]);
+    if (action === "none" || !isMapReadyForFit(map, mapSize)) return;
+    const key = `${datasetIdentity}:${datasetRevision}:${secondaryRevision}:${action}`;
+    if (fitAttemptsRef.current.key !== key) fitAttemptsRef.current = { key, count: 0 };
+    if (fitAttemptsRef.current.count >= 3) return;
+    fitAttemptsRef.current.count += 1;
+    const pending = { identity: datasetIdentity, revision: datasetRevision, action };
+    current.pending = pending;
+    current.pendingComplete = !datasetLoading && datasetComplete;
+    const finish = () => {
+      if (current.pending !== pending) return;
+      cancelPendingFit();
+      current.pending = pending;
+      confirmAutoFit(current, {
+        ...pending,
+        secondaryRevision: fitNeighbors.length > 0 ? secondaryRevision : null,
+      });
+      setFitSettledIdentity(datasetIdentity);
+      setFitRetry((value) => value + 1);
+      logMapPlot("auto fit settled", { ...pending, center: map.getCenter?.()?.toJSON?.(), zoom: map.getZoom?.(), bounds: map.getBounds?.()?.toJSON?.() });
+    };
+    fitIdleListenerRef.current = map.addListener("idle", finish);
+    try {
+      if (!applyAutoViewport(map)) throw new Error("No valid fit bounds");
+      logMapPlot("auto fit requested", { ...pending, primaryRows: normalizedLocations.length, secondaryRows: fitNeighbors.length, size: mapSize });
+    } catch (error) {
+      cancelPendingFit();
+      logMapPlot("auto fit deferred", { ...pending, error: error?.message });
+      if (fitAttemptsRef.current.count < 3) setFitRetry((value) => value + 1);
+      return;
+    }
+    fitRecoveryTimerRef.current = window.setTimeout(() => {
+      if (current.pending !== pending) return;
+      cancelPendingFit();
+      logMapPlot("auto fit settle timed out", pending);
+      if (fitAttemptsRef.current.count < 3) setFitRetry((value) => value + 1);
+    }, 1800);
+  }, [map, datasetIdentity, datasetRevision, datasetLoading, datasetComplete, secondaryRevision, secondaryReady, fitToLocations, fitRequestId, applyAutoViewport, normalizedLocations, fitNeighbors, mapSize, fitRetry, cancelPendingFit]);
 
   useEffect(() => {
     if (!map || typeof map.addListener !== "function") return undefined;
     const markUserNavigation = () => {
-      if (!programmaticViewportRef.current) fitStateRef.current.userNavigated = true;
+      cancelPendingFit();
+      fitStateRef.current.userNavigated = true;
+      setFitSettledIdentity(datasetIdentity);
     };
-    const dragListener = map.addListener("dragstart", () => { fitStateRef.current.userNavigated = true; });
-    const zoomListener = map.addListener("zoom_changed", markUserNavigation);
-    const idleListener = map.addListener("idle", () => {
-      programmaticViewportRef.current = false;
-      window.clearTimeout(programmaticViewportTimerRef.current);
-    });
+    const dragListener = map.addListener("dragstart", markUserNavigation);
+    const div = map.getDiv?.();
+    const onControlPointer = (event) => {
+      if (event.target?.closest?.('button,[role="button"]')) markUserNavigation();
+    };
+    const onMapKey = (event) => {
+      if (["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "+", "-", "=", "PageUp", "PageDown"].includes(event.key)) markUserNavigation();
+    };
+    div?.addEventListener("wheel", markUserNavigation, true);
+    div?.addEventListener("dblclick", markUserNavigation, true);
+    div?.addEventListener("touchstart", markUserNavigation, true);
+    div?.addEventListener("keydown", onMapKey, true);
+    div?.addEventListener("pointerdown", onControlPointer, true);
     return () => {
-      window.clearTimeout(programmaticViewportTimerRef.current);
+      div?.removeEventListener("wheel", markUserNavigation, true);
+      div?.removeEventListener("dblclick", markUserNavigation, true);
+      div?.removeEventListener("touchstart", markUserNavigation, true);
+      div?.removeEventListener("keydown", onMapKey, true);
+      div?.removeEventListener("pointerdown", onControlPointer, true);
       window.google?.maps?.event?.removeListener?.(dragListener);
-      window.google?.maps?.event?.removeListener?.(zoomListener);
-      window.google?.maps?.event?.removeListener?.(idleListener);
     };
-  }, [map]);
+  }, [map, cancelPendingFit, datasetIdentity]);
+
+  useEffect(() => () => cancelPendingFit(), [cancelPendingFit]);
 
   const handleMapUnmount = useCallback(() => {
     setMap(null);
@@ -2682,12 +2758,13 @@ const MapWithMultipleCircles = ({
         onLoad={handleMapLoad}
         onUnmount={handleMapUnmount}
         options={googleMapOptions}
-        defaultCenter={computedCenter}
+        center={initialCenterRef.current}
         zoom={defaultZoom}
       >
         {map && (
           <DeckGLOverlay
             map={map}
+            samplingReady={fitSettledIdentity === datasetIdentity}
             showGrid={enableGrid}
             gridCells={enableGrid ? visibleGridCells : EMPTY_ARRAY}
             gridOpacity={GRID_POLYGON_FILL_OPACITY}

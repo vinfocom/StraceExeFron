@@ -11,6 +11,8 @@ const job = (datasetRevision = 1, totalLogs = 2) => ({
   coordinates: new Float64Array([77, 28, 78, 29]),
   totalLogs,
   datasetRevision,
+  identity: `dataset:${datasetRevision}`,
+  viewportGeneration: 1,
   options: { zoom: 12, preserveIndexes: [1] },
 });
 const reply = (worker, message, indexes = [0, 1]) => worker.onmessage({ data: {
@@ -85,5 +87,21 @@ test("stale dataset and request replies cannot replace current indexes", () => {
   reply(workers[0], workers[0].messages[1]);
   assert.equal(results.length, 1);
   assert.equal(results[0].datasetRevision, 2);
+  runtime.dispose();
+});
+
+test("an obsolete viewport response cannot replace the settled viewport sample", () => {
+  const worker = fakeWorker();
+  const results = [];
+  const runtime = createLogSamplingWorkerRuntime({ createWorker: () => worker, onResult: (result) => results.push(result) });
+  const first = { ...job(), viewportGeneration: 1 };
+  runtime.request(first);
+  const stale = worker.messages[0];
+  runtime.request({ ...first, viewportGeneration: 2, options: { ...first.options, zoom: 14 } });
+  reply(worker, stale);
+  assert.equal(results.length, 0);
+  reply(worker, worker.messages[1]);
+  assert.equal(results.length, 1);
+  assert.equal(results[0].viewportGeneration, 2);
   runtime.dispose();
 });

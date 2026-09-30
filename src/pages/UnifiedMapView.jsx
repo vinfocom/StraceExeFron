@@ -2993,6 +2993,9 @@ const UnifiedMapView = () => {
     inferredSessionIdsFromPassedLogs,
   ]);
   const sessionKey = useMemo(() => sessionIds.join(","), [sessionIds]);
+  const hasPassedNeighborsForSelection = hasPassedNeighbors &&
+    JSON.stringify(normalizeMapSessionIds(passedState?.sessionIds).map(String).sort()) ===
+    JSON.stringify(sessionIds.map(String).sort());
 
   useEffect(() => {
     if (!showInsights) return undefined;
@@ -4217,7 +4220,7 @@ const UnifiedMapView = () => {
     polygons: EMPTY_POLYGONS,
   });
 
-  const shouldFetchNeighbors = !hasPassedNeighbors && sessionIds.length > 0;
+  const shouldFetchNeighbors = !hasPassedNeighborsForSelection && sessionIds.length > 0;
 
   const {
     dataset: fetchedNeighborDataset,
@@ -4247,10 +4250,10 @@ const UnifiedMapView = () => {
     };
   }, [deferredNeighborDataset, fetchedNeighborDataset.identity]);
 
-  const sessionNeighborData = hasPassedNeighbors
+  const sessionNeighborData = hasPassedNeighborsForSelection
     ? passedNeighbors
     : renderedNeighborDataset.rows;
-  const sessionNeighborStats = hasPassedNeighbors
+  const sessionNeighborStats = hasPassedNeighborsForSelection
     ? passedState?.neighborStats || null
     : renderedNeighborDataset.stats;
 
@@ -7372,13 +7375,13 @@ const UnifiedMapView = () => {
       0;
 
     return Boolean(
-      hasPassedNeighbors ||
+      hasPassedNeighborsForSelection ||
         statsTotal > 0 ||
         (Array.isArray(sessionNeighborData) && sessionNeighborData.length > 0) ||
         (Array.isArray(filteredNeighbors) && filteredNeighbors.length > 0),
     );
   }, [
-    hasPassedNeighbors,
+    hasPassedNeighborsForSelection,
     sessionNeighborStats,
     sessionNeighborData,
     filteredNeighbors,
@@ -8260,6 +8263,9 @@ const UnifiedMapView = () => {
               datasetRevision={renderedMapDisplayDataset.revision}
               datasetLoading={activeDatasetLoading}
               datasetComplete={renderedMapDisplayDataset.complete}
+              secondaryRevision={hasPassedNeighborsForSelection ? 1 : renderedNeighborDataset.revision}
+              secondaryReady={showSessionNeighbors && (hasPassedNeighborsForSelection || (renderedNeighborDataset.complete && !sessionNeighborLoading && !sessionNeighborError))}
+              fitSessionIds={sessionIds}
               fitRequestId={mapFitRequestId}
               showNumCells={showNumCells}
               showMetricLabels={showMetricLabels}

@@ -8,8 +8,8 @@ import { useDeckLayerRegistry } from '@/components/maps/deckLayerRegistry.jsx';
 import { assertCategorizedLayerEntries, categorizeMapLayer, getMapLayerMetadata, sortMapLayerEntries } from '@/components/maps/mapLayerPolicy.js';
 import { getDrawingHoverTarget, getPolygonDrawingHitData, getPolylineDrawingHitData } from '@/components/maps/drawingShapeInteractions.js';
 import { logMapPlot } from '@/utils/mapPlotDebug';
-import { debounce } from '@/utils/unifiedMapConfig';
 import { normalizeMapBounds } from '@/features/unified-map/map/viewport.js';
+import { getMapCoordinate } from '@/features/unified-map/map/autoFit.js';
 
 const pickFirstNonEmpty = (obj, keys = []) => {
   for (const key of keys) {
@@ -204,11 +204,15 @@ const DeckGLOverlay = ({
   predictionGridData = [],
   onPrimarySamplingState,
   primaryDatasetIdentity = "default",
+  samplingReady = true,
 }) => {
   const { groups: registeredGroups, version: registryVersion } = useDeckLayerRegistry();
   const overlayRef = useRef(null);
   const [mapZoom, setMapZoom] = useState(null);
   const [viewportBounds, setViewportBounds] = useState(null);
+  const [viewportGeneration, setViewportGeneration] = useState(0);
+  const viewportGenerationRef = useRef(0);
+  const viewportSignatureRef = useRef(null);
   const [sampledPrimaryResult, setSampledPrimaryResult] = useState(null);
   const samplingWorkerRef = useRef(null);
   const samplingRequestRef = useRef(0);
@@ -233,6 +237,7 @@ const DeckGLOverlay = ({
   // re-run and actually draw the layers instead of silently no-op'ing.
   const [attachedMap, setAttachedMap] = useState(null);
   const idleListenerRef = useRef(null);
+  const projectionListenerRef = useRef(null);
   const attachTimerRef = useRef(null);
   const isValidMapInstance = useCallback((m) => {
     if (!m || !window.google?.maps) return false;
@@ -252,6 +257,22 @@ const DeckGLOverlay = ({
     }
     return true;
   }, [isValidMapInstance]);
+
+  useEffect(() => {
+    const div = map?.getDiv?.();
+    if (!div) return undefined;
+    const reportContext = (event) => logMapPlot(event.type, {
+      dataset: primaryDatasetIdentity,
+      canvas: [event.target?.width, event.target?.height],
+      container: [div.clientWidth, div.clientHeight],
+    });
+    div.addEventListener('webglcontextlost', reportContext, true);
+    div.addEventListener('webglcontextrestored', reportContext, true);
+    return () => {
+      div.removeEventListener('webglcontextlost', reportContext, true);
+      div.removeEventListener('webglcontextrestored', reportContext, true);
+    };
+  }, [map, primaryDatasetIdentity]);
 
   useEffect(() => {
     if (!isValidMapInstance(map)) return;
@@ -287,6 +308,8 @@ const DeckGLOverlay = ({
         window.google.maps.event.removeListener(idleListenerRef.current);
       }
       idleListenerRef.current = null;
+      projectionListenerRef.current?.remove?.();
+      projectionListenerRef.current = null;
       if (attachTimerRef.current) {
         window.clearTimeout(attachTimerRef.current);
       }
@@ -320,6 +343,7 @@ const DeckGLOverlay = ({
     if (attachedMapRef.current !== map && typeof map.addListener === 'function') {
       logMapPlot("attachOverlay: not attached synchronously, arming idle/timeout retry");
       idleListenerRef.current = map.addListener('idle', attachOverlay);
+      projectionListenerRef.current = map.addListener('projection_changed', attachOverlay);
       attachTimerRef.current = window.setTimeout(attachOverlay, 150);
     }
 
@@ -346,39 +370,29 @@ const DeckGLOverlay = ({
     if (!isValidMapInstance(map)) return;
     const zoom = map.getZoom();
     const bounds = normalizeMapBounds(map.getBounds?.());
+    const div = map.getDiv?.();
+    if (!bounds || !Number.isFinite(zoom) || !div?.clientWidth || !div?.clientHeight) return;
+    const signature = JSON.stringify([zoom, bounds]);
+    if (viewportSignatureRef.current === signature) return;
+    viewportSignatureRef.current = signature;
+    viewportGenerationRef.current += 1;
+    setViewportGeneration(viewportGenerationRef.current);
     setMapZoom(zoom);
     setViewportBounds(bounds);
-    logMapPlot("updateMapViewport", { zoom, bounds, rawBoundsAvailable: Boolean(map.getBounds?.()) });
+    logMapPlot("updateMapViewport", { zoom, bounds, generation: viewportGenerationRef.current, size: [div.clientWidth, div.clientHeight] });
   }, [map, isValidMapInstance]);
-
-  // zoom_changed fires on every frame of Google's zoom-easing animation —
-  // a single fitBounds transition can emit 15-20+ of these before settling.
-  // Each one flows into mapZoom -> gridData/primaryData recompute -> a full
-  // deck.gl setProps rebuild, which gets expensive fast on large datasets
-  // (e.g. a 15k-cell grid rebuilt on every intermediate tick). Debouncing
-  // this listener collapses that burst into one rebuild after the zoom
-  // actually settles. idle/dragend already only fire once settled, so they
-  // stay undebounced for immediate feedback after a real interaction ends.
-  const debouncedUpdateMapViewport = useMemo(
-    () => debounce(updateMapViewport, 120),
-    [updateMapViewport],
-  );
 
   useEffect(() => {
     if (!isValidMapInstance(map) || typeof map.addListener !== 'function') return;
-    updateMapViewport();
-    const zoomListener = map.addListener('zoom_changed', debouncedUpdateMapViewport);
     const idleListener = map.addListener('idle', updateMapViewport);
-    const dragListener = map.addListener('dragend', updateMapViewport);
+    // A camera animation can report intermediate bounds. Sample only after
+    // Google Maps has settled on the actual viewport.
     return () => {
-      debouncedUpdateMapViewport.cancel?.();
       if (window.google?.maps?.event?.removeListener) {
-        window.google.maps.event.removeListener(zoomListener);
         window.google.maps.event.removeListener(idleListener);
-        window.google.maps.event.removeListener(dragListener);
       }
     };
-  }, [map, isValidMapInstance, updateMapViewport, debouncedUpdateMapViewport]);
+  }, [map, isValidMapInstance, updateMapViewport]);
 
   useEffect(() => {
     const runtime = createLogSamplingWorkerRuntime({
@@ -387,9 +401,9 @@ const DeckGLOverlay = ({
         return new Worker(new URL('../../workers/logSpatialSampling.worker.js', import.meta.url), { type: 'module' });
       },
       onResult: (result) => {
-        if (result.datasetRevision !== samplingDatasetRevisionRef.current) return;
+        if (result.datasetRevision !== samplingDatasetRevisionRef.current || result.viewportGeneration !== viewportGenerationRef.current || result.identity !== samplingDatasetCoordinatesRef.current.identity) return;
         setSampledPrimaryResult({ coordinates: result.coordinates, identity: result.identity, indexes: result.indexes });
-        logMapPlot('sampling worker: response applied', { requestId: result.requestId, sampledCount: result.indexes.length, fallback: result.fallback });
+        logMapPlot('sampling worker: response applied', { requestId: result.requestId, viewportGeneration: result.viewportGeneration, sampledCount: result.indexes.length, fallback: result.fallback });
       },
       onStatus: (status) => onPrimarySamplingState?.(status),
     });
@@ -404,8 +418,9 @@ const DeckGLOverlay = ({
   const samplingCoordinates = useMemo(() => {
     const coordinates = new Float64Array(locations.length * 2);
     locations.forEach((loc, index) => {
-      coordinates[index * 2] = Number(loc?.lng ?? loc?.longitude ?? loc?.lon ?? loc?.Lng);
-      coordinates[index * 2 + 1] = Number(loc?.lat ?? loc?.latitude ?? loc?.Lat);
+      const point = getMapCoordinate(loc);
+      coordinates[index * 2] = point?.lng ?? NaN;
+      coordinates[index * 2 + 1] = point?.lat ?? NaN;
     });
     return coordinates;
   }, [locations]);
@@ -444,12 +459,14 @@ const DeckGLOverlay = ({
       onPrimarySamplingState?.(null);
       return;
     }
+    if (!samplingReady || !viewportBounds || !Number.isFinite(mapZoom)) return;
 
     const requestId = samplingRequestRef.current + 1;
     samplingRequestRef.current = requestId;
     const options = {
       requestId,
       datasetRevision: samplingDatasetRevisionRef.current,
+      viewportGeneration,
       totalLogs: locations.length,
       bounds: viewportBounds,
       zoom: mapZoom,
@@ -464,6 +481,7 @@ const DeckGLOverlay = ({
       bounds: viewportBounds,
       zoom: mapZoom,
       datasetRevision: samplingDatasetRevisionRef.current,
+      viewportGeneration,
       usingWorkerRuntime: Boolean(samplingWorkerRef.current),
     });
     samplingWorkerRef.current?.request({
@@ -471,9 +489,10 @@ const DeckGLOverlay = ({
       totalLogs: locations.length,
       datasetRevision: samplingDatasetRevisionRef.current,
       identity: primaryDatasetIdentity,
+      viewportGeneration,
       options,
     });
-  }, [locations, samplingCoordinates, significantPrimaryIndexes, showPrimaryLogs, viewportBounds, mapZoom, selectedIndex, primaryRenderLimit, onPrimarySamplingState, primaryDatasetIdentity]);
+  }, [locations, samplingCoordinates, significantPrimaryIndexes, showPrimaryLogs, samplingReady, viewportBounds, viewportGeneration, mapZoom, selectedIndex, primaryRenderLimit, onPrimarySamplingState, primaryDatasetIdentity]);
 
   const handlePrimaryClick = useCallback((info) => {
     if (!info?.object) {
@@ -524,11 +543,9 @@ const DeckGLOverlay = ({
     return Array.from(activeIndexes, (idx) => {
       const loc = locations[idx];
       if (!loc) return null;
-      const position = [
-        Number(loc.lng ?? loc.longitude ?? loc.lon ?? loc.Lng),
-        Number(loc.lat ?? loc.latitude ?? loc.Lat),
-      ];
-      if (!Number.isFinite(position[0]) || !Number.isFinite(position[1])) return null;
+      const coordinate = getMapCoordinate(loc);
+      if (!coordinate) return null;
+      const position = [coordinate.lng, coordinate.lat];
       return {
         index: idx,
         source: loc,
@@ -1033,8 +1050,9 @@ const DeckGLOverlay = ({
         mapZoom: map?.getZoom?.(),
       });
     } catch (e) {
-      // Overlay can detach during map teardown; skip this update.
-      logMapPlot("layer-build effect: setProps threw", { error: e?.message || String(e) });
+      const detail = { error: e?.message || String(e), layers: layers.map((layer) => layer.id), container: [map?.getDiv?.()?.clientWidth, map?.getDiv?.()?.clientHeight] };
+      logMapPlot("layer-build effect: setProps threw", detail);
+      console.warn("DeckGL layer update failed", detail, e);
     }
   }, [map, attachedMap, primaryData, neighborData, gridData, imageLogData, metricLabelData, drawingData, drawingPolygonHitData, drawingPolylineHitData, drawingOpacity, nativeOutlineData, predictionRenderData, siteRenderData, registeredGroups, registryVersion, showPrimaryLogs, showNeighbors, showGrid, gridOpacity, handleGridHover, handleDrawingHover, showImageLogs, selectedIndex, radius, radiusMinPixels, radiusMaxPixels, opacity, neighborOpacity, showNumCells, showMetricLabels, getColor, getNeighborColor, handleImageLogClick, handlePrimaryHover, isValidMapInstance, pickable, autoHighlight, mapZoom, interactionsDisabled]);
 
@@ -1044,6 +1062,8 @@ const DeckGLOverlay = ({
         window.google.maps.event.removeListener(idleListenerRef.current);
       }
       idleListenerRef.current = null;
+      projectionListenerRef.current?.remove?.();
+      projectionListenerRef.current = null;
       if (attachTimerRef.current) {
         window.clearTimeout(attachTimerRef.current);
       }
