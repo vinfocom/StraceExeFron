@@ -181,7 +181,18 @@ if (isSuccessResponse(response)) {
         localStorage.setItem(LOGIN_EVENT_KEY, Date.now().toString());
         localStorage.removeItem(LOGIN_EVENT_KEY);
 
-        return { success: true, user: userData };
+        return {
+          success: true,
+          user: userData,
+          message:
+            response?.message ||
+            response?.Message ||
+            response?.data?.message ||
+            response?.data?.Message ||
+            response?.Data?.message ||
+            response?.Data?.Message ||
+            'Login successful!',
+        };
       }
 
       const errorMessage =

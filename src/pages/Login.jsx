@@ -194,7 +194,7 @@ const LoginPage = () => {
 
       if (response.success) {
         await persistRememberedUserId(normalizedEmail);
-        toast.success("Login successful!");
+        toast.success(response.message || "Login successful!");
         navigateAfterLogin();
       } else {
         const alreadyLoggedIn =
@@ -217,19 +217,19 @@ const LoginPage = () => {
 
             if (forceResponse.success) {
               await persistRememberedUserId(normalizedEmail);
-              toast.success("Login successful!");
+              toast.success(forceResponse.message || "Login successful!");
               navigateAfterLogin();
               return;
             }
 
-            toast.error(GENERIC_LOGIN_ERROR);
+            toast.error(forceResponse?.message || GENERIC_LOGIN_ERROR);
             sessionStorage.removeItem(TRANSITION_INTENT_KEY);
             return;
           }
         }
 
         sessionStorage.removeItem(TRANSITION_INTENT_KEY);
-        toast.error(GENERIC_LOGIN_ERROR);
+        toast.error(response?.message || GENERIC_LOGIN_ERROR);
       }
     } catch (error) {
       let backendMessage = "";
@@ -266,24 +266,31 @@ const LoginPage = () => {
 
             if (forceResponse?.success) {
               await persistRememberedUserId(normalizedEmail);
-              toast.success("Login successful!");
+              toast.success(forceResponse.message || "Login successful!");
               navigateAfterLogin();
               return;
             }
 
-            toast.error(GENERIC_LOGIN_ERROR);
+            toast.error(forceResponse?.message || GENERIC_LOGIN_ERROR);
             sessionStorage.removeItem(TRANSITION_INTENT_KEY);
             return;
           } catch (forceError) {
             sessionStorage.removeItem(TRANSITION_INTENT_KEY);
-            toast.error(GENERIC_LOGIN_ERROR);
+            toast.error(
+              forceError?.response?.data?.message ||
+              forceError?.response?.data?.Message ||
+              forceError?.data?.message ||
+              forceError?.data?.Message ||
+              forceError?.message ||
+              GENERIC_LOGIN_ERROR
+            );
             return;
           }
         }
       }
 
       sessionStorage.removeItem(TRANSITION_INTENT_KEY);
-      toast.error(GENERIC_LOGIN_ERROR);
+      toast.error(backendMessage || GENERIC_LOGIN_ERROR);
     } finally {
       setLoading(false);
     }
