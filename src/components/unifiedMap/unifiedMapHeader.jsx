@@ -130,6 +130,8 @@ function UnifiedHeader({
   canEnableGridView = false,
   onMapSnapshot,
   onAddSiteClick,
+  onHotspotClick,
+  hotspotMode = false,
   enableSiteToggle = false,
   siteToggle,
   setSiteToggle,
@@ -497,6 +499,11 @@ function UnifiedHeader({
       action: () => onAddSiteClick?.(),
     },
     {
+      label: hotspotMode ? "Cancel Hotspot" : "Hotspot",
+      action: () => onHotspotClick?.(),
+      disabled: !effectiveProjectId,
+    },
+    {
       label: "Import Site",
       action: () => setOpenImportDialog(true),
     },
@@ -562,6 +569,10 @@ function UnifiedHeader({
         onAddSiteClick?.();
         return;
       }
+      if (action === "hotspot") {
+        onHotspotClick?.();
+        return;
+      }
       if (action === "opacity") {
         toggleQuickControl("opacity");
         return;
@@ -608,6 +619,7 @@ function UnifiedHeader({
     isMapPage,
     neighborLogsAvailable,
     onAddSiteClick,
+    onHotspotClick,
     onSettingsSaved,
     onMapSnapshot,
     openSettings,

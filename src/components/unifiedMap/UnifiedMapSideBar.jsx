@@ -765,6 +765,11 @@ const UnifiedMapSidebar = ({
   setShowSessionNeighbors,
   showInsights = false,
   setShowInsights,
+  showHotspots = false,
+  setShowHotspots,
+  hotspotsLoading = false,
+  hotspotsError = "",
+  hotspotCount = 0,
   insightsLoading = false,
   secondaryMetricAvailability = {},
   neighborLogsAvailable = false,
@@ -3656,6 +3661,23 @@ const UnifiedMapSidebar = ({
               description={insightsLoading ? "Loading insights..." : "Show upload insights on the map"}
               checked={Boolean(showInsights)}
               onChange={setShowInsights}
+              useSwitch={true}
+            />
+
+            <ToggleRow
+              label="Show Hotspot"
+              description={hotspotsLoading
+                ? "Loading hotspots..."
+                : hotspotsError
+                  ? `Could not load hotspots: ${hotspotsError}`
+                  : showHotspots
+                    ? hotspotCount > 0
+                      ? `${hotspotCount} hotspot${hotspotCount === 1 ? "" : "s"} shown on the map`
+                      : "No hotspots saved for this project"
+                    : "Show saved hotspot symbols and details"}
+              checked={Boolean(showHotspots)}
+              onChange={setShowHotspots}
+              disabled={!projectId}
               useSwitch={true}
             />
 

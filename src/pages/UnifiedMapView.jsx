@@ -40,6 +40,7 @@ import LoadingProgress from "@/components/LoadingProgress";
 import TechHandoverMarkers from "@/components/unifiedMap/TechHandoverMarkers";
 import SubSessionMarkers from "@/components/unifiedMap/SubSessionMarkers";
 import InsightMarkers from "@/components/unifiedMap/InsightMarkers";
+import HotspotLayer, { HOTSPOT_SYMBOLS, HotspotMarker, getHotspotAnchor, getHotspotLine } from "@/components/unifiedMap/HotspotLayer";
 import { extractInsightRows } from "@/components/unifiedMap/insightUtils";
 import AddSiteFormDialog from "@/components/unifiedMap/AddSiteFormDialog";
 import LtePredictionLocationLayer from "@/components/unifiedMap/LtePredictionLocationLayer";
@@ -1970,6 +1971,13 @@ const UnifiedMapView = () => {
   const mapSnapshotContainerRef = useRef(null);
   const [analyticsActiveTab, setAnalyticsActiveTab] = useState("overview");
   const [showInsights, setShowInsights] = useState(false);
+  const [showHotspots, setShowHotspots] = useState(false);
+  const [hotspots, setHotspots] = useState([]);
+  const [hotspotsLoading, setHotspotsLoading] = useState(false);
+  const [hotspotsError, setHotspotsError] = useState("");
+  const [hotspotPicking, setHotspotPicking] = useState(null);
+  const [hotspotDraft, setHotspotDraft] = useState(null);
+  const [hotspotSaving, setHotspotSaving] = useState(false);
   const [insights, setInsights] = useState([]);
   const [insightsLoading, setInsightsLoading] = useState(false);
   const [selectedInsightId, setSelectedInsightId] = useState(null);
@@ -2582,6 +2590,10 @@ const UnifiedMapView = () => {
   });
 
   const mapRef = useRef(null);
+  const hotspotMapClickRef = useRef(null);
+  const hotspotPickingRef = useRef(null);
+  const hotspotPolygonCheckerRef = useRef(null);
+  const hotspotPolygonLoadingRef = useRef(false);
   const viewportRef = useRef(null);
   const zoomLockEnabledRef = useRef(false);
   const [mapFitRequestId, setMapFitRequestId] = useState(0);
@@ -3172,6 +3184,8 @@ const UnifiedMapView = () => {
         : null,
     [rawFilteringPolygons],
   );
+  hotspotPolygonCheckerRef.current = filteringPolygonChecker;
+  hotspotPolygonLoadingRef.current = polygonLoading || (areaEnabled && areaLoading);
   const siteLayerPolygonFiltering = Boolean(enableSiteToggle && rawFilteringPolygons.length > 0);
   const canEnableUnifiedGridView = hasFilteringPolygons;
 
@@ -3253,6 +3267,123 @@ const UnifiedMapView = () => {
 
     return hasPassedLocations ? passedLocations : fetchedSamples;
   }, [shouldFetchSamples, sampleLoading, fetchedSamples, hasPassedLocations, passedLocations, renderedSampleDataset]);
+
+  hotspotPickingRef.current = hotspotPicking;
+
+  useEffect(() => {
+    setHotspots([]);
+    setHotspotsError("");
+    setShowHotspots(false);
+    setHotspotPicking(null);
+    setHotspotDraft(null);
+  }, [projectId]);
+
+  const fetchHotspots = useCallback(async (signal) => {
+    if (!hasOpenProject) return;
+    setHotspotsLoading(true);
+    setHotspotsError("");
+    try {
+      const response = await mapViewApi.getNetworkLogHotspots(projectId, { signal });
+      const body = response || {};
+      if ((body.status ?? body.Status) === 0) throw new Error(body.message ?? body.Message ?? "Could not load hotspots.");
+      if (!signal?.aborted) setHotspots(Array.isArray(body.data ?? body.Data) ? (body.data ?? body.Data) : []);
+    } catch (error) {
+      if (!signal?.aborted && error?.code !== "ERR_CANCELED") {
+        const message = error?.response?.data?.message ?? error?.response?.data?.Message ?? error.message ?? "Could not load hotspots.";
+        setHotspotsError(message);
+        toast.error(message);
+      }
+    } finally {
+      if (!signal?.aborted) setHotspotsLoading(false);
+    }
+  }, [hasOpenProject, projectId]);
+
+  const hotspotsNeeded = Boolean(showHotspots || hotspotPicking || hotspotDraft);
+  useEffect(() => {
+    if (!hotspotsNeeded) return undefined;
+    const controller = new AbortController();
+    fetchHotspots(controller.signal);
+    return () => controller.abort();
+  }, [hotspotsNeeded, fetchHotspots]);
+
+  const editHotspot = useCallback((row) => {
+    const point = getHotspotAnchor(row);
+    const id = Number(row?.id);
+    if (!point || !Number.isSafeInteger(id) || id === 0) return;
+    const savedLine = getHotspotLine(row);
+    setHotspotDraft({
+      networkLogId: id,
+      point,
+      hotspot: row.hotspot ?? "",
+      symbol: row.hotspot_symbol || "warning",
+      line: savedLine.length ? savedLine : [point],
+    });
+    setHotspotPicking(null);
+  }, []);
+
+  const handleHotspotMapClick = useCallback((latLng) => {
+    const point = { lat: latLng.lat(), lon: latLng.lng() };
+    if (hotspotPolygonLoadingRef.current) {
+      toast.info("Wait for the project polygon to finish loading.");
+      return;
+    }
+    const polygonChecker = hotspotPolygonCheckerRef.current;
+    if (polygonChecker?.hasPolygons && !polygonChecker.isInside(point.lat, point.lon)) {
+      toast.info("Select a location inside the project polygon.");
+      return;
+    }
+    if (hotspotPickingRef.current === "line") {
+      setHotspotDraft((draft) => draft ? { ...draft, line: [...draft.line, point] } : draft);
+      setHotspotPicking(null);
+      return;
+    }
+    if (hotspotPickingRef.current !== "anchor") return;
+    setHotspotDraft((draft) => draft
+      ? { ...draft, point, line: [point, ...draft.line.slice(1)] }
+      : { networkLogId: 0, point, hotspot: "", symbol: "warning", line: [point] });
+    setHotspotPicking(null);
+  }, []);
+  hotspotMapClickRef.current = handleHotspotMapClick;
+
+  const handleHotspotToggle = useCallback(() => {
+    if (!hasOpenProject) return;
+    if (hotspotPickingRef.current) {
+      setHotspotPicking(null);
+      return;
+    }
+    setAddSiteMode(false);
+    addSiteModeRef.current = false;
+    setHotspotDraft(null);
+    setHotspotPicking("anchor");
+  }, [hasOpenProject]);
+
+  const saveHotspot = useCallback(async (event) => {
+    event.preventDefault();
+    if (!hotspotDraft || !hotspotDraft.hotspot.trim() || !hasOpenProject) return;
+    setHotspotSaving(true);
+    try {
+      const response = await mapViewApi.saveNetworkLogHotspot({
+        projectId,
+        networkLogId: hotspotDraft.networkLogId,
+        lat: hotspotDraft.point.lat,
+        lon: hotspotDraft.point.lon,
+        hotspot: hotspotDraft.hotspot.trim(),
+        symbol: hotspotDraft.symbol,
+        line: hotspotDraft.line,
+      });
+      const body = response || {};
+      if ((body.status ?? body.Status) === 0) throw new Error(body.message ?? body.Message ?? "Could not save hotspot.");
+      toast.success(body.message ?? body.Message ?? "Hotspot saved successfully.");
+      setHotspotDraft(null);
+      setHotspotPicking(null);
+      setShowHotspots(true);
+      await fetchHotspots();
+    } catch (error) {
+      toast.error(error?.response?.data?.message ?? error?.response?.data?.Message ?? error.message ?? "Could not save hotspot.");
+    } finally {
+      setHotspotSaving(false);
+    }
+  }, [fetchHotspots, hasOpenProject, hotspotDraft, projectId]);
 
   const getCachedNetworkLogsForPrediction = useCallback(
     ({ projectId: requestedProjectId, sessionIds: requestedSessionIds } = {}) => {
@@ -6431,10 +6562,11 @@ const UnifiedMapView = () => {
       zoomControl: false,
       isFractionalZoomEnabled: true,
       scrollwheel: !isZoomLocked,
+      draggableCursor: hotspotPicking ? "crosshair" : undefined,
       disableDoubleClickZoom: isZoomLocked,
       keyboardShortcuts: !isZoomLocked,
     }),
-    [ui.basemapStyle, isZoomLocked],
+    [ui.basemapStyle, isZoomLocked, hotspotPicking],
   );
 
   const updateViewportRef = useCallback((newViewport) => {
@@ -6656,6 +6788,11 @@ const UnifiedMapView = () => {
             });
             map.setZoom(lockedZoomRef.current);
           }
+        }
+
+        if (hotspotPickingRef.current) {
+          hotspotMapClickRef.current?.(e.latLng);
+          return;
         }
 
         if (addSiteModeRef.current) {
@@ -7478,6 +7615,8 @@ const UnifiedMapView = () => {
       toast.error("Please select a valid project before adding a site.");
       return;
     }
+    setHotspotPicking(null);
+    setHotspotDraft(null);
     setAddSiteMode(true);
     addSiteModeRef.current = true;
     toast.info("Click on the map to pick a location for the new site", {
@@ -7856,6 +7995,8 @@ const UnifiedMapView = () => {
         canEnableGridView={canEnableUnifiedGridView}
         onMapSnapshot={handleMapSnapshot}
         onAddSiteClick={handleAddSiteClick}
+        onHotspotClick={handleHotspotToggle}
+        hotspotMode={Boolean(hotspotPicking)}
         enableSiteToggle={enableSiteToggle}
         siteToggle={siteToggle}
         setSiteToggle={setSiteToggle}
@@ -8010,6 +8151,11 @@ const UnifiedMapView = () => {
         setShowSessionNeighbors={setShowSessionNeighbors}
         showInsights={showInsights}
         setShowInsights={setShowInsights}
+        showHotspots={showHotspots}
+        setShowHotspots={setShowHotspots}
+        hotspotsLoading={hotspotsLoading}
+        hotspotsError={hotspotsError}
+        hotspotCount={hotspots.length}
         insightsLoading={insightsLoading}
         neighborLogsAvailable={neighborLogsAvailable}
         sessionNeighborLoading={sessionNeighborLoading}
@@ -8531,6 +8677,22 @@ const UnifiedMapView = () => {
                 radius={logRadius}
               />
 
+              {showHotspots && <HotspotLayer hotspots={hotspots} onEdit={editHotspot} />}
+
+              {hotspotDraft && (
+                <>
+                {hotspotDraft.line.length > 1 && (
+                  <Polyline path={hotspotDraft.line.map((point) => ({ lat: point.lat, lng: point.lon }))} options={{ strokeColor: "#f59e0b", strokeWeight: 3, strokeOpacity: 0.9, clickable: false, zIndex: 1050 }} />
+                )}
+                <HotspotMarker
+                  position={{ lat: hotspotDraft.point.lat, lng: hotspotDraft.point.lon }}
+                  symbolName={hotspotDraft.symbol}
+                  title="Selected hotspot location"
+                  preview
+                />
+                </>
+              )}
+
             </MapWithMultipleCircles>
           )}
           {!showInitialMapSpinner && (error || siteError || sessionNeighborError || (!activeDatasetComplete && !activeDatasetLoading)) && (
@@ -8579,6 +8741,48 @@ const UnifiedMapView = () => {
               Updating secondary log data…
             </div>
           )}
+          {hotspotDraft && (
+            <form onSubmit={saveHotspot} className="absolute right-4 top-4 z-[850] w-[min(360px,calc(100%-2rem))] space-y-3 rounded-xl border border-slate-600 bg-slate-900/95 p-4 text-white shadow-xl">
+              <div className="flex items-center justify-between gap-2">
+                <h2 className="text-base font-semibold">Hotspot details</h2>
+                <button type="button" onClick={() => { setHotspotDraft(null); setHotspotPicking(null); }} className="text-sm text-slate-300 hover:text-white">Cancel</button>
+              </div>
+              <div className="text-xs text-slate-300">{hotspotDraft.networkLogId > 0 ? `Network log #${hotspotDraft.networkLogId}` : hotspotDraft.networkLogId < 0 ? `Hotspot #${-hotspotDraft.networkLogId}` : "New hotspot"} · {hotspotDraft.point.lat.toFixed(6)}, {hotspotDraft.point.lon.toFixed(6)}</div>
+              <label className="block text-sm">
+                <span className="mb-1 block">Hotspot name</span>
+                <input autoFocus required maxLength={1000} value={hotspotDraft.hotspot} onChange={(event) => setHotspotDraft((draft) => ({ ...draft, hotspot: event.target.value }))} className="w-full rounded border border-slate-600 bg-slate-800 px-3 py-2 text-white" placeholder="VIP Issue Point" />
+              </label>
+              <div className="text-sm">
+                <span className="mb-1 block">Symbol</span>
+                <div role="group" aria-label="Hotspot symbol" className="grid grid-cols-5 gap-2">
+                  {HOTSPOT_SYMBOLS.map((symbol) => {
+                    const Icon = symbol.icon;
+                    const selected = hotspotDraft.symbol === symbol.value;
+                    return (
+                      <button
+                        key={symbol.value}
+                        type="button"
+                        title={symbol.label}
+                        aria-label={symbol.label}
+                        aria-pressed={selected}
+                        onClick={() => setHotspotDraft((draft) => ({ ...draft, symbol: symbol.value }))}
+                        className={`flex h-11 items-center justify-center rounded border ${selected ? "border-white bg-slate-700 ring-2 ring-blue-400" : "border-slate-600 bg-slate-800 hover:bg-slate-700"}`}
+                      >
+                        <Icon aria-hidden="true" className="h-5 w-5" style={{ color: symbol.color }} strokeWidth={2.5} />
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+              <div className="text-xs text-slate-300">Line points: {hotspotDraft.line.length}</div>
+              <div className="flex flex-wrap gap-2">
+                <button type="button" onClick={() => setHotspotPicking("line")} className="rounded bg-slate-700 px-3 py-1.5 text-xs hover:bg-slate-600">{hotspotPicking === "line" ? "Click map for next point" : "Add line point"}</button>
+                {hotspotDraft.line.length > 1 && <button type="button" onClick={() => setHotspotDraft((draft) => ({ ...draft, line: draft.line.slice(0, -1) }))} className="rounded bg-slate-700 px-3 py-1.5 text-xs hover:bg-slate-600">Undo point</button>}
+                <button type="button" onClick={() => setHotspotPicking("anchor")} className="rounded bg-slate-700 px-3 py-1.5 text-xs hover:bg-slate-600">Change location</button>
+              </div>
+              <button type="submit" disabled={hotspotSaving || !hotspotDraft.hotspot.trim()} className="w-full rounded bg-blue-600 px-3 py-2 text-sm font-semibold hover:bg-blue-500 disabled:opacity-50">{hotspotSaving ? "Saving..." : "Save Hotspot"}</button>
+            </form>
+          )}
           {ui.basemapStyle === "terrain" && (
             <TerrainElevationProfile
               hoverControllerRef={terrainHoverControllerRef}
@@ -8610,6 +8814,13 @@ const UnifiedMapView = () => {
           >
             Cancel
           </button>
+        </div>
+      )}
+
+      {hotspotPicking && (
+        <div className="fixed left-1/2 top-20 z-[2000] flex -translate-x-1/2 items-center gap-2 rounded-full bg-amber-600 px-4 py-2 text-sm font-medium text-white shadow-lg">
+          {hotspotPicking === "anchor" ? "Click on the map to place a hotspot" : "Click on the map to add a line point"}
+          <button type="button" onClick={() => setHotspotPicking(null)} className="rounded bg-white/20 px-2 py-0.5 text-xs hover:bg-white/30">Cancel</button>
         </div>
       )}
 

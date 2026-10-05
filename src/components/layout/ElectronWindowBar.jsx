@@ -238,6 +238,7 @@ const ElectronWindowBar = () => {
           onActionClick={() => setActiveMenu(null)}
           actions={[
             { label: "Add Site", onClick: () => emitUtilityAction("add-site") },
+            { label: "Hotspot", onClick: () => emitUtilityAction("hotspot") },
             { label: "Opacity", onClick: () => emitUtilityAction("opacity") },
             { label: "Baseline Opacity", onClick: () => emitUtilityAction("stored-grid-opacity") },
             { label: "Log Radius", onClick: () => emitUtilityAction("log-radius") },

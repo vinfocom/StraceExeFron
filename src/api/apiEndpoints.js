@@ -1790,6 +1790,13 @@ export const sitePredictionApi = {
 };
 
 export const mapViewApi = {
+  getNetworkLogHotspots: (projectId, config = {}) =>
+    api.get("/api/MapView/GetNetworkLogHotspots", {
+      params: { projectId },
+      ...config,
+    }),
+  saveNetworkLogHotspot: (payload) =>
+    api.post("/api/MapView/SaveNetworkLogHotspot", payload),
   addSitePrediction: sitePredictionApi.add,
   getLtePfrection: (params, config = {}) =>
     api.get("/api/MapView/GetLtePredictionLocationStats", { params, ...config }),
