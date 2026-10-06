@@ -4209,6 +4209,7 @@ const UnifiedMapView = () => {
           optimizedBestOperator,
           bestOperator: providerLabel,
           provider: providerLabel,
+          colorByOperator: isBestOperatorGridMode,
           technology: row?.technology ?? row?.Technology ?? deltaGridApiState?.storedGridTechnology ?? storedGridTechnology ?? "ALL",
           lat: centerLat,
           lng: centerLon,

@@ -3,6 +3,8 @@ import { Grid, Html, Line } from '@react-three/drei'
 import { CanvasTexture, Shape } from 'three'
 import { normalizeWallSide } from '../../utils/indoor/floorPlan'
 
+const LABEL_Z_INDEX_RANGE = [1, 0]
+
 const WALL_MATERIALS = {
   drywall: { color: '#d3d3d3', opacity: 1, transparent: false },
   glass: { color: '#7ec1dd', opacity: 0.45, transparent: true },
@@ -243,6 +245,9 @@ export function FloorModel({
   onStartDrag,
   onDragMove,
   onEndDrag,
+  showGroundGrid = true,
+  highlighted = false,
+  labelPortal,
 }) {
   const is2dView = viewMode === '2d'
   const visibleFurniture = draftFurniture ? [...furniture, draftFurniture] : furniture
@@ -557,7 +562,7 @@ export function FloorModel({
               {render2DWallLine(room, 'south')}
               {render2DWallLine(room, 'west')}
               {render2DWallLine(room, 'east')}
-              <Html position={[cx, 0.2, cz]} center>
+              <Html position={[cx, 0.2, cz]} center portal={labelPortal} zIndexRange={LABEL_Z_INDEX_RANGE}>
                 <div style={{ background: 'rgba(255,255,255,0.9)', border: '1px solid #cbd5e1', borderRadius: 4, padding: '1px 5px', color: '#17303b', fontSize: 10, fontWeight: 600, lineHeight: 1.2, maxWidth: 120, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', pointerEvents: 'none' }}>
                   {room.name}
                 </div>
@@ -603,7 +608,7 @@ export function FloorModel({
               <meshBasicMaterial color="#2563eb" />
             </mesh>
             <Line points={[[0, 0.04, 0], [0.75, 0.04, 0]]} color="#1d4ed8" lineWidth={3} />
-            <Html position={[0, 0.18, 0]} center>
+            <Html position={[0, 0.18, 0]} center portal={labelPortal} zIndexRange={LABEL_Z_INDEX_RANGE}>
               <div style={{ background: 'rgba(239,246,255,0.95)', border: '1px solid #93c5fd', borderRadius: 4, padding: '1px 5px', color: '#1e3a8a', fontSize: 10, fontWeight: 700, maxWidth: 110, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', pointerEvents: 'none' }}>
                 {site.name}
               </div>
@@ -616,7 +621,7 @@ export function FloorModel({
               <ringGeometry args={[0.18, 0.34, 32]} />
               <meshBasicMaterial color="#06b6d4" />
             </mesh>
-            <Html position={[0, 0.18, 0]} center>
+            <Html position={[0, 0.18, 0]} center portal={labelPortal} zIndexRange={LABEL_Z_INDEX_RANGE}>
               <div style={{ background: 'rgba(236,254,255,0.94)', border: '1px solid #67e8f9', borderRadius: 4, padding: '1px 5px', color: '#155e75', fontSize: 10, fontWeight: 700, maxWidth: 110, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', pointerEvents: 'none' }}>
                 {wifi.name}
               </div>
@@ -649,7 +654,7 @@ export function FloorModel({
     <group onPointerMove={handlePlanPointerMove} onPointerUp={handlePlanPointerUp} onPointerLeave={handlePlanPointerUp}>
       <mesh rotation-x={-Math.PI / 2} position={[(bounds.minX + bounds.maxX) / 2, 0, (bounds.minZ + bounds.maxZ) / 2]} onPointerDown={handlePlanPointerDown}>
         <planeGeometry args={[bounds.maxX - bounds.minX, bounds.maxZ - bounds.minZ]} />
-        <meshStandardMaterial color="#ffffff" roughness={0.92} metalness={0} />
+        <meshStandardMaterial color={highlighted ? '#ccfbf1' : '#ffffff'} roughness={0.92} metalness={0} />
       </mesh>
 
       {rooms.map((room) => {
@@ -706,7 +711,7 @@ export function FloorModel({
                 {renderWall(room, 'east', [room.x + room.width, room.height / 2, cz], [wallThickness, room.height, room.depth + wallThickness])}
               </>
             )}
-            <Html position={is2dView ? [cx, 0.16, cz] : [cx, room.height + 0.2, cz]} center distanceFactor={is2dView ? undefined : 18}>
+            <Html position={is2dView ? [cx, 0.16, cz] : [cx, room.height + 0.2, cz]} center distanceFactor={is2dView ? undefined : 18} portal={labelPortal} zIndexRange={LABEL_Z_INDEX_RANGE}>
               <div style={{ background: 'rgba(255,255,255,0.88)', border: '1px solid #c7d8de', borderRadius: 4, padding: '1px 5px', color: '#17303b', fontSize: is2dView ? 10 : 12, fontWeight: 600, lineHeight: 1.2, maxWidth: 120, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', pointerEvents: 'none' }}>
                 {room.name}
               </div>
@@ -778,7 +783,7 @@ export function FloorModel({
                     <meshBasicMaterial color={index === 0 ? '#2563eb' : index === 1 ? '#3b82f6' : '#93c5fd'} transparent opacity={0.88 - index * 0.18} side={2} toneMapped={false} />
                   </mesh>
                 ))}
-                <Html position={is2dView ? [0, 0.26, 0] : [0, towerHeight + 0.35, 0]} center distanceFactor={is2dView ? undefined : 18}>
+                <Html position={is2dView ? [0, 0.26, 0] : [0, towerHeight + 0.35, 0]} center distanceFactor={is2dView ? undefined : 18} portal={labelPortal} zIndexRange={LABEL_Z_INDEX_RANGE}>
                   <div style={{ background: 'rgba(239,246,255,0.95)', border: '1px solid #93c5fd', borderRadius: 4, padding: '1px 5px', color: '#1e3a8a', fontSize: is2dView ? 10 : 11, fontWeight: 700, lineHeight: 1.2, maxWidth: 110, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', pointerEvents: 'none' }}>
                     {site.name}
                   </div>
@@ -812,7 +817,7 @@ export function FloorModel({
               <meshBasicMaterial color={index === 0 ? '#06b6d4' : index === 1 ? '#22d3ee' : '#a5f3fc'} transparent opacity={0.86 - index * 0.18} side={2} toneMapped={false} />
             </mesh>
           ))}
-          <Html position={is2dView ? [0, 0.26, 0] : [0, 0.55, 0]} center distanceFactor={is2dView ? undefined : 18}>
+          <Html position={is2dView ? [0, 0.26, 0] : [0, 0.55, 0]} center distanceFactor={is2dView ? undefined : 18} portal={labelPortal} zIndexRange={LABEL_Z_INDEX_RANGE}>
             <div style={{ background: 'rgba(236,254,255,0.94)', border: '1px solid #67e8f9', borderRadius: 4, padding: '1px 5px', color: '#155e75', fontSize: is2dView ? 10 : 11, fontWeight: 700, lineHeight: 1.2, maxWidth: 110, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', pointerEvents: 'none' }}>
               {wifi.name}
             </div>
@@ -887,7 +892,7 @@ export function FloorModel({
       })}
       <PredictionHeatmapOverlay predictions={predictions} rooms={rooms} wallThickness={wallThickness} />
       {renderDragPlane()}
-      <Grid position={[0, -0.01, 0]} args={[80, 80]} sectionColor="#4b6c7b" cellColor="#9cb5c0" sectionSize={5} sectionThickness={1} cellSize={1} cellThickness={0.5} fadeDistance={80} fadeStrength={1} />
+      {showGroundGrid && <Grid position={[0, -0.01, 0]} args={[80, 80]} sectionColor="#4b6c7b" cellColor="#9cb5c0" sectionSize={5} sectionThickness={1} cellSize={1} cellThickness={0.5} fadeDistance={80} fadeStrength={1} />}
     </group>
   )
 }

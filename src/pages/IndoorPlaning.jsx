@@ -3,12 +3,15 @@ import { useLocation, useParams } from 'react-router-dom'
 import { Canvas } from '@react-three/fiber'
 import { OrbitControls, OrthographicCamera, PerspectiveCamera } from '@react-three/drei'
 import { FloorModel } from '@/components/indoor/FloorModel'
+import GoogleMapAlignmentDialog from '@/components/indoor/GoogleMapAlignmentDialog'
 import IndoorPlanningSidebar from '@/components/indoor/IndoorPlanningSidebar'
 import { ALLOWED_EXCEL_TYPES, ALLOWED_IMAGE_TYPES, initialRooms, MAX_EXCEL_BYTES, MAX_IMAGE_BYTES } from '@/config/indoor/floorPlannerConfig'
 import { createStoryBuildingTemplateWorkbook } from '@/templates/indoor/buildingTemplate'
 import { createReviewedDetectedWorkbook, downloadWorkbook, parseBuildingWorkbook, parseLogsWorkbook, parseLogsCsv } from '@/utils/indoor/excelPlan'
 import { buildFloorOptions, getOverlapWarnings, getVisiblePlan, hasAllowedExtension, normalizeParsedPlan, toNumber } from '@/utils/indoor/floorPlan'
 import { buildAggregatedLogGridCells, getLogMetricValue } from '@/utils/indoor/indoorPlanningUtils'
+import { getFloorElevations, isValidAlignment, projectLogs } from '@/utils/indoor/geographicAlignment'
+import { parseProjectPlan, serializePlanningData } from '@/utils/indoor/planningPersistence'
 import { OMNI_SIGNAL_LEGEND, buildDefaultSiteSectors, calculateIndoorPredictionPoints } from '@/utils/indoor/indoorPrediction'
 import { pythonApi } from '@/api/pythonApiService'
 import { indoorPlanningApi } from '@/api/apiEndpoints'
@@ -51,7 +54,6 @@ const formatKpiRange = (item, unit) => {
 }
 
 const getProjectName = (project) => project?.name || project?.Name || project?.projectName || project?.ProjectName
-const getProjectPlanJson = (project) => project?.planJson || project?.PlanJson || project?.plan_json
 
 const isPointInsideRoom = (x, z, room) => {
   const shape = String(room?.shape || 'rectangle').toLowerCase()
@@ -83,18 +85,6 @@ const isSourceInsideRooms = (source, rooms) => {
   return Number.isFinite(x) && Number.isFinite(z) && rooms.some((room) => isPointInsideRoom(x, z, room))
 }
 
-const parseProjectPlan = (project) => {
-  const value = getProjectPlanJson(project)
-  if (!value) return null
-  if (typeof value === 'object') return value
-  if (typeof value !== 'string') return null
-  try {
-    return JSON.parse(value)
-  } catch {
-    return null
-  }
-}
-
 function IndoorPlaning() {
   const { projectId } = useParams()
   const location = useLocation()
@@ -106,6 +96,9 @@ function IndoorPlaning() {
   const [doors, setDoors] = useState([])
   const [windows, setWindows] = useState([])
   const [logs, setLogs] = useState([])
+  const [alignment, setAlignment] = useState(null)
+  const [showAlignment, setShowAlignment] = useState(false)
+  const [defaultFloorHeightM, setDefaultFloorHeightM] = useState(3.2)
   const [showLogs, setShowLogs] = useState(true)
   const [showLogGrid, setShowLogGrid] = useState(false)
   const [logGridSizeM, setLogGridSizeM] = useState(1)
@@ -140,6 +133,7 @@ function IndoorPlaning() {
   const [projectHydrated, setProjectHydrated] = useState(!projectId)
   const lastSavedPlanJsonRef = useRef('')
   const saveTimerRef = useRef(null)
+  const canvasLabelPortalRef = useRef(null)
   const inputClass = 'rounded-lg border border-slate-300 bg-white px-2.5 py-2 text-sm'
   const buttonClass = 'cursor-pointer rounded-lg bg-white   px-3 py-1 text-black border  border-black-500'
   const dangerButtonClass = 'cursor-pointer rounded-lg bg-rose-600 px-2.5 py-1.5 text-xs text-white'
@@ -175,16 +169,21 @@ function IndoorPlaning() {
 
       if (plan.siteName || plan.site_name) setSiteName(String(plan.siteName || plan.site_name))
       if (Array.isArray(plan.rooms) && plan.rooms.length > 0) setRooms(plan.rooms)
+      if (Array.isArray(plan.boundaryPolygon)) setBoundaryPolygon(plan.boundaryPolygon)
       if (Array.isArray(plan.doors)) setDoors(plan.doors)
       if (Array.isArray(plan.windows)) setWindows(plan.windows)
-      if (Array.isArray(plan.sites)) setSites(plan.sites)
-      if (Array.isArray(plan.wifiPoints)) setWifiPoints(plan.wifiPoints)
-      if (Array.isArray(plan.furniture)) setFurniture(plan.furniture)
+      const legacyFloorId = String(plan.selectedFloorId || plan.selected_floor_id || 'level-1')
+      if (Array.isArray(plan.sites)) setSites(plan.sites.map((item) => ({ ...item, floorId: item.floorId || legacyFloorId })))
+      if (Array.isArray(plan.wifiPoints)) setWifiPoints(plan.wifiPoints.map((item) => ({ ...item, floorId: item.floorId || legacyFloorId })))
+      if (Array.isArray(plan.furniture)) setFurniture(plan.furniture.map((item) => ({ ...item, floorId: item.floorId || legacyFloorId })))
       if (Array.isArray(plan.interiorWalls)) setInteriorWalls(plan.interiorWalls)
       if (plan.wallTypes && typeof plan.wallTypes === 'object') setWallTypes(plan.wallTypes)
       if (Number.isFinite(Number(plan.wallThickness ?? plan.wall_thickness))) setWallThickness(Number(plan.wallThickness ?? plan.wall_thickness))
       if (plan.selectedFloorId || plan.selected_floor_id) setSelectedFloorId(String(plan.selectedFloorId || plan.selected_floor_id))
-      lastSavedPlanJsonRef.current = JSON.stringify(plan)
+      setAlignment(isValidAlignment(plan.alignment) ? plan.alignment : null)
+      if (Number(plan.defaultFloorHeightM) > 0) setDefaultFloorHeightM(Number(plan.defaultFloorHeightM))
+      if (Array.isArray(plan.logs)) setLogs(plan.logs)
+      lastSavedPlanJsonRef.current = serializePlanningData(plan)
     }
 
     const routeProject = location.state?.indoorProject
@@ -213,8 +212,12 @@ function IndoorPlaning() {
 
   const floors = useMemo(() => buildFloorOptions(rooms), [rooms])
   const selectedFloor = useMemo(() => floors.find((floor) => floor.id === selectedFloorId) || floors[0] || { id: 'level-1', name: 'Level 1' }, [floors, selectedFloorId])
+  const floorElevations = useMemo(() => getFloorElevations(floors, rooms, defaultFloorHeightM), [floors, rooms, defaultFloorHeightM])
+  const stackHeight = Math.max(...floorElevations.values(), 0)
+  const positionedLogs = useMemo(() => projectLogs(logs, alignment), [logs, alignment])
+  const pendingGeographicCount = positionedLogs.filter((item) => item.lat !== undefined && item.x === null).length
 
-  const savedPlanJson = useMemo(() => JSON.stringify({
+  const savedPlanJson = useMemo(() => serializePlanningData({
     siteName,
     selectedFloorId,
     wallThickness,
@@ -231,6 +234,9 @@ function IndoorPlaning() {
     logMetric,
     logGridSizeM,
     logGridAggregation,
+    alignment,
+    defaultFloorHeightM,
+    logs,
   }), [
     siteName,
     selectedFloorId,
@@ -248,6 +254,9 @@ function IndoorPlaning() {
     logMetric,
     logGridSizeM,
     logGridAggregation,
+    alignment,
+    defaultFloorHeightM,
+    logs,
   ])
 
   useEffect(() => {
@@ -274,53 +283,7 @@ function IndoorPlaning() {
   }, [projectId, projectHydrated, savedPlanJson, selectedFloor.name, siteName])
 
   const { visibleRooms, visibleDoors, visibleWindows } = useMemo(() => getVisiblePlan({ rooms, doors, windows, selectedFloor }), [rooms, doors, windows, selectedFloor])
-  const visibleLogs = useMemo(() => logs.filter((item) => (item.floorId || 'level-1') === selectedFloor.id), [logs, selectedFloor])
-  const floorBoundsById = useMemo(() => {
-    const byFloor = new Map()
-    rooms.forEach((room) => {
-      const floorId = room.floorId || 'level-1'
-      const current = byFloor.get(floorId) || { minX: Number.POSITIVE_INFINITY, maxX: Number.NEGATIVE_INFINITY, minZ: Number.POSITIVE_INFINITY, maxZ: Number.NEGATIVE_INFINITY }
-      const minX = Number(room.x)
-      const minZ = Number(room.z)
-      const maxX = Number(room.x) + Number(room.width)
-      const maxZ = Number(room.z) + Number(room.depth)
-      if (!Number.isFinite(minX) || !Number.isFinite(minZ) || !Number.isFinite(maxX) || !Number.isFinite(maxZ)) return
-      byFloor.set(floorId, {
-        minX: Math.min(current.minX, minX),
-        maxX: Math.max(current.maxX, maxX),
-        minZ: Math.min(current.minZ, minZ),
-        maxZ: Math.max(current.maxZ, maxZ),
-      })
-    })
-    return byFloor
-  }, [rooms])
-
-  const bringLogsInsideMesh = (parsedLogs) => {
-    const inset = Math.max(0.05, Number(wallThickness || 0.2) / 2)
-    let adjustedCount = 0
-    const logsInside = parsedLogs.map((item) => {
-      const floorId = item.floorId || selectedFloor.id
-      const bounds = floorBoundsById.get(floorId) || floorBoundsById.get(selectedFloor.id)
-      if (!bounds) return item
-      const minX = bounds.minX + inset
-      const maxX = bounds.maxX - inset
-      const minZ = bounds.minZ + inset
-      const maxZ = bounds.maxZ - inset
-      const clampedX = Math.min(maxX, Math.max(minX, Number(item.x)))
-      const clampedZ = Math.min(maxZ, Math.max(minZ, Number(item.z)))
-      const moved = Math.abs(clampedX - Number(item.x)) > 1e-9 || Math.abs(clampedZ - Number(item.z)) > 1e-9
-      if (!moved) return item
-      adjustedCount += 1
-      return {
-        ...item,
-        x: clampedX,
-        z: clampedZ,
-        status: 'adjusted',
-        shiftM: Math.hypot(clampedX - Number(item.x), clampedZ - Number(item.z)),
-      }
-    })
-    return { logsInside, adjustedCount }
-  }
+  const visibleLogs = useMemo(() => positionedLogs.filter((item) => item.floorId === selectedFloor.id && Number.isFinite(item.x) && Number.isFinite(item.z)), [positionedLogs, selectedFloor])
   const coloredVisibleLogs = useMemo(() => {
     return visibleLogs.map((item) => {
       const metricValue = getLogMetricValue(item, logMetric)
@@ -363,9 +326,9 @@ function IndoorPlaning() {
 
   useEffect(() => {
     if (predictions.length === 0) return
-    const hasValidSource = [...sites, ...wifiPoints].some((source) => isSourceInsideRooms(source, visibleRooms))
+    const hasValidSource = [...sites, ...wifiPoints].some((source) => source.floorId === selectedFloor.id && isSourceInsideRooms(source, visibleRooms))
     if (!hasValidSource) setPredictions([])
-  }, [predictions.length, sites, visibleRooms, wifiPoints])
+  }, [predictions.length, sites, selectedFloor.id, visibleRooms, wifiPoints])
 
   const simSummary = useMemo(() => {
     if (predictions.length === 0) return null
@@ -482,7 +445,7 @@ function IndoorPlaning() {
   }
 
   const runIndoorPrediction = () => {
-    const predictionSources = [...sites, ...wifiPoints].filter((source) => isSourceInsideRooms(source, visibleRooms))
+    const predictionSources = [...sites, ...wifiPoints].filter((source) => source.floorId === selectedFloor.id && isSourceInsideRooms(source, visibleRooms))
     if (predictionSources.length === 0 || visibleRooms.length === 0) {
       setPredictions([])
       setUploadMessage('Add a site or Wi-Fi point inside the building before running prediction.')
@@ -554,6 +517,7 @@ function IndoorPlaning() {
     }
     const item = {
       id: `S${sites.length + 1}`,
+      floorId: selectedFloor.id,
       name: siteForm.name.trim() || `Site-${sites.length + 1}`,
       technology: String(siteForm.technology || '').trim() || '4G',
       antennaPattern: siteForm.antennaPattern === 'directional' ? 'directional' : 'omni',
@@ -605,6 +569,7 @@ function IndoorPlaning() {
       ...prev,
       {
         id: `WIFI${nextIndex}`,
+        floorId: selectedFloor.id,
         name: wifiForm.name.trim() || `Wi-Fi ${nextIndex}`,
         antennaPattern: wifiForm.antennaPattern === 'directional' ? 'directional' : 'omni',
         x,
@@ -638,6 +603,7 @@ function IndoorPlaning() {
       ...prev,
       {
         id: `F${nextIndex}`,
+        floorId: selectedFloor.id,
         type,
         name: `${furnitureConfig.label} ${nextIndex}`,
         x,
@@ -838,15 +804,14 @@ function IndoorPlaning() {
     }
     try {
       const parsed = isCsv
-        ? parseLogsCsv(await file.text(), boundaryPolygon, selectedFloor.id)
-        : await parseLogsWorkbook(await file.arrayBuffer(), boundaryPolygon, selectedFloor.id)
+        ? parseLogsCsv(await file.text(), boundaryPolygon, selectedFloor.id, alignment)
+        : await parseLogsWorkbook(await file.arrayBuffer(), boundaryPolygon, selectedFloor.id, alignment)
       if (parsed.error) {
         setLogsMessage(parsed.error)
         return
       }
-      const { logsInside, adjustedCount } = bringLogsInsideMesh(parsed.logs)
-      setLogs(logsInside)
-      setLogsMessage(`Loaded ${parsed.total} logs (${adjustedCount} adjusted inside mesh) from ${file.name}.`)
+      setLogs((current) => [...current, ...parsed.logs.map((item, index) => ({ ...item, sourceId: item.id, id: `log-${current.length + index}-${item.id}` }))])
+      setLogsMessage(`Loaded ${parsed.total} logs from ${file.name}.${parsed.rejected ? ` ${parsed.rejected} rows had invalid coordinates.` : ''}${parsed.pendingAlignment ? ` ${parsed.pendingAlignment} geographic points need Align with Google Map before plotting.` : ''}`)
     } catch {
       setLogsMessage('Could not parse logs file. Check columns and try again.')
     } finally {
@@ -984,13 +949,13 @@ function IndoorPlaning() {
           setPredictions={setPredictions}
           simSummary={simSummary}
           thresholdLegend={thresholdLegend}
-          sites={sites}
+          sites={sites.filter((item) => item.floorId === selectedFloor.id)}
           updateSite={updateSite}
           removeSite={removeSite}
-          wifiPoints={wifiPoints}
+          wifiPoints={wifiPoints.filter((item) => item.floorId === selectedFloor.id)}
           updateWifiPoint={updateWifiPoint}
           removeWifiPoint={removeWifiPoint}
-          furniture={furniture}
+          furniture={furniture.filter((item) => item.floorId === selectedFloor.id)}
           removeFurniture={removeFurniture}
           overlapWarnings={overlapWarnings}
         />
@@ -1001,6 +966,7 @@ function IndoorPlaning() {
               <div className="min-w-[220px] flex-1">
                 <h2 className="text-lg font-semibold">{siteName || 'Omni Site Signal'} - {selectedFloor.name}</h2>
                 <p className="mt-1 text-sm text-slate-600">{viewMode === '2d' ? 'Pan and zoom while drawing.' : 'Drag to rotate, scroll to zoom.'}</p>
+                {pendingGeographicCount > 0 && <p className="mt-1 text-sm font-medium text-amber-700" role="alert">{pendingGeographicCount} geographic logs need Align with Google Map before plotting.</p>}
               </div>
               <div className="grid min-w-[600px] flex-[2] grid-cols-[repeat(5,minmax(110px,1fr))] items-end gap-2 max-[900px]:min-w-full max-[900px]:grid-cols-2 max-[560px]:grid-cols-1">
                 <label className="grid min-w-0 gap-1 text-xs text-slate-600">
@@ -1021,6 +987,8 @@ function IndoorPlaning() {
             </div>
           </header>
           <div className="flex flex-wrap items-center gap-2 border-b border-slate-100 bg-slate-50 px-3 py-2">
+            <button className="rounded-md border border-teal-600 bg-teal-50 px-3 py-1.5 text-sm text-teal-800" type="button" onClick={() => setShowAlignment(true)}>Align with Google Map</button>
+            <label className="flex items-center gap-1 text-xs text-slate-600">Floor spacing (m)<input className="w-16 rounded border p-1" type="number" min="0.5" step="0.1" value={defaultFloorHeightM} onChange={(event) => setDefaultFloorHeightM(Math.max(0.5, Number(event.target.value) || 3.2))} /></label>
             <button
               className={`rounded-md border px-3 py-1.5 text-sm ${viewMode === '3d' ? 'border-slate-900 bg-slate-900 text-white' : 'border-slate-300 bg-white text-slate-700'}`}
               type="button"
@@ -1080,7 +1048,7 @@ function IndoorPlaning() {
               </div>
             )}
           </div>
-          <div className="relative min-h-0">
+          <div ref={canvasLabelPortalRef} className="relative isolate min-h-0 overflow-hidden">
             <div className="pointer-events-none absolute right-3 top-3 z-20 w-44 rounded-lg border border-slate-200 bg-white/95 p-2.5 text-xs shadow-md backdrop-blur">
               <div className="mb-2 flex items-center justify-between gap-2">
                 <span className="font-semibold text-slate-800">{predictions.length ? 'Omni Signal' : (KPI_META[logMetric]?.label || String(logMetric).toUpperCase())}</span>
@@ -1109,21 +1077,26 @@ function IndoorPlaning() {
               {viewMode === '2d' ? (
                 <OrthographicCamera makeDefault position={[10, 60, 6]} zoom={34} near={0.1} far={1000} />
               ) : (
-                <PerspectiveCamera makeDefault position={[18, 22, 18]} fov={45} near={0.1} far={1000} />
+                <PerspectiveCamera makeDefault position={[18 + stackHeight * 0.3, Math.max(22, stackHeight * 0.9), 18 + stackHeight * 1.4]} fov={45} near={0.1} far={1000} />
               )}
               <color attach="background" args={['#f4f8fa']} />
               <ambientLight intensity={0.85} />
               <directionalLight intensity={1.05} position={[8, 12, 6]} />
+              {(viewMode === '3d' ? floors : [selectedFloor]).map((renderFloor) => {
+                const active = renderFloor.id === selectedFloor.id
+                const floorPlan = active ? { visibleRooms, visibleDoors, visibleWindows } : getVisiblePlan({ rooms, doors, windows, selectedFloor: renderFloor })
+                const floorLogs = active ? coloredVisibleLogs : positionedLogs.filter((item) => item.floorId === renderFloor.id && Number.isFinite(item.x) && Number.isFinite(item.z)).map((item) => ({ ...item, color: getMetricColor(getLogMetricValue(item, logMetric), logMetric) }))
+                return <group key={renderFloor.id} position={[0, viewMode === '3d' ? floorElevations.get(renderFloor.id) || 0 : 0, 0]}>
               <FloorModel
-                rooms={visibleRooms}
+                rooms={floorPlan.visibleRooms}
                 wallThickness={wallThickness}
-                doors={visibleDoors}
-                windows={visibleWindows}
-                logs={showLogs ? coloredVisibleLogs : []}
-                sites={sites}
-                wifiPoints={wifiPoints}
-                furniture={furniture}
-                draftFurniture={draftWallStart && ['sofa', 'almirah', 'bed'].includes(placementMode) && drawHoverPoint ? {
+                doors={floorPlan.visibleDoors}
+                windows={floorPlan.visibleWindows}
+                logs={showLogs ? floorLogs : []}
+                sites={sites.filter((item) => item.floorId === renderFloor.id)}
+                wifiPoints={wifiPoints.filter((item) => item.floorId === renderFloor.id)}
+                furniture={furniture.filter((item) => item.floorId === renderFloor.id)}
+                draftFurniture={active && draftWallStart && ['sofa', 'almirah', 'bed'].includes(placementMode) && drawHoverPoint ? {
                   id: 'draft',
                   type: placementMode,
                   name: FURNITURE_CONFIG[placementMode]?.label || 'Furniture',
@@ -1133,27 +1106,32 @@ function IndoorPlaning() {
                   depth: FURNITURE_CONFIG[placementMode]?.depth || 1.2,
                   rotationDeg: (Math.atan2(drawHoverPoint.z - draftWallStart.z, drawHoverPoint.x - draftWallStart.x) * 180) / Math.PI,
                 } : null}
-                interiorWalls={interiorWalls.filter((wall) => (wall.floorId || selectedFloor.id) === selectedFloor.id)}
-                draftInteriorWall={draftWallStart ? { start: draftWallStart, end: drawHoverPoint, height: Math.max(2, Number(newRoom.height) || 3), floorId: selectedFloor.id } : null}
-                predictions={predictions}
-                logGridCells={aggregatedLogGridCells}
+                interiorWalls={interiorWalls.filter((wall) => (wall.floorId || selectedFloor.id) === renderFloor.id)}
+                draftInteriorWall={active && draftWallStart ? { start: draftWallStart, end: drawHoverPoint, height: Math.max(2, Number(newRoom.height) || 3), floorId: selectedFloor.id } : null}
+                predictions={active ? predictions : []}
+                logGridCells={active ? aggregatedLogGridCells : []}
                 wallTypes={wallTypes}
-                selectedWall={selectedWall}
-                placementMode={placementMode}
+                selectedWall={active ? selectedWall : null}
+                placementMode={active ? placementMode : null}
                 viewMode={viewMode}
-                dragTarget={dragTarget}
-                editMode={editMode}
-                onSelectWall={setSelectedWall}
-                onCanvasPoint={handleCanvasPoint}
-                onCanvasHover={handleCanvasHover}
-                onStartDrag={setDragTarget}
-                onDragMove={movePlannerItem}
-                onEndDrag={() => setDragTarget(null)}
+                dragTarget={active ? dragTarget : null}
+                editMode={active && editMode}
+                onSelectWall={active ? setSelectedWall : undefined}
+                onCanvasPoint={active ? handleCanvasPoint : undefined}
+                onCanvasHover={active ? handleCanvasHover : undefined}
+                onStartDrag={active ? setDragTarget : undefined}
+                onDragMove={active ? movePlannerItem : undefined}
+                onEndDrag={active ? () => setDragTarget(null) : undefined}
+                showGroundGrid={viewMode === '2d' || renderFloor.id === floors[0]?.id}
+                highlighted={viewMode === '3d' && active}
+                labelPortal={canvasLabelPortalRef}
               />
+                </group>
+              })}
               <OrbitControls
                 makeDefault
                 enabled={!editMode && !dragTarget}
-                target={[10, 0, 6]}
+                target={[10, viewMode === '3d' ? stackHeight / 2 : 0, 6]}
                 enableRotate
                 enablePan
                 minPolarAngle={viewMode === '2d' ? 0.18 : 0.15}
@@ -1163,6 +1141,7 @@ function IndoorPlaning() {
           </div>
         </section>
       </main>
+      {showAlignment && <GoogleMapAlignmentDialog floors={floors} rooms={rooms} boundaryPolygon={boundaryPolygon} alignment={alignment} onSave={(next) => { setAlignment(next); setShowAlignment(false); setLogsMessage('Alignment saved. Geographic logs now use the updated building position.') }} onCancel={() => setShowAlignment(false)} />}
     </div>
   )
 }

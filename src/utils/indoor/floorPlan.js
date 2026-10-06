@@ -43,7 +43,15 @@ export const buildFloorOptions = (rooms) => {
     const floorId = room.floorId || 'level-1'
     if (!floorMap.has(floorId)) floorMap.set(floorId, { id: floorId, name: room.floorName || floorId })
   })
-  return Array.from(floorMap.values()).sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }))
+  const rank = (floor) => {
+    const label = `${floor.id} ${floor.name}`.toLowerCase()
+    const basement = /(?:basement|\bb)[-_\s]*(\d+)/.exec(label)
+    if (basement) return -Number(basement[1])
+    if (/\bground\b|\bgf\b/.test(label)) return 0
+    const number = /(?:floor|level|storey|story)[-_\s]*(\d+)/.exec(label)
+    return number ? Number(number[1]) : Number.POSITIVE_INFINITY
+  }
+  return Array.from(floorMap.values()).sort((a, b) => rank(a) - rank(b) || a.name.localeCompare(b.name, undefined, { numeric: true }))
 }
 
 export const getVisiblePlan = ({ rooms, doors, windows, selectedFloor }) => {

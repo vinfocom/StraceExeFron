@@ -642,18 +642,21 @@ const LtePredictionLocationLayer = ({
           lat: Number(cell?.lat),
           lng: Number(cell?.lng),
           provider: cell?.provider ?? cell?.bestOperator ?? null,
+          colorByOperator: Boolean(cell?.colorByOperator),
           band: cell?.band ?? cell?.Band ?? null,
           technology: cell?.technology ?? cell?.Technology ?? null,
           pci: cell?.pci ?? cell?.PCI ?? null,
           selectedMetric,
           color: (() => {
             const metric = cell?.deltaCompare ? "delta" : selectedMetric;
-            const thresholdColor = getColorFromThresholds(
-              Number(cell?.value),
-              metric,
-              thresholds,
-              metricColorOverrides,
-            );
+            const thresholdColor = cell?.colorByOperator
+              ? null
+              : getColorFromThresholds(
+                  Number(cell?.value),
+                  metric,
+                  thresholds,
+                  metricColorOverrides,
+                );
             if (thresholdColor) {
               return toRgbaArray(
                 thresholdColor,

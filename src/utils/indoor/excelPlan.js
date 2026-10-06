@@ -1,5 +1,6 @@
-import { MAX_SHEET_ROWS } from '../../config/indoor/floorPlannerConfig'
-import { floorSheetNumber, getFirst, getFloorIdentity, toNumber } from './floorPlan'
+import { MAX_SHEET_ROWS } from '../../config/indoor/floorPlannerConfig.js'
+import { floorSheetNumber, getFirst, getFloorIdentity, toNumber } from './floorPlan.js'
+import { geographicToLocal, isValidLatLng } from './geographicAlignment.js'
 
 const loadExcelJS = async () => {
   const module = await import('exceljs')
@@ -161,12 +162,16 @@ export const parseBuildingWorkbook = async (buffer) => {
 
   const buildingMeta = buildingRows[0] || {}
   const meta = metaRows[0] || {}
+  const unit = String(getFirst(buildingMeta, ['unit']) || getFirst(meta, ['unit']) || 'm').trim().toLowerCase()
+  const unitScale = { m: 1, metre: 1, metres: 1, meter: 1, meters: 1, ft: 0.3048, feet: 0.3048, foot: 0.3048, cm: 0.01, mm: 0.001 }
+  const metresPerUnit = unitScale[unit]
+  if (!metresPerUnit) return { error: `Unsupported building unit "${unit}". Use m, ft, cm or mm.` }
   const metaByFloorId = new Map(metaRows.map((row, index) => {
     const identity = getFloorIdentity(row, `level-${index + 1}`, `Level ${index + 1}`)
     return [identity.floorId, { ...row, ...identity }]
   }))
-  const defaultHeight = toNumber(getFirst(meta, ['ceiling_height', 'height']), 3)
-  const parsedWallThickness = toNumber(getFirst(meta, ['wall_thickness', 'wall']), 0.2)
+  const defaultHeight = toNumber(getFirst(meta, ['ceiling_height', 'height']) ?? getFirst(buildingMeta, ['ceiling_height', 'height']), 3)
+  const parsedWallThickness = toNumber(getFirst(meta, ['wall_thickness', 'wall']) ?? getFirst(buildingMeta, ['wall_thickness', 'wall']), 0.2)
 
   const rooms = roomRows
     .map((row, index) => {
@@ -212,6 +217,10 @@ export const parseBuildingWorkbook = async (buffer) => {
         shape: shapeType,
         radius: Number.isFinite(radius) && radius > 0 ? radius : undefined,
         polygonPoints: polygonBounds?.points,
+        floorElevationM: getFirst(floorMeta || {}, ['floor_elevation_m', 'elevation_m']) !== undefined
+          ? toNumber(getFirst(floorMeta || {}, ['floor_elevation_m', 'elevation_m']), NaN)
+          : toNumber(getFirst(floorMeta || {}, ['floor_elevation', 'elevation']), NaN) * metresPerUnit,
+        floorHeightM: toNumber(getFirst(floorMeta || {}, ['floor_height', 'floor_to_floor_height']) ?? getFirst(buildingMeta, ['floor_height', 'floor_to_floor_height']), NaN) * metresPerUnit,
       }
     })
     .filter(Boolean)
@@ -225,80 +234,52 @@ export const parseBuildingWorkbook = async (buffer) => {
     .filter((item) => item.roomId && item.wallSide)
 
   return {
-    rooms,
-    doors,
-    windows,
-    wallThickness: Math.max(0.1, parsedWallThickness),
+    rooms: rooms.map((room) => ({ ...room, x: room.x * metresPerUnit, z: room.z * metresPerUnit, width: room.width * metresPerUnit, depth: room.depth * metresPerUnit, height: room.height * metresPerUnit, radius: room.radius === undefined ? undefined : room.radius * metresPerUnit, polygonPoints: room.polygonPoints?.map((point) => ({ x: point.x * metresPerUnit, z: point.z * metresPerUnit })) })),
+    doors: doors.map((door) => ({ ...door, offset: door.offset * metresPerUnit, width: door.width * metresPerUnit, height: door.height * metresPerUnit })),
+    windows: windows.map((windowItem) => ({ ...windowItem, offset: windowItem.offset * metresPerUnit, width: windowItem.width * metresPerUnit, height: windowItem.height * metresPerUnit, sillHeight: windowItem.sillHeight * metresPerUnit })),
+    wallThickness: Math.max(0.03, parsedWallThickness * metresPerUnit),
     siteName: getFirst(buildingMeta, ['site_name', 'building_name', 'name']) || getFirst(meta, ['site_name', 'building_name', 'name']),
-    boundaryPolygon: parseBoundaryFromBuildingMeta(buildingMeta),
+    boundaryPolygon: parseBoundaryFromBuildingMeta(buildingMeta)?.map((point) => ({ x: point.x * metresPerUnit, z: point.z * metresPerUnit })) || null,
   }
 }
 
-const pointInPolygon = (point, polygon) => {
-  let inside = false
-  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i, i += 1) {
-    const xi = polygon[i].x
-    const zi = polygon[i].z
-    const xj = polygon[j].x
-    const zj = polygon[j].z
-    const intersect = zi > point.z !== zj > point.z && point.x < ((xj - xi) * (point.z - zi)) / (zj - zi + 1e-12) + xi
-    if (intersect) inside = !inside
-  }
-  return inside
+const coordinate = (row, keys) => {
+  const value = getFirst(row, keys)
+  if (value === undefined || value === null || String(value).trim() === '') return null
+  const number = Number(value)
+  return Number.isFinite(number) ? number : null
 }
 
-const closestPointOnSegment = (point, a, b) => {
-  const abx = b.x - a.x
-  const abz = b.z - a.z
-  const apx = point.x - a.x
-  const apz = point.z - a.z
-  const len2 = abx * abx + abz * abz
-  if (len2 <= 1e-12) return { x: a.x, z: a.z }
-  const t = Math.max(0, Math.min(1, (apx * abx + apz * abz) / len2))
-  return { x: a.x + t * abx, z: a.z + t * abz }
-}
-
-const centroid = (polygon) => {
-  const total = polygon.reduce((acc, p) => ({ x: acc.x + p.x, z: acc.z + p.z }), { x: 0, z: 0 })
-  return { x: total.x / polygon.length, z: total.z / polygon.length }
-}
-
-const correctPointInsideBoundary = (point, boundaryPolygon, inwardOffset = 1.5) => {
-  if (!Array.isArray(boundaryPolygon) || boundaryPolygon.length < 3) return { ...point, status: 'inside', shiftM: 0 }
-  if (pointInPolygon(point, boundaryPolygon)) return { ...point, status: 'inside', shiftM: 0 }
-  let nearest = null
-  let minDist2 = Number.POSITIVE_INFINITY
-  for (let i = 0; i < boundaryPolygon.length; i += 1) {
-    const a = boundaryPolygon[i]
-    const b = boundaryPolygon[(i + 1) % boundaryPolygon.length]
-    const c = closestPointOnSegment(point, a, b)
-    const dx = c.x - point.x
-    const dz = c.z - point.z
-    const dist2 = dx * dx + dz * dz
-    if (dist2 < minDist2) {
-      minDist2 = dist2
-      nearest = c
+export const parseLogRows = (rows, selectedFloorId = 'level-1', alignment = null) => {
+  let rejected = 0
+  const logs = rows.map((row, index) => {
+    const localX = coordinate(row, ['x', 'pos_x'])
+    const localZ = coordinate(row, ['z', 'pos_z', 'y'])
+    const lat = coordinate(row, ['lat', 'latitude'])
+    const lng = coordinate(row, ['lon', 'lng', 'longitude'])
+    const geographic = localX === null && localZ === null
+    if (geographic ? !isValidLatLng(lat, lng) : localX === null || localZ === null) {
+      rejected += 1
+      return null
     }
-  }
-  const c = centroid(boundaryPolygon)
-  const vx = c.x - nearest.x
-  const vz = c.z - nearest.z
-  const vlen = Math.hypot(vx, vz) || 1
-  const candidate = { x: nearest.x + (vx / vlen) * inwardOffset, z: nearest.z + (vz / vlen) * inwardOffset }
-  const shiftM = Math.hypot(candidate.x - point.x, candidate.z - point.z)
-  return { ...candidate, status: 'adjusted', shiftM }
+    const position = geographic ? geographicToLocal({ lat, lng }, alignment) : { x: localX, z: localZ }
+    const metric = (keys) => coordinate(row, keys)
+    return {
+      id: String(getFirst(row, ['id']) || `L${index + 1}`),
+      floorId: String(getFirst(row, ['floor_id', 'floor']) || selectedFloorId),
+      x: position?.x ?? null,
+      z: position?.z ?? null,
+      ...(geographic ? { lat, lng } : {}),
+      rsrp: metric(['rsrp', 'RSRP', 'lte_rsrp']),
+      rsrq: metric(['rsrq', 'RSRQ', 'lte_rsrq']),
+      sinr: metric(['sinr', 'SINR', 'lte_sinr']),
+      timestamp: String(getFirst(row, ['timestamp', 'time']) || ''),
+    }
+  }).filter(Boolean)
+  return { logs, total: logs.length, rejected, pendingAlignment: logs.filter((log) => log.lat !== undefined && log.x === null).length }
 }
 
-const EARTH_RADIUS_M = 6371000
-const latLonToMetersFromMinRef = (lat, lon, minLat, minLon) => {
-  const dLat = (lat - minLat) * (Math.PI / 180)
-  const dLon = (lon - minLon) * (Math.PI / 180)
-  const x = dLon * Math.cos((minLat * Math.PI) / 180) * EARTH_RADIUS_M
-  const z = dLat * EARTH_RADIUS_M
-  return { x, z }
-}
-
-export const parseLogsWorkbook = async (buffer, boundaryPolygon, selectedFloorId = 'level-1') => {
+export const parseLogsWorkbook = async (buffer, _boundaryPolygon, selectedFloorId = 'level-1', alignment = null) => {
   const ExcelJS = await loadExcelJS()
   const workbook = new ExcelJS.Workbook()
   await workbook.xlsx.load(buffer)
@@ -306,174 +287,32 @@ export const parseLogsWorkbook = async (buffer, boundaryPolygon, selectedFloorId
   if (!worksheet) return { error: 'No sheet found in logs Excel.' }
   const rows = worksheetToRows(worksheet)
   if (rows.length === 0) return { error: 'Logs sheet is empty.' }
-
-  const hasLocalCoords = rows.some((row) => Number.isFinite(Number(getFirst(row, ['x', 'pos_x']))))
-  const latLonRows = hasLocalCoords
-    ? []
-    : rows
-        .map((row) => ({
-          lat: Number(getFirst(row, ['lat', 'latitude'])),
-          lon: Number(getFirst(row, ['lon', 'lng', 'longitude'])),
-        }))
-        .filter((item) => Number.isFinite(item.lat) && Number.isFinite(item.lon))
-  const minLat = latLonRows.length ? Math.min(...latLonRows.map((item) => item.lat)) : 0
-  const minLon = latLonRows.length ? Math.min(...latLonRows.map((item) => item.lon)) : 0
-  const logRows = rows
-    .map((row, index) => {
-      let x
-      let z
-      if (hasLocalCoords) {
-        x = Number(getFirst(row, ['x', 'pos_x']))
-        z = Number(getFirst(row, ['z', 'pos_z', 'y']))
-      } else {
-        const lat = Number(getFirst(row, ['lat', 'latitude']))
-        const lon = Number(getFirst(row, ['lon', 'lng', 'longitude']))
-        if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null
-        const local = latLonToMetersFromMinRef(lat, lon, minLat, minLon)
-        x = local.x
-        z = local.z
-      }
-      if (!Number.isFinite(x) || !Number.isFinite(z)) return null
-      const corrected = hasLocalCoords && boundaryPolygon?.length ? correctPointInsideBoundary({ x, z }, boundaryPolygon, 1.5) : { x, z, status: 'inside', shiftM: 0 }
-      return {
-        id: String(getFirst(row, ['id']) || `L${index + 1}`),
-        floorId: String(getFirst(row, ['floor_id', 'floor']) || selectedFloorId),
-        x: corrected.x,
-        z: corrected.z,
-        rsrp: Number(getFirst(row, ['rsrp', 'RSRP', 'lte_rsrp'])),
-        rsrq: Number(getFirst(row, ['rsrq', 'RSRQ', 'lte_rsrq'])),
-        sinr: Number(getFirst(row, ['sinr', 'SINR', 'lte_sinr'])),
-        status: corrected.status,
-        shiftM: corrected.shiftM,
-        timestamp: String(getFirst(row, ['timestamp', 'time']) || ''),
-      }
-    })
-    .filter(Boolean)
-
-  return {
-    logs: logRows,
-    total: logRows.length,
-    adjusted: logRows.filter((item) => item.status === 'adjusted').length,
-    mode: hasLocalCoords ? 'local_xy' : 'latlon_raw',
-  }
+  return parseLogRows(rows, selectedFloorId, alignment)
 }
 
 const parseCsvRows = (text) => {
   const rows = []
   let row = []
   let value = ''
-  let i = 0
   let inQuotes = false
-  while (i < text.length) {
+  for (let i = 0; i < text.length; i += 1) {
     const char = text[i]
-    const next = text[i + 1]
-    if (inQuotes) {
-      if (char === '"' && next === '"') {
-        value += '"'
-        i += 2
-        continue
-      }
-      if (char === '"') {
-        inQuotes = false
-        i += 1
-        continue
-      }
-      value += char
-      i += 1
-      continue
-    }
     if (char === '"') {
-      inQuotes = true
-      i += 1
-      continue
-    }
-    if (char === ',') {
-      row.push(value)
-      value = ''
-      i += 1
-      continue
-    }
-    if (char === '\n') {
-      row.push(value)
-      rows.push(row)
-      row = []
-      value = ''
-      i += 1
-      continue
-    }
-    if (char === '\r') {
-      i += 1
-      continue
-    }
-    value += char
-    i += 1
+      if (inQuotes && text[i + 1] === '"') { value += '"'; i += 1 } else inQuotes = !inQuotes
+    } else if (char === ',' && !inQuotes) {
+      row.push(value); value = ''
+    } else if (char === '\n' && !inQuotes) {
+      row.push(value); rows.push(row); row = []; value = ''
+    } else if (char !== '\r' || inQuotes) value += char
   }
-  if (value.length > 0 || row.length > 0) {
-    row.push(value)
-    rows.push(row)
-  }
+  if (value || row.length) { row.push(value); rows.push(row) }
   return rows
 }
 
-export const parseLogsCsv = (text, boundaryPolygon, selectedFloorId = 'level-1') => {
+export const parseLogsCsv = (text, _boundaryPolygon, selectedFloorId = 'level-1', alignment = null) => {
   const csvRows = parseCsvRows(text)
   if (csvRows.length < 2) return { error: 'CSV is empty.' }
-  const headers = csvRows[0].map((h) => String(h || '').trim())
-  const rows = csvRows.slice(1).map((values) => {
-    const obj = {}
-    headers.forEach((header, index) => {
-      obj[header] = values[index] ?? ''
-    })
-    return obj
-  })
-
-  const hasLocalCoords = rows.some((row) => Number.isFinite(Number(getFirst(row, ['x', 'pos_x']))))
-  const latLonRows = hasLocalCoords
-    ? []
-    : rows
-        .map((row) => ({
-          lat: Number(getFirst(row, ['lat', 'latitude'])),
-          lon: Number(getFirst(row, ['lon', 'lng', 'longitude'])),
-        }))
-        .filter((item) => Number.isFinite(item.lat) && Number.isFinite(item.lon))
-  const minLat = latLonRows.length ? Math.min(...latLonRows.map((item) => item.lat)) : 0
-  const minLon = latLonRows.length ? Math.min(...latLonRows.map((item) => item.lon)) : 0
-  const logRows = rows
-    .map((row, index) => {
-      let x
-      let z
-      if (hasLocalCoords) {
-        x = Number(getFirst(row, ['x', 'pos_x']))
-        z = Number(getFirst(row, ['z', 'pos_z', 'y']))
-      } else {
-        const lat = Number(getFirst(row, ['lat', 'latitude']))
-        const lon = Number(getFirst(row, ['lon', 'lng', 'longitude']))
-        if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null
-        const local = latLonToMetersFromMinRef(lat, lon, minLat, minLon)
-        x = local.x
-        z = local.z
-      }
-      if (!Number.isFinite(x) || !Number.isFinite(z)) return null
-      const corrected = hasLocalCoords && boundaryPolygon?.length ? correctPointInsideBoundary({ x, z }, boundaryPolygon, 1.5) : { x, z, status: 'inside', shiftM: 0 }
-      return {
-        id: String(getFirst(row, ['id']) || `L${index + 1}`),
-        floorId: String(getFirst(row, ['floor_id', 'floor']) || selectedFloorId),
-        x: corrected.x,
-        z: corrected.z,
-        rsrp: Number(getFirst(row, ['rsrp', 'RSRP', 'lte_rsrp'])),
-        rsrq: Number(getFirst(row, ['rsrq', 'RSRQ', 'lte_rsrq'])),
-        sinr: Number(getFirst(row, ['sinr', 'SINR', 'lte_sinr'])),
-        status: corrected.status,
-        shiftM: corrected.shiftM,
-        timestamp: String(getFirst(row, ['timestamp', 'time']) || ''),
-      }
-    })
-    .filter(Boolean)
-
-  return {
-    logs: logRows,
-    total: logRows.length,
-    adjusted: logRows.filter((item) => item.status === 'adjusted').length,
-    mode: hasLocalCoords ? 'local_xy' : 'latlon_raw',
-  }
+  const headers = csvRows[0].map((header) => String(header || '').trim())
+  const rows = csvRows.slice(1).map((values) => Object.fromEntries(headers.map((header, index) => [header, values[index] ?? ''])))
+  return parseLogRows(rows, selectedFloorId, alignment)
 }
