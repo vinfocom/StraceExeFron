@@ -8,6 +8,11 @@ import { Button } from "@/components/ui/button";
 import { ChevronLeft } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 
+const toDateInputValue = (value) => {
+  const date = String(value ?? "").match(/^\d{4}-\d{2}-\d{2}/);
+  return date ? date[0] : "";
+};
+
 const CompanyLicensesPage = () => {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
@@ -26,10 +31,6 @@ const CompanyLicensesPage = () => {
     return d.toLocaleDateString();
   };
 
-  const getCompanyValidTill = (row) => {
-    return formatDate(row?.company_valid_till);
-  };
-
   const fetchUsers = useCallback(async () => {
     setLoading(true);
     try {
@@ -45,6 +46,7 @@ const CompanyLicensesPage = () => {
         if (row?.license_id == null) return;
         nextEdits[row.license_id] = {
           status: String(row.license_status ?? 0),
+          valid_till: toDateInputValue(row.valid_till),
         };
       });
       setLicenseEdits(nextEdits);
@@ -134,15 +136,23 @@ const CompanyLicensesPage = () => {
 
     const edit = licenseEdits[licenseId] || {};
     const status = Number(edit.status);
+    const validTill = edit.valid_till ?? toDateInputValue(row.valid_till);
 
     if (![0, 1, 2].includes(status)) {
       toast.error("Invalid status value.");
       return;
     }
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(validTill)) {
+      toast.error("Select a valid license expiry date.");
+      return;
+    }
 
     try {
       setUpdatingLicenseId(licenseId);
-      await companyApi.updateIssuedLicense(licenseId, { status });
+      await companyApi.updateIssuedLicense(licenseId, {
+        status,
+        valid_till: `${validTill}T00:00:00`,
+      });
       toast.success("License updated successfully.");
       await fetchUsers();
     } catch (error) {
@@ -205,7 +215,18 @@ const CompanyLicensesPage = () => {
     {
       header: "Valid Till",
       accessor: "valid_till",
-      render: (row) => <span className="text-gray-700">{getCompanyValidTill(row)}</span>,
+      render: (row) => (
+        <input
+          type="date"
+          aria-label={`Valid till for license ${row.license_id}`}
+          value={licenseEdits[row.license_id]?.valid_till ?? toDateInputValue(row.valid_till)}
+          onChange={(e) =>
+            onChangeLicenseField(row.license_id, "valid_till", e.target.value)
+          }
+          disabled={updatingLicenseId === row.license_id}
+          className="border rounded px-2 py-1 text-sm bg-white"
+        />
+      ),
     },
     {
       header: "License Code",
