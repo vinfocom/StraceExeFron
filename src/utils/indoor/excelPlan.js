@@ -1,6 +1,7 @@
 import { MAX_SHEET_ROWS } from '../../config/indoor/floorPlannerConfig.js'
 import { floorSheetNumber, getFirst, getFloorIdentity, toNumber } from './floorPlan.js'
 import { geographicToLocal, isValidLatLng } from './geographicAlignment.js'
+import { INDOOR_LOG_KPIS, normalizeLogColumn, readLogKpi } from './indoorLogKpis.js'
 
 const loadExcelJS = async () => {
   const module = await import('exceljs')
@@ -253,27 +254,25 @@ const coordinate = (row, keys) => {
 export const parseLogRows = (rows, selectedFloorId = 'level-1', alignment = null) => {
   let rejected = 0
   const logs = rows.map((row, index) => {
-    const localX = coordinate(row, ['x', 'pos_x'])
-    const localZ = coordinate(row, ['z', 'pos_z', 'y'])
-    const lat = coordinate(row, ['lat', 'latitude'])
-    const lng = coordinate(row, ['lon', 'lng', 'longitude'])
-    const geographic = localX === null && localZ === null
+    const fields = Object.fromEntries(Object.entries(row).map(([key, value]) => [normalizeLogColumn(key), value]))
+    const localX = coordinate(fields, ['x', 'pos_x'])
+    const localZ = coordinate(fields, ['z', 'pos_z', 'y'])
+    const lat = coordinate(fields, ['lat', 'latitude'])
+    const lng = coordinate(fields, ['lon', 'lng', 'longitude'])
+    const geographic = lat !== null || lng !== null || (localX === null && localZ === null)
     if (geographic ? !isValidLatLng(lat, lng) : localX === null || localZ === null) {
       rejected += 1
       return null
     }
     const position = geographic ? geographicToLocal({ lat, lng }, alignment) : { x: localX, z: localZ }
-    const metric = (keys) => coordinate(row, keys)
     return {
-      id: String(getFirst(row, ['id']) || `L${index + 1}`),
-      floorId: String(getFirst(row, ['floor_id', 'floor']) || selectedFloorId),
+      id: String(getFirst(fields, ['id']) || `L${index + 1}`),
+      floorId: String(getFirst(fields, ['floor_id', 'floor', 'floor_name', 'level_id']) || selectedFloorId).trim(),
       x: position?.x ?? null,
       z: position?.z ?? null,
       ...(geographic ? { lat, lng } : {}),
-      rsrp: metric(['rsrp', 'RSRP', 'lte_rsrp']),
-      rsrq: metric(['rsrq', 'RSRQ', 'lte_rsrq']),
-      sinr: metric(['sinr', 'SINR', 'lte_sinr']),
-      timestamp: String(getFirst(row, ['timestamp', 'time']) || ''),
+      ...Object.fromEntries(INDOOR_LOG_KPIS.map((kpi) => [kpi.key, readLogKpi(fields, kpi)])),
+      timestamp: String(getFirst(fields, ['timestamp', 'time']) || ''),
     }
   }).filter(Boolean)
   return { logs, total: logs.length, rejected, pendingAlignment: logs.filter((log) => log.lat !== undefined && log.x === null).length }
@@ -313,6 +312,8 @@ export const parseLogsCsv = (text, _boundaryPolygon, selectedFloorId = 'level-1'
   const csvRows = parseCsvRows(text)
   if (csvRows.length < 2) return { error: 'CSV is empty.' }
   const headers = csvRows[0].map((header) => String(header || '').trim())
-  const rows = csvRows.slice(1).map((values) => Object.fromEntries(headers.map((header, index) => [header, values[index] ?? ''])))
+  const rows = csvRows.slice(1)
+    .filter((values) => values.length > 1 && values.some((value) => String(value ?? '').trim() !== ''))
+    .map((values) => Object.fromEntries(headers.map((header, index) => [header, values[index] ?? ''])))
   return parseLogRows(rows, selectedFloorId, alignment)
 }

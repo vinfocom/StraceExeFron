@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useLocation, useParams } from 'react-router-dom'
 import { Canvas } from '@react-three/fiber'
 import { OrbitControls, OrthographicCamera, PerspectiveCamera } from '@react-three/drei'
@@ -10,7 +10,8 @@ import { createStoryBuildingTemplateWorkbook } from '@/templates/indoor/building
 import { createReviewedDetectedWorkbook, downloadWorkbook, parseBuildingWorkbook, parseLogsWorkbook, parseLogsCsv } from '@/utils/indoor/excelPlan'
 import { buildFloorOptions, getOverlapWarnings, getVisiblePlan, hasAllowedExtension, normalizeParsedPlan, toNumber } from '@/utils/indoor/floorPlan'
 import { buildAggregatedLogGridCells, getLogMetricValue } from '@/utils/indoor/indoorPlanningUtils'
-import { getFloorElevations, isValidAlignment, projectLogs } from '@/utils/indoor/geographicAlignment'
+import { getFloorElevations, getPlottableLogs, isValidAlignment, projectLogs } from '@/utils/indoor/geographicAlignment'
+import { getAvailableLogKpis, getFallbackLogKpiColor, INDOOR_LOG_KPIS } from '@/utils/indoor/indoorLogKpis'
 import { parseProjectPlan, serializePlanningData } from '@/utils/indoor/planningPersistence'
 import { OMNI_SIGNAL_LEGEND, buildDefaultSiteSectors, calculateIndoorPredictionPoints } from '@/utils/indoor/indoorPrediction'
 import { pythonApi } from '@/api/pythonApiService'
@@ -37,11 +38,7 @@ const FURNITURE_CONFIG = {
   bed: { label: 'Bed', width: 2.1, depth: 1.6 },
 }
 
-const KPI_META = {
-  rsrp: { label: 'RSRP', unit: 'dBm' },
-  rsrq: { label: 'RSRQ', unit: 'dB' },
-  sinr: { label: 'SINR', unit: 'dB' },
-}
+const KPI_META = Object.fromEntries(INDOOR_LOG_KPIS.map(({ key, label, unit }) => [key, { label, unit }]))
 
 const formatKpiRange = (item, unit) => {
   if (item?.range) return item.range
@@ -138,10 +135,18 @@ function IndoorPlaning() {
   const buttonClass = 'cursor-pointer rounded-lg bg-white   px-3 py-1 text-black border  border-black-500'
   const dangerButtonClass = 'cursor-pointer rounded-lg bg-rose-600 px-2.5 py-1.5 text-xs text-white'
   const { getMetricColor, getThresholdsForMetric } = useColorForLog()
+  const availableLogKpis = useMemo(() => getAvailableLogKpis(logs), [logs])
+  useEffect(() => {
+    if (availableLogKpis.length > 0 && !availableLogKpis.some((kpi) => kpi.key === logMetric)) setLogMetric(availableLogKpis[0].key)
+  }, [availableLogKpis, logMetric])
+  const configuredThresholds = useMemo(() => getThresholdsForMetric(logMetric) || [], [getThresholdsForMetric, logMetric])
   const thresholdLegend = useMemo(() => {
-    const rows = getThresholdsForMetric(logMetric) || []
+    const rows = configuredThresholds.length ? configuredThresholds : INDOOR_LOG_KPIS.find((kpi) => kpi.key === logMetric)?.thresholds || []
     return [...rows].sort((a, b) => Number(a.min) - Number(b.min))
-  }, [getThresholdsForMetric, logMetric])
+  }, [configuredThresholds, logMetric])
+  const colorForSelectedLogMetric = useCallback((value) => configuredThresholds.length
+    ? getMetricColor(value, logMetric)
+    : getFallbackLogKpiColor(value, logMetric), [configuredThresholds, getMetricColor, logMetric])
 
   const snapPoint = (point) => {
     const step = 0.5
@@ -180,6 +185,7 @@ function IndoorPlaning() {
       if (plan.wallTypes && typeof plan.wallTypes === 'object') setWallTypes(plan.wallTypes)
       if (Number.isFinite(Number(plan.wallThickness ?? plan.wall_thickness))) setWallThickness(Number(plan.wallThickness ?? plan.wall_thickness))
       if (plan.selectedFloorId || plan.selected_floor_id) setSelectedFloorId(String(plan.selectedFloorId || plan.selected_floor_id))
+      if (INDOOR_LOG_KPIS.some((kpi) => kpi.key === plan.logMetric)) setLogMetric(plan.logMetric)
       setAlignment(isValidAlignment(plan.alignment) ? plan.alignment : null)
       if (Number(plan.defaultFloorHeightM) > 0) setDefaultFloorHeightM(Number(plan.defaultFloorHeightM))
       if (Array.isArray(plan.logs)) setLogs(plan.logs)
@@ -213,9 +219,10 @@ function IndoorPlaning() {
   const floors = useMemo(() => buildFloorOptions(rooms), [rooms])
   const selectedFloor = useMemo(() => floors.find((floor) => floor.id === selectedFloorId) || floors[0] || { id: 'level-1', name: 'Level 1' }, [floors, selectedFloorId])
   const floorElevations = useMemo(() => getFloorElevations(floors, rooms, defaultFloorHeightM), [floors, rooms, defaultFloorHeightM])
-  const stackHeight = Math.max(...floorElevations.values(), 0)
+  const selectedFloorElevation = floorElevations.get(selectedFloor.id) || 0
   const positionedLogs = useMemo(() => projectLogs(logs, alignment), [logs, alignment])
   const pendingGeographicCount = positionedLogs.filter((item) => item.lat !== undefined && item.x === null).length
+  const visibleLogs = useMemo(() => getPlottableLogs(positionedLogs), [positionedLogs])
 
   const savedPlanJson = useMemo(() => serializePlanningData({
     siteName,
@@ -283,14 +290,13 @@ function IndoorPlaning() {
   }, [projectId, projectHydrated, savedPlanJson, selectedFloor.name, siteName])
 
   const { visibleRooms, visibleDoors, visibleWindows } = useMemo(() => getVisiblePlan({ rooms, doors, windows, selectedFloor }), [rooms, doors, windows, selectedFloor])
-  const visibleLogs = useMemo(() => positionedLogs.filter((item) => item.floorId === selectedFloor.id && Number.isFinite(item.x) && Number.isFinite(item.z)), [positionedLogs, selectedFloor])
   const coloredVisibleLogs = useMemo(() => {
     return visibleLogs.map((item) => {
       const metricValue = getLogMetricValue(item, logMetric)
-      const color = Number.isFinite(metricValue) ? getMetricColor(metricValue, logMetric) : '#808080'
+      const color = Number.isFinite(metricValue) ? colorForSelectedLogMetric(metricValue) : '#808080'
       return { ...item, color }
     })
-  }, [visibleLogs, logMetric, getMetricColor])
+  }, [visibleLogs, logMetric, colorForSelectedLogMetric])
   const aggregatedLogGridCells = useMemo(() => {
     return buildAggregatedLogGridCells({
       enabled: showLogGrid,
@@ -300,9 +306,9 @@ function IndoorPlaning() {
       gridSizeM: logGridSizeM,
       aggregationMethod: logGridAggregation,
       metric: logMetric,
-      getMetricColor,
+      getMetricColor: colorForSelectedLogMetric,
     })
-  }, [showLogGrid, showLogs, coloredVisibleLogs, visibleRooms, logGridSizeM, logGridAggregation, logMetric, getMetricColor])
+  }, [showLogGrid, showLogs, coloredVisibleLogs, visibleRooms, logGridSizeM, logGridAggregation, logMetric, colorForSelectedLogMetric])
   const gridCoverageSummary = useMemo(() => {
     const size = Math.max(1, Number(logGridSizeM) || 1)
     const rectangularRooms = visibleRooms.filter((room) => String(room.shape || 'rectangle').toLowerCase() === 'rectangle')
@@ -985,10 +991,25 @@ function IndoorPlaning() {
                 <button className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700" type="button" onClick={() => setShowLogGrid((prev) => !prev)}>Log Grid: {showLogGrid ? 'ON' : 'OFF'}</button>
               </div>
             </div>
+            <div className="mt-2 flex flex-wrap items-center gap-2">
+              <p className="text-xs text-slate-600" role="status">{logsMessage} {logs.length > 0 && `${visibleLogs.length} of ${logs.length} logs plotted on the selected floor.`}</p>
+              {logs.length > 0 && <button className="rounded border border-slate-300 bg-white px-2 py-1 text-xs text-slate-700" type="button" onClick={() => { setLogs([]); setLogsMessage('Logs cleared. Upload a file to plot new logs.') }}>Clear logs</button>}
+            </div>
           </header>
           <div className="flex flex-wrap items-center gap-2 border-b border-slate-100 bg-slate-50 px-3 py-2">
+            <label className="flex items-center gap-1 text-xs text-slate-600">View Floor
+              <select className="max-w-40 rounded border border-slate-300 bg-white p-1.5 text-sm text-slate-700" value={selectedFloor.id} onChange={(event) => setSelectedFloorId(event.target.value)}>
+                {floors.map((floor) => <option key={floor.id} value={floor.id}>{floor.name}</option>)}
+              </select>
+            </label>
+            <label className="flex items-center gap-1 text-xs text-slate-600">Color logs by
+              <select className="max-w-44 rounded border border-slate-300 bg-white p-1.5 text-sm text-slate-700" value={logMetric} onChange={(event) => setLogMetric(event.target.value)} disabled={availableLogKpis.length === 0}>
+                {availableLogKpis.length > 0
+                  ? availableLogKpis.map((kpi) => <option key={kpi.key} value={kpi.key}>{kpi.label}</option>)
+                  : <option value={logMetric}>Upload logs first</option>}
+              </select>
+            </label>
             <button className="rounded-md border border-teal-600 bg-teal-50 px-3 py-1.5 text-sm text-teal-800" type="button" onClick={() => setShowAlignment(true)}>Align with Google Map</button>
-            <label className="flex items-center gap-1 text-xs text-slate-600">Floor spacing (m)<input className="w-16 rounded border p-1" type="number" min="0.5" step="0.1" value={defaultFloorHeightM} onChange={(event) => setDefaultFloorHeightM(Math.max(0.5, Number(event.target.value) || 3.2))} /></label>
             <button
               className={`rounded-md border px-3 py-1.5 text-sm ${viewMode === '3d' ? 'border-slate-900 bg-slate-900 text-white' : 'border-slate-300 bg-white text-slate-700'}`}
               type="button"
@@ -1051,11 +1072,11 @@ function IndoorPlaning() {
           <div ref={canvasLabelPortalRef} className="relative isolate min-h-0 overflow-hidden">
             <div className="pointer-events-none absolute right-3 top-3 z-20 w-44 rounded-lg border border-slate-200 bg-white/95 p-2.5 text-xs shadow-md backdrop-blur">
               <div className="mb-2 flex items-center justify-between gap-2">
-                <span className="font-semibold text-slate-800">{predictions.length ? 'Omni Signal' : (KPI_META[logMetric]?.label || String(logMetric).toUpperCase())}</span>
-                <span className="text-[10px] font-medium uppercase text-slate-500">{predictions.length ? `${Math.max(20, Math.min(50, Number(rfConfig.omniRangeM) || 50))} m` : (KPI_META[logMetric]?.unit || '')}</span>
+                <span className="font-semibold text-slate-800">{predictions.length && (!showLogs || visibleLogs.length === 0) ? 'Omni Signal' : (KPI_META[logMetric]?.label || String(logMetric).toUpperCase())}</span>
+                <span className="text-[10px] font-medium uppercase text-slate-500">{predictions.length && (!showLogs || visibleLogs.length === 0) ? `${Math.max(20, Math.min(50, Number(rfConfig.omniRangeM) || 50))} m` : (KPI_META[logMetric]?.unit || '')}</span>
               </div>
               <div className="grid gap-1.5">
-                {predictions.length > 0 ? OMNI_SIGNAL_LEGEND.map((item, index) => (
+                {predictions.length > 0 && (!showLogs || visibleLogs.length === 0) ? OMNI_SIGNAL_LEGEND.map((item, index) => (
                   <div key={`omni-legend-${index}`} className="flex min-w-0 items-center gap-2">
                     <span className="h-3 w-3 shrink-0 rounded-sm border border-black/10" style={{ backgroundColor: item.color }} />
                     <span className="min-w-0 truncate text-slate-700">{item.label}</span>
@@ -1075,17 +1096,17 @@ function IndoorPlaning() {
             </div>
             <Canvas className="h-full w-full">
               {viewMode === '2d' ? (
-                <OrthographicCamera makeDefault position={[10, 60, 6]} zoom={34} near={0.1} far={1000} />
+                <OrthographicCamera key={`2d-${selectedFloor.id}`} makeDefault position={[10, 60, 6]} zoom={34} near={0.1} far={1000} />
               ) : (
-                <PerspectiveCamera makeDefault position={[18 + stackHeight * 0.3, Math.max(22, stackHeight * 0.9), 18 + stackHeight * 1.4]} fov={45} near={0.1} far={1000} />
+                <PerspectiveCamera key={`3d-${selectedFloor.id}`} makeDefault position={[18, selectedFloorElevation + 22, 18]} fov={45} near={0.1} far={1000} />
               )}
               <color attach="background" args={['#f4f8fa']} />
               <ambientLight intensity={0.85} />
               <directionalLight intensity={1.05} position={[8, 12, 6]} />
-              {(viewMode === '3d' ? floors : [selectedFloor]).map((renderFloor) => {
+              {[selectedFloor].map((renderFloor) => {
                 const active = renderFloor.id === selectedFloor.id
                 const floorPlan = active ? { visibleRooms, visibleDoors, visibleWindows } : getVisiblePlan({ rooms, doors, windows, selectedFloor: renderFloor })
-                const floorLogs = active ? coloredVisibleLogs : positionedLogs.filter((item) => item.floorId === renderFloor.id && Number.isFinite(item.x) && Number.isFinite(item.z)).map((item) => ({ ...item, color: getMetricColor(getLogMetricValue(item, logMetric), logMetric) }))
+                const floorLogs = active ? coloredVisibleLogs : []
                 return <group key={renderFloor.id} position={[0, viewMode === '3d' ? floorElevations.get(renderFloor.id) || 0 : 0, 0]}>
               <FloorModel
                 rooms={floorPlan.visibleRooms}
@@ -1122,16 +1143,17 @@ function IndoorPlaning() {
                 onStartDrag={active ? setDragTarget : undefined}
                 onDragMove={active ? movePlannerItem : undefined}
                 onEndDrag={active ? () => setDragTarget(null) : undefined}
-                showGroundGrid={viewMode === '2d' || renderFloor.id === floors[0]?.id}
+                showGroundGrid
                 highlighted={viewMode === '3d' && active}
                 labelPortal={canvasLabelPortalRef}
               />
                 </group>
               })}
               <OrbitControls
+                key={`${viewMode}-${selectedFloor.id}`}
                 makeDefault
                 enabled={!editMode && !dragTarget}
-                target={[10, viewMode === '3d' ? stackHeight / 2 : 0, 6]}
+                target={[10, viewMode === '3d' ? selectedFloorElevation : 0, 6]}
                 enableRotate
                 enablePan
                 minPolarAngle={viewMode === '2d' ? 0.18 : 0.15}

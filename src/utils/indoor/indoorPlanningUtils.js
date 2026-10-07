@@ -15,9 +15,19 @@ const pointInPolygon = (x, z, points) => {
 
 export const getLogMetricValue = (item, metric) => {
   if (!item) return NaN
-  if (metric === 'rsrq') return Number(item.rsrq ?? item.RSRQ ?? item.rsrqDb ?? item.RSRQ_DB)
-  if (metric === 'sinr') return Number(item.sinr ?? item.SINR ?? item.sinrDb ?? item.SINR_DB)
-  return Number(item.rsrp ?? item.RSRP ?? item.rssiDbm ?? item.RSSI_DBM ?? item.rssi ?? item.RSSI)
+  const legacyFields = {
+    rsrp: ['RSRP'],
+    rsrq: ['RSRQ', 'rsrqDb', 'RSRQ_DB'],
+    sinr: ['SINR', 'sinrDb', 'SINR_DB'],
+    rssi: ['RSSI', 'rssiDbm', 'RSSI_DBM'],
+  }
+  for (const key of [metric, ...(legacyFields[metric] || [])]) {
+    const value = item[key]
+    if (value === null || value === undefined || value === '') continue
+    const number = Number(value)
+    if (Number.isFinite(number)) return number
+  }
+  return NaN
 }
 
 export const aggregateValues = (values, method) => {

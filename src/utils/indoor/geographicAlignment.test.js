@@ -1,8 +1,10 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { geographicToLocal, getFloorElevations, localToGeographic, projectLogs } from './geographicAlignment.js'
+import { geographicToLocal, getFloorElevations, getPlottableLogs, localToGeographic, projectLogs } from './geographicAlignment.js'
 import { parseBuildingWorkbook, parseLogsCsv, parseLogsWorkbook } from './excelPlan.js'
 import { buildFloorOptions } from './floorPlan.js'
+import { getAvailableLogKpis, getFallbackLogKpiColor } from './indoorLogKpis.js'
+import { getLogMetricValue } from './indoorPlanningUtils.js'
 import { parseProjectPlan, serializePlanningData } from './planningPersistence.js'
 
 const alignment = { lat: 12, lng: 77, x: 10, z: 20, rotationDeg: 0, referenceFloorId: 'floor-1', unit: 'm' }
@@ -55,6 +57,47 @@ test('local X/Z rows remain local and need no geographic alignment', () => {
   ])
   assert.equal(parsed.logs[0].rsrq, -9)
   assert.deepEqual(projectLogs(parsed.logs, alignment), parsed.logs)
+})
+
+test('log uploads accept common header casing without requiring a matching floor name', () => {
+  const parsed = parseLogsCsv('\uFEFFLatitude,Longitude,Floor ID,RSRP\n12,77,Floor_1,-86\n', null, 'floor-2', alignment)
+  assert.equal(parsed.total, 1)
+  assert.equal(parsed.rejected, 0)
+  assert.equal(parsed.logs[0].floorId, 'Floor_1')
+  assert.equal(parsed.logs[0].rsrp, -86)
+  assert.deepEqual({ x: parsed.logs[0].x, z: parsed.logs[0].z }, { x: 10, z: 20 })
+
+  assert.equal(getPlottableLogs(projectLogs(parsed.logs, alignment)).length, 1)
+  assert.deepEqual(getPlottableLogs([
+    { floorId: 'other-building', x: '2', z: '3' },
+    { floorId: 'floor-1', x: null, z: null },
+  ]), [{ floorId: 'other-building', x: 2, z: 3 }])
+})
+
+test('latitude and longitude take priority when a log row also has X and Y', () => {
+  const parsed = parseLogsCsv('Latitude,Longitude,X,Y,Floor ID,RSRP\n12,77,999,999,unmatched,-90\n', null, 'floor-1', alignment)
+  assert.equal(parsed.total, 1)
+  assert.equal(parsed.logs[0].x, 10)
+  assert.equal(parsed.logs[0].z, 20)
+  assert.equal(getPlottableLogs(parsed.logs).length, 1)
+})
+
+test('network log CSV maps combined KPI headers and treats Level as signal level', () => {
+  const csv = [
+    'Timestamp,Latitude,Longitude,ssRSRP / RSRP / RSCP,ssRSRQ / RSRQ / EcNo,NR-SINR / SINR / RxQual,RSSI  (2G-RxLEV),DL THPT,UL THPT,MOS,Jitter,Latency,Packet Loss,Level',
+    'Device MODEL : example',
+    '# KPI convention: example',
+    '2026-10-07 10:31:59,12,77,-60,-11,9,-51,0.06,0.05,4.09,8.99,25.19,0,4',
+  ].join('\n')
+  const parsed = parseLogsCsv(csv, null, 'floor-1', alignment)
+  assert.equal(parsed.total, 1)
+  assert.equal(parsed.rejected, 0)
+  assert.equal(parsed.logs[0].floorId, 'floor-1')
+  assert.deepEqual([parsed.logs[0].rsrp, parsed.logs[0].rsrq, parsed.logs[0].sinr, parsed.logs[0].rssi], [-60, -11, 9, -51])
+  assert.deepEqual([parsed.logs[0].dl_thpt, parsed.logs[0].ul_thpt, parsed.logs[0].mos, parsed.logs[0].jitter, parsed.logs[0].latency, parsed.logs[0].packet_loss, parsed.logs[0].level], [0.06, 0.05, 4.09, 8.99, 25.19, 0, 4])
+  assert.deepEqual(getAvailableLogKpis(parsed.logs).map((kpi) => kpi.key), ['rsrp', 'rsrq', 'sinr', 'rssi', 'dl_thpt', 'ul_thpt', 'mos', 'jitter', 'latency', 'packet_loss', 'level'])
+  assert.notEqual(getFallbackLogKpiColor(getLogMetricValue(parsed.logs[0], 'rsrp'), 'rsrp'), getFallbackLogKpiColor(getLogMetricValue(parsed.logs[0], 'dl_thpt'), 'dl_thpt'))
+  assert.ok(Number.isNaN(getLogMetricValue(parsed.logs[0], 'cqi')))
 })
 
 test('CSV and XLSX reject invalid coordinates; unaligned geographic rows wait for alignment', async () => {

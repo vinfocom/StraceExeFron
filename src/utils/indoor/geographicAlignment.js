@@ -43,6 +43,10 @@ export const projectLogs = (logs, alignment) => logs.map((log) => {
   return local ? { ...log, ...local } : { ...log, x: null, z: null }
 })
 
+export const getPlottableLogs = (logs) => logs
+  .filter((log) => log.x !== null && log.z !== null && log.x !== '' && log.z !== '' && Number.isFinite(Number(log.x)) && Number.isFinite(Number(log.z)))
+  .map((log) => ({ ...log, x: Number(log.x), z: Number(log.z) }))
+
 export const getFloorElevations = (floors, rooms, defaultFloorHeightM = 3.2) => {
   const result = new Map()
   let next = 0

@@ -596,10 +596,16 @@ export function FloorModel({
           </mesh>
         ))}
         {logs.map((item) => (
-          <mesh key={`2d-log-${item.id}`} rotation-x={-Math.PI / 2} position={[item.x, 0.24, item.z]}>
-            <circleGeometry args={[0.12, 16]} />
-            <meshBasicMaterial color={item.color || (item.status === 'adjusted' ? '#ff8a00' : '#1f7a3f')} />
-          </mesh>
+          <group key={`2d-log-${item.id}`} position={[item.x, 0.3, item.z]}>
+            <mesh rotation-x={-Math.PI / 2}>
+              <circleGeometry args={[0.23, 20]} />
+              <meshBasicMaterial color="#ffffff" depthTest={false} />
+            </mesh>
+            <mesh rotation-x={-Math.PI / 2} position={[0, 0.005, 0]}>
+              <circleGeometry args={[0.18, 20]} />
+              <meshBasicMaterial color={item.color || (item.status === 'adjusted' ? '#ff8a00' : '#1f7a3f')} depthTest={false} toneMapped={false} />
+            </mesh>
+          </group>
         ))}
         {sites.map((site) => (
           <group key={`2d-site-${site.id}`} position={[site.x, 0.28, site.z]} onPointerDown={(event) => startDrag(event, 'site', site.id)}>
@@ -744,9 +750,9 @@ export function FloorModel({
         </mesh>
       ))}
       {logs.map((item) => (
-        <mesh key={`log-${item.id}`} position={[item.x, 0.12, item.z]}>
-          <sphereGeometry args={[0.12, 12, 12]} />
-          <meshStandardMaterial color={item.color || (item.status === 'adjusted' ? '#ff8a00' : '#1f7a3f')} />
+        <mesh key={`log-${item.id}`} position={[item.x, 0.22, item.z]}>
+          <sphereGeometry args={[0.2, 16, 16]} />
+          <meshBasicMaterial color={item.color || (item.status === 'adjusted' ? '#ff8a00' : '#1f7a3f')} toneMapped={false} />
         </mesh>
       ))}
       {sites.map((site) => (
