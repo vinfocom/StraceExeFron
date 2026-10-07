@@ -265,12 +265,16 @@ export const parseLogRows = (rows, selectedFloorId = 'level-1', alignment = null
       return null
     }
     const position = geographic ? geographicToLocal({ lat, lng }, alignment) : { x: localX, z: localZ }
+    const accuracyLabel = String(getFirst(fields, ['indoor_outdoor']) || '')
+    const accuracyM = coordinate(fields, ['gps_accuracy_m', 'horizontal_accuracy_m']) ?? Number(/\(([\d.]+)\s*m\)/i.exec(accuracyLabel)?.[1])
     return {
       id: String(getFirst(fields, ['id']) || `L${index + 1}`),
       floorId: String(getFirst(fields, ['floor_id', 'floor', 'floor_name', 'level_id']) || selectedFloorId).trim(),
       x: position?.x ?? null,
       z: position?.z ?? null,
       ...(geographic ? { lat, lng } : {}),
+      accuracyM: Number.isFinite(accuracyM) && accuracyM > 0 ? accuracyM : null,
+      gpsHdop: coordinate(fields, ['gps_hdop']),
       ...Object.fromEntries(INDOOR_LOG_KPIS.map((kpi) => [kpi.key, readLogKpi(fields, kpi)])),
       timestamp: String(getFirst(fields, ['timestamp', 'time']) || ''),
     }
@@ -289,7 +293,7 @@ export const parseLogsWorkbook = async (buffer, _boundaryPolygon, selectedFloorI
   return parseLogRows(rows, selectedFloorId, alignment)
 }
 
-const parseCsvRows = (text) => {
+export const parseCsvRows = (text) => {
   const rows = []
   let row = []
   let value = ''

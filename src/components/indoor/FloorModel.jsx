@@ -246,6 +246,7 @@ export function FloorModel({
   onDragMove,
   onEndDrag,
   showGroundGrid = true,
+  showRoomLabels = true,
   highlighted = false,
   labelPortal,
 }) {
@@ -562,11 +563,11 @@ export function FloorModel({
               {render2DWallLine(room, 'south')}
               {render2DWallLine(room, 'west')}
               {render2DWallLine(room, 'east')}
-              <Html position={[cx, 0.2, cz]} center portal={labelPortal} zIndexRange={LABEL_Z_INDEX_RANGE}>
+              {showRoomLabels && <Html position={[cx, 0.2, cz]} center portal={labelPortal} zIndexRange={LABEL_Z_INDEX_RANGE}>
                 <div style={{ background: 'rgba(255,255,255,0.9)', border: '1px solid #cbd5e1', borderRadius: 4, padding: '1px 5px', color: '#17303b', fontSize: 10, fontWeight: 600, lineHeight: 1.2, maxWidth: 120, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', pointerEvents: 'none' }}>
                   {room.name}
                 </div>
-              </Html>
+              </Html>}
             </group>
           )
         })}
@@ -717,11 +718,11 @@ export function FloorModel({
                 {renderWall(room, 'east', [room.x + room.width, room.height / 2, cz], [wallThickness, room.height, room.depth + wallThickness])}
               </>
             )}
-            <Html position={is2dView ? [cx, 0.16, cz] : [cx, room.height + 0.2, cz]} center distanceFactor={is2dView ? undefined : 18} portal={labelPortal} zIndexRange={LABEL_Z_INDEX_RANGE}>
+            {showRoomLabels && <Html position={is2dView ? [cx, 0.16, cz] : [cx, room.height + 0.2, cz]} center distanceFactor={is2dView ? undefined : 18} portal={labelPortal} zIndexRange={LABEL_Z_INDEX_RANGE}>
               <div style={{ background: 'rgba(255,255,255,0.88)', border: '1px solid #c7d8de', borderRadius: 4, padding: '1px 5px', color: '#17303b', fontSize: is2dView ? 10 : 12, fontWeight: 600, lineHeight: 1.2, maxWidth: 120, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', pointerEvents: 'none' }}>
                 {room.name}
               </div>
-            </Html>
+            </Html>}
           </group>
         )
       })}

@@ -47,9 +47,15 @@ export const getAvailableLogKpis = (logs) => INDOOR_LOG_KPIS.filter((kpi) => log
   return value !== null && value !== undefined && value !== '' && Number.isFinite(Number(value))
 }))
 
+export const getLogKpiRangeColor = (value, ranges) => {
+  const number = Number(value)
+  if (!Array.isArray(ranges) || !ranges.length || value === null || value === undefined || value === '' || !Number.isFinite(number)) return '#808080'
+  const sorted = ranges
+  return sorted.find((threshold) => number >= Number(threshold.min) && number < Number(threshold.max))?.color
+    || (number < Number(sorted[0].min) ? sorted[0].color : number >= Number(sorted.at(-1).max) ? sorted.at(-1).color : '#808080')
+}
+
 export const getFallbackLogKpiColor = (value, metric) => {
   const kpi = INDOOR_LOG_KPIS.find((item) => item.key === metric)
-  const number = Number(value)
-  if (!kpi || value === null || value === undefined || value === '' || !Number.isFinite(number)) return '#808080'
-  return kpi.thresholds.find((threshold) => number >= threshold.min && number < threshold.max)?.color || '#808080'
+  return getLogKpiRangeColor(value, kpi?.thresholds)
 }

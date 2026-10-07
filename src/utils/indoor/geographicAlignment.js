@@ -37,6 +37,45 @@ export const geographicToLocal = ({ lat, lng }, alignment) => {
   }
 }
 
+export const rotationFromTwoPoints = (planStart, planEnd, mapStart, mapEnd) => {
+  if (!isValidLatLng(mapStart?.lat, mapStart?.lng) || !isValidLatLng(mapEnd?.lat, mapEnd?.lng)) return null
+  const dx = Number(planEnd?.x) - Number(planStart?.x)
+  const dz = Number(planEnd?.z) - Number(planStart?.z)
+  const east = (Number(mapEnd.lng) - Number(mapStart.lng)) * RAD * EARTH_RADIUS_M * Math.cos(Number(mapStart.lat) * RAD)
+  const north = (Number(mapEnd.lat) - Number(mapStart.lat)) * RAD * EARTH_RADIUS_M
+  if (![dx, dz, east, north].every(Number.isFinite) || Math.hypot(dx, dz) < 0.5 || Math.hypot(east, north) < 0.5) return null
+  const degrees = (Math.atan2(north, east) - Math.atan2(dz, dx)) / RAD
+  return ((degrees + 180) % 360 + 360) % 360 - 180
+}
+
+const pointInPolygon = (x, z, points) => {
+  let inside = false
+  for (let i = 0, j = points.length - 1; i < points.length; j = i, i += 1) {
+    const a = points[i], b = points[j]
+    const ax = Number(a.x ?? a[0]), az = Number(a.z ?? a[1])
+    const bx = Number(b.x ?? b[0]), bz = Number(b.z ?? b[1])
+    if ((az > z) !== (bz > z) && x < ((bx - ax) * (z - az)) / (bz - az) + ax) inside = !inside
+  }
+  return inside
+}
+
+export const getAlignmentFootprintCoverage = (logs, alignment, footprint) => {
+  const geographicLogs = logs.filter((log) => isValidLatLng(log.lat, log.lng))
+  if (!isValidAlignment(alignment) || !Array.isArray(footprint) || footprint.length < 3) return { total: geographicLogs.length, inside: 0, outside: geographicLogs.length, medianAccuracyM: null }
+  let inside = 0
+  const accuracies = []
+  for (const log of geographicLogs) {
+    const point = geographicToLocal(log, alignment)
+    if (point && pointInPolygon(point.x, point.z, footprint)) inside += 1
+    const accuracy = Number(log.accuracyM)
+    if (log.accuracyM != null && Number.isFinite(accuracy) && accuracy > 0) accuracies.push(accuracy)
+  }
+  accuracies.sort((a, b) => a - b)
+  const mid = Math.floor(accuracies.length / 2)
+  const medianAccuracyM = accuracies.length ? (accuracies[mid] + accuracies[Math.max(0, mid - (accuracies.length % 2 === 0 ? 1 : 0))]) / 2 : null
+  return { total: geographicLogs.length, inside, outside: geographicLogs.length - inside, medianAccuracyM }
+}
+
 export const projectLogs = (logs, alignment) => logs.map((log) => {
   if (!isValidLatLng(log.lat, log.lng)) return log
   const local = geographicToLocal(log, alignment)

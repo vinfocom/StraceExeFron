@@ -8,15 +8,21 @@ import IndoorPlanningSidebar from '@/components/indoor/IndoorPlanningSidebar'
 import { ALLOWED_EXCEL_TYPES, ALLOWED_IMAGE_TYPES, initialRooms, MAX_EXCEL_BYTES, MAX_IMAGE_BYTES } from '@/config/indoor/floorPlannerConfig'
 import { createStoryBuildingTemplateWorkbook } from '@/templates/indoor/buildingTemplate'
 import { createReviewedDetectedWorkbook, downloadWorkbook, parseBuildingWorkbook, parseLogsWorkbook, parseLogsCsv } from '@/utils/indoor/excelPlan'
+import { parseIndoorLogZip } from '@/utils/indoor/indoorZip'
 import { buildFloorOptions, getOverlapWarnings, getVisiblePlan, hasAllowedExtension, normalizeParsedPlan, toNumber } from '@/utils/indoor/floorPlan'
 import { buildAggregatedLogGridCells, getLogMetricValue } from '@/utils/indoor/indoorPlanningUtils'
 import { getFloorElevations, getPlottableLogs, isValidAlignment, projectLogs } from '@/utils/indoor/geographicAlignment'
-import { getAvailableLogKpis, getFallbackLogKpiColor, INDOOR_LOG_KPIS } from '@/utils/indoor/indoorLogKpis'
+import { getAvailableLogKpis, getFallbackLogKpiColor, getLogKpiRangeColor, INDOOR_LOG_KPIS } from '@/utils/indoor/indoorLogKpis'
 import { parseProjectPlan, serializePlanningData } from '@/utils/indoor/planningPersistence'
 import { OMNI_SIGNAL_LEGEND, buildDefaultSiteSectors, calculateIndoorPredictionPoints } from '@/utils/indoor/indoorPrediction'
 import { pythonApi } from '@/api/pythonApiService'
-import { indoorPlanningApi } from '@/api/apiEndpoints'
+import { adminApi, indoorPlanningApi } from '@/api/apiEndpoints'
 import useColorForLog from '@/hooks/useColorForLog'
+import { useNetworkSamples } from '@/hooks/useNetworkSamples'
+import { Eye, EyeOff, Grid2X2, Layers, PanelRightClose, PanelRightOpen, Settings2, Tag } from 'lucide-react'
+
+const EMPTY_POLYGONS = []
+const MAX_RENDERED_LOGS = 3000
 
 const WALL_TYPE_OPTIONS = [
   { value: 'drywall', label: 'Drywall / Plasterboard' },
@@ -93,6 +99,13 @@ function IndoorPlaning() {
   const [doors, setDoors] = useState([])
   const [windows, setWindows] = useState([])
   const [logs, setLogs] = useState([])
+  const [sessionIds, setSessionIds] = useState([])
+  const [sessionInput, setSessionInput] = useState('')
+  const [sessionMessage, setSessionMessage] = useState('')
+  const [recentSessions, setRecentSessions] = useState([])
+  const [sessionsLoading, setSessionsLoading] = useState(false)
+  const [zipThresholds, setZipThresholds] = useState({})
+  const [colorSource, setColorSource] = useState('settings')
   const [alignment, setAlignment] = useState(null)
   const [showAlignment, setShowAlignment] = useState(false)
   const [defaultFloorHeightM, setDefaultFloorHeightM] = useState(3.2)
@@ -104,7 +117,7 @@ function IndoorPlaning() {
   const [showIndoorPlanningPanel, setShowIndoorPlanningPanel] = useState(false)
   const [boundaryPolygon, setBoundaryPolygon] = useState(null)
   const [uploadMessage, setUploadMessage] = useState('Upload BuildingMeta + Floor_1/Floor_2 sheets with shape columns (rectangle/circle/polygon), or FloorMeta + Rooms.')
-  const [logsMessage, setLogsMessage] = useState('Upload logs file (.xlsx or .csv) after building upload. ')
+  const [logsMessage, setLogsMessage] = useState('Upload a standard ZIP, CSV or Excel log, or add a session ID.')
   const [imageMessage, setImageMessage] = useState('Upload floorplan image to auto-extract room data from ML backend.')
   const [isParsingImage, setIsParsingImage] = useState(false)
   const [detectedPlan, setDetectedPlan] = useState(null)
@@ -119,6 +132,8 @@ function IndoorPlaning() {
   const [viewMode, setViewMode] = useState('2d')
   const [showDrawMenu, setShowDrawMenu] = useState(false)
   const [editMode, setEditMode] = useState(false)
+  const [sidebarVisible, setSidebarVisible] = useState(true)
+  const [showRoomLabels, setShowRoomLabels] = useState(true)
   const [selectedWall, setSelectedWall] = useState(null)
   const [wallTypes, setWallTypes] = useState({})
   const [dragTarget, setDragTarget] = useState(null)
@@ -134,19 +149,25 @@ function IndoorPlaning() {
   const inputClass = 'rounded-lg border border-slate-300 bg-white px-2.5 py-2 text-sm'
   const buttonClass = 'cursor-pointer rounded-lg bg-white   px-3 py-1 text-black border  border-black-500'
   const dangerButtonClass = 'cursor-pointer rounded-lg bg-rose-600 px-2.5 py-1.5 text-xs text-white'
+  const { locations: sessionSamples, loading: sessionLoading, error: sessionError, progress: sessionProgress } = useNetworkSamples(sessionIds, sessionIds.length > 0, false, EMPTY_POLYGONS, 20000)
+  const sessionLogs = useMemo(() => sessionSamples.map((sample, index) => ({ ...sample, id: `session-${sample.session_id}-${sample.id ?? index}` })), [sessionSamples])
+  const allLogs = useMemo(() => [...logs, ...sessionLogs], [logs, sessionLogs])
   const { getMetricColor, getThresholdsForMetric } = useColorForLog()
-  const availableLogKpis = useMemo(() => getAvailableLogKpis(logs), [logs])
+  const availableLogKpis = useMemo(() => getAvailableLogKpis(allLogs), [allLogs])
   useEffect(() => {
     if (availableLogKpis.length > 0 && !availableLogKpis.some((kpi) => kpi.key === logMetric)) setLogMetric(availableLogKpis[0].key)
   }, [availableLogKpis, logMetric])
   const configuredThresholds = useMemo(() => getThresholdsForMetric(logMetric) || [], [getThresholdsForMetric, logMetric])
   const thresholdLegend = useMemo(() => {
-    const rows = configuredThresholds.length ? configuredThresholds : INDOOR_LOG_KPIS.find((kpi) => kpi.key === logMetric)?.thresholds || []
+    const rows = colorSource === 'zip' && zipThresholds[logMetric]?.length
+      ? zipThresholds[logMetric]
+      : configuredThresholds.length ? configuredThresholds : INDOOR_LOG_KPIS.find((kpi) => kpi.key === logMetric)?.thresholds || []
     return [...rows].sort((a, b) => Number(a.min) - Number(b.min))
-  }, [configuredThresholds, logMetric])
-  const colorForSelectedLogMetric = useCallback((value) => configuredThresholds.length
-    ? getMetricColor(value, logMetric)
-    : getFallbackLogKpiColor(value, logMetric), [configuredThresholds, getMetricColor, logMetric])
+  }, [colorSource, zipThresholds, configuredThresholds, logMetric])
+  const colorForSelectedLogMetric = useCallback((value) => {
+    if (colorSource === 'zip' && zipThresholds[logMetric]?.length) return getLogKpiRangeColor(value, zipThresholds[logMetric])
+    return configuredThresholds.length ? getMetricColor(value, logMetric) : getFallbackLogKpiColor(value, logMetric)
+  }, [colorSource, zipThresholds, configuredThresholds, getMetricColor, logMetric])
 
   const snapPoint = (point) => {
     const step = 0.5
@@ -189,6 +210,9 @@ function IndoorPlaning() {
       setAlignment(isValidAlignment(plan.alignment) ? plan.alignment : null)
       if (Number(plan.defaultFloorHeightM) > 0) setDefaultFloorHeightM(Number(plan.defaultFloorHeightM))
       if (Array.isArray(plan.logs)) setLogs(plan.logs)
+      if (Array.isArray(plan.sessionIds)) setSessionIds(plan.sessionIds.map(String))
+      if (plan.zipThresholds && typeof plan.zipThresholds === 'object') setZipThresholds(plan.zipThresholds)
+      if (plan.colorSource === 'zip' || plan.colorSource === 'settings') setColorSource(plan.colorSource)
       lastSavedPlanJsonRef.current = serializePlanningData(plan)
     }
 
@@ -220,7 +244,7 @@ function IndoorPlaning() {
   const selectedFloor = useMemo(() => floors.find((floor) => floor.id === selectedFloorId) || floors[0] || { id: 'level-1', name: 'Level 1' }, [floors, selectedFloorId])
   const floorElevations = useMemo(() => getFloorElevations(floors, rooms, defaultFloorHeightM), [floors, rooms, defaultFloorHeightM])
   const selectedFloorElevation = floorElevations.get(selectedFloor.id) || 0
-  const positionedLogs = useMemo(() => projectLogs(logs, alignment), [logs, alignment])
+  const positionedLogs = useMemo(() => projectLogs(allLogs, alignment), [allLogs, alignment])
   const pendingGeographicCount = positionedLogs.filter((item) => item.lat !== undefined && item.x === null).length
   const visibleLogs = useMemo(() => getPlottableLogs(positionedLogs), [positionedLogs])
 
@@ -244,6 +268,9 @@ function IndoorPlaning() {
     alignment,
     defaultFloorHeightM,
     logs,
+    sessionIds,
+    zipThresholds,
+    colorSource,
   }), [
     siteName,
     selectedFloorId,
@@ -264,6 +291,9 @@ function IndoorPlaning() {
     alignment,
     defaultFloorHeightM,
     logs,
+    sessionIds,
+    zipThresholds,
+    colorSource,
   ])
 
   useEffect(() => {
@@ -297,6 +327,11 @@ function IndoorPlaning() {
       return { ...item, color }
     })
   }, [visibleLogs, logMetric, colorForSelectedLogMetric])
+  const renderedColoredLogs = useMemo(() => {
+    if (coloredVisibleLogs.length <= MAX_RENDERED_LOGS) return coloredVisibleLogs
+    const stride = Math.ceil(coloredVisibleLogs.length / MAX_RENDERED_LOGS)
+    return coloredVisibleLogs.filter((_, index) => index % stride === 0)
+  }, [coloredVisibleLogs])
   const aggregatedLogGridCells = useMemo(() => {
     return buildAggregatedLogGridCells({
       enabled: showLogGrid,
@@ -796,32 +831,65 @@ function IndoorPlaning() {
   const handleLogsUpload = async (event) => {
     const file = event.target.files?.[0]
     if (!file) return
+    const isZip = hasAllowedExtension(file.name, ['.zip'])
     const isExcel = hasAllowedExtension(file.name, ['.xlsx', '.xls']) && ALLOWED_EXCEL_TYPES.has(file.type)
     const isCsv = hasAllowedExtension(file.name, ['.csv']) || file.type === 'text/csv'
-    if (!isExcel && !isCsv) {
-      setLogsMessage('Only .xlsx, .xls, or .csv logs files are supported.')
+    if (!isZip && !isExcel && !isCsv) {
+      setLogsMessage('Upload a standard .zip, .xlsx, .xls or .csv logs file.')
       event.target.value = ''
       return
     }
-    if (file.size > MAX_EXCEL_BYTES) {
-      setLogsMessage('Logs file is too large. Keep uploads under 2 MB.')
+    if (file.size > (isZip ? 20 * 1024 * 1024 : MAX_EXCEL_BYTES)) {
+      setLogsMessage(`Logs file is too large. Keep ${isZip ? 'ZIP uploads under 20 MB' : 'CSV and Excel uploads under 2 MB'}.`)
       event.target.value = ''
       return
     }
     try {
-      const parsed = isCsv
+      const parsed = isZip
+        ? await parseIndoorLogZip(await file.arrayBuffer(), selectedFloor.id, alignment)
+        : isCsv
         ? parseLogsCsv(await file.text(), boundaryPolygon, selectedFloor.id, alignment)
         : await parseLogsWorkbook(await file.arrayBuffer(), boundaryPolygon, selectedFloor.id, alignment)
       if (parsed.error) {
         setLogsMessage(parsed.error)
         return
       }
+      if (isZip) {
+        setZipThresholds(parsed.zipThresholds)
+        setColorSource(Object.keys(parsed.zipThresholds).length ? 'zip' : 'settings')
+      }
       setLogs((current) => [...current, ...parsed.logs.map((item, index) => ({ ...item, sourceId: item.id, id: `log-${current.length + index}-${item.id}` }))])
-      setLogsMessage(`Loaded ${parsed.total} logs from ${file.name}.${parsed.rejected ? ` ${parsed.rejected} rows had invalid coordinates.` : ''}${parsed.pendingAlignment ? ` ${parsed.pendingAlignment} geographic points need Align with Google Map before plotting.` : ''}`)
+      setLogsMessage(`Loaded ${parsed.total} logs from ${parsed.sourceName || file.name}.${parsed.rejected ? ` ${parsed.rejected} rows had invalid coordinates.` : ''}${parsed.pendingAlignment ? ` ${parsed.pendingAlignment} geographic points need building alignment before plotting.` : ''}`)
     } catch {
       setLogsMessage('Could not parse logs file. Check columns and try again.')
     } finally {
       event.target.value = ''
+    }
+  }
+
+  const addSessionIds = (event) => {
+    event?.preventDefault()
+    const values = sessionInput.split(/[\s,]+/).filter(Boolean)
+    if (!values.length || values.some((value) => !/^-?\d+$/.test(value) || Number(value) === 0)) {
+      setSessionMessage('Enter one or more numeric session IDs.')
+      return
+    }
+    setSessionIds((current) => [...new Set([...current, ...values])])
+    setSessionInput('')
+    setSessionMessage('Session samples load through GetNetworkLog and are kept separate from uploaded file logs.')
+  }
+
+  const loadRecentSessions = async () => {
+    setSessionsLoading(true)
+    try {
+      const response = await adminApi.getSessions({ page: 1, pageSize: 50 })
+      const rows = Array.isArray(response?.Data) ? response.Data : Array.isArray(response?.data?.Data) ? response.data.Data : Array.isArray(response?.data) ? response.data : []
+      setRecentSessions(rows.filter((item) => item.id != null || item.session_id != null))
+      setSessionMessage(rows.length ? 'Select a recent session or enter its ID.' : 'No recent sessions returned. You can still enter a session ID.')
+    } catch (error) {
+      setSessionMessage(error?.message || 'Could not list sessions. Enter a session ID directly.')
+    } finally {
+      setSessionsLoading(false)
     }
   }
 
@@ -896,23 +964,12 @@ function IndoorPlaning() {
 
   return (
     <div>
-      <main className="grid h-[calc(100vh-5rem)] grid-cols-[1fr_360px] gap-4 overflow-hidden p-3 max-[980px]:h-auto max-[980px]:grid-cols-1">
-        <IndoorPlanningSidebar
+      <main className={`grid h-[calc(100vh-5rem)] gap-3 overflow-hidden p-3 max-[980px]:h-auto max-[980px]:grid-cols-1 ${sidebarVisible ? 'grid-cols-[minmax(0,1fr)_300px]' : 'grid-cols-1'}`}>
+        {sidebarVisible && <IndoorPlanningSidebar
           buttonClass={buttonClass}
           dangerButtonClass={dangerButtonClass}
           inputClass={inputClass}
           downloadTemplate={downloadTemplate}
-          handleExcelUpload={handleExcelUpload}
-          uploadMessage={uploadMessage}
-          handleImageUpload={handleImageUpload}
-          isParsingImage={isParsingImage}
-          imageMessage={imageMessage}
-          handleLogsUpload={handleLogsUpload}
-          logsMessage={logsMessage}
-          showLogs={showLogs}
-          setShowLogs={setShowLogs}
-          showLogGrid={showLogGrid}
-          setShowLogGrid={setShowLogGrid}
           logGridSizeM={logGridSizeM}
           setLogGridSizeM={setLogGridSizeM}
           logGridAggregation={logGridAggregation}
@@ -927,12 +984,7 @@ function IndoorPlaning() {
           applyDetectedPlan={applyDetectedPlan}
           downloadReviewedDetectedExcel={downloadReviewedDetectedExcel}
           setDetectedPlan={setDetectedPlan}
-          siteName={siteName}
-          setSiteName={setSiteName}
           selectedFloor={selectedFloor}
-          selectedFloorId={selectedFloor.id}
-          setSelectedFloorId={setSelectedFloorId}
-          floors={floors}
           wallThickness={wallThickness}
           setWallThickness={setWallThickness}
           addRoom={addRoom}
@@ -949,12 +1001,9 @@ function IndoorPlaning() {
           setWifiForm={setWifiForm}
           rfConfig={rfConfig}
           setRfConfig={setRfConfig}
-          logMetric={logMetric}
-          setLogMetric={setLogMetric}
           runIndoorPrediction={runIndoorPrediction}
           setPredictions={setPredictions}
           simSummary={simSummary}
-          thresholdLegend={thresholdLegend}
           sites={sites.filter((item) => item.floorId === selectedFloor.id)}
           updateSite={updateSite}
           removeSite={removeSite}
@@ -964,17 +1013,19 @@ function IndoorPlaning() {
           furniture={furniture.filter((item) => item.floorId === selectedFloor.id)}
           removeFurniture={removeFurniture}
           overlapWarnings={overlapWarnings}
-        />
+        />}
 
-        <section className="relative order-1 grid min-h-0 grid-rows-[auto_auto_minmax(0,1fr)] overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm max-[980px]:min-h-[60vh]">
+        <section className="relative order-1 grid min-h-0 grid-rows-[auto_auto_minmax(0,1fr)] overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm min-[1500px]:grid-rows-[auto_minmax(0,1fr)] max-[980px]:min-h-[60vh]">
           <header className="border-b border-slate-200 px-4 py-3">
-            <div className="flex flex-wrap items-end gap-3">
-              <div className="min-w-[220px] flex-1">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div>
                 <h2 className="text-lg font-semibold">{siteName || 'Omni Site Signal'} - {selectedFloor.name}</h2>
-                <p className="mt-1 text-sm text-slate-600">{viewMode === '2d' ? 'Pan and zoom while drawing.' : 'Drag to rotate, scroll to zoom.'}</p>
-                {pendingGeographicCount > 0 && <p className="mt-1 text-sm font-medium text-amber-700" role="alert">{pendingGeographicCount} geographic logs need Align with Google Map before plotting.</p>}
+                <p className="text-xs text-slate-600">{viewMode === '2d' ? 'Pan and zoom while drawing.' : 'Drag to rotate, scroll to zoom.'}</p>
               </div>
-              <div className="grid min-w-[600px] flex-[2] grid-cols-[repeat(5,minmax(110px,1fr))] items-end gap-2 max-[900px]:min-w-full max-[900px]:grid-cols-2 max-[560px]:grid-cols-1">
+            </div>
+            <details className="mt-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+              <summary className="cursor-pointer text-sm font-medium text-slate-800">Data sources: building, ZIP or CSV, and sessions</summary>
+              <div className="mt-3 grid gap-3 sm:grid-cols-3">
                 <label className="grid min-w-0 gap-1 text-xs text-slate-600">
                   Building File
                   <input className="min-w-0 w-full rounded-md border border-slate-300 bg-white px-2 py-1.5 text-xs text-slate-700" type="file" accept=".xlsx,.xls" onChange={handleExcelUpload} />
@@ -984,29 +1035,31 @@ function IndoorPlaning() {
                   <input className="min-w-0 w-full rounded-md border border-slate-300 bg-white px-2 py-1.5 text-xs text-slate-700" type="file" accept=".png,.jpg,.jpeg,.webp" onChange={handleImageUpload} disabled={isParsingImage} />
                 </label>
                 <label className="grid min-w-0 gap-1 text-xs text-slate-600">
-                  Logs
-                  <input className="min-w-0 w-full rounded-md border border-slate-300 bg-white px-2 py-1.5 text-xs text-slate-700" type="file" accept=".xlsx,.xls,.csv,text/csv" onChange={handleLogsUpload} />
+                  Log ZIP, CSV or Excel
+                  <input className="min-w-0 w-full rounded-md border border-slate-300 bg-white px-2 py-1.5 text-xs text-slate-700" type="file" accept=".zip,.xlsx,.xls,.csv,text/csv,application/zip" onChange={handleLogsUpload} />
                 </label>
-                <button className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700" type="button" onClick={() => setShowLogs((prev) => !prev)}>Logs: {showLogs ? 'ON' : 'OFF'}</button>
-                <button className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700" type="button" onClick={() => setShowLogGrid((prev) => !prev)}>Log Grid: {showLogGrid ? 'ON' : 'OFF'}</button>
               </div>
-            </div>
+              <form className="mt-3 flex flex-wrap items-end gap-2" onSubmit={addSessionIds}>
+                <label className="grid gap-1 text-xs text-slate-600">Session ID(s)
+                  <input className="rounded border border-slate-300 bg-white px-2 py-1.5 text-sm" value={sessionInput} onChange={(event) => setSessionInput(event.target.value)} placeholder="e.g. 8219" />
+                </label>
+                <button className="rounded border border-teal-600 bg-teal-50 px-3 py-1.5 text-sm text-teal-800" type="submit">Add session</button>
+                <button className="rounded border border-slate-300 bg-white px-2 py-1.5 text-sm text-slate-700" type="button" onClick={loadRecentSessions} disabled={sessionsLoading}>{sessionsLoading ? 'Loading sessions...' : 'Browse recent'}</button>
+                {recentSessions.length > 0 && <select className="max-w-56 rounded border border-slate-300 bg-white p-1.5 text-sm" value="" onChange={(event) => setSessionInput(event.target.value)} aria-label="Choose a recent session"><option value="">Choose session</option>{recentSessions.map((session) => { const id = String(session.id ?? session.session_id); return <option key={id} value={id}>Session {id}{session.name ? ` — ${session.name}` : ''}</option> })}</select>}
+                {sessionIds.map((id) => <button className="rounded border border-slate-300 bg-white px-2 py-1 text-xs text-slate-700" key={id} type="button" onClick={() => setSessionIds((current) => current.filter((value) => value !== id))}>Session {id} ×</button>)}
+              </form>
+              {(sessionMessage || sessionLoading || sessionError) && <p className="mt-2 text-xs text-slate-600" role="status">{sessionError ? `Session load failed: ${sessionError.message || sessionError}` : sessionLoading ? `Loading session samples${sessionProgress.total ? `: ${sessionProgress.current} of ${sessionProgress.total}` : '...'}` : sessionMessage}</p>}
+            </details>
             <div className="mt-2 flex flex-wrap items-center gap-2">
-              <p className="text-xs text-slate-600" role="status">{logsMessage} {logs.length > 0 && `${visibleLogs.length} of ${logs.length} logs plotted on the selected floor.`}</p>
-              {logs.length > 0 && <button className="rounded border border-slate-300 bg-white px-2 py-1 text-xs text-slate-700" type="button" onClick={() => { setLogs([]); setLogsMessage('Logs cleared. Upload a file to plot new logs.') }}>Clear logs</button>}
+              <p className="text-xs text-slate-600" role="status">{logsMessage} {allLogs.length > 0 && `${visibleLogs.length} of ${allLogs.length} logs positioned. ${renderedColoredLogs.length} point markers displayed.`}</p>
+              {pendingGeographicCount > 0 && <span className="text-xs font-medium text-amber-700" role="alert">{pendingGeographicCount} GPS logs need building alignment.</span>}
+              {logs.length > 0 && <button className="rounded border border-slate-300 bg-white px-2 py-1 text-xs text-slate-700" type="button" onClick={() => { setLogs([]); setLogsMessage('File logs cleared. Upload a file to plot new logs.') }}>Clear file logs</button>}
             </div>
           </header>
-          <div className="flex flex-wrap items-center gap-2 border-b border-slate-100 bg-slate-50 px-3 py-2">
+          <div className="flex flex-wrap items-center gap-2 border-b border-slate-100 bg-slate-50 px-3 py-2 min-[1500px]:absolute min-[1500px]:right-4 min-[1500px]:top-3 min-[1500px]:z-30 min-[1500px]:max-w-[calc(100%-28rem)] min-[1500px]:justify-end min-[1500px]:border-0 min-[1500px]:bg-transparent min-[1500px]:p-0">
             <label className="flex items-center gap-1 text-xs text-slate-600">View Floor
               <select className="max-w-40 rounded border border-slate-300 bg-white p-1.5 text-sm text-slate-700" value={selectedFloor.id} onChange={(event) => setSelectedFloorId(event.target.value)}>
                 {floors.map((floor) => <option key={floor.id} value={floor.id}>{floor.name}</option>)}
-              </select>
-            </label>
-            <label className="flex items-center gap-1 text-xs text-slate-600">Color logs by
-              <select className="max-w-44 rounded border border-slate-300 bg-white p-1.5 text-sm text-slate-700" value={logMetric} onChange={(event) => setLogMetric(event.target.value)} disabled={availableLogKpis.length === 0}>
-                {availableLogKpis.length > 0
-                  ? availableLogKpis.map((kpi) => <option key={kpi.key} value={kpi.key}>{kpi.label}</option>)
-                  : <option value={logMetric}>Upload logs first</option>}
               </select>
             </label>
             <button className="rounded-md border border-teal-600 bg-teal-50 px-3 py-1.5 text-sm text-teal-800" type="button" onClick={() => setShowAlignment(true)}>Align with Google Map</button>
@@ -1014,9 +1067,35 @@ function IndoorPlaning() {
               className={`rounded-md border px-3 py-1.5 text-sm ${viewMode === '3d' ? 'border-slate-900 bg-slate-900 text-white' : 'border-slate-300 bg-white text-slate-700'}`}
               type="button"
               onClick={() => setViewMode((mode) => (mode === '3d' ? '2d' : '3d'))}
+              aria-label={viewMode === '3d' ? 'Switch to 2D view' : 'Switch to 3D view'}
             >
-              {viewMode === '3d' ? 'Exit' : '3D'}
+              <span className="flex items-center gap-1"><Layers size={15} />{viewMode === '3d' ? '2D' : '3D'}</span>
             </button>
+            <button className="rounded-md border border-slate-300 bg-white px-2 py-1.5 text-sm text-slate-700" type="button" onClick={() => setShowLogs((prev) => !prev)} aria-label={showLogs ? 'Hide logs' : 'Show logs'}>{showLogs ? <Eye size={16} /> : <EyeOff size={16} />}</button>
+            <button className={`rounded-md border px-2 py-1.5 text-sm ${showLogGrid ? 'border-teal-600 bg-teal-50 text-teal-800' : 'border-slate-300 bg-white text-slate-700'}`} type="button" onClick={() => setShowLogGrid((prev) => !prev)} aria-label={showLogGrid ? 'Hide log grid' : 'Show log grid'}><Grid2X2 size={16} /></button>
+            <button className={`rounded-md border px-2 py-1.5 text-sm ${showRoomLabels ? 'border-slate-300 bg-white text-slate-700' : 'border-teal-600 bg-teal-50 text-teal-800'}`} type="button" onClick={() => setShowRoomLabels((visible) => !visible)} aria-label={showRoomLabels ? 'Hide room labels' : 'Show room labels'} title={showRoomLabels ? 'Hide room labels' : 'Show room labels'}><Tag size={16} /></button>
+            <details className="relative">
+              <summary className="flex cursor-pointer list-none items-center gap-1 rounded-md border border-slate-300 bg-white px-2.5 py-1.5 text-sm text-slate-700"><Settings2 size={15} /> KPI ranges</summary>
+              <div className="absolute left-0 top-full z-40 mt-1 grid min-w-56 gap-2 rounded-lg border border-slate-200 bg-white p-3 shadow-lg">
+                <label className="grid gap-1 text-xs text-slate-600">Color logs by
+                  <select className="rounded border border-slate-300 bg-white p-1.5 text-sm text-slate-700" value={logMetric} onChange={(event) => setLogMetric(event.target.value)} disabled={availableLogKpis.length === 0}>
+                    {availableLogKpis.length > 0
+                      ? availableLogKpis.map((kpi) => <option key={kpi.key} value={kpi.key}>{kpi.label}</option>)
+                      : <option value={logMetric}>Upload logs first</option>}
+                  </select>
+                </label>
+                <label className="grid gap-1 text-xs text-slate-600">Range colors
+                  <select className="rounded border border-slate-300 bg-white p-1.5 text-sm text-slate-700" value={colorSource} onChange={(event) => setColorSource(event.target.value)}>
+                    <option value="settings">Saved ranges</option>
+                    {Object.keys(zipThresholds).length > 0 && <option value="zip">ZIP ranges</option>}
+                  </select>
+                </label>
+                <p className="text-xs text-slate-500">{thresholdLegend.length} ranges for {KPI_META[logMetric]?.label || logMetric}</p>
+              </div>
+            </details>
+            <details className="relative rounded border border-slate-200 bg-white px-2 py-1">
+              <summary className="cursor-pointer text-sm text-slate-700">Build tools{placementMode ? ' — drawing' : ''}</summary>
+              <div className="absolute right-0 top-full z-40 mt-1 flex w-[min(80vw,38rem)] max-w-[calc(100vw-2rem)] flex-wrap items-center gap-2 rounded-lg border border-slate-200 bg-white p-3 shadow-lg">
             <div className="relative">
               <button className={`rounded-md px-3 py-1.5 text-sm font-medium text-white ${placementMode && ['sofa', 'almirah', 'bed'].includes(placementMode) ? 'bg-indigo-700' : 'bg-violet-600'}`} type="button" onClick={() => setShowDrawMenu((value) => !value)}>Draw</button>
               {showDrawMenu && (
@@ -1058,6 +1137,9 @@ function IndoorPlaning() {
               <button className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm text-slate-700" type="button" onClick={cancelDrawing}>Cancel</button>
             )}
             <button className="rounded-md border border-rose-200 bg-rose-50 px-3 py-1.5 text-sm text-rose-600" type="button" onClick={() => { setFurniture([]); setWifiPoints([]); setSites([]); setInteriorWalls([]); setDraftWallStart(null); setPredictions([]); setSelectedWall(null); setWallTypes({}) }}>Clear All</button>
+              </div>
+            </details>
+            <button className="ml-auto rounded-md border border-slate-300 bg-white px-2 py-1.5 text-sm text-slate-700" type="button" onClick={() => setSidebarVisible((visible) => !visible)} aria-label={sidebarVisible ? 'Hide planning sidebar' : 'Show planning sidebar'} title={sidebarVisible ? 'Hide planning sidebar' : 'Show planning sidebar'}>{sidebarVisible ? <PanelRightClose size={16} /> : <PanelRightOpen size={16} />}</button>
             {showLogGrid && (
               <div className="ml-auto flex flex-wrap items-center gap-2 text-xs">
                 <span className="rounded-md border border-emerald-200 bg-emerald-50 px-2 py-1 text-emerald-700">
@@ -1070,11 +1152,11 @@ function IndoorPlaning() {
             )}
           </div>
           <div ref={canvasLabelPortalRef} className="relative isolate min-h-0 overflow-hidden">
-            <div className="pointer-events-none absolute right-3 top-3 z-20 w-44 rounded-lg border border-slate-200 bg-white/95 p-2.5 text-xs shadow-md backdrop-blur">
-              <div className="mb-2 flex items-center justify-between gap-2">
-                <span className="font-semibold text-slate-800">{predictions.length && (!showLogs || visibleLogs.length === 0) ? 'Omni Signal' : (KPI_META[logMetric]?.label || String(logMetric).toUpperCase())}</span>
-                <span className="text-[10px] font-medium uppercase text-slate-500">{predictions.length && (!showLogs || visibleLogs.length === 0) ? `${Math.max(20, Math.min(50, Number(rfConfig.omniRangeM) || 50))} m` : (KPI_META[logMetric]?.unit || '')}</span>
-              </div>
+            <details className="pointer-events-auto absolute right-3 top-3 z-20 w-44 rounded-lg border border-slate-200 bg-white/95 p-2.5 text-xs shadow-md backdrop-blur">
+              <summary className="flex cursor-pointer list-none items-center justify-between gap-2">
+                <span className="font-semibold text-slate-800">{predictions.length && (!showLogs || visibleLogs.length === 0) ? 'Omni Signal ranges' : `${KPI_META[logMetric]?.label || String(logMetric).toUpperCase()} ranges`}</span>
+                <span className="text-[10px] font-medium uppercase text-slate-500">{predictions.length && (!showLogs || visibleLogs.length === 0) ? `${OMNI_SIGNAL_LEGEND.length}` : `${thresholdLegend.length}`}</span>
+              </summary>
               <div className="grid gap-1.5">
                 {predictions.length > 0 && (!showLogs || visibleLogs.length === 0) ? OMNI_SIGNAL_LEGEND.map((item, index) => (
                   <div key={`omni-legend-${index}`} className="flex min-w-0 items-center gap-2">
@@ -1084,16 +1166,16 @@ function IndoorPlaning() {
                 )) : thresholdLegend.length > 0 ? thresholdLegend.map((item, index) => (
                   <div key={`${logMetric}-legend-${item.min}-${item.max}-${index}`} className="flex min-w-0 items-center gap-2">
                     <span className="h-3 w-3 shrink-0 rounded-sm border border-black/10" style={{ backgroundColor: item.color }} />
-                    <span className="min-w-0 truncate text-slate-700">{item.label || formatKpiRange(item, KPI_META[logMetric]?.unit || '')}</span>
+                    <span className="min-w-0 truncate text-slate-700">{formatKpiRange(item, KPI_META[logMetric]?.unit || '')}{item.label ? ` · ${item.label}` : ''}</span>
                   </div>
                 )) : (
                   <div className="flex min-w-0 items-center gap-2 text-slate-500">
                     <span className="h-3 w-3 shrink-0 rounded-sm border border-black/10 bg-slate-400" />
-                    <span>No KPI thresholds</span>
+                  <span>No KPI ranges</span>
                   </div>
                 )}
               </div>
-            </div>
+            </details>
             <Canvas className="h-full w-full">
               {viewMode === '2d' ? (
                 <OrthographicCamera key={`2d-${selectedFloor.id}`} makeDefault position={[10, 60, 6]} zoom={34} near={0.1} far={1000} />
@@ -1106,7 +1188,7 @@ function IndoorPlaning() {
               {[selectedFloor].map((renderFloor) => {
                 const active = renderFloor.id === selectedFloor.id
                 const floorPlan = active ? { visibleRooms, visibleDoors, visibleWindows } : getVisiblePlan({ rooms, doors, windows, selectedFloor: renderFloor })
-                const floorLogs = active ? coloredVisibleLogs : []
+                const floorLogs = active ? renderedColoredLogs : []
                 return <group key={renderFloor.id} position={[0, viewMode === '3d' ? floorElevations.get(renderFloor.id) || 0 : 0, 0]}>
               <FloorModel
                 rooms={floorPlan.visibleRooms}
@@ -1131,6 +1213,7 @@ function IndoorPlaning() {
                 draftInteriorWall={active && draftWallStart ? { start: draftWallStart, end: drawHoverPoint, height: Math.max(2, Number(newRoom.height) || 3), floorId: selectedFloor.id } : null}
                 predictions={active ? predictions : []}
                 logGridCells={active ? aggregatedLogGridCells : []}
+                showRoomLabels={showRoomLabels}
                 wallTypes={wallTypes}
                 selectedWall={active ? selectedWall : null}
                 placementMode={active ? placementMode : null}
@@ -1163,7 +1246,7 @@ function IndoorPlaning() {
           </div>
         </section>
       </main>
-      {showAlignment && <GoogleMapAlignmentDialog floors={floors} rooms={rooms} boundaryPolygon={boundaryPolygon} alignment={alignment} onSave={(next) => { setAlignment(next); setShowAlignment(false); setLogsMessage('Alignment saved. Geographic logs now use the updated building position.') }} onCancel={() => setShowAlignment(false)} />}
+      {showAlignment && <GoogleMapAlignmentDialog floors={floors} rooms={rooms} boundaryPolygon={boundaryPolygon} alignment={alignment} logs={allLogs} onSave={(next) => { setAlignment(next); setShowAlignment(false); setLogsMessage('Alignment saved. Geographic logs now use the updated building position.') }} onCancel={() => setShowAlignment(false)} />}
     </div>
   )
 }

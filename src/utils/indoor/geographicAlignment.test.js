@@ -1,7 +1,9 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { geographicToLocal, getFloorElevations, getPlottableLogs, localToGeographic, projectLogs } from './geographicAlignment.js'
+import JSZip from 'jszip'
+import { geographicToLocal, getAlignmentFootprintCoverage, getFloorElevations, getPlottableLogs, localToGeographic, projectLogs, rotationFromTwoPoints } from './geographicAlignment.js'
 import { parseBuildingWorkbook, parseLogsCsv, parseLogsWorkbook } from './excelPlan.js'
+import { parseIndoorLogZip } from './indoorZip.js'
 import { buildFloorOptions } from './floorPlan.js'
 import { getAvailableLogKpis, getFallbackLogKpiColor } from './indoorLogKpis.js'
 import { getLogMetricValue } from './indoorPlanningUtils.js'
@@ -26,6 +28,32 @@ test('anchor, X east, Z north, rotation and reverse mapping', () => {
   const restored = geographicToLocal(localToGeographic(point, rotated), rotated)
   near(restored.x, point.x)
   near(restored.z, point.z)
+})
+
+test('two map points set direction and coverage reports GPS uncertainty', () => {
+  const rotated = { ...alignment, x: 0, z: 0, rotationDeg: 90 }
+  const end = localToGeographic({ x: 10, z: 0 }, rotated)
+  near(rotationFromTwoPoints({ x: 0, z: 0 }, { x: 10, z: 0 }, { lat: 12, lng: 77 }, end), 90)
+  const inside = localToGeographic({ x: 5, z: 5 }, rotated)
+  const outside = localToGeographic({ x: 20, z: 20 }, rotated)
+  const coverage = getAlignmentFootprintCoverage([
+    { ...inside, accuracyM: 20 },
+    { ...outside, accuracyM: 40 },
+  ], rotated, [{ x: 0, z: 0 }, { x: 10, z: 0 }, { x: 10, z: 10 }, { x: 0, z: 10 }])
+  assert.deepEqual(coverage, { total: 2, inside: 1, outside: 1, medianAccuracyM: 30 })
+})
+
+test('standard log ZIP reads its network CSV and ARGB color settings', async () => {
+  const zip = new JSZip()
+  zip.file('Log_8219/NetworkLog_1.csv', 'Latitude,Longitude,ssRSRP / RSRP / RSCP,Indoor/Outdoor,GPS HDOP\n12,77,-95,UNKNOWN (43.09 m),8.62\n')
+  zip.file('Log_8219/ColorSettings_8219.csv', 'Metric,Display Name,Type,Min,Max,Value,Color,Label\nRSRP,RSRP (dBm),RANGE,-105,-95,,#FF00008B,Fair\nRSRP,RSRP (dBm),RANGE,-95,-85,,#FFADD8E6,Good\n')
+  const parsed = await parseIndoorLogZip(await zip.generateAsync({ type: 'uint8array' }), 'floor-1', alignment)
+  assert.equal(parsed.total, 1)
+  assert.equal(parsed.logs[0].rsrp, -95)
+  assert.equal(parsed.logs[0].accuracyM, 43.09)
+  assert.equal(parsed.logs[0].gpsHdop, 8.62)
+  assert.equal(parsed.zipThresholds.rsrp[0].color, '#00008B')
+  assert.equal(parsed.zipThresholds.rsrp[1].color, '#ADD8E6')
 })
 
 test('CSV uploads share one origin, retain floors and raw coordinates, and reproject without clamping', () => {

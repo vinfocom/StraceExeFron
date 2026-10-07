@@ -38,10 +38,6 @@ function IndoorPlanningSidebar({
   dangerButtonClass,
   inputClass,
   downloadTemplate,
-  showLogs,
-  setShowLogs,
-  showLogGrid,
-  setShowLogGrid,
   logGridSizeM,
   setLogGridSizeM,
   logGridAggregation,
@@ -70,12 +66,7 @@ function IndoorPlanningSidebar({
   applyDetectedPlan,
   downloadReviewedDetectedExcel,
   setDetectedPlan,
-  siteName,
-  setSiteName,
   selectedFloor,
-  selectedFloorId,
-  setSelectedFloorId,
-  floors,
   wallThickness,
   setWallThickness,
   visibleRooms,
@@ -98,12 +89,13 @@ function IndoorPlanningSidebar({
         <button className={buttonClass} type="button" onClick={downloadTemplate}><Download /></button>
       </div>
 
-      <section className="mb-4 rounded-lg border border-slate-200 bg-slate-50 p-3">
-        <h2>Planning Tools</h2>
-        <div className="mt-2 grid gap-2">
+      <section className="mb-3 rounded-lg border border-slate-200 bg-slate-50 p-3">
+        <details>
+          <summary className="cursor-pointer font-medium">Planning Tools</summary>
+          <div className="mt-2 grid gap-2">
           <button className={buttonClass} type="button" onClick={() => { setShowAddRoomPanel?.((value) => !value); setShowIndoorPlanningPanel?.(false) }}>Add Room</button>
           <button className={buttonClass} type="button" onClick={() => { setShowIndoorPlanningPanel?.((value) => !value); setShowAddRoomPanel?.(false) }}>Omni Signal Planning</button>
-        </div>
+          </div>
         {showAddRoomPanel && (
           <div className="mt-3 rounded-lg border border-indigo-100 bg-white p-2.5">
             <div className="grid grid-cols-2 gap-2">
@@ -183,11 +175,12 @@ function IndoorPlanningSidebar({
               </div>
             )}
           </div>
-        )}
+          )}
+        </details>
       </section>
 
-      <section className="mb-4 rounded-lg border border-slate-200 bg-slate-50 p-3">
-        <h2>Log Grid Settings</h2>
+      <details className="mb-3 rounded-lg border border-slate-200 bg-slate-50 p-3">
+        <summary className="cursor-pointer font-medium">Grid settings</summary>
         <label className="mb-3 mt-2 grid gap-1.5 text-sm">
           Grid Size (m)
           <input className={inputClass} type="number" step="0.5" min="1" value={logGridSizeM} onChange={(e) => setLogGridSizeM(Math.max(1, Number(e.target.value) || 1))} />
@@ -201,7 +194,7 @@ function IndoorPlanningSidebar({
             <option value="max">Max</option>
           </select>
         </label>
-      </section>
+      </details>
 
       {detectedPlan && (
         <section className="mb-4 mt-2 rounded-lg border border-slate-300 bg-slate-50 p-2.5">
@@ -226,16 +219,6 @@ function IndoorPlanningSidebar({
         </section>
       )}
 
-      <label className="mb-3 grid gap-1.5 text-sm">
-        Omni Site Signal Name
-        <input className={inputClass} value={siteName} onChange={(event) => setSiteName(event.target.value)} />
-      </label>
-      <label className="mb-3 grid gap-1.5 text-sm">
-        View Floor
-        <select className={inputClass} value={selectedFloorId} onChange={(event) => setSelectedFloorId(event.target.value)}>
-          {floors.map((floor) => <option key={floor.id} value={floor.id}>{floor.name}</option>)}
-        </select>
-      </label>
       <label className="mb-3 grid gap-1.5 text-sm">
         Wall Thickness (m)
         <input className={inputClass} type="number" step="0.05" min="0.1" max="0.5" value={wallThickness} onChange={(event) => setWallThickness(Number(event.target.value) || 0.2)} />
