@@ -5232,18 +5232,28 @@ const UnifiedMapView = () => {
     const providers = new Set();
     const bands = new Set();
     const technologies = new Set();
+    const technologyRawValues = new Map();
     const cellIds = new Set();
     const apps = new Set();
     const macDetailFields = new Set();
 
     // Keep log technology choices available regardless of active map filters.
     (locations || []).forEach((loc) => {
-      const technologyName = normalizeTechName(
+      const rawTechnology = String(
         loc?.technology ?? loc?.networkType ?? loc?.network ?? "",
+      ).trim();
+      const technologyName = normalizeTechName(
+        rawTechnology,
         loc?.band ?? loc?.Band,
       );
       if (technologyName && !isUnknownOption(technologyName)) {
         technologies.add(technologyName);
+        if (rawTechnology) {
+          if (!technologyRawValues.has(technologyName)) {
+            technologyRawValues.set(technologyName, new Set());
+          }
+          technologyRawValues.get(technologyName).add(rawTechnology);
+        }
       }
     });
 
@@ -5294,6 +5304,9 @@ const UnifiedMapView = () => {
         return numA - numB;
       }),
       technologies: [...technologies].sort(),
+      technologyRawValues: Object.fromEntries(
+        [...technologyRawValues].map(([label, values]) => [label, [...values]]),
+      ),
       cellIds: [...cellIds].sort((a, b) => {
         const numA = Number(a);
         const numB = Number(b);
@@ -8068,6 +8081,7 @@ const UnifiedMapView = () => {
             dataFilters={dataFilters}
             availableBands={availableFilterOptions?.bands || []}
             availableTechnologies={availableFilterOptions?.technologies}
+            reportTechnologyRawValues={availableFilterOptions?.technologyRawValues}
             bestNetworkEnabled={bestNetworkEnabled}
             bestNetworkStats={bestNetworkStats}
             onClose={handleCloseAnalytics}

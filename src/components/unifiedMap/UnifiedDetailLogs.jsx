@@ -1402,6 +1402,7 @@ function UnifiedDetailLogs({
   n78NeighborLoading = false,
   dataFilters = DEFAULT_DATA_FILTERS,
   availableTechnologies,
+  reportTechnologyRawValues = {},
   onFilteredDataChange,
   showSubSession = false,
   subSessionData = [],
@@ -1448,22 +1449,17 @@ function UnifiedDetailLogs({
   const [pdfAggregation, setPdfAggregation] = useState("median"); // "max" | "mean" | "min" | "median" -- how samples in a grid cell collapse to one value (Grid view only)
   const [selectedPdfTechnologies, setSelectedPdfTechnologies] = useState([]);
 
-  // Every distinct `network`/`technology` value actually present in this
-  // project's own data, in the exact form the backend's `network` column
-  // stores it (e.g. "4G", "4G (LTE Anchor - NSA)", "5G NSA") -- shown as
-  // individual checkboxes so the user picks exact variants themselves
-  // rather than the app guessing which variants belong to which generation.
-  const availablePdfTechnologies = useMemo(() => {
-    const set = new Set();
-    (locations || []).forEach((loc) => {
-      const tech = String(loc?.technology || loc?.networkType || loc?.network || "").trim();
-      if (tech) set.add(tech);
-    });
-    return Array.from(set).sort();
-  }, [locations]);
+  // Mirror the log Technology dropdown in UnifiedMapSidebar, including
+  // selected values that may no longer be in the current available set.
+  const availableReportTechnologies = useMemo(() => [...new Set([
+    ...(availableTechnologies || []),
+    ...(dataFilters?.technologies || []),
+  ].map((technology) => String(technology ?? "").trim())
+    .filter((technology) => technology && technology.toLowerCase() !== "all"))],
+  [availableTechnologies, dataFilters?.technologies]);
 
   const openPdfOptionsDialog = () => {
-    setSelectedPdfTechnologies(availablePdfTechnologies);
+    setSelectedPdfTechnologies(availableReportTechnologies);
     setPdfMapViewType(canEnableGridView ? "grid" : "raw");
     setPdfAggregation("median");
     setIsPdfOptionsDialogOpen(true);
@@ -2075,7 +2071,11 @@ function UnifiedDetailLogs({
         // Only the new "Per Technology" module reads these -- the old
         // Combined report doesn't accept them and stays exactly as it was.
         ...(isPerTechnology ? {
-          technologies: selectedPdfTechnologies,
+          technologies: [...new Set(selectedPdfTechnologies.flatMap((technology) =>
+            reportTechnologyRawValues[technology]?.length
+              ? reportTechnologyRawValues[technology]
+              : [technology],
+          ))],
           map_view_type: pdfMapViewType,
           ...(canEnableGridView && pdfMapViewType === "grid" ? { aggregation: pdfAggregation } : {}),
         } : {}),
@@ -2362,11 +2362,11 @@ function UnifiedDetailLogs({
                   <>
                     <div>
                       <p className="mb-2 text-sm font-medium text-slate-200">Technologies</p>
-                      {availablePdfTechnologies.length === 0 ? (
+                      {availableReportTechnologies.length === 0 ? (
                         <p className="text-xs text-slate-400">No technology data available for this project.</p>
                       ) : (
                         <div className="max-h-40 space-y-1 overflow-y-auto rounded-lg border border-slate-700 bg-slate-800/70 p-2">
-                          {availablePdfTechnologies.map((tech) => (
+                          {availableReportTechnologies.map((tech) => (
                             <label
                               key={tech}
                               htmlFor={`pdf-tech-${tech}`}
@@ -2588,8 +2588,7 @@ function UnifiedDetailLogs({
               sessionIds={sessionIds}
               projectId={projectId}
               availableBands={availableBands}
-              availableTechnologies={availableTechnologies}
-              selectedTechnologies={dataFilters?.technologies}
+              reportTechnologies={availableReportTechnologies}
               gridViewEnabled={gridViewEnabled}
               gridViewSummary={gridViewSummary}
               metricLabels={metricLabels}

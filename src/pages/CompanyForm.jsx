@@ -24,6 +24,9 @@ const CompanyForm = () => {
       editCompany?.license_validity_in_months?.toString?.() || "",
     total_granted_licenses:
       editCompany?.total_granted_licenses?.toString?.() || "",
+    license_status: editCompany?.admin_license_status == null
+      ? "1"
+      : String(editCompany.admin_license_status),
     otp_phone_number: editCompany?.otp_phone_number || "",
     ask_for_otp: editCompany ? editCompany?.ask_for_otp === 1 : false,
     blacklisted_phone_number: editCompany?.blacklisted_phone_number || "",
@@ -55,6 +58,14 @@ const CompanyForm = () => {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    const validityMonths = Number(formData.license_validity_in_months);
+    const grantedLicenses = Number(formData.total_granted_licenses);
+    if (!Number.isInteger(validityMonths) || validityMonths < 1 ||
+        !Number.isInteger(grantedLicenses) || grantedLicenses < 1 ||
+        ![0, 1, 2].includes(Number(formData.license_status))) {
+      alert("Enter a positive license validity and count, and select a license status.");
+      return;
+    }
     setLoading(true);
 
     const payload = {
@@ -78,12 +89,9 @@ const CompanyForm = () => {
       remarks: formData.remarks || "",
 
       // Integers (Must be numbers)
-      license_validity_in_months: formData.license_validity_in_months
-        ? parseInt(formData.license_validity_in_months, 10)
-        : 0,
-      total_granted_licenses: formData.total_granted_licenses
-        ? parseInt(formData.total_granted_licenses, 10)
-        : 0,
+      license_validity_in_months: validityMonths,
+      total_granted_licenses: grantedLicenses,
+      license_status: Number(formData.license_status),
       total_used_licenses: isEditMode
         ? editCompany?.total_used_licenses || 0
         : 0,
@@ -114,6 +122,7 @@ const CompanyForm = () => {
             gst_id: "",
             license_validity_in_months: "",
             total_granted_licenses: "",
+            license_status: "1",
             otp_phone_number: "",
             ask_for_otp: 0,
             blacklisted_phone_number: "",
@@ -156,60 +165,63 @@ const CompanyForm = () => {
     }
   };
 
-  // Styles
-  const labelClass = "block text-sm font-medium text-gray-700 mb-1";
-  const inputClass =
-    "w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all";
-  const checkboxContainerClass =
-    "flex items-center space-x-3 bg-gray-50 p-3 rounded-lg border border-gray-200 cursor-pointer hover:bg-gray-100 transition";
+  const labelClass = "mb-2 block text-[clamp(0.875rem,calc(0.82rem+0.2vw),1rem)] font-semibold leading-tight text-slate-700";
+  const inputClass = "block min-h-11 w-full min-w-0 rounded-[0.625rem] border border-slate-300 bg-white px-3.5 py-2.5 text-[clamp(0.875rem,calc(0.82rem+0.2vw),1rem)] leading-snug text-slate-800 outline-none placeholder:text-slate-400 transition-[border-color,box-shadow] focus:border-blue-600 focus:ring-[3px] focus:ring-blue-600/15";
+  const checkboxContainerClass = "flex min-h-13 min-w-0 cursor-pointer items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 p-3 text-[clamp(0.875rem,calc(0.82rem+0.2vw),1rem)] font-medium text-slate-700 hover:bg-slate-100";
+  const sectionClass = "mt-2 border-b border-slate-200 pb-2.5 text-[clamp(1.125rem,calc(1rem+0.45vw),1.5rem)] font-semibold leading-snug text-slate-800";
 
   return (
-    <div className="min-h-screen bg-gray-100 flex items-center justify-center scrollbar-hide ">
-      <div className="bg-white w-full  overflow-hidden">
-        <div className="px-8 py-4 ">
-          <h2 className="text-2xl font-bold text-black">
+    <main className="min-h-dvh min-w-0 bg-slate-100 p-[clamp(0.875rem,2.5vw,2rem)] text-[clamp(0.875rem,calc(0.8rem+0.25vw),1rem)] text-slate-800">
+      <div className="mx-auto w-full max-w-[74rem] min-w-0 overflow-hidden rounded-[clamp(0.875rem,1.5vw,1.25rem)] border border-slate-200 bg-white shadow-[0_12px_32px_rgba(15,23,42,0.05)]">
+        <div className="flex min-w-0 flex-wrap items-center justify-between gap-4 border-b border-slate-200 p-[clamp(1rem,2.5vw,2rem)] max-[36rem]:items-stretch">
+          <div className="flex min-w-0 items-start gap-[clamp(0.75rem,1.4vw,1rem)] max-[36rem]:w-full">
             <Button
               variant="outline"
               size="icon"
               onClick={() => navigate("/companies")}
-              className="h-10 w-10 bg-white border-gray-300 hover:bg-gray-100 text-gray-700"
+              className="h-11 w-11 shrink-0 border-slate-300 bg-white text-slate-700 hover:bg-slate-100"
+              aria-label="Back to companies"
             >
               <ChevronLeft className="h-5 w-5" />
             </Button>
-            {isEditMode ? "Edit Company" : "Company Registration"}
-          </h2>
-          <p className="text-black text-sm mt-1">
-            {isEditMode ? "Update company details." : "Enter company details."}
-          </p>
-          {isEditMode && (
-            <div className="mt-3">
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() =>
-                  navigate(`/company-licenses?companyId=${editCompany.id}`)
-                }
-              >
-                Manage Licenses & Features
-              </Button>
+            <div className="min-w-0">
+              <h1 className="m-0 wrap-anywhere text-[clamp(1.45rem,calc(1.15rem+1.1vw),2.125rem)] leading-tight font-bold text-gray-900">
+                {isEditMode ? "Edit Company" : "Company Registration"}
+              </h1>
+              <p className="mt-1.5 text-[clamp(0.875rem,calc(0.82rem+0.2vw),1rem)] leading-normal text-slate-500">
+                {isEditMode ? "Update company details." : "Enter company details."}
+              </p>
             </div>
+          </div>
+          {isEditMode && (
+            <Button
+              type="button"
+              variant="outline"
+              className="min-h-11 max-w-full whitespace-normal text-center text-[clamp(0.875rem,calc(0.82rem+0.2vw),1rem)] max-[36rem]:w-full"
+              onClick={() =>
+                navigate(`/company-licenses?companyId=${editCompany.id}`)
+              }
+            >
+              Manage Licenses & Features
+            </Button>
           )}
         </div>
 
-        <form onSubmit={handleSubmit} className="py-2 px-8">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div className="md:col-span-2">
-              <h3 className="text-lg font-semibold text-gray-800 border-b pb-2 mb-4">
+        <form onSubmit={handleSubmit} className="p-[clamp(1rem,2.5vw,2rem)]">
+          <div className="grid grid-cols-1 gap-x-[clamp(1rem,2.5vw,2rem)] gap-y-[clamp(1rem,1.7vw,1.5rem)] lg:grid-cols-2 [&>*]:min-w-0">
+            <div className="col-span-full">
+              <h2 className={`${sectionClass} mt-0`}>
                 Basic Information
-              </h3>
+              </h2>
             </div>
 
             {/* Required Fields */}
             <div>
-              <label className={labelClass}>
+              <label className={labelClass} htmlFor="company_name">
                 Company Name <span className="text-red-500">*</span>
               </label>
               <input
+                id="company_name"
                 name="company_name"
                 placeholder="e.g. Acme Industries"
                 value={formData.company_name}
@@ -220,10 +232,11 @@ const CompanyForm = () => {
             </div>
 
             <div>
-              <label className={labelClass}>
+              <label className={labelClass} htmlFor="contact_person">
                 Contact Person <span className="text-red-500">*</span>
               </label>
               <input
+                id="contact_person"
                 name="contact_person"
                 placeholder="Full Name"
                 value={formData.contact_person}
@@ -234,11 +247,13 @@ const CompanyForm = () => {
             </div>
 
             <div>
-              <label className={labelClass}>
+              <label className={labelClass} htmlFor="mobile">
                 Mobile Number <span className="text-red-500">*</span>
               </label>
               <input
+                id="mobile"
                 name="mobile"
+                type="tel"
                 placeholder="10-digit Mobile"
                 value={formData.mobile}
                 onChange={handleChange}
@@ -248,10 +263,11 @@ const CompanyForm = () => {
             </div>
 
             <div>
-              <label className={labelClass}>
+              <label className={labelClass} htmlFor="email">
                 Email Address <span className="text-red-500">*</span>
               </label>
               <input
+                id="email"
                 name="email"
                 type="email"
                 placeholder="admin@company.com"
@@ -263,25 +279,27 @@ const CompanyForm = () => {
             </div>
 
             <div>
-              <label className={labelClass}>
+              <label className={labelClass} htmlFor="password">
                 Password <span className="text-red-500">*</span>
               </label>
 
               <div className="relative">
                 <input
+                  id="password"
                   name="password"
                   type={open ? "text" : "password"}
                   placeholder="••••••••"
                   value={formData.password}
                   onChange={handleChange}
                   required={!isEditMode}
-                  className={`${inputClass} pr-10`}
+                  className={`${inputClass} pr-13`}
                 />
 
                 <button
                   type="button"
                   onClick={() => setOpen(!open)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500"
+                  className="absolute top-1/2 right-1.5 grid h-11 w-11 -translate-y-1/2 place-items-center rounded-lg text-slate-500 hover:text-slate-800"
+                  aria-label={open ? "Hide password" : "Show password"}
                 >
                   {open ? (
                     <Eye className="h-4 w-4" />
@@ -294,8 +312,9 @@ const CompanyForm = () => {
 
             {/* Optional Fields */}
             <div>
-              <label className={labelClass}>GST ID</label>
+              <label className={labelClass} htmlFor="gst_id">GST ID</label>
               <input
+                id="gst_id"
                 name="gst_id"
                 placeholder="GSTIN Number"
                 value={formData.gst_id}
@@ -304,9 +323,10 @@ const CompanyForm = () => {
               />
             </div>
 
-            <div className="md:col-span-2">
-              <label className={labelClass}>Address</label>
+            <div className="col-span-full">
+              <label className={labelClass} htmlFor="address">Address</label>
               <textarea
+                id="address"
                 name="address"
                 placeholder="Street Address, City, State"
                 rows="2"
@@ -317,9 +337,11 @@ const CompanyForm = () => {
             </div>
 
             <div>
-              <label className={labelClass}>Pincode</label>
+              <label className={labelClass} htmlFor="pincode">Pincode</label>
               <input
+                id="pincode"
                 name="pincode"
+                inputMode="numeric"
                 placeholder="e.g. 110001"
                 value={formData.pincode}
                 onChange={handleChange}
@@ -328,8 +350,9 @@ const CompanyForm = () => {
             </div>
 
             <div>
-              <label className={labelClass}>Isd Code</label>
+              <label className={labelClass} htmlFor="isd_code">Isd Code</label>
               <input
+                id="isd_code"
                 type="text"
                 name="isd_code"
                 placeholder="e.g. +91"
@@ -339,66 +362,90 @@ const CompanyForm = () => {
               />
             </div>
 
-            <br />
-            <button
-              type="button"
-              onClick={toggleCountry}
-              className="relative w-20 h-10 bg-gray-200 rounded-full 
-                 transition-colors duration-300
-                 flex items-center px-1"
-            >
-              <div
-                className={`absolute w-8 h-8 bg-white rounded-full 
-                    flex items-center justify-center text-sm font-semibold
-                    transition-transform duration-300
-                    ${country === "TW" ? "translate-x-10" : ""}`}
+            <div>
+              <span className={labelClass}>Country</span>
+              <button
+                type="button"
+                onClick={toggleCountry}
+                className="relative flex h-11 w-30 items-center justify-around rounded-full border border-slate-300 bg-slate-200 p-[0.2rem]"
+                aria-label={`Country: ${country}. Switch country`}
               >
-                {country}
-              </div>
-            </button>
+                <span className="text-[clamp(0.8rem,calc(0.77rem+0.12vw),0.9rem)] font-semibold text-slate-600">IN</span>
+                <span className="text-[clamp(0.8rem,calc(0.77rem+0.12vw),0.9rem)] font-semibold text-slate-600">TW</span>
+                <span className={`absolute top-[0.2rem] left-[0.2rem] grid h-[calc(100%-0.4rem)] w-[calc(50%-0.2rem)] place-items-center rounded-full bg-white text-[clamp(0.8rem,calc(0.77rem+0.12vw),0.9rem)] font-bold text-blue-700 shadow-sm transition-transform duration-200 ${country === "TW" ? "translate-x-full" : ""}`}>
+                  {country}
+                </span>
+              </button>
+            </div>
 
             {/* License Details */}
-            <div className="md:col-span-2 mt-4">
-              <h3 className="text-lg font-semibold text-gray-800 border-b pb-2 mb-4">
+            <div className="col-span-full">
+              <h2 className={sectionClass}>
                 License Details
-              </h3>
+              </h2>
             </div>
 
             <div>
-              <label className={labelClass}>Validity (Months)</label>
+              <label className={labelClass} htmlFor="license_validity_in_months">Validity (Months) <span className="text-red-500">*</span></label>
               <input
+                id="license_validity_in_months"
                 type="number"
+                min="1"
+                step="1"
                 name="license_validity_in_months"
                 placeholder="e.g. 12"
                 value={formData.license_validity_in_months}
                 onChange={handleChange}
+                required
                 className={inputClass}
               />
             </div>
 
             <div>
-              <label className={labelClass}>Total Granted Licenses</label>
+              <label className={labelClass} htmlFor="total_granted_licenses">Total Granted Licenses <span className="text-red-500">*</span></label>
               <input
+                id="total_granted_licenses"
                 type="number"
+                min="1"
+                step="1"
                 name="total_granted_licenses"
                 placeholder="e.g. 50"
                 value={formData.total_granted_licenses}
                 onChange={handleChange}
+                required
                 className={inputClass}
               />
             </div>
 
+            <div>
+              <label className={labelClass} htmlFor="license_status">Default Admin License Status <span className="text-red-500">*</span></label>
+              <select
+                id="license_status"
+                name="license_status"
+                value={formData.license_status}
+                onChange={handleChange}
+                required
+                className={inputClass}
+              >
+                <option value="1">Active</option>
+                <option value="0">Inactive</option>
+                <option value="2">Revoked</option>
+              </select>
+            </div>
+
             {/* Security & Settings */}
-            <div className="md:col-span-2 mt-4">
-              <h3 className="text-lg font-semibold text-gray-800 border-b pb-2 mb-4">
+            <div className="col-span-full">
+              <h2 className={sectionClass}>
                 Security & Settings
-              </h3>
+              </h2>
             </div>
 
             <div>
-              <label className={labelClass}>OTP Phone Number</label>
+              <label className={labelClass} htmlFor="otp_phone_number">OTP Phone Number</label>
               <input
+                id="otp_phone_number"
                 name="otp_phone_number"
+                type="tel"
                 placeholder="Phone for OTP"
                 value={formData.otp_phone_number}
                 onChange={handleChange}
@@ -407,9 +454,11 @@ const CompanyForm = () => {
             </div>
 
             <div>
-              <label className={labelClass}>Blacklisted Phone</label>
+              <label className={labelClass} htmlFor="blacklisted_phone_number">Blacklisted Phone</label>
               <input
+                id="blacklisted_phone_number"
                 name="blacklisted_phone_number"
+                type="tel"
                 placeholder="Blocked Number"
                 value={formData.blacklisted_phone_number}
                 onChange={handleChange}
@@ -417,9 +466,10 @@ const CompanyForm = () => {
               />
             </div>
 
-            <div className="md:col-span-2">
-              <label className={labelClass}>Remarks</label>
+            <div className="col-span-full">
+              <label className={labelClass} htmlFor="remarks">Remarks</label>
               <textarea
+                id="remarks"
                 name="remarks"
                 placeholder="Any additional notes..."
                 rows="2"
@@ -430,16 +480,16 @@ const CompanyForm = () => {
             </div>
 
             {/* Checkboxes */}
-            <div className="md:col-span-2 grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div className="col-span-full grid grid-cols-1 gap-3.5 sm:grid-cols-2">
               <label className={checkboxContainerClass}>
                 <input
                   type="checkbox"
                   name="ask_for_otp"
                   checked={formData.ask_for_otp}
                   onChange={handleChange}
-                  className="w-5 h-5 text-blue-600 rounded focus:ring-blue-500 border-gray-300"
+                  className="h-5 w-5 shrink-0 accent-blue-600"
                 />
-                <span className="text-sm font-medium text-gray-700">
+                <span>
                   Ask for OTP on Login
                 </span>
               </label>
@@ -450,20 +500,20 @@ const CompanyForm = () => {
                   name="status"
                   checked={formData.status}
                   onChange={handleChange}
-                  className="w-5 h-5 text-green-600 rounded focus:ring-green-500 border-gray-300"
+                  className="h-5 w-5 shrink-0 accent-blue-600"
                 />
-                <span className="text-sm font-medium text-gray-700">
+                <span>
                   Active Account Status
                 </span>
               </label>
             </div>
           </div>
 
-          <div className="mt-8">
+          <div className="mt-[clamp(1.5rem,2.5vw,2.25rem)]">
             <button
               type="submit"
               disabled={loading}
-              className={`w-full text-white font-bold py-3 px-4 rounded-lg shadow-md transition duration-300 transform hover:-translate-y-0.5 
+              className={`min-h-12 w-full rounded-[0.625rem] px-4 py-3 text-[clamp(0.9375rem,calc(0.88rem+0.25vw),1.125rem)] font-bold text-white shadow-[0_4px_12px_rgba(37,99,235,0.13)] transition-[background-color,box-shadow]
                 ${loading ? "bg-gray-400 cursor-not-allowed" : "bg-blue-600 hover:bg-blue-700 hover:shadow-lg"}`}
             >
               {loading
@@ -477,7 +527,7 @@ const CompanyForm = () => {
           </div>
         </form>
       </div>
-    </div>
+    </main>
   );
 };
 

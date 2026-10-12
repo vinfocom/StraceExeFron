@@ -1393,6 +1393,11 @@ export const pptReportApi = {
       return path;
     }
   },
+  download: (downloadUrl, projectId) =>
+    pythonApi.get(pptReportApi.getDownloadUrl(downloadUrl, projectId), {
+      responseType: "blob",
+      timeout: 600000,
+    }),
 };
 
 export const authApi = {

@@ -8,6 +8,12 @@ import { Button } from "@/components/ui/button";
 import { ChevronLeft } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 
+const bodyTextClass = "text-[clamp(0.875rem,calc(0.82rem+0.2vw),1rem)]";
+const tableTextClass = "text-[clamp(0.8125rem,calc(0.78rem+0.18vw),0.9375rem)]";
+const badgeClass = "inline-flex max-w-full items-center rounded-full border px-2.5 py-1 text-[clamp(0.75rem,calc(0.72rem+0.15vw),0.875rem)] font-semibold leading-tight";
+const controlClass = "block min-h-10 w-full min-w-0 rounded-lg border border-slate-300 bg-white px-2 py-1 text-[clamp(0.8125rem,calc(0.78rem+0.18vw),0.9375rem)] text-slate-800 outline-none focus:border-blue-600 focus:ring-[3px] focus:ring-blue-600/15 disabled:opacity-60";
+const fieldLabelClass = "mb-2 block text-[clamp(0.875rem,calc(0.82rem+0.2vw),1rem)] font-semibold leading-tight text-slate-700";
+
 const toDateInputValue = (value) => {
   const date = String(value ?? "").match(/^\d{4}-\d{2}-\d{2}/);
   return date ? date[0] : "";
@@ -88,7 +94,7 @@ const CompanyLicensesPage = () => {
       className: "bg-gray-100 text-gray-700 border border-gray-300",
     };
     return (
-      <span className={`px-2 py-1 rounded-full text-xs font-medium ${config.className}`}>
+      <span className={`${badgeClass} ${config.className}`}>
         {config.label}
       </span>
     );
@@ -114,7 +120,7 @@ const CompanyLicensesPage = () => {
       className: "bg-gray-100 text-gray-700 border border-gray-300",
     };
     return (
-      <span className={`px-2 py-1 rounded-full text-xs font-medium ${config.className}`}>
+      <span className={`${badgeClass} ${config.className}`}>
         {config.label}
       </span>
     );
@@ -183,149 +189,213 @@ const CompanyLicensesPage = () => {
     }
   };
 
+  const renderValidTill = (row, inputId) => (
+    <input
+      id={inputId}
+      type="date"
+      aria-label={`Valid till for license ${row.license_id}`}
+      value={licenseEdits[row.license_id]?.valid_till ?? toDateInputValue(row.valid_till)}
+      onChange={(e) =>
+        onChangeLicenseField(row.license_id, "valid_till", e.target.value)
+      }
+      disabled={updatingLicenseId === row.license_id}
+      className={controlClass}
+    />
+  );
+
+  const renderStatusEditor = (row, inputId) => {
+    const edit = licenseEdits[row.license_id] || {};
+    const selectedStatus = edit.status ?? String(row.license_status ?? 0);
+    return (
+      <div className="grid w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-1.5">
+        <select
+          id={inputId}
+          aria-label={`Status for license ${row.license_id}`}
+          value={selectedStatus}
+          onChange={(e) =>
+            onChangeLicenseField(row.license_id, "status", e.target.value)
+          }
+          disabled={updatingLicenseId === row.license_id}
+          className={controlClass}
+        >
+          <option value="1">Active</option>
+          <option value="0">Inactive</option>
+          <option value="2">Revoked</option>
+        </select>
+        {getLicenseStatusBadge(row.license_status)}
+      </div>
+    );
+  };
+
+  const renderActions = (row) => {
+    const isUpdating = updatingLicenseId === row.license_id;
+    return (
+      <div className="grid w-full grid-cols-2 gap-1.5">
+        <Button
+          size="sm"
+          className={`min-h-9 min-w-0 px-1.5 ${tableTextClass}`}
+          onClick={() => handleUpdateLicense(row)}
+          disabled={isUpdating}
+        >
+          {isUpdating ? "Updating..." : "Update"}
+        </Button>
+        <Button
+          size="sm"
+          variant="destructive"
+          className={`min-h-9 min-w-0 px-1.5 ${tableTextClass}`}
+          onClick={() => handleRevokeLicense(row)}
+          disabled={isUpdating}
+        >
+          Revoke
+        </Button>
+      </div>
+    );
+  };
+
   const columns = [
     {
       header: "S. No.",
+      className: "w-[5%]",
       render: (_row, index) => (
         <span className="text-gray-700 font-medium">{index + 1}</span>
       ),
     },
     {
       header: "License Id",
+      className: "w-[6%]",
       accessor: "license_id",
       render: (row) => <span className="text-gray-700">{row.license_id || "-"}</span>,
     },
     {
       header: "Name",
+      className: "w-[12%] overflow-hidden text-ellipsis",
       accessor: "name",
       render: (row) => (
-        <span className="text-gray-800 font-medium">{row.user_name || "-"}</span>
+        <span className="text-gray-800 font-medium" title={row.user_name || undefined}>{row.user_name || "-"}</span>
       ),
     },
     {
       header: "Mobile No.",
+      className: "w-[10%] overflow-hidden text-ellipsis",
       accessor: "user_mobile",
-      render: (row) => <span className="text-gray-700">{row.user_mobile || "-"}</span>,
+      render: (row) => <span className="text-gray-700" title={row.user_mobile || undefined}>{row.user_mobile || "-"}</span>,
     },
     {
       header: "Created On",
+      className: "w-[9%]",
       accessor: "created_on",
       render: (row) => formatDate(row.created_on),
     },
     {
       header: "Valid Till",
+      className: "w-[12%]",
       accessor: "valid_till",
-      render: (row) => (
-        <input
-          type="date"
-          aria-label={`Valid till for license ${row.license_id}`}
-          value={licenseEdits[row.license_id]?.valid_till ?? toDateInputValue(row.valid_till)}
-          onChange={(e) =>
-            onChangeLicenseField(row.license_id, "valid_till", e.target.value)
-          }
-          disabled={updatingLicenseId === row.license_id}
-          className="border rounded px-2 py-1 text-sm bg-white"
-        />
-      ),
+      render: (row) => renderValidTill(row),
     },
     {
       header: "License Code",
+      className: "w-[10%] overflow-hidden text-ellipsis",
       accessor: "licenses_code",
-      render: (row) => <span className="text-gray-700">{row.license_code || "-"}</span>,
+      render: (row) => <span className="text-gray-700" title={row.license_code || undefined}>{row.license_code || "-"}</span>,
     },
     {
       header: "License Status",
+      className: "w-[16%]",
       accessor: "license_status",
-      render: (row) => {
-        const edit = licenseEdits[row.license_id] || {};
-        const selectedStatus = edit.status ?? String(row.license_status ?? 0);
-        return (
-          <div className="flex items-center gap-2">
-            <select
-              value={selectedStatus}
-              onChange={(e) =>
-                onChangeLicenseField(row.license_id, "status", e.target.value)
-              }
-              className="border rounded px-2 py-1 text-sm bg-white"
-            >
-              <option value="1">Active</option>
-              <option value="0">Inactive</option>
-              <option value="2">Revoked</option>
-            </select>
-            {getLicenseStatusBadge(row.license_status)}
-          </div>
-        );
-      },
+      render: (row) => renderStatusEditor(row),
     },
     {
       header: "User Status",
+      className: "w-[8%]",
       accessor: "user_isactive",
       render: (row) => <div>{getUserStatusBadge(row.user_isactive)}</div>,
     },
     {
       header: "Action",
-      render: (row) => {
-        const isUpdating = updatingLicenseId === row.license_id;
-        return (
-          <div className="flex items-center gap-2">
-            <Button
-              size="sm"
-              onClick={() => handleUpdateLicense(row)}
-              disabled={isUpdating}
-            >
-              {isUpdating ? "Updating..." : "Update"}
-            </Button>
-            <Button
-              size="sm"
-              variant="destructive"
-              onClick={() => handleRevokeLicense(row)}
-              disabled={isUpdating}
-            >
-              Revoke
-            </Button>
-          </div>
-        );
-      },
+      className: "w-[12%]",
+      render: renderActions,
     },
   ];
 
   if (loading && users.length === 0) return <Spinner />;
 
   return (
-    <div className="space-y-6 bg-gray-50 min-h-screen p-6">
-      <div className="flex justify-between items-center">
-        <div className="flex items-center gap-4">
-          <Button
-            variant="outline"
-            size="icon"
-            onClick={() => navigate("/companies")}
-            className="h-10 w-10 bg-white border-gray-300 hover:bg-gray-100 text-gray-700"
-          >
-            <ChevronLeft className="h-5 w-5" />
-          </Button>
-          <div>
-            <h1 className="text-3xl font-bold text-gray-800">{companyName ? companyName : null}</h1>
-            
+    <main className={`min-h-dvh min-w-0 bg-slate-100 p-[clamp(0.875rem,2.5vw,2rem)] text-slate-800 ${bodyTextClass}`}>
+      <div className="mx-auto w-full max-w-[88rem]">
+        <div className="flex min-w-0 flex-wrap items-center justify-between gap-4 py-[clamp(1rem,2.5vw,2rem)] max-[36rem]:items-stretch">
+          <div className="flex min-w-0 items-start gap-[clamp(0.75rem,1.4vw,1rem)] max-[36rem]:w-full">
+            <Button
+              variant="outline"
+              size="icon"
+              onClick={() => navigate("/companies")}
+              className="h-11 w-11 shrink-0 border-slate-300 bg-white text-slate-700 hover:bg-slate-100"
+              aria-label="Back to companies"
+            >
+              <ChevronLeft className="h-5 w-5" />
+            </Button>
+            <div className="min-w-0">
+              <h1 className="m-0 break-words text-[clamp(1.45rem,calc(1.15rem+1.1vw),2.125rem)] leading-tight font-bold text-gray-900">{companyName || "Company Licenses"}</h1>
+              <p className={`mt-1.5 leading-normal text-slate-500 ${bodyTextClass}`}>Manage licenses and expiry dates</p>
+            </div>
           </div>
         </div>
-      </div>
 
-      <Card className="bg-white border border-gray-200 shadow-sm">
-        <CardContent className="pt-6">
-          {loading ? (
-            <div className="flex justify-center p-8">
-              <Spinner />
-            </div>
-          ) : (
-            <DataTable
-              data={users}
-              columns={columns}
-              emptyMessage="No licenses found for this company."
-            />
-          )}
-        </CardContent>
-      </Card>
-    </div>
+        <Card className="min-w-0 gap-0 overflow-hidden rounded-[clamp(0.875rem,1.5vw,1.25rem)] border-slate-200 bg-white py-0 shadow-[0_12px_32px_rgba(15,23,42,0.05)]">
+          <CardContent className="px-[clamp(0.75rem,2vw,1.5rem)] py-[clamp(0.75rem,2vw,1.5rem)]">
+            {loading ? (
+              <div className="flex justify-center p-8">
+                <Spinner />
+              </div>
+            ) : (
+              <div className="min-w-0">
+                <div className="hidden max-w-full overflow-x-auto min-[1536px]:block" role="region" aria-label="Company licenses table" tabIndex={0}>
+                  <DataTable
+                    data={users}
+                    columns={columns}
+                    className="gap-0 border-0 py-0 shadow-none"
+                    tableClassName="w-full min-w-[82rem] table-fixed"
+                    headClassName={`bg-slate-50 px-2 py-2.5 font-bold whitespace-nowrap ${tableTextClass}`}
+                    cellClassName={`px-2 py-2.5 align-middle whitespace-nowrap ${tableTextClass}`}
+                    rowClassName="border-slate-200 even:bg-slate-50/60"
+                  />
+                </div>
+                <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3 min-[1536px]:hidden">
+                  {users.length === 0 ? (
+                    <p className={`col-span-full px-4 py-8 text-center text-slate-500 ${bodyTextClass}`}>No licenses found for this company.</p>
+                  ) : users.map((row, index) => (
+                    <article className="flex min-w-0 flex-col gap-4 rounded-xl border border-slate-200 bg-white p-[clamp(1rem,2vw,1.25rem)]" key={row.license_id ?? row.id ?? index}>
+                      <div className="flex flex-wrap items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <h2 className="m-0 break-words text-[clamp(1.05rem,calc(0.96rem+0.4vw),1.3rem)] font-bold text-slate-800">{row.user_name || "Unnamed user"}</h2>
+                          <p className={`mt-1 text-slate-500 ${tableTextClass}`}>License #{row.license_id || "-"}</p>
+                        </div>
+                        {getUserStatusBadge(row.user_isactive)}
+                      </div>
+                      <dl className="m-0 grid gap-3">
+                        <div className="grid grid-cols-[minmax(6.5rem,38%)_minmax(0,1fr)] gap-3"><dt className={`text-slate-500 ${tableTextClass}`}>Mobile No.</dt><dd className="m-0 min-w-0 break-words font-semibold text-slate-700">{row.user_mobile || "-"}</dd></div>
+                        <div className="grid grid-cols-[minmax(6.5rem,38%)_minmax(0,1fr)] gap-3"><dt className={`text-slate-500 ${tableTextClass}`}>Created On</dt><dd className="m-0 min-w-0 break-words font-semibold text-slate-700">{formatDate(row.created_on)}</dd></div>
+                        <div className="grid grid-cols-[minmax(6.5rem,38%)_minmax(0,1fr)] gap-3"><dt className={`text-slate-500 ${tableTextClass}`}>License Code</dt><dd className="m-0 min-w-0 break-words font-semibold text-slate-700">{row.license_code || "-"}</dd></div>
+                      </dl>
+                      <div className="grid grid-cols-1 gap-3">
+                        <div className="min-w-0">
+                          <label className={fieldLabelClass} htmlFor={`license-valid-${row.license_id}`}>Valid Till</label>
+                          {renderValidTill(row, `license-valid-${row.license_id}`)}
+                        </div>
+                        <div className="min-w-0">
+                          <label className={fieldLabelClass} htmlFor={`license-status-${row.license_id}`}>License Status</label>
+                          {renderStatusEditor(row, `license-status-${row.license_id}`)}
+                        </div>
+                      </div>
+                      <div className="mt-auto border-t border-slate-200 pt-3">{renderActions(row)}</div>
+                    </article>
+                  ))}
+                </div>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+    </main>
   );
 };
 

@@ -217,8 +217,7 @@ export const OverviewTab = ({
   sessionIds: sessionIdsProp = [],
   projectId = null,
   availableBands = [],
-  availableTechnologies,
-  selectedTechnologies,
+  reportTechnologies = [],
   gridViewEnabled = false,
   gridViewSummary = null,
 }) => {
@@ -228,6 +227,7 @@ export const OverviewTab = ({
   const [error, setError] = useState(null);
   const [isGeneratingPpt, setIsGeneratingPpt] = useState(false);
   const [pptPercent, setPptPercent] = useState(null);
+  const [readyPpt, setReadyPpt] = useState(null);
   const [isPptBandDialogOpen, setIsPptBandDialogOpen] = useState(false);
   const [lockedBand, setLockedBand] = useState("all");
   const [pptTemplate, setPptTemplate] = useState("");
@@ -290,14 +290,8 @@ export const OverviewTab = ({
     }
   }, [lockedBand, pptBandOptions]);
 
-  // Match the sidebar's log technology choices, including active selections.
-  const pptTechnologyOptions = useMemo(
-    () => [...new Set([
-      ...(availableTechnologies || []),
-      ...(selectedTechnologies || []),
-    ])],
-    [availableTechnologies, selectedTechnologies],
-  );
+  // Share the PDF picker's exact network values with the PPT report service.
+  const pptTechnologyOptions = reportTechnologies;
 
   useEffect(() => {
     setPptTechnologies((current) => {
@@ -312,6 +306,22 @@ export const OverviewTab = ({
         ? current.filter((item) => item !== technology)
         : [...current, technology],
     );
+  }, []);
+
+  useEffect(() => {
+    setReadyPpt(null);
+  }, [projectId]);
+
+  const downloadReadyPpt = useCallback((report) => {
+    if (!report?.blob) return;
+    const url = window.URL.createObjectURL(report.blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = report.filename;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    window.setTimeout(() => window.URL.revokeObjectURL(url), 60000);
   }, []);
 
   const handleDownloadKml = useCallback(() => {
@@ -365,6 +375,7 @@ export const OverviewTab = ({
       return;
     }
 
+    setReadyPpt(null);
     const region = resolveUserRegion(user) || "india";
     const numericUserId = Number(
       user?.id ?? user?.user_id ?? user?.userId ?? user?.UserId ?? 0,
@@ -469,26 +480,23 @@ export const OverviewTab = ({
           );
         }
       }
-      const downloadUrl = pptReportApi.getDownloadUrl(
-        reportResponse?.download_url,
-        numericProjectId,
-      );
-
       if (status && !["success", "ready"].includes(status)) {
         throw new Error(reportResponse?.message || "The PPT report could not be generated.");
       }
 
-      const link = document.createElement("a");
-      link.href = downloadUrl;
-      link.download = reportResponse?.output_file || `Mobility_DT_Project_${numericProjectId}.pptx`;
-      link.target = "_blank";
-      link.rel = "noopener noreferrer";
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
+      const blob = await pptReportApi.download(reportResponse?.download_url, numericProjectId);
+      const report = {
+        blob: blob instanceof Blob ? blob : new Blob([blob], {
+          type: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        }),
+        filename: String(reportResponse?.output_file || `Mobility_DT_Project_${numericProjectId}.pptx`)
+          .split(/[\\/]/).pop(),
+      };
+      setReadyPpt(report);
+      downloadReadyPpt(report);
 
       toast.update(toastId, {
-        render: "PowerPoint report is ready and downloading.",
+        render: "PowerPoint report is ready. Use Download PPT to save it again.",
         type: "success",
         isLoading: false,
         autoClose: 3000,
@@ -505,17 +513,17 @@ export const OverviewTab = ({
       setIsGeneratingPpt(false);
       setPptPercent(null);
     }
-  }, [isGeneratingPpt, lockedBand, projectId, pptAggregation, pptMapViewType, pptTechnologies, pptTemplate, sessionIds, user]);
+  }, [downloadReadyPpt, isGeneratingPpt, lockedBand, projectId, pptAggregation, pptMapViewType, pptTechnologies, pptTemplate, sessionIds, user]);
 
   const handlePptButtonClick = useCallback(() => {
     if (isGeneratingPpt) return;
     setLockedBand("all");
-    setPptTemplate("");
-    setPptTechnologies([]);
+    setPptTemplate("stracer");
+    setPptTechnologies(pptTechnologyOptions);
     setPptMapViewType("grid");
     setPptAggregation("median");
     setIsPptBandDialogOpen(true);
-  }, [isGeneratingPpt]);
+  }, [isGeneratingPpt, pptTechnologyOptions]);
 
   const isUnknownOrEmpty = useCallback((value) => {
     if (!value) return true;
@@ -869,7 +877,7 @@ export const OverviewTab = ({
         </div>
       )}
 
-      <div className="flex justify-end gap-2">
+      <div className="flex flex-wrap justify-end gap-2">
         <button
           type="button"
           onClick={handleDownloadKml}
@@ -890,6 +898,17 @@ export const OverviewTab = ({
           {isGeneratingPpt && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
           {isGeneratingPpt ? (pptPercent != null ? `Generating ${pptPercent}%` : "Preparing PPT…") : "PPT"}
         </button>
+        {readyPpt && (
+          <button
+            type="button"
+            onClick={() => downloadReadyPpt(readyPpt)}
+            title="Download the generated PowerPoint report"
+            className="inline-flex items-center gap-1.5 rounded-md border border-emerald-500/50 bg-emerald-600/15 px-2.5 py-1.5 text-xs font-medium text-emerald-200 transition hover:bg-emerald-600/25"
+          >
+            <Download className="h-3.5 w-3.5" />
+            Download PPT
+          </button>
+        )}
       </div>
 
       <Dialog open={isPptBandDialogOpen} onOpenChange={setIsPptBandDialogOpen}>
@@ -956,7 +975,8 @@ export const OverviewTab = ({
 
           {pptTemplate === "stracer" && (
             <fieldset className="space-y-2">
-              <legend className="text-sm font-medium text-slate-200">Technology</legend>
+              <legend className="text-sm font-medium text-slate-200">Per Technology</legend>
+              <p className="text-xs text-slate-400">Select the technologies to include in the PPT report.</p>
               {pptTechnologyOptions.length === 0 && (
                 <p className="text-xs text-slate-400">No technologies are available for the current map data.</p>
               )}

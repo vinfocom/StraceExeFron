@@ -614,14 +614,14 @@ export const useNetworkSamples = (
       const cachedDataset = createNetworkLogCacheSnapshot(cached, requestIdentity, datasetRevisionRef.current + 1);
       if (cachedDataset) {
         const revision = ++datasetRevisionRef.current;
-        setDatasetSnapshot({ ...cachedDataset.snapshot, revision });
+        // Show the saved dataset immediately while the request below checks for
+        // newer logs. Keep the rows complete so the map stays visible.
+        setDatasetSnapshot({ ...cachedDataset.snapshot, revision, loading: true });
         setAppSummary(cachedDataset.appSummary);
         setInpSummary(cachedDataset.inpSummary);
         setTptVolume(cachedDataset.tptVolume);
         setProgress({ identity: requestIdentity, current: cached.locations.length, total: cached.locations.length, page: 1, totalPages: 1, percent: 100 });
         lastFetchedKeyRef.current = requestIdentity;
-        requestGeneration.finish(request);
-        return;
       }
     }
 
