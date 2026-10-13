@@ -7,6 +7,9 @@ import Spinner from "../components/common/Spinner";
 import { Button } from "@/components/ui/button";
 import { ChevronLeft } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
+import { Dialog, DialogContent } from "@/components/ui/dialog";
+import { FEATURE_OPTIONS, getEnabledFeaturesFromSource } from "@/utils/featureAccess";
+import PortalUsage from "@/components/company/PortalUsage";
 
 const bodyTextClass = "text-[clamp(0.875rem,calc(0.82rem+0.2vw),1rem)]";
 const tableTextClass = "text-[clamp(0.8125rem,calc(0.78rem+0.18vw),0.9375rem)]";
@@ -27,6 +30,10 @@ const CompanyLicensesPage = () => {
   const [users, setUsers] = useState([]);
   const [licenseEdits, setLicenseEdits] = useState({});
   const [updatingLicenseId, setUpdatingLicenseId] = useState(null);
+  const [featureLicense, setFeatureLicense] = useState(null);
+  const [selectedFeatures, setSelectedFeatures] = useState([]);
+  const [filterInputs, setFilterInputs] = useState({ code: "", mobile: "", status: "" });
+  const [filters, setFilters] = useState({});
   const [loading, setLoading] = useState(true);
   const companyName = users[0]?.company_name || "";
 
@@ -42,6 +49,7 @@ const CompanyLicensesPage = () => {
     try {
       const apiFilters = {
         ...(companyIdQuery ? { companyId: companyIdQuery } : {}),
+        ...filters,
       };
       const response = await companyApi.licensesDetails(apiFilters);
       const userData = Array.isArray(response?.Data) ? response.Data : [];
@@ -63,7 +71,7 @@ const CompanyLicensesPage = () => {
     } finally {
       setLoading(false);
     }
-  }, [companyIdQuery]);
+  }, [companyIdQuery, filters]);
 
   useEffect(() => {
     if (companyIdQuery) {
@@ -189,6 +197,29 @@ const CompanyLicensesPage = () => {
     }
   };
 
+  const openFeatureEditor = (row) => {
+    setFeatureLicense(row);
+    setSelectedFeatures(getEnabledFeaturesFromSource(row));
+  };
+
+  const saveFeatures = async () => {
+    if (!featureLicense?.license_id) return;
+    const licenseId = featureLicense.license_id;
+    try {
+      setUpdatingLicenseId(licenseId);
+      await companyApi.updateIssuedLicense(licenseId, {
+        enabled_features: selectedFeatures,
+      });
+      toast.success("License features updated.");
+      setFeatureLicense(null);
+      await fetchUsers();
+    } catch (error) {
+      toast.error(error?.message || "Failed to update license features.");
+    } finally {
+      setUpdatingLicenseId(null);
+    }
+  };
+
   const renderValidTill = (row, inputId) => (
     <input
       id={inputId}
@@ -247,6 +278,15 @@ const CompanyLicensesPage = () => {
           disabled={isUpdating}
         >
           Revoke
+        </Button>
+        <Button
+          size="sm"
+          variant="outline"
+          className={`col-span-2 min-h-9 min-w-0 px-1.5 ${tableTextClass}`}
+          onClick={() => openFeatureEditor(row)}
+          disabled={isUpdating}
+        >
+          Features
         </Button>
       </div>
     );
@@ -335,10 +375,45 @@ const CompanyLicensesPage = () => {
             </Button>
             <div className="min-w-0">
               <h1 className="m-0 break-words text-[clamp(1.45rem,calc(1.15rem+1.1vw),2.125rem)] leading-tight font-bold text-gray-900">{companyName || "Company Licenses"}</h1>
-              <p className={`mt-1.5 leading-normal text-slate-500 ${bodyTextClass}`}>Manage licenses and expiry dates</p>
+              <p className={`mt-1.5 leading-normal text-slate-500 ${bodyTextClass}`}>Manage licenses, expiry dates, and features</p>
             </div>
           </div>
         </div>
+
+        <form
+          className="mb-4 grid gap-3 rounded-xl border border-slate-200 bg-white p-4 sm:grid-cols-[1fr_1fr_10rem_auto_auto] sm:items-end"
+          onSubmit={(event) => {
+            event.preventDefault();
+            setFilters(Object.fromEntries(Object.entries(filterInputs)
+              .map(([key, value]) => [key, value.trim()])
+              .filter(([, value]) => value !== "")));
+          }}
+        >
+          <label className="text-sm font-medium text-slate-700">License code
+            <input className={`${controlClass} mt-1`} value={filterInputs.code} onChange={(event) => setFilterInputs((prev) => ({ ...prev, code: event.target.value }))} placeholder="LIC-963406" />
+          </label>
+          <label className="text-sm font-medium text-slate-700">Mobile
+            <input className={`${controlClass} mt-1`} value={filterInputs.mobile} onChange={(event) => setFilterInputs((prev) => ({ ...prev, mobile: event.target.value }))} placeholder="Mobile number" />
+          </label>
+          <label className="text-sm font-medium text-slate-700">Status
+            <select className={`${controlClass} mt-1`} value={filterInputs.status} onChange={(event) => setFilterInputs((prev) => ({ ...prev, status: event.target.value }))}>
+              <option value="">All</option><option value="1">Active</option><option value="0">Inactive</option><option value="2">Revoked</option>
+            </select>
+          </label>
+          <Button type="submit" className="min-h-10">Search</Button>
+          <Button type="button" variant="outline" className="min-h-10" onClick={() => { setFilterInputs({ code: "", mobile: "", status: "" }); setFilters({}); }}>Clear</Button>
+        </form>
+
+        {companyIdQuery && (
+          <div className="mb-4">
+            <PortalUsage
+              companyId={companyIdQuery}
+              onShowFeatures={(activeUser) => navigate(
+                `/company-license-features?${new URLSearchParams({ companyId: companyIdQuery, userId: String(activeUser.user_id) })}`,
+              )}
+            />
+          </div>
+        )}
 
         <Card className="min-w-0 gap-0 overflow-hidden rounded-[clamp(0.875rem,1.5vw,1.25rem)] border-slate-200 bg-white py-0 shadow-[0_12px_32px_rgba(15,23,42,0.05)]">
           <CardContent className="px-[clamp(0.75rem,2vw,1.5rem)] py-[clamp(0.75rem,2vw,1.5rem)]">
@@ -395,6 +470,36 @@ const CompanyLicensesPage = () => {
           </CardContent>
         </Card>
       </div>
+      <Dialog open={Boolean(featureLicense)} onOpenChange={(open) => { if (!open && updatingLicenseId == null) setFeatureLicense(null); }}>
+        <DialogContent title="License features" style={{ width: "min(28rem, 90vw)" }} showCloseButton={updatingLicenseId == null}>
+          <h2 className="mb-3 text-xl font-bold text-slate-900">License features</h2>
+          <p className="mb-4 text-sm text-slate-600">
+            {featureLicense?.user_name || "User"} | {featureLicense?.license_code || `License #${featureLicense?.license_id}`}
+          </p>
+          <div className="grid gap-2">
+            {FEATURE_OPTIONS.map((feature) => (
+              <label key={feature.key} className="flex items-center gap-3 rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-800">
+                <input
+                  type="checkbox"
+                  checked={selectedFeatures.includes(feature.key)}
+                  onChange={(event) => setSelectedFeatures((current) => event.target.checked
+                    ? [...current, feature.key]
+                    : current.filter((key) => key !== feature.key))}
+                  disabled={updatingLicenseId != null}
+                  className="h-4 w-4 accent-blue-600"
+                />
+                {feature.label}
+              </label>
+            ))}
+          </div>
+          <div className="mt-5 flex justify-end gap-2">
+            <Button variant="outline" onClick={() => setFeatureLicense(null)} disabled={updatingLicenseId != null}>Cancel</Button>
+            <Button onClick={saveFeatures} disabled={updatingLicenseId != null}>
+              {updatingLicenseId != null ? "Saving..." : "Save features"}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </main>
   );
 };

@@ -1,6 +1,6 @@
 import { getTechnologyMetricValue, is2GTechnology } from "@/utils/technologyMetricLabels";
 // src/hooks/useNetworkSamples.js
-import { useState, useRef, useCallback, useEffect } from 'react';
+import { useState, useRef, useCallback, useEffect, useMemo } from 'react';
 import { toast } from 'react-toastify';
 import { mapViewApi } from '@/api/apiEndpoints'; 
 import { isCancelledError } from '@/api/apiService';
@@ -526,6 +526,7 @@ export const useNetworkSamples = (
   polygons = [],
   maxRows = 2000000,
   projectId = null,
+  quietCacheRefresh = false,
 ) => {
   const [datasetSnapshot, setDatasetSnapshot] = useState({
     rows: [], identity: null, revision: 0, complete: false, loading: false, outcome: 'empty', error: null,
@@ -535,6 +536,7 @@ export const useNetworkSamples = (
   const [inpSummary, setInpSummary] = useState({});
   const [tptVolume, setTptVolume] = useState({});
   const [progress, setProgress] = useState({ identity: null, current: 0, total: null, page: 0, totalPages: null, percent: null });
+  const [cacheLookup, setCacheLookup] = useState({ identity: null, status: 'checking' });
   const lastFetchedKeyRef = useRef(null);
 
   const safeMaxRows =
@@ -589,12 +591,14 @@ export const useNetworkSamples = (
       return;
     }
 
+    setCacheLookup({ identity: requestIdentity, status: forceRefresh || !canUsePersistentCache ? 'miss' : 'checking' });
     setDatasetSnapshot((previous) => {
       const revision = previous.identity === requestIdentity ? previous.revision : ++datasetRevisionRef.current;
       return beginNetworkLogSnapshot(previous, requestIdentity, revision);
     });
     setProgress({ identity: requestIdentity, current: 0, total: null, page: 0, totalPages: null, percent: null });
 
+    let hadCachedDataset = false;
     if (!forceRefresh && canUsePersistentCache) {
       let cached = null;
       try {
@@ -613,6 +617,7 @@ export const useNetworkSamples = (
       if (!isCurrent()) return;
       const cachedDataset = createNetworkLogCacheSnapshot(cached, requestIdentity, datasetRevisionRef.current + 1);
       if (cachedDataset) {
+        hadCachedDataset = true;
         const revision = ++datasetRevisionRef.current;
         // Show the saved dataset immediately while the request below checks for
         // newer logs. Keep the rows complete so the map stays visible.
@@ -623,6 +628,7 @@ export const useNetworkSamples = (
         setProgress({ identity: requestIdentity, current: cached.locations.length, total: cached.locations.length, page: 1, totalPages: 1, percent: 100 });
         lastFetchedKeyRef.current = requestIdentity;
       }
+      setCacheLookup({ identity: requestIdentity, status: hadCachedDataset ? 'hit' : 'miss' });
     }
 
     const PAGE_SIZE = 20000;
@@ -732,16 +738,18 @@ export const useNetworkSamples = (
       }
 
 
-      if (allParsedLogs.length > 0) {
-        const cappedSuffix =
-          safeMaxRows && allParsedLogs.length >= safeMaxRows
-            ? ` (capped at ${safeMaxRows.toLocaleString()})`
-            : "";
-        toast.success(
-          `${allParsedLogs.length.toLocaleString()} points loaded in ${fetchTime}s${cappedSuffix}`,
-        );
-      } else {
-        toast.warn('No valid log data found');
+      if (!hadCachedDataset || !quietCacheRefresh) {
+        if (allParsedLogs.length > 0) {
+          const cappedSuffix =
+            safeMaxRows && allParsedLogs.length >= safeMaxRows
+              ? ` (capped at ${safeMaxRows.toLocaleString()})`
+              : "";
+          toast.success(
+            `${allParsedLogs.length.toLocaleString()} points loaded in ${fetchTime}s${cappedSuffix}`,
+          );
+        } else {
+          toast.warn('No valid log data found');
+        }
       }
 
 
@@ -759,10 +767,14 @@ export const useNetworkSamples = (
             complete: preserveCompleted,
             loading: false,
             outcome: preserveCompleted ? previous.outcome : 'failed',
-            error: err.message || 'Unable to load the complete network log dataset.',
+            error: hadCachedDataset && quietCacheRefresh
+              ? null
+              : err.message || 'Unable to load the complete network log dataset.',
           };
         });
-        toast.error(`Network log load failed: ${err.message || 'Unknown error'}. Retry to load the complete dataset.`);
+        if (!hadCachedDataset || !quietCacheRefresh) {
+          toast.error(`Network log load failed: ${err.message || 'Unknown error'}. Retry to load the complete dataset.`);
+        }
       }
     } finally {
       if (isCurrent()) {
@@ -783,6 +795,7 @@ export const useNetworkSamples = (
     cacheKey,
     requestIdentity,
     requestGeneration,
+    quietCacheRefresh,
   ]);
 
   useEffect(() => {
@@ -792,21 +805,28 @@ export const useNetworkSamples = (
 
   const hasRequestedDataset = Boolean(enabled && sessionIds?.length);
   const visibleSnapshot = getVisibleNetworkLogSnapshot(datasetSnapshot, requestIdentity, hasRequestedDataset);
+  const cacheStatus = cacheLookup.identity === requestIdentity ? cacheLookup.status : 'checking';
+  const checkingCache = quietCacheRefresh && hasRequestedDataset && canUsePersistentCache && cacheStatus === 'checking' && !visibleSnapshot.complete;
+  const visibleLoading = visibleSnapshot.loading && (!quietCacheRefresh || !canUsePersistentCache || cacheStatus === 'miss');
+  const visibleDataset = useMemo(() => visibleLoading === visibleSnapshot.loading
+    ? visibleSnapshot
+    : { ...visibleSnapshot, loading: visibleLoading }, [visibleSnapshot, visibleLoading]);
   const visibleProgress = progress.identity === requestIdentity
     ? progress
     : { identity: requestIdentity, current: 0, total: null, page: 0, totalPages: null, percent: null };
 
   return {
-    locations: visibleSnapshot.rows,
-    dataset: visibleSnapshot,
+    locations: visibleDataset.rows,
+    dataset: visibleDataset,
     appSummary,
     inpSummary,
     tptVolume,
-    loading: visibleSnapshot.loading,
-    error: visibleSnapshot.error,
+    loading: visibleDataset.loading,
+    checkingCache,
+    error: visibleDataset.error,
     progress: visibleProgress,
-    outcome: visibleSnapshot.outcome,
-    complete: visibleSnapshot.complete,
+    outcome: visibleDataset.outcome,
+    complete: visibleDataset.complete,
     refetch: useCallback(() => {
       fetchData(true);
     }, [fetchData]),

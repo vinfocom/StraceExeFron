@@ -8,7 +8,7 @@ import DeckGLOverlay from "@/components/maps/DeckGLOverlay";
 import { DeckLayerRegistryProvider } from "@/components/maps/deckLayerRegistry.jsx";
 import PrimaryLogTooltip from "./PrimaryLogTooltip";
 import { Zap, Layers, Radio, Square, Circle, Trash2 } from "lucide-react";
-import { isCompletedDeletableDrawing } from "@/components/maps/drawingShapeInteractions.js";
+import { getClosestDrawingBoundaryHoverTarget, getDrawingPath, getNativeDrawingHoverTarget, isCompletedDeletableDrawing } from "@/components/maps/drawingShapeInteractions.js";
 // import TechHandoverMarkers from "../unifiedMap/TechHandoverMarkers";
 import useColorForLog from "@/hooks/useColorForLog";
 import { getMetricValueFromLog, getMacDetailValueFromLog, getPciColor, getEarfcnColor } from "@/utils/metrics";
@@ -1594,6 +1594,7 @@ const MapWithMultipleCircles = ({
   siteData = EMPTY_ARRAY,
   predictionGridData = EMPTY_ARRAY,
   onDeleteDrawing,
+  drawingHoverControllerRef,
 }) => {
   // L3DEBUG-START
   const l3MapRenderCountRef = useRef(0);
@@ -1630,6 +1631,7 @@ const MapWithMultipleCircles = ({
   const onFilteredLocationsChangeRef = useRef(onFilteredLocationsChange);
   const onFilteredNeighborsChangeRef = useRef(onFilteredNeighborsChange);
   const mapContainerRef = useRef(null);
+  const drawingBoundaryCacheRef = useRef(null);
   const onMarkerClickRef = useRef(onMarkerClick);
   const onNeighborClickRef = useRef(onNeighborClick);
   const onGridLegendLocationsChangeRef = useRef(onGridLegendLocationsChange);
@@ -1952,7 +1954,11 @@ const MapWithMultipleCircles = ({
     }
     window.clearTimeout(drawingActionHideTimerRef.current);
     drawingActionHideTimerRef.current = null;
-    setHoveredDrawingAction(target);
+    setHoveredDrawingAction((previous) =>
+      previous?.boundaryAnchored && target.boundaryAnchored && previous.id === target.id
+        ? previous
+        : target,
+    );
   }, [drawingEnabled]);
 
   const clearHoveredDrawingAction = useCallback(() => {
@@ -1963,7 +1969,64 @@ const MapWithMultipleCircles = ({
 
   useEffect(() => {
     if (drawingEnabled) clearHoveredDrawingAction();
-  }, [drawingEnabled, clearHoveredDrawingAction]);
+    const controller = drawingHoverControllerRef?.current;
+    if (!controller) return undefined;
+    const handleNativeDrawingHover = (id, event) => {
+      const wrapperBounds = mapContainerRef.current?.getBoundingClientRect();
+      const pointer = getNativeDrawingHoverTarget(id, event, wrapperBounds);
+      const projection = map?.getProjection?.();
+      const center = map?.getCenter?.();
+      const mapDivBounds = map?.getDiv?.()?.getBoundingClientRect?.();
+      const zoom = map?.getZoom?.();
+      if (!pointer || !projection || !center || !mapDivBounds || !Number.isFinite(zoom)) {
+        handleDrawingHover(null);
+        return;
+      }
+
+      const originX = mapDivBounds.left - wrapperBounds.left + mapDivBounds.width / 2;
+      const originY = mapDivBounds.top - wrapperBounds.top + mapDivBounds.height / 2;
+      const viewportKey = `${center.lat()},${center.lng()},${zoom},${originX},${originY},${mapDivBounds.width},${mapDivBounds.height}`;
+      let cached = drawingBoundaryCacheRef.current;
+      if (cached?.drawingShapes !== drawingShapes || cached?.map !== map || cached?.viewportKey !== viewportKey) {
+        const centerWorld = projection.fromLatLngToPoint(center);
+        const scale = 2 ** zoom;
+        const boundaries = drawingShapes
+          .filter((drawing) => isCompletedDeletableDrawing(drawing) && drawing.type !== "polyline")
+          .map((drawing) => {
+            const coordinates = getDrawingPath(drawing);
+            if (coordinates.length < 2 || !coordinates.every(([lng, lat]) => Number.isFinite(lng) && Number.isFinite(lat))) {
+              return null;
+            }
+            const path = coordinates.map(([lng, lat]) => {
+              const world = projection.fromLatLngToPoint(new window.google.maps.LatLng(lat, lng));
+              const wrappedX = world.x - centerWorld.x - Math.round((world.x - centerWorld.x) / 256) * 256;
+              return { x: originX + wrappedX * scale, y: originY + (world.y - centerWorld.y) * scale };
+            });
+            return { id: drawing.id, paths: [path] };
+          })
+          .filter(Boolean);
+        cached = { drawingShapes, map, viewportKey, boundaries };
+        drawingBoundaryCacheRef.current = cached;
+      }
+      handleDrawingHover(getClosestDrawingBoundaryHoverTarget(pointer, cached.boundaries));
+    };
+    controller.setDrawingHover = handleNativeDrawingHover;
+    return () => {
+      if (controller.setDrawingHover === handleNativeDrawingHover) {
+        delete controller.setDrawingHover;
+      }
+    };
+  }, [drawingEnabled, clearHoveredDrawingAction, drawingHoverControllerRef, drawingShapes, handleDrawingHover, map]);
+
+  useEffect(() => {
+    if (!map || !window.google?.maps?.event) return undefined;
+    const centerListener = window.google.maps.event.addListener(map, "center_changed", clearHoveredDrawingAction);
+    const zoomListener = window.google.maps.event.addListener(map, "zoom_changed", clearHoveredDrawingAction);
+    return () => {
+      centerListener.remove();
+      zoomListener.remove();
+    };
+  }, [map, clearHoveredDrawingAction]);
 
   useEffect(() => {
     if (hoveredDrawingAction?.id === null || hoveredDrawingAction?.id === undefined) return;
@@ -2946,8 +3009,9 @@ const MapWithMultipleCircles = ({
           onMouseLeave={() => handleDrawingHover(null)}
           className="absolute z-[1000001] grid h-8 w-8 place-items-center rounded-md border border-red-400/60 bg-slate-950/95 text-red-300 shadow-lg transition hover:border-red-300 hover:bg-red-600 hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-400"
           style={{
-            left: `${hoveredDrawingAction.x + 10}px`,
-            top: `${hoveredDrawingAction.y + 10}px`,
+            left: `${hoveredDrawingAction.x + (hoveredDrawingAction.boundaryAnchored ? 0 : 10)}px`,
+            top: `${hoveredDrawingAction.y + (hoveredDrawingAction.boundaryAnchored ? 0 : 10)}px`,
+            transform: hoveredDrawingAction.boundaryAnchored ? "translate(-50%, -50%)" : undefined,
           }}
         >
           <Trash2 size={15} aria-hidden="true" />

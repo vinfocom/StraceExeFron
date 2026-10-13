@@ -1,10 +1,15 @@
 export {
   DELETABLE_DRAWING_TYPES,
+  getClosestDrawingBoundaryHoverTarget,
+  getDrawingBoundaryHoverTarget,
   getDrawingHoverTarget,
+  getDrawingPath,
+  getNativeDrawingHoverTarget,
   getPolygonDrawingHitData,
   getPolylineDrawingHitData,
   handleShapeOverlayRightClick,
   isCompletedDeletableDrawing,
   removeDrawingEntryById,
   removeShapeById,
+  setCompletedDrawingInteractions,
 } from "../../features/unified-map/drawing/drawingShapeInteractions.js";

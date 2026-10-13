@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useCallback, useState, memo } from "react";
 import { toast } from "react-toastify";
 import { createAdvancedMarker, getAdvancedMarkerLatLngEvent, isSatelliteMapType, orientAdvancedMarkerLabel, refreshAdvancedMarkerLabelTheme, setAdvancedMarkerLabel } from "@/lib/advancedMarkers";
-import { handleShapeOverlayRightClick, removeDrawingEntryById, removeShapeById } from "@/components/maps/drawingShapeInteractions.js";
+import { handleShapeOverlayRightClick, removeDrawingEntryById, removeShapeById, setCompletedDrawingInteractions } from "@/components/maps/drawingShapeInteractions.js";
 import {
   getElevationSampleCoordinates,
   isTerrainHoverTargetCurrent,
@@ -453,13 +453,17 @@ function createRouteEnvelopePolygonPath(routeLegs, offsetMeters) {
 // Builds a sparse, bounded corridor around all selected route samples. Repeated
 // drives add to the same cells. Point connections are based only on geographic
 // proximity; timestamps and session ordering are deliberately ignored.
-function createRasterRouteBufferPath(logs, offsetMeters) {
+function createRasterRouteBufferPath(logs, offsetMeters, diagnostics = null) {
   const gm = window.google.maps;
   const offset = Math.max(1, Number(offsetMeters) || 1);
-  if (!gm?.geometry?.spherical || !Array.isArray(logs) || logs.length < 2) return [];
+  const fail = (reason) => {
+    if (diagnostics) diagnostics.reason = reason;
+    return [];
+  };
+  if (!gm?.geometry?.spherical || !Array.isArray(logs) || logs.length < 2) return fail("invalid-route");
 
   const allPoints = logs.map(toLatLng).filter(Boolean);
-  if (allPoints.length < 2) return [];
+  if (allPoints.length < 2) return fail("invalid-route");
 
   const originLat = allPoints[0].lat();
   const originLng = allPoints[0].lng();
@@ -520,7 +524,7 @@ function createRasterRouteBufferPath(logs, offsetMeters) {
   };
 
   allPoints.forEach((point) => addSpatialPoint(toGridPoint(point)));
-  if (spatialPoints.size > MAX_ROUTE_BUFFER_CELLS) return [];
+  if (spatialPoints.size > MAX_ROUTE_BUFFER_CELLS) return fail("detail-limit");
 
   const points = [...spatialPoints.values()];
   points.forEach((point, index) => {
@@ -660,14 +664,14 @@ function createRasterRouteBufferPath(logs, offsetMeters) {
     components = buildComponents();
   }
 
-  if (centerlineCells.size > MAX_ROUTE_BUFFER_CELLS) return [];
+  if (centerlineCells.size > MAX_ROUTE_BUFFER_CELLS) return fail("detail-limit");
   if (radiusCells < 12) {
     centerlineCells.forEach((key) => {
       const [x, y] = key.split(",").map(Number);
       markDisc({ x: x + 0.5, y: y + 0.5 });
     });
   }
-  if (bufferTooLarge) return [];
+  if (bufferTooLarge) return fail("area-limit");
 
   let minOccupiedX = Infinity;
   let maxOccupiedX = -Infinity;
@@ -780,7 +784,7 @@ function createRasterRouteBufferPath(logs, offsetMeters) {
   const boundary = loops.sort(
     (a, b) => Math.abs(signedArea(b)) - Math.abs(signedArea(a)),
   )[0];
-  if (!boundary?.length) return [];
+  if (!boundary?.length) return fail("outline");
 
   const simplifiedBoundary = simplifyClosedGridPath(
     boundary,
@@ -1068,9 +1072,10 @@ const fmtArea = (m2) =>
 
 const createLabelMarker = (map, position) => {
   const AdvancedMarkerElement = window.google?.maps?.marker?.AdvancedMarkerElement;
-  return AdvancedMarkerElement
-    ? new AdvancedMarkerElement({ map, position, zIndex: DRAWING_LABEL_Z_INDEX })
-    : null;
+  if (!AdvancedMarkerElement) return null;
+  const marker = new AdvancedMarkerElement({ map, position, zIndex: DRAWING_LABEL_Z_INDEX });
+  marker.style.pointerEvents = "none";
+  return marker;
 };
 
 // Pill used for the live readout that follows the cursor while drawing.
@@ -1183,6 +1188,9 @@ const createVertexMarker = ({
   onDragStart,
   onDrag,
   onDragEnd,
+  onPointerEnter,
+  onPointerMove,
+  onPointerLeave,
 }) => {
   const gm = window.google.maps;
   const isFirst = index === 0;
@@ -1220,6 +1228,9 @@ const createVertexMarker = ({
   if (onDragEnd) {
     listen("gmp-dragend", (event) => onDragEnd(getAdvancedMarkerLatLngEvent(marker, event), index));
   }
+  if (onPointerEnter) listen("pointerenter", (event) => onPointerEnter(event, index));
+  if (onPointerMove) listen("pointermove", (event) => onPointerMove(event, index));
+  if (onPointerLeave) listen("pointerleave", (event) => onPointerLeave(event, index));
   if (draggable) {
     listen("gmp-dragstart", () => { marker.style.cursor = "grabbing"; });
     listen("gmp-dragend", () => { marker.style.cursor = "grab"; });
@@ -1728,6 +1739,18 @@ function DrawingToolsLayerComponent({
         );
       }),
     );
+    if (type === "polygon" || type === "rectangle" || type === "circle") {
+      ["mouseover", "mousemove"].forEach((eventName) => {
+        listeners.push(window.google.maps.event.addListener(overlay, eventName, (event) => {
+          terrainHoverControllerRef?.current?.setDrawingHover?.(shapeObj.id, event);
+        }));
+      });
+      ["mouseout", "dragstart"].forEach((eventName) => {
+        listeners.push(window.google.maps.event.addListener(overlay, eventName, () => {
+          terrainHoverControllerRef?.current?.setDrawingHover?.(null);
+        }));
+      });
+    }
     const update = () => {
       window.clearTimeout(shapeObj.analysisTimer);
       shapeObj.analysisTimer = window.setTimeout(
@@ -1850,6 +1873,9 @@ function DrawingToolsLayerComponent({
             if (!event.latLng) return;
             path.setAt(markerIndex, event.latLng);
           },
+          onPointerEnter: type === "polygon" ? (event) => terrainHoverControllerRef?.current?.setDrawingHover?.(shapeObj.id, event) : undefined,
+          onPointerMove: type === "polygon" ? (event) => terrainHoverControllerRef?.current?.setDrawingHover?.(shapeObj.id, event) : undefined,
+          onPointerLeave: type === "polygon" ? () => terrainHoverControllerRef?.current?.setDrawingHover?.(null) : undefined,
         }),
       ).filter(Boolean);
     };
@@ -1899,6 +1925,9 @@ function DrawingToolsLayerComponent({
             rebuildSegmentLabels();
             update();
           },
+          onPointerEnter: type === "polygon" ? (event) => terrainHoverControllerRef?.current?.setDrawingHover?.(shapeObj.id, event) : undefined,
+          onPointerMove: type === "polygon" ? (event) => terrainHoverControllerRef?.current?.setDrawingHover?.(shapeObj.id, event) : undefined,
+          onPointerLeave: type === "polygon" ? () => terrainHoverControllerRef?.current?.setDrawingHover?.(null) : undefined,
         });
         if (markerEntry) shapeObj.midpointMarkers.push(markerEntry);
       }
@@ -2164,15 +2193,24 @@ function DrawingToolsLayerComponent({
           return;
         }
 
-        const polygonPath = createRasterRouteBufferPath(selectedLogs, logPolygonOffsetMeters);
+        const requestedOffset = Math.max(1, Number(logPolygonOffsetMeters) || 1);
+        const diagnostics = {};
+        const polygonPath = createRasterRouteBufferPath(selectedLogs, requestedOffset, diagnostics);
 
         if (polygonPath.length < 3) {
-          toast.error("Could not create a polygon around the selected route logs.", {
+          const nextOffset = Math.max(100, Math.ceil((requestedOffset * 2) / 5) * 5);
+          const message = diagnostics.reason === "detail-limit"
+            ? `Route detail exceeds the limit at ${requestedOffset} m. Try ${nextOffset} m in Route Offset or select a shorter route.`
+            : diagnostics.reason === "area-limit"
+              ? `Selected route covers too much area at ${requestedOffset} m. Select a shorter section or try another Route Offset.`
+              : diagnostics.reason === "invalid-route"
+                ? "Select at least two logs with valid locations to draw a route polygon."
+                : `Could not trace the route boundary at ${requestedOffset} m. Try another Route Offset or select a shorter route.`;
+          toast.error(message, {
             position: "bottom-right",
-            autoClose: 2500,
+            autoClose: 5500,
           });
           resetSelection();
-          stopRouteTool();
           return;
         }
 
@@ -2197,7 +2235,7 @@ function DrawingToolsLayerComponent({
           suppressGridAnalysis: true,
         });
         toast.info(
-          `Route polygon created around ${selectedLogs.length} selected logs with ${Math.round(Number(logPolygonOffsetMeters) || 0)} m offset.`,
+          `Route polygon created around ${selectedLogs.length} selected logs with ${Math.round(requestedOffset)} m offset.`,
           { position: "bottom-right", autoClose: 2500 },
         );
       };
@@ -2553,6 +2591,8 @@ function DrawingToolsLayerComponent({
     if (!map || typeof map.getDiv !== "function") return;
 
     const isDrawingActive = Boolean(enabled && shapeMode);
+    if (isDrawingActive) toast.dismiss("all-drawings-cleared");
+    setCompletedDrawingInteractions(shapesRef.current, isDrawingActive);
     const mapDiv = map.getDiv();
     const originalDraggable = map.get("draggable");
     const originalDisableDoubleClickZoom = map.get("disableDoubleClickZoom");
@@ -2598,6 +2638,7 @@ function DrawingToolsLayerComponent({
   useEffect(() => {
     if (clearSignal === 0 || clearSignal === lastClearSignalRef.current) return;
     lastClearSignalRef.current = clearSignal;
+    const hadDrawings = shapesRef.current.length > 0 || Boolean(activeDrawingRef.current?.overlay);
     terrainHoverControllerRef?.current?.clearHover?.();
     terrainHoverControllerRef?.current?.clearChartHover?.();
     cleanupActiveDrawing(false);
@@ -2607,8 +2648,14 @@ function DrawingToolsLayerComponent({
     collectedDrawingRef.current = [];
     callbacksRef.current.onDrawingsChange?.([]);
     callbacksRef.current.onSummary?.(null);
-    toast.info("All drawings cleared", { position: "bottom-right", autoClose: 2000 });
-  }, [clearSignal, cleanupActiveDrawing, clearActiveDrawingPreview, terrainHoverControllerRef]);
+    if (hadDrawings && !(enabled && shapeMode)) {
+      toast.info("All drawings cleared", {
+        toastId: "all-drawings-cleared",
+        position: "bottom-right",
+        autoClose: 2000,
+      });
+    }
+  }, [clearSignal, cleanupActiveDrawing, clearActiveDrawingPreview, enabled, shapeMode, terrainHoverControllerRef]);
 
   useEffect(() => () => {
     cleanupActiveDrawing(false);

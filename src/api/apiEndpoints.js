@@ -2893,6 +2893,8 @@ export const companyApi = {
   licensesDetails: (params) => api.get("/api/company/usedLicenses",
     { params, withCredentials: true }
   ),
+
+  portalUsage: (params) => api.get("/api/company/portalUsage", { params }),
 };
 
 export default {

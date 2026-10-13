@@ -295,6 +295,9 @@ const DrawingControlsPanel = memo(function DrawingControlsPanel({
                       />
                       <span className="text-xs text-slate-700">m</span>
                     </div>
+                    <p className="text-xs text-slate-600">
+                      Long routes may need a larger offset. If drawing fails, increase it or select a shorter route.
+                    </p>
 
                     <label className="flex items-center gap-2 cursor-pointer">
                       <input

@@ -6,7 +6,7 @@ import { getMetricConfig, getMetricValueFromLog } from '@/utils/metrics';
 import { createLogSamplingWorkerRuntime } from '@/features/unified-map/processing/logSamplingWorkerRuntime.js';
 import { useDeckLayerRegistry } from '@/components/maps/deckLayerRegistry.jsx';
 import { assertCategorizedLayerEntries, categorizeMapLayer, getMapLayerMetadata, sortMapLayerEntries } from '@/components/maps/mapLayerPolicy.js';
-import { getDrawingHoverTarget, getPolygonDrawingHitData, getPolylineDrawingHitData } from '@/components/maps/drawingShapeInteractions.js';
+import { getDrawingBoundaryHoverTarget, getDrawingHoverTarget, getDrawingPath, getPolygonDrawingHitData, getPolylineDrawingHitData } from '@/components/maps/drawingShapeInteractions.js';
 import { logMapPlot } from '@/utils/mapPlotDebug';
 import { normalizeMapBounds } from '@/features/unified-map/map/viewport.js';
 import { getMapCoordinate } from '@/features/unified-map/map/autoFit.js';
@@ -91,48 +91,6 @@ const getLegendAlpha = (source, activeAlpha, dimmedAlpha = 55) =>
 
 
 const metersToLatDeg = 1 / 111320;
-
-const getDrawingPath = (drawing) => {
-  const geometry = drawing?.geometry;
-  if (!geometry) return [];
-
-  if (geometry.type === 'polyline') {
-    return (geometry.path || []).map((point) => [Number(point.lng), Number(point.lat)]);
-  }
-  if (geometry.type === 'polygon') {
-    const path = (geometry.polygon || []).map((point) => [Number(point.lng), Number(point.lat)]);
-    if (path.length < 3 || String(drawing?.id).startsWith('active-')) return path;
-    const first = path[0];
-    const last = path[path.length - 1];
-    return first[0] === last[0] && first[1] === last[1] ? path : [...path, first];
-  }
-  if (geometry.type === 'rectangle') {
-    const sw = geometry.rectangle?.sw;
-    const ne = geometry.rectangle?.ne;
-    if (!sw || !ne) return [];
-    return [
-      [Number(sw.lng), Number(sw.lat)],
-      [Number(ne.lng), Number(sw.lat)],
-      [Number(ne.lng), Number(ne.lat)],
-      [Number(sw.lng), Number(ne.lat)],
-      [Number(sw.lng), Number(sw.lat)],
-    ];
-  }
-  if (geometry.type === 'circle') {
-    const center = geometry.circle?.center;
-    const radius = Number(geometry.circle?.radius);
-    if (!center || !Number.isFinite(radius) || radius <= 0) return [];
-    const lat = Number(center.lat);
-    const lng = Number(center.lng);
-    const latDelta = radius / 111320;
-    const lngDelta = radius / (111320 * Math.max(0.1, Math.cos((lat * Math.PI) / 180)));
-    return Array.from({ length: 65 }, (_, index) => {
-      const angle = (index / 64) * Math.PI * 2;
-      return [lng + Math.cos(angle) * lngDelta, lat + Math.sin(angle) * latDelta];
-    });
-  }
-  return [];
-};
 
 const getPredictionRenderLimit = (total) => {
   if (total > 300000) return 30000;
@@ -524,6 +482,19 @@ const DeckGLOverlay = ({
 
   const handleDrawingHover = useCallback((info) => {
     onDrawingHover?.(getDrawingHoverTarget(info));
+  }, [onDrawingHover]);
+
+  const handleDrawingBoundaryHover = useCallback((info) => {
+    const drawing = info?.object;
+    if (!drawing || !info?.viewport?.project) {
+      onDrawingHover?.(null);
+      return;
+    }
+    const path = drawing.path.map((coordinate) => {
+      const [x, y] = info.viewport.project(coordinate);
+      return { x, y };
+    });
+    onDrawingHover?.(getDrawingBoundaryHoverTarget(drawing.id, { x: info.x, y: info.y }, [path]));
   }, [onDrawingHover]);
 
   const handleGridHover = useCallback((info) => {
@@ -966,19 +937,20 @@ const DeckGLOverlay = ({
     }
 
     if (drawingPolygonHitData.length > 0) {
-      // The shared drawings category paints above map data; this transparent
-      // hit surface sits below the visible drawing outlines.
-      addLayer('drawings', new PolygonLayer({
+      // Pick only the outline, so moving across the filled area does not show delete.
+      addLayer('drawings', new PathLayer({
         id: 'user-drawing-polygon-hit-layer',
         data: drawingPolygonHitData,
-        getPolygon: (drawing) => drawing.polygon,
-        getFillColor: [0, 0, 0, 0],
-        getLineColor: [0, 0, 0, 0],
-        filled: true,
-        stroked: false,
+        getPath: (drawing) => drawing.path,
+        getColor: [0, 0, 0, 0],
+        getWidth: 20,
+        widthUnits: 'pixels',
+        widthMinPixels: 20,
+        jointRounded: true,
+        capRounded: true,
         opacity: 0,
         pickable: Boolean(pickable && !interactionsDisabled),
-        onHover: handleDrawingHover,
+        onHover: handleDrawingBoundaryHover,
       }), -100);
     }
 
@@ -1054,7 +1026,7 @@ const DeckGLOverlay = ({
       logMapPlot("layer-build effect: setProps threw", detail);
       console.warn("DeckGL layer update failed", detail, e);
     }
-  }, [map, attachedMap, primaryData, neighborData, gridData, imageLogData, metricLabelData, drawingData, drawingPolygonHitData, drawingPolylineHitData, drawingOpacity, nativeOutlineData, predictionRenderData, siteRenderData, registeredGroups, registryVersion, showPrimaryLogs, showNeighbors, showGrid, gridOpacity, handleGridHover, handleDrawingHover, showImageLogs, selectedIndex, radius, radiusMinPixels, radiusMaxPixels, opacity, neighborOpacity, showNumCells, showMetricLabels, getColor, getNeighborColor, handleImageLogClick, handlePrimaryHover, isValidMapInstance, pickable, autoHighlight, mapZoom, interactionsDisabled]);
+  }, [map, attachedMap, primaryData, neighborData, gridData, imageLogData, metricLabelData, drawingData, drawingPolygonHitData, drawingPolylineHitData, drawingOpacity, nativeOutlineData, predictionRenderData, siteRenderData, registeredGroups, registryVersion, showPrimaryLogs, showNeighbors, showGrid, gridOpacity, handleGridHover, handleDrawingHover, handleDrawingBoundaryHover, showImageLogs, selectedIndex, radius, radiusMinPixels, radiusMaxPixels, opacity, neighborOpacity, showNumCells, showMetricLabels, getColor, getNeighborColor, handleImageLogClick, handlePrimaryHover, isValidMapInstance, pickable, autoHighlight, mapZoom, interactionsDisabled]);
 
   useEffect(() => {
     return () => {

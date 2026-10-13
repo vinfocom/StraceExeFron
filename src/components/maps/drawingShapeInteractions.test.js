@@ -1,13 +1,18 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
+  getClosestDrawingBoundaryHoverTarget,
+  getDrawingBoundaryHoverTarget,
   getDrawingHoverTarget,
+  getDrawingPath,
+  getNativeDrawingHoverTarget,
   getPolygonDrawingHitData,
   getPolylineDrawingHitData,
   handleShapeOverlayRightClick,
   isCompletedDeletableDrawing,
   removeDrawingEntryById,
   removeShapeById,
+  setCompletedDrawingInteractions,
 } from "./drawingShapeInteractions.js";
 
 const polygonPath = [[0, 0], [1, 0], [1, 1], [0, 0]];
@@ -39,6 +44,105 @@ test("hover target appears for a supported shape and clears for hover-out or act
   );
   assert.equal(getDrawingHoverTarget({ object: { id: "active-circle", type: "circle" }, x: 1, y: 2 }), null);
   assert.equal(getDrawingHoverTarget(null), null);
+});
+
+test("native shape hover uses map container coordinates", () => {
+  const bounds = { left: 100, top: 50 };
+  assert.deepEqual(
+    getNativeDrawingHoverTarget("rectangle-a", { domEvent: { clientX: 145, clientY: 80 } }, bounds),
+    { id: "rectangle-a", x: 45, y: 30 },
+  );
+  assert.deepEqual(
+    getNativeDrawingHoverTarget("polygon-a", { clientX: 110, clientY: 60 }, bounds),
+    { id: "polygon-a", x: 10, y: 10 },
+  );
+  assert.equal(getNativeDrawingHoverTarget(null, { clientX: 110, clientY: 60 }, bounds), null);
+  assert.equal(getNativeDrawingHoverTarget("circle-a", null, bounds), null);
+});
+
+test("area drawing delete target stays on the outline and ignores the interior", () => {
+  const rectangle = [
+    { x: 10, y: 10 }, { x: 110, y: 10 }, { x: 110, y: 90 },
+    { x: 10, y: 90 }, { x: 10, y: 10 },
+  ];
+  assert.deepEqual(
+    getDrawingBoundaryHoverTarget("rectangle-a", { x: 50, y: 15 }, [rectangle]),
+    { id: "rectangle-a", x: 50, y: 10, boundaryAnchored: true },
+  );
+  assert.equal(getDrawingBoundaryHoverTarget("rectangle-a", { x: 50, y: 50 }, [rectangle]), null);
+  assert.equal(getDrawingBoundaryHoverTarget("rectangle-a", { x: 50, y: 120 }, [rectangle]), null);
+  assert.deepEqual(
+    getDrawingBoundaryHoverTarget("rectangle-a", { x: 6, y: 50 }, [rectangle]),
+    { id: "rectangle-a", x: 10, y: 50, boundaryAnchored: true },
+  );
+});
+
+test("the newer polygon boundary remains targetable inside an older polygon", () => {
+  const outer = [
+    { x: 0, y: 0 }, { x: 100, y: 0 }, { x: 100, y: 100 },
+    { x: 0, y: 100 }, { x: 0, y: 0 },
+  ];
+  const inner = [
+    { x: 20, y: 20 }, { x: 80, y: 20 }, { x: 80, y: 80 },
+    { x: 20, y: 80 }, { x: 20, y: 20 },
+  ];
+  const drawings = [
+    { id: "first-polygon", paths: [outer] },
+    { id: "second-polygon", paths: [inner] },
+  ];
+  const pointer = getNativeDrawingHoverTarget(
+    "first-polygon",
+    { domEvent: { clientX: 50, clientY: 23 } },
+    { left: 0, top: 0 },
+  );
+  assert.deepEqual(
+    getClosestDrawingBoundaryHoverTarget(pointer, drawings),
+    { id: "second-polygon", x: 50, y: 20, boundaryAnchored: true },
+  );
+  assert.equal(getClosestDrawingBoundaryHoverTarget({ x: 50, y: 50 }, drawings), null);
+  assert.equal(
+    getClosestDrawingBoundaryHoverTarget({ x: 50, y: 0 }, [
+      { id: "first-polygon", paths: [outer] },
+      { id: "second-polygon", paths: [outer] },
+    ])?.id,
+    "second-polygon",
+  );
+});
+
+test("polygon, rectangle, and circle drawing paths include a closed boundary", () => {
+  const polygon = getDrawingPath({ id: "polygon-a", geometry: {
+    type: "polygon", polygon: [{ lng: 0, lat: 0 }, { lng: 1, lat: 0 }, { lng: 1, lat: 1 }],
+  } });
+  const rectangle = getDrawingPath({ geometry: {
+    type: "rectangle", rectangle: { sw: { lng: 0, lat: 0 }, ne: { lng: 1, lat: 1 } },
+  } });
+  const circle = getDrawingPath({ geometry: {
+    type: "circle", circle: { center: { lng: 0, lat: 0 }, radius: 100 },
+  } });
+  assert.deepEqual(polygon.at(0), polygon.at(-1));
+  assert.deepEqual(rectangle.at(0), rectangle.at(-1));
+  assert.deepEqual(circle.at(0), circle.at(-1));
+});
+
+test("completed shapes release map input while another drawing is active", () => {
+  const options = [];
+  const vertex = { style: { pointerEvents: "" } };
+  const midpoint = { style: { pointerEvents: "" } };
+  const shapes = [{
+    overlay: { setOptions: (value) => options.push(value) },
+    vertexMarkers: [{ marker: vertex }],
+    midpointMarkers: [{ marker: midpoint }],
+  }];
+
+  setCompletedDrawingInteractions(shapes, true);
+  assert.deepEqual(options[0], { clickable: false, draggable: false, editable: false });
+  assert.equal(vertex.style.pointerEvents, "none");
+  assert.equal(midpoint.style.pointerEvents, "none");
+
+  setCompletedDrawingInteractions(shapes, false);
+  assert.deepEqual(options[1], { clickable: true, draggable: true, editable: false });
+  assert.equal(vertex.style.pointerEvents, "");
+  assert.equal(midpoint.style.pointerEvents, "");
 });
 
 test("deleting by id cleans up only the target and preserves sibling shape listeners and drawings", () => {

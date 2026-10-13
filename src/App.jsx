@@ -53,6 +53,7 @@ const MultiViewPage = lazy(() => import("./pages/MultiViewPage"));
 const SuperAdminCompanies = lazy(() => import("@/pages/SuperAdmin"));
 const CompanyForm = lazy(() => import("./pages/CompanyForm"));  
 const CompanyLicensesPage = lazy(() => import("./pages/CompanyLicenses"));
+const CompanyLicenseFeaturesPage = lazy(() => import("./pages/CompanyLicenseFeatures"));
 const DataDeletionPage = lazy(() => import("./pages/DataDeletion"));
 const BackendL3EventAnalyzerPage = lazy(() => import("./pages/BackendL3EventAnalyzer"));
 const InsightsPage = lazy(() => import("./pages/Insights"));
@@ -204,6 +205,7 @@ function AppShell({ isElectronRuntime }) {
 
             <Route path="/companies" element={<SuperAdminRoute><SuperAdminCompanies /></SuperAdminRoute>} />
             <Route path="/company-licenses" element={<SuperAdminRoute><CompanyLicensesPage /></SuperAdminRoute>} />
+            <Route path="/company-license-features" element={<SuperAdminRoute><CompanyLicenseFeaturesPage /></SuperAdminRoute>} />
 
             <Route path="*" element={<NotFoundPage />} />
           </Routes>

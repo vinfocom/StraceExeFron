@@ -3219,6 +3219,7 @@ const UnifiedMapView = () => {
     inpSummary,
     tptVolume,
     loading: sampleLoading,
+    checkingCache: checkingSampleCache,
     progress: sampleProgress,
     error: sampleError,
     refetch: refetchSample,
@@ -3229,6 +3230,7 @@ const UnifiedMapView = () => {
     EMPTY_POLYGONS,
     2000000,
     projectId,
+    true,
   );
 
   const deferredSampleDataset = useDeferredValue(fetchedSampleDataset);
@@ -4793,11 +4795,11 @@ const UnifiedMapView = () => {
   // genuine first load.
   const hasMountedMapRef = useRef(false);
   const showInitialMapSpinner = shouldShowInitialMapSpinner({
-    isLoading,
-    hasRows: (locations?.length || 0) > 0 || (siteData?.length || 0) > 0,
+    isLoading: isLoading && !(shouldFetchSamples && (checkingSampleCache || fetchedSampleDataset.complete)),
+    hasRows: (locations?.length || 0) > 0 || (fetchedSamples?.length || 0) > 0 || (siteData?.length || 0) > 0,
     hasMounted: hasMountedMapRef.current,
   });
-  if (!showInitialMapSpinner) {
+  if (!showInitialMapSpinner && !(shouldFetchSamples && checkingSampleCache)) {
     hasMountedMapRef.current = true;
   }
 
@@ -8433,6 +8435,7 @@ const UnifiedMapView = () => {
               overlapDrawOrder={ui.overlapDrawOrder}
               drawingShapes={drawingShapesForMap}
               onDeleteDrawing={handleDrawingDeleteRequest}
+              drawingHoverControllerRef={terrainHoverControllerRef}
               siteData={siteData}
               predictionGridData={lteLayerLocations}
               onLoad={handleMapLoad}
