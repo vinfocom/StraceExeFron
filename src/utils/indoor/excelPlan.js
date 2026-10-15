@@ -4,7 +4,7 @@ import { geographicToLocal, isValidLatLng } from './geographicAlignment.js'
 import { INDOOR_LOG_KPIS, normalizeLogColumn, readLogKpi } from './indoorLogKpis.js'
 
 const loadExcelJS = async () => {
-  const module = await import('exceljs')
+  const module = await import('exceljs/dist/exceljs.bare.min.js')
   return module.default || module
 }
 

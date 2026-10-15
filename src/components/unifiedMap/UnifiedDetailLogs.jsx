@@ -218,7 +218,7 @@ const downloadBlob = (blob, filename) => {
 };
 
 const loadExcelJS = async () => {
-  const module = await import("exceljs");
+  const module = await import("exceljs/dist/exceljs.bare.min.js");
   return module.default || module;
 };
 

@@ -37,14 +37,30 @@ export default defineConfig({
   build: {
     outDir: "dist",
     assetsDir: "assets",
+    // ExcelJS ships as one prebuilt browser file, fetched only for workbook operations.
+    chunkSizeWarningLimit: 900,
     rollupOptions: {
       output: {
         manualChunks(id) {
           if (!id.includes("node_modules")) return;
 
-          if (id.includes("exceljs") || id.includes("jszip") || id.includes("file-saver")) {
-            return "vendor-export";
-          }
+          const moduleId = id.replaceAll("\\", "/");
+
+          if (moduleId.includes("/node_modules/exceljs/")) return "vendor-exceljs";
+          if (moduleId.includes("/node_modules/jszip/")) return "vendor-jszip";
+          if (moduleId.includes("/node_modules/file-saver/")) return "vendor-file-saver";
+
+          if (moduleId.includes("/node_modules/three/build/three.core.js")) return "vendor-three-core";
+          if (moduleId.includes("/node_modules/three/")) return "vendor-three";
+          if (moduleId.includes("/node_modules/@react-three/fiber/")) return "vendor-react-three";
+          if (moduleId.includes("/node_modules/@react-three/drei/")) return "vendor-drei";
+          if (moduleId.includes("/node_modules/three-stdlib/")) return "vendor-three-stdlib";
+
+          if (moduleId.includes("/node_modules/@deck.gl/core/")) return "vendor-deck-core";
+          if (moduleId.includes("/node_modules/@deck.gl/layers/")) return "vendor-deck-layers";
+          if (moduleId.includes("/node_modules/@luma.gl/")) return "vendor-luma";
+          if (moduleId.includes("/node_modules/@math.gl/")) return "vendor-math";
+          if (moduleId.includes("/node_modules/@loaders.gl/")) return "vendor-loaders";
 
           if (id.includes("html2canvas") || id.includes("html-to-image")) {
             return "vendor-capture";

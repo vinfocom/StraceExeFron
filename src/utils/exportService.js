@@ -7,7 +7,7 @@ let html2CanvasModulePromise = null;
 
 const loadExcelJS = async () => {
   if (!excelJsModulePromise) {
-    excelJsModulePromise = import("exceljs").then((m) => m.default || m);
+    excelJsModulePromise = import("exceljs/dist/exceljs.bare.min.js").then((m) => m.default || m);
   }
   return excelJsModulePromise;
 };

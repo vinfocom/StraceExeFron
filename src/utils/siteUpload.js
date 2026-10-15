@@ -433,7 +433,7 @@ export const normalizeSiteUploadFile = async (file) => {
     let rows = [];
 
     try {
-      const excelModule = await import("exceljs");
+      const excelModule = await import("exceljs/dist/exceljs.bare.min.js");
       const ExcelJS = excelModule?.default ?? excelModule;
       const workbook = new ExcelJS.Workbook();
       await workbook.xlsx.load(buffer);

@@ -14,7 +14,7 @@ const loadJSZip = async () => {
 let excelJsModulePromise = null;
 const loadExcelJS = async () => {
   if (!excelJsModulePromise) {
-    excelJsModulePromise = import("exceljs").then((mod) => mod.default || mod);
+    excelJsModulePromise = import("exceljs/dist/exceljs.bare.min.js").then((mod) => mod.default || mod);
   }
   return excelJsModulePromise;
 };

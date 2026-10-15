@@ -72,7 +72,7 @@ const getTemplateRooms = (floor) => {
 }
 
 export const createStoryBuildingTemplateWorkbook = async (floorCount = 34) => {
-  const module = await import('exceljs')
+  const module = await import('exceljs/dist/exceljs.bare.min.js')
   const ExcelJS = module.default || module
   const wb = new ExcelJS.Workbook()
   addJsonWorksheet(wb, 'BuildingMeta', [{ building_name: `Network C - ${floorCount} Story Example`, total_floors: floorCount, unit: 'm', wall_thickness: 0.2, ceiling_height: 3.2 }])

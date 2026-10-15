@@ -1,4 +1,3 @@
-import JSZip from 'jszip'
 import { parseCsvRows, parseLogsCsv } from './excelPlan.js'
 import { INDOOR_LOG_KPIS } from './indoorLogKpis.js'
 
@@ -34,6 +33,7 @@ export const parseZipColorSettings = (csv) => {
 }
 
 export const parseIndoorLogZip = async (buffer, selectedFloorId, alignment) => {
+  const { default: JSZip } = await import('jszip')
   const zip = await JSZip.loadAsync(buffer)
   const networkEntry = csvEntry(zip, /^NetworkLog_.*\.csv$/i)
   if (!networkEntry) return { error: 'ZIP has no NetworkLog_*.csv file.' }

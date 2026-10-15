@@ -83,5 +83,6 @@ export function getMapRenderEventType(log = {}) {
 
 export function shouldRenderLogOnMap(log = {}) {
   if (log?.is_generated_log) return true;
+  if (log?.is_wifi === true) return true;
   return Boolean(getMapRenderEventType(log));
 }

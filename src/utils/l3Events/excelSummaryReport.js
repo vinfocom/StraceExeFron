@@ -1,7 +1,7 @@
 import { createSignalingMessageTable, writeExcelSignalingSummary } from "./pdfReport.js";
 
 export async function createExcelSignalingSummaryWorkbook(options) {
-  const module = await import("exceljs");
+  const module = await import("exceljs/dist/exceljs.bare.min.js");
   const ExcelJS = module.default || module;
   const workbook = new ExcelJS.Workbook();
   workbook.creator = "Signal Tracker";

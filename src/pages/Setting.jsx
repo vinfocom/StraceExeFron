@@ -9,7 +9,7 @@ import { settingApi } from '../api/apiEndpoints';
 import { useAuth } from '@/context/AuthContext';
 
 const loadExcelJS = async () => {
-    const module = await import("exceljs");
+    const module = await import("exceljs/dist/exceljs.bare.min.js");
     return module.default || module;
 };
 
