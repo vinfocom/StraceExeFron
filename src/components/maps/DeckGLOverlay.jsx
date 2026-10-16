@@ -6,7 +6,7 @@ import { getMetricConfig, getMetricValueFromLog } from '@/utils/metrics';
 import { createLogSamplingWorkerRuntime } from '@/features/unified-map/processing/logSamplingWorkerRuntime.js';
 import { useDeckLayerRegistry } from '@/components/maps/deckLayerRegistry.jsx';
 import { assertCategorizedLayerEntries, categorizeMapLayer, getMapLayerMetadata, sortMapLayerEntries } from '@/components/maps/mapLayerPolicy.js';
-import { getDrawingBoundaryHoverTarget, getDrawingHoverTarget, getDrawingPath, getPolygonDrawingHitData, getPolylineDrawingHitData } from '@/components/maps/drawingShapeInteractions.js';
+import { getDrawingBoundaryHoverTarget, getDrawingHoverTarget, getDrawingPath, getPolygonDrawingHitData, getPolylineDrawingHitData } from '@/features/unified-map/drawing/drawingShapeInteractions.js';
 import { logMapPlot } from '@/utils/mapPlotDebug';
 import { normalizeMapBounds } from '@/features/unified-map/map/viewport.js';
 import { getMapCoordinate } from '@/features/unified-map/map/autoFit.js';

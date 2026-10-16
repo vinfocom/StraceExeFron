@@ -24,11 +24,17 @@ const FIELD_KEYS = [
 
 const mapRenderEventTypeCache = new WeakMap();
 
+const hasValue = (value) =>
+  value !== null && value !== undefined && String(value).trim() !== "";
+
+// Number(null) and Number("") are 0 (finite), so guard with hasValue first.
+const hasFiniteNumber = (value) => hasValue(value) && Number.isFinite(Number(value));
+
 function collectText(log = {}) {
   const raw = log.raw_event || log.raw || null;
   const values = FIELD_KEYS.flatMap((key) => [log?.[key], raw?.[key]]);
   return values
-    .filter((value) => value !== null && value !== undefined && value !== "")
+    .filter(hasValue)
     .join(" ")
     .toLowerCase();
 }
@@ -56,15 +62,8 @@ function computeMapRenderEventType(log = {}) {
     return "data_activity";
   }
 
-  const hasCellSignal =
-    Number.isFinite(Number(log.rsrp)) ||
-    Number.isFinite(Number(log.rssi)) ||
-    Number.isFinite(Number(log.rsrq)) ||
-    Number.isFinite(Number(log.sinr));
-  const hasCellIdentity =
-    log.pci !== null && log.pci !== undefined && String(log.pci).trim() !== "" ||
-    log.cell_id !== null && log.cell_id !== undefined && String(log.cell_id).trim() !== "" ||
-    log.earfcn !== null && log.earfcn !== undefined && String(log.earfcn).trim() !== "";
+  const hasCellSignal = ["rsrp", "rssi", "rsrq", "sinr"].some((key) => hasFiniteNumber(log[key]));
+  const hasCellIdentity = ["pci", "cell_id", "earfcn"].some((key) => hasValue(log[key]));
 
   if (/\b(cell measurement|cell[_ -]?meas|serving cell|neighbor cell|neighbour cell|nr_rrc_serv_cell|lte_rrc_mib|sib type 1)\b/i.test(text) || (hasCellSignal && hasCellIdentity)) {
     return "cell_measurement";

@@ -75,7 +75,7 @@ import { useProjectPolygons } from "@/hooks/useProjectPolygons";
 import { useProjectBuildingClutterTiles } from "@/hooks/useProjectBuildingClutterTiles";
 import { useProjectSavedSourceGeometries } from "@/hooks/useProjectSavedSourceGeometries";
 import { useAreaPolygons } from "@/hooks/useAreaPolygons";
-import { useUnifiedGridViewDataPair } from "@/hooks/useUnifiedGridViewData";
+import { useUnifiedGridViewDataPair } from "@/features/unified-map/processing/useUnifiedGridViewData.js";
 
 // Utils
 import { getTechnologyFamily } from "@/utils/technologySelection";

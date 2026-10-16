@@ -13,7 +13,7 @@ import {
   removeDrawingEntryById,
   removeShapeById,
   setCompletedDrawingInteractions,
-} from "./drawingShapeInteractions.js";
+} from "../../features/unified-map/drawing/drawingShapeInteractions.js";
 
 const polygonPath = [[0, 0], [1, 0], [1, 1], [0, 0]];
 

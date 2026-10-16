@@ -8,7 +8,7 @@ import DeckGLOverlay from "@/components/maps/DeckGLOverlay";
 import { DeckLayerRegistryProvider } from "@/components/maps/deckLayerRegistry.jsx";
 import PrimaryLogTooltip from "./PrimaryLogTooltip";
 import { Zap, Layers, Radio, Square, Circle, Trash2 } from "lucide-react";
-import { getClosestDrawingBoundaryHoverTarget, getDrawingPath, getNativeDrawingHoverTarget, isCompletedDeletableDrawing } from "@/components/maps/drawingShapeInteractions.js";
+import { getClosestDrawingBoundaryHoverTarget, getDrawingPath, getNativeDrawingHoverTarget, isCompletedDeletableDrawing } from "@/features/unified-map/drawing/drawingShapeInteractions.js";
 // import TechHandoverMarkers from "../unifiedMap/TechHandoverMarkers";
 import useColorForLog from "@/hooks/useColorForLog";
 import { getMetricValueFromLog, getMacDetailValueFromLog, getPciColor, getEarfcnColor } from "@/utils/metrics";

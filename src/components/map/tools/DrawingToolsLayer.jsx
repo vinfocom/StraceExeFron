@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useCallback, useState, memo } from "react";
 import { toast } from "react-toastify";
 import { createAdvancedMarker, getAdvancedMarkerLatLngEvent, isSatelliteMapType, orientAdvancedMarkerLabel, refreshAdvancedMarkerLabelTheme, setAdvancedMarkerLabel } from "@/lib/advancedMarkers";
-import { handleShapeOverlayRightClick, removeDrawingEntryById, removeShapeById, setCompletedDrawingInteractions } from "@/components/maps/drawingShapeInteractions.js";
+import { handleShapeOverlayRightClick, removeDrawingEntryById, removeShapeById, setCompletedDrawingInteractions } from "@/features/unified-map/drawing/drawingShapeInteractions.js";
 import {
   getElevationSampleCoordinates,
   isTerrainHoverTargetCurrent,
