@@ -3049,7 +3049,7 @@ const MapWithMultipleCircles = ({
           <div className="font-semibold text-gray-800 mb-2">Grid Cell</div>
           <div className="space-y-1">
             <div className="flex justify-between text-blue-600"><span>Logs:</span><span className="font-bold">{hoveredCell.count}</span></div>
-            {hoveredCell.aggregatedValue !== null && (<div className="flex justify-between text-gray-600"><span>{gridAggregationMethod.charAt(0).toUpperCase() + gridAggregationMethod.slice(1)} {selectedMetric.toUpperCase()}:</span><span className="font-medium">{hoveredCell.aggregatedValue.toFixed(1)}</span></div>)}
+            {hoveredCell.aggregatedValue !== null && (<div className="flex justify-between text-gray-600"><span>{gridAggregationMethod.charAt(0).toUpperCase() + gridAggregationMethod.slice(1)} {selectedMetric.toUpperCase()}:</span><span className="font-medium">{typeof hoveredCell.aggregatedValue === 'number' ? hoveredCell.aggregatedValue.toFixed(1) : String(hoveredCell.aggregatedValue)}</span></div>)}
             {hoveredCell.bestByColor && (
               <div className="flex justify-between text-gray-700 gap-2">
                 <span>Best {hoveredCell.bestByColor.label}:</span>

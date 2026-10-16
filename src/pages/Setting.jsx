@@ -85,10 +85,21 @@ const generateId = () => {
     return `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 };
 
-const generateRangeString = (min, max) => {
+// "below" = smallest row (value < max), "above" = biggest row (value > min), both strict.
+// The open side is stored as a far-out sentinel so existing min/max matchers keep working.
+const OPEN_MIN = -9999;
+const OPEN_MAX = 9999;
+
+const normalizeCondition = (condition) => (
+    condition === 'below' || condition === 'above' ? condition : 'range'
+);
+
+const generateRangeString = (min, max, condition = 'range') => {
     if (min === undefined || max === undefined || min === null || max === null) {
         return '';
     }
+    if (condition === 'below') return `< ${max}`;
+    if (condition === 'above') return `> ${min}`;
     return `${min} to ${max}`;
 };
 
@@ -101,21 +112,24 @@ const parseNumber = (value) => {
 };
 
 const normalizeRow = (row) => {
-    const min = parseNumber(row.min);
-    const max = parseNumber(row.max);
-    
+    const condition = normalizeCondition(row.condition);
+    const min = condition === 'below' ? OPEN_MIN : parseNumber(row.min);
+    const max = condition === 'above' ? OPEN_MAX : parseNumber(row.max);
+
     return {
         id: row.id || generateId(),
+        condition,
         min,
         max,
         color: row.color || '#00ff00',
         label: row.label || '',
-        range: generateRangeString(min, max),
+        range: generateRangeString(min, max, condition),
     };
 };
 
 const createNewRow = () => ({
     id: generateId(),
+    condition: 'range',
     min: 0,
     max: 0,
     color: '#00ff00',
@@ -199,6 +213,7 @@ const ThresholdRow = memo(({ row, index, onChange, onDelete }) => {
     const [maxStr, setMaxStr] = useState(String(row.max ?? 0));
     const [color, setColor] = useState(row.color || '#00ff00');
     const [label, setLabel] = useState(row.label || '');
+    const condition = normalizeCondition(row.condition);
 
     useEffect(() => {
         setMinStr(String(row.min ?? 0));
@@ -208,20 +223,32 @@ const ThresholdRow = memo(({ row, index, onChange, onDelete }) => {
     }, [row.id, row.min, row.max, row.color, row.label]);
 
     const syncToParent = useCallback((updates = {}) => {
+        const currentCondition = updates.condition !== undefined ? updates.condition : condition;
         const currentMin = updates.min !== undefined ? updates.min : parseNumber(minStr);
         const currentMax = updates.max !== undefined ? updates.max : parseNumber(maxStr);
         const currentColor = updates.color !== undefined ? updates.color : color;
         const currentLabel = updates.label !== undefined ? updates.label : label;
 
-        onChange(index, { 
+        onChange(index, {
             id: row.id,
-            min: currentMin, 
-            max: currentMax, 
-            color: currentColor, 
+            condition: currentCondition,
+            min: currentMin,
+            max: currentMax,
+            color: currentColor,
             label: currentLabel,
-            range: generateRangeString(currentMin, currentMax) 
+            range: generateRangeString(currentMin, currentMax, currentCondition)
         });
-    }, [index, row.id, minStr, maxStr, color, label, onChange]);
+    }, [index, row.id, condition, minStr, maxStr, color, label, onChange]);
+
+    // Switching to below/above reuses the number already typed as the single limit.
+    const handleConditionChange = useCallback((next) => {
+        const limit = next === 'below' ? parseNumber(maxStr) : parseNumber(minStr);
+        syncToParent(
+            next === 'below' ? { condition: next, max: limit }
+                : next === 'above' ? { condition: next, min: limit }
+                : { condition: next }
+        );
+    }, [minStr, maxStr, syncToParent]);
 
     const handleMinBlur = useCallback(() => {
         const num = parseNumber(minStr);
@@ -241,9 +268,23 @@ const ThresholdRow = memo(({ row, index, onChange, onDelete }) => {
     return (
         <div className="grid grid-cols-12 gap-2 items-center p-3.5 bg-slate-900/70 border border-slate-600/70 rounded-xl hover:border-blue-500/40 hover:bg-slate-900 transition-all">
             <div className="col-span-2">
+                <label className="text-xs text-slate-300 block mb-1">Condition</label>
+                <select
+                    className="h-9 w-full text-white bg-slate-950 border border-slate-600 rounded-lg px-2 text-sm"
+                    value={condition}
+                    onChange={e => handleConditionChange(e.target.value)}
+                >
+                    <option value="below">Below (&lt;)</option>
+                    <option value="range">Range</option>
+                    <option value="above">Above (&gt;)</option>
+                </select>
+            </div>
+
+            <div className="col-span-2">
                 <label className="text-xs text-slate-300 block mb-1">Min</label>
                 <Input
-                    className="text-white bg-slate-950 border-slate-600 focus:border-blue-500 rounded-lg"
+                    disabled={condition === 'below'}
+                    className="text-white bg-slate-950 border-slate-600 focus:border-blue-500 rounded-lg disabled:opacity-40"
                     type="number"
                     step="any"
                     value={minStr}
@@ -264,7 +305,8 @@ const ThresholdRow = memo(({ row, index, onChange, onDelete }) => {
             <div className="col-span-2">
                 <label className="text-xs text-slate-300 block mb-1">Max</label>
                 <Input
-                    className="text-white bg-slate-950 border-slate-600 focus:border-blue-500 rounded-lg"
+                    disabled={condition === 'above'}
+                    className="text-white bg-slate-950 border-slate-600 focus:border-blue-500 rounded-lg disabled:opacity-40"
                     type="number"
                     step="any"
                     value={maxStr}
@@ -282,7 +324,7 @@ const ThresholdRow = memo(({ row, index, onChange, onDelete }) => {
                 />
             </div>
 
-            <div className="col-span-3">
+            <div className="col-span-2">
                 <label className="text-xs text-slate-300 block mb-1">Color</label>
                 <div className="flex items-center gap-2">
                     <Input
@@ -308,14 +350,14 @@ const ThresholdRow = memo(({ row, index, onChange, onDelete }) => {
                 </div>
             </div>
 
-            <div className="col-span-4 flex items-end gap-2">
+            <div className="col-span-3 flex items-end gap-2">
                 <div className="flex-1">
                     <label className="text-xs text-slate-300 block mb-1">Range</label>
                     <div 
                         className="text-xs px-2 py-2 rounded-lg text-center font-semibold truncate border"
                         style={{ backgroundColor: color + '40', color: color }}
                     >
-                        {generateRangeString(currentMin, currentMax) || 'N/A'}
+                        {generateRangeString(currentMin, currentMax, condition) || 'N/A'}
                     </div>
                 </div>
                 <Button
@@ -1087,13 +1129,19 @@ const parseThresholdData = (data) => {
 
 const buildSavePayload = (thresholds, userId) => {
     const normalizeArray = (arr) => {
-        return (arr || []).map(row => ({
-            min: parseNumber(row.min),
-            max: parseNumber(row.max),
-            color: row.color || '#00ff00',
-            label: row.label || '',
-            range: generateRangeString(parseNumber(row.min), parseNumber(row.max)),
-        }));
+        return (arr || []).map(row => {
+            const condition = normalizeCondition(row.condition);
+            const min = condition === 'below' ? OPEN_MIN : parseNumber(row.min);
+            const max = condition === 'above' ? OPEN_MAX : parseNumber(row.max);
+            return {
+                condition,
+                min,
+                max,
+                color: row.color || '#00ff00',
+                label: row.label || '',
+                range: generateRangeString(min, max, condition),
+            };
+        });
     };
 
     const normalizeBucketedRanges = (key, sourceBuckets) => {
