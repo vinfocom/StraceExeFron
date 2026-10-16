@@ -21,11 +21,13 @@ export function SettingsDialogProvider({ children }) {
   const [dialogState, setDialogState] = useState({
     open: false,
     onSaveSuccess: null,
+    initialParam: null,
   });
 
   const openSettings = useCallback((options = {}) => {
     setDialogState({
       open: true,
+      initialParam: typeof options?.initialParam === "string" ? options.initialParam : null,
       onSaveSuccess:
         typeof options?.onSaveSuccess === "function"
           ? options.onSaveSuccess
@@ -87,7 +89,10 @@ export function SettingsDialogProvider({ children }) {
               </div>
             }
           >
-            <SettingsPage onSaveSuccess={handleSaveSuccess} />
+            <SettingsPage
+              onSaveSuccess={handleSaveSuccess}
+              initialParam={dialogState.initialParam}
+            />
           </Suspense>
         </DialogContent>
       </Dialog>

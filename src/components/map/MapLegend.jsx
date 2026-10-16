@@ -814,7 +814,7 @@ const MetricThresholdLegend = ({
 
       valid++;
       const idx = normalizedThresholds.findIndex((t) =>
-        matchesMetricRange(val, t.minNum, t.maxNum, t.isLast),
+        matchesMetricRange(val, t.minNum, t.maxNum, false),
       );
 
       if (idx !== -1) {
@@ -850,7 +850,7 @@ const MetricThresholdLegend = ({
         id,
         min: parseFloat(threshold.min),
         max: parseFloat(threshold.max),
-        includeMax: Boolean(threshold.isLast),
+        includeMax: false,
         metric: selectedMetric,
       },
       onFilterChange,
@@ -1002,7 +1002,7 @@ const MetricThresholdLegend = ({
             id,
             min: parseFloat(t.min),
             max: parseFloat(t.max),
-            includeMax: Boolean(t.isLast),
+            includeMax: false,
             metric: selectedMetric,
           });
           const isDimmed = getLegendFilterItems(activeFilter).length > 0 && !isActive;
@@ -1394,8 +1394,13 @@ export default function MapLegend({
 
   const openSettings = (e) => {
     e.stopPropagation();
+    // Open Settings on the KPI the legend is currently showing (none for categorical legends).
+    const legendMetric = colorBy === "mac_detail"
+      ? resolveMacDetailMetricKey(selectedMetric)
+      : colorBy ? null : selectedMetric;
+    const initialParam = legendMetric ? getMetricConfig(legendMetric)?.thresholdKey : null;
     if (openSettingsDialog) {
-      openSettingsDialog();
+      openSettingsDialog({ initialParam });
       return;
     }
     if (typeof window !== "undefined") {

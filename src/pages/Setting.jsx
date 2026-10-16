@@ -1627,12 +1627,15 @@ const buildThresholdsFromWorkbook = async (arrayBuffer, currentThresholds) => {
     return nextThresholds;
 };
 
-const SettingsPage = ({ onSaveSuccess }) => {
+const SettingsPage = ({ onSaveSuccess, initialParam = null }) => {
     const { user } = useAuth();
     const [thresholds, setThresholds] = useState(null);
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
-    const [activeParam, setActiveParam] = useState(null);
+    // Opened from a legend: jump straight to that KPI's form when it is a known setting.
+    const [activeParam, setActiveParam] = useState(
+        initialParam && (initialParam in PARAMETERS || initialParam in SPECIAL_FIELDS) ? initialParam : null
+    );
     const fileInputRef = useRef(null);
 
     const allParameters = { ...PARAMETERS, ...SPECIAL_FIELDS };

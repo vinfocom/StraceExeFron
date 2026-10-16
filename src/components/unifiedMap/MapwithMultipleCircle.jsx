@@ -777,6 +777,8 @@ const generateGridCellsOptimized = (
   if (!polygonData?.length || !locations?.length) return [];
   const categoryGridMetric = String(metric || "").trim().toLowerCase();
   const isMacDetailGridMetric = String(colorBy || "").toLowerCase() === "mac_detail";
+  // Numeric L3 fields (e.g. *_mbps, bler, mcs) are colored by threshold range, like the legend.
+  const macDetailBucketKey = isMacDetailGridMetric ? resolveMacDetailMetricKey(metric) : null;
   const isBestOperatorMetric = categoryGridMetric === "best_operator";
   const isBestTechnologyMetric = categoryGridMetric === "best_technology";
   const isBestPciMetric = categoryGridMetric === "best_pci";
@@ -973,6 +975,13 @@ const generateGridCellsOptimized = (
           const cellId = resolveCellId(log);
           if (isMacDetailGridMetric) {
             const rawL3Value = getMacDetailValueFromLog(log, metric);
+            if (macDetailBucketKey) {
+              const numericL3Value = Number.parseFloat(rawL3Value);
+              if (Number.isFinite(numericL3Value) && validCount < valuesBuffer.length) {
+                valuesBuffer[validCount++] = numericL3Value;
+              }
+              continue;
+            }
             const category = String(rawL3Value ?? "").trim();
             if (category) macDetailCountBuckets.set(category, (macDetailCountBuckets.get(category) || 0) + 1);
             continue;
@@ -1032,7 +1041,7 @@ const generateGridCellsOptimized = (
           }
         }
         
-        if (isMacDetailGridMetric && macDetailCountBuckets.size > 0) {
+        if (isMacDetailGridMetric && !macDetailBucketKey && macDetailCountBuckets.size > 0) {
           const ranked = Array.from(macDetailCountBuckets.entries()).sort((a, b) => b[1] - a[1]);
           aggregatedValue = ranked[0][0];
           bestByColor = { label: metric, name: ranked[0][0], count: ranked[0][1] };
@@ -1082,7 +1091,7 @@ const generateGridCellsOptimized = (
           aggregatedValue = aggregateFn(Array.from(values));
           
           if (getMetricColor && aggregatedValue !== null) {
-            fillColor = getMetricColor(aggregatedValue, metric);
+            fillColor = getMetricColor(aggregatedValue, macDetailBucketKey || metric);
           }
 
           const rankedOperators = Array.from(operatorMetricBuckets.entries())
@@ -1368,10 +1377,14 @@ const PrimaryLogInfoWindow = React.memo(({ log, resolveColor, selectedMetric, co
       : colorBy === "mac_detail"
         ? getMacDetailValueFromLog(log, selectedMetric)
         : getMetricValueFromLog(log, selectedMetric);
+  const popupMacBucketKey = colorBy === "mac_detail" ? resolveMacDetailMetricKey(selectedMetric) : null;
+  const popupNumericValue = Number.parseFloat(metricValue);
   const metricColor =
     selectedMetricKey === "cell_id"
       ? resolveColor(selectedCellId || "Unknown", "cell_id")
-      : resolveColor(metricValue, colorBy === "mac_detail" ? "mac_detail" : selectedMetric);
+      : popupMacBucketKey
+        ? (Number.isFinite(popupNumericValue) ? resolveColor(popupNumericValue, popupMacBucketKey) : "#808080")
+        : resolveColor(metricValue, colorBy === "mac_detail" ? "mac_detail" : selectedMetric);
   const isWifiLog =
     log?.is_wifi === true ||
     ["wifi", "wi-fi"].includes(
@@ -2336,11 +2349,14 @@ const MapWithMultipleCircles = ({
       ? String(selectedMetric || "")
       : String(selectedMetric || "rsrp").trim().toLowerCase();
     const categoryKey = String(colorBy || "").trim().toLowerCase();
+    // Numeric L3 fields are colored by threshold range, so their cells carry a number, not a category.
+    const isNumericMacDetailGrid =
+      categoryKey === "mac_detail" && Boolean(resolveMacDetailMetricKey(metricKey));
     // Keep every range available in the legend while filtering map visibility.
     const rows = gridCells
       .filter((cell) => cell.count > 0)
       .filter((cell) => {
-        if (!categoryKey || categoryKey === "metric") {
+        if (!categoryKey || categoryKey === "metric" || isNumericMacDetailGrid) {
           // Plain numeric metric coloring: a cell with no valid value for
           // the selected metric is intentionally grey on the map and must
           // not create a legend entry for a value it doesn't have.
@@ -2426,7 +2442,7 @@ const MapWithMultipleCircles = ({
             row.best_pci = pci;
           }
         } else if (categoryKey === "mac_detail") {
-          row.extra_fields = { [metricKey]: categoryName ?? metricValue };
+          row.extra_fields = { [metricKey]: isNumericMacDetailGrid ? metricValue : (categoryName ?? metricValue) };
         }
 
         return row;
@@ -2455,9 +2471,12 @@ const MapWithMultipleCircles = ({
         if (colorBy === 'mac_detail') {
           const rawValue = getMacDetailValueFromLog(loc, selectedMetric);
           const bucketKey = resolveMacDetailMetricKey(selectedMetric);
-          return bucketKey
-            ? resolveColor(Number(rawValue), bucketKey)
-            : resolveColor(String(rawValue ?? "").trim(), "mac_detail");
+          if (bucketKey) {
+            // No value must stay grey; Number(null) would be 0 and land in the lowest range.
+            const numericValue = Number.parseFloat(rawValue);
+            return Number.isFinite(numericValue) ? resolveColor(numericValue, bucketKey) : "#808080";
+          }
+          return resolveColor(String(rawValue ?? "").trim(), "mac_detail");
         }
         const value = getLegendCategoryKeyFromLog(loc, colorBy, selectedMetric);
         return resolveColor(value, colorBy);
@@ -2483,9 +2502,11 @@ const MapWithMultipleCircles = ({
         if (colorBy === 'mac_detail') {
           const rawValue = getMacDetailValueFromLog(neighbor, selectedMetric);
           const bucketKey = resolveMacDetailMetricKey(selectedMetric);
-          return bucketKey
-            ? resolveColor(Number(rawValue), bucketKey)
-            : resolveColor(String(rawValue ?? "").trim(), "mac_detail");
+          if (bucketKey) {
+            const numericValue = Number.parseFloat(rawValue);
+            return Number.isFinite(numericValue) ? resolveColor(numericValue, bucketKey) : "#808080";
+          }
+          return resolveColor(String(rawValue ?? "").trim(), "mac_detail");
         }
         const value = getLegendCategoryKeyFromLog(neighbor, colorBy, selectedMetric);
         return resolveColor(value, colorBy);
