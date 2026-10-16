@@ -39,6 +39,9 @@ const FALLBACK_COLORS = [
   "#6366F1",
 ];
 
+// Operators shown initially when no operator filter is selected
+const DEFAULT_OPERATORS = ["Airtel", "Jio", "Vi", "BSNL"];
+
 const NEGATIVE_VALUE_METRICS = ["rsrp", "rsrq"];
 
 const isValidName = (name) => {
@@ -255,6 +258,12 @@ const OperatorNetworkChart = ({ chartFilters, onChartFiltersChange }) => {
       filtered = filtered.filter((item) =>
         chartFilters.operators.includes(item.displayName),
       );
+    } else {
+      // No filter chosen: initially show only the main operators
+      const defaults = filtered.filter((item) =>
+        DEFAULT_OPERATORS.includes(item.displayName),
+      );
+      if (defaults.length > 0) filtered = defaults;
     }
 
     // Apply network/technology filters from chartFilters
@@ -586,7 +595,9 @@ const OperatorNetworkChart = ({ chartFilters, onChartFiltersChange }) => {
       headerActions={
         <div className="flex items-center gap-2 text-xs text-gray-600">
           <span className="font-medium">
-            {filteredData?.length || 0} operators
+            Showing: {filteredData?.length || 0} of{" "}
+            {Math.max(availableOperators.length, filteredData?.length || 0)}{" "}
+            operators
           </span>
           <span>•</span>
           <span className="font-medium">

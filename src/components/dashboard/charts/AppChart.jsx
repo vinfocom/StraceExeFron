@@ -11,6 +11,7 @@ import {
 } from "recharts";
 import ChartCard from "../ChartCard";
 import StableChartContainer from "../StableChartContainer";
+import ItemPicker from "../ItemPicker";
 import { useAppData } from "@/hooks/useDashboardData.js";
 
 const METRIC_CONFIG = [
@@ -124,6 +125,7 @@ function AppChart() {
   ]);
   const [topN, setTopN] = useState(15);
   const [sortBy, setSortBy] = useState('sampleCount');
+  const [selectedApps, setSelectedApps] = useState([]);
 
   // ============================================
   // DATA VALIDATION
@@ -157,10 +159,21 @@ function AppChart() {
       return 0;
     });
     
-    const result = sorted.slice(0, topN);
-    
-    return result;
-  }, [data, topN, sortBy]);
+    if (selectedApps.length > 0) {
+      return sorted.filter((d) => selectedApps.includes(d.appName));
+    }
+
+    return sorted.slice(0, topN);
+  }, [data, topN, sortBy, selectedApps]);
+
+  const appOptions = useMemo(
+    () =>
+      [...data]
+        .sort((a, b) => (b.sampleCount || 0) - (a.sampleCount || 0))
+        .map((d) => d.appName)
+        .filter(Boolean),
+    [data]
+  );
 
   // ============================================
   // GET ACTIVE METRICS CONFIG
@@ -237,6 +250,14 @@ function AppChart() {
         </div>
       </div>
 
+      <ItemPicker
+        label="Choose Apps to Show"
+        options={appOptions}
+        selected={selectedApps}
+        onChange={setSelectedApps}
+        emptyHint="None selected – showing top apps"
+      />
+
       {/* Top N */}
       <div className="space-y-2">
         <label className="block text-sm font-medium text-gray-700">
@@ -301,6 +322,7 @@ function AppChart() {
             setSelectedMetrics(["avgDlTptMbps", "avgUlTptMbps", "avgMos"]);
             setTopN(15);
             setSortBy('sampleCount');
+            setSelectedApps([]);
           }}
           className="flex-1 px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 border border-gray-300 rounded-md hover:bg-gray-200 transition-colors"
         >
@@ -332,6 +354,11 @@ function AppChart() {
         title: "App Chart Settings",
         render: settingsRender,
       }}
+      headerActions={
+        <span className="text-xs text-gray-600">
+          Showing: {displayData.length} of {data.length} apps
+        </span>
+      }
     >
       {isLoading ? (
         // ✅ Enhanced Loading State with Progress

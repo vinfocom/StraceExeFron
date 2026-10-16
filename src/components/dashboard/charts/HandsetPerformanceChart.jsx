@@ -12,6 +12,7 @@ import {
 import { Smartphone, TrendingUp, TrendingDown } from 'lucide-react';
 import ChartCard from '../ChartCard';
 import StableChartContainer from '../StableChartContainer';
+import ItemPicker from '../ItemPicker';
 import { TOOLTIP_STYLE } from '@/components/constants/dashboardConstants';
 import { useHandsetPerformance } from '@/hooks/useDashboardData.js';
 import { getRSRPPointColor } from '@/utils/chartUtils';
@@ -184,6 +185,7 @@ const HandsetPerformanceChart = () => {
   const [topN, setTopN] = useState(10);
   const [minSamples, setMinSamples] = useState(0);
   const [sortBy, setSortBy] = useState('avg');
+  const [selectedMakes, setSelectedMakes] = useState([]);
 
   const data = useMemo(() => {
     if (!rawData || !Array.isArray(rawData)) {
@@ -197,10 +199,12 @@ const HandsetPerformanceChart = () => {
       return [];
     }
     
+    const hasSelection = selectedMakes.length > 0;
     let filtered = data.filter(item => {
-      const hasMinSamples = (item.Samples || 0) >= minSamples;
+      const hasMinSamples = hasSelection || (item.Samples || 0) >= minSamples;
       const hasValidAvg = item.Avg !== undefined && item.Avg !== null && !isNaN(item.Avg);
-      return hasMinSamples && hasValidAvg;
+      const isSelected = !hasSelection || selectedMakes.includes(item.Make);
+      return hasMinSamples && hasValidAvg && isSelected;
     });
     
     if (sortBy === 'avg') {
@@ -209,14 +213,24 @@ const HandsetPerformanceChart = () => {
       filtered.sort((a, b) => (b.Samples || 0) - (a.Samples || 0));
     }
     
-    const result = filtered.slice(0, topN).map((item, index) => ({
+    const limited = hasSelection ? filtered : filtered.slice(0, topN);
+    const result = limited.map((item, index) => ({
       ...item,
       BaselineValue: CHART_Y_MIN,
       index,
     }));
-    
+
     return result;
-  }, [data, topN, minSamples, sortBy]);
+  }, [data, topN, minSamples, sortBy, selectedMakes]);
+
+  const makeOptions = useMemo(
+    () =>
+      [...data]
+        .sort((a, b) => (b.Samples || 0) - (a.Samples || 0))
+        .map(d => d.Make)
+        .filter(Boolean),
+    [data]
+  );
 
   const xAxisInterval = useMemo(() => {
     if (chartData.length <= 8) return 0;
@@ -247,6 +261,7 @@ const HandsetPerformanceChart = () => {
     setTopN(10);
     setMinSamples(0);
     setSortBy('avg');
+    setSelectedMakes([]);
   }, []);
 
   const handleRefresh = useCallback(() => {
@@ -287,6 +302,14 @@ const HandsetPerformanceChart = () => {
           </div>
         </div>
       )}
+
+      <ItemPicker
+        label="Choose Handsets to Show"
+        options={makeOptions}
+        selected={selectedMakes}
+        onChange={setSelectedMakes}
+        emptyHint="None selected – showing top handsets"
+      />
 
       <div className="space-y-2">
         <label className="block text-sm font-medium text-gray-700">
@@ -373,7 +396,7 @@ const HandsetPerformanceChart = () => {
         </button>
       </div>
     </div>
-  ), [stats, topN, minSamples, sortBy, data.length, chartData.length, isLoading, handleTopNChange, handleMinSamplesChange, handleSortByChange, handleReset, handleRefresh]);
+  ), [stats, topN, minSamples, sortBy, makeOptions, selectedMakes, data.length, chartData.length, isLoading, handleTopNChange, handleMinSamplesChange, handleSortByChange, handleReset, handleRefresh]);
 
   return (
     <ChartCard
@@ -389,6 +412,11 @@ const HandsetPerformanceChart = () => {
         title: 'Handset Performance Settings',
         render: settingsRender,
       }}
+      headerActions={
+        <span className="text-xs text-gray-600">
+          Showing: {chartData.length} of {data.length} handsets
+        </span>
+      }
     >
       {chartData.length === 0 ? (
         <div className="flex flex-col items-center justify-center h-full py-12">

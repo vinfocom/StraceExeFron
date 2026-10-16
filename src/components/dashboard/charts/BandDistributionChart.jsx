@@ -13,6 +13,7 @@ import {
 import { Check, ChevronDown, X } from 'lucide-react';
 import ChartCard from '../ChartCard';
 import StableChartContainer from '../StableChartContainer';
+import ItemPicker from '../ItemPicker';
 import { CHART_COLORS } from '@/components/constants/dashboardConstants';
 import { useBandDistributionRaw } from '@/hooks/useDashboardData.js';
 import { canonicalOperatorName } from '@/utils/dashboardUtils';
@@ -175,6 +176,7 @@ const BandDistributionChart = ({ filters: globalFilters }) => {
   const [selectedNetworks, setSelectedNetworks] = useState([]);
   const [topN, setTopN] = useState(15);
   const [sortBy, setSortBy] = useState('count');
+  const [selectedBands, setSelectedBands] = useState([]);
 
   const data = useMemo(() => {
     if (!Array.isArray(rawData) || rawData.length === 0) return [];
@@ -196,9 +198,9 @@ const BandDistributionChart = ({ filters: globalFilters }) => {
     return { operators: ops, networks: nets };
   }, [data]);
 
-  const chartData = useMemo(() => {
-    if (!data || data.length === 0) return [];
-    
+  const bandResult = useMemo(() => {
+    if (!data || data.length === 0) return { items: [], total: 0, all: [] };
+
     let filtered = data.filter(item => {
       const operatorMatch = selectedOperators.length === 0 || 
                            selectedOperators.includes(item.operatorName);
@@ -229,8 +231,18 @@ const BandDistributionChart = ({ filters: globalFilters }) => {
       });
     }
     
-    return result.slice(0, topN);
-  }, [data, selectedOperators, selectedNetworks, topN, sortBy]);
+    const all = result.map((r) => r.name);
+    if (selectedBands.length > 0) {
+      return {
+        items: result.filter((r) => selectedBands.includes(r.name)),
+        total: result.length,
+        all,
+      };
+    }
+    return { items: result.slice(0, topN), total: result.length, all };
+  }, [data, selectedOperators, selectedNetworks, topN, sortBy, selectedBands]);
+
+  const chartData = bandResult.items;
 
   const stats = useMemo(() => {
     const totalSamples = chartData.reduce((sum, item) => sum + item.value, 0);
@@ -245,6 +257,7 @@ const BandDistributionChart = ({ filters: globalFilters }) => {
     setSelectedNetworks([]);
     setTopN(15);
     setSortBy('count');
+    setSelectedBands([]);
   };
 
   const settingsRender = () => (
@@ -265,6 +278,14 @@ const BandDistributionChart = ({ filters: globalFilters }) => {
         onChange={setSelectedNetworks}
         placeholder="Select networks..."
         allLabel="All Networks"
+      />
+
+      <ItemPicker
+        label="Choose Bands to Show"
+        options={bandResult.all}
+        selected={selectedBands}
+        onChange={setSelectedBands}
+        emptyHint="None selected – showing top bands"
       />
 
       <div className="space-y-2">
@@ -388,6 +409,11 @@ const BandDistributionChart = ({ filters: globalFilters }) => {
         title: 'Band Distribution Settings',
         render: settingsRender,
       }}
+      headerActions={
+        <span className="text-xs text-gray-600">
+          Showing: {chartData.length} of {bandResult.total} bands
+        </span>
+      }
     >
       <ActiveFiltersDisplay />
       
