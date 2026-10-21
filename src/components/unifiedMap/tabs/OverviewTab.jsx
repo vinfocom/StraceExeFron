@@ -38,7 +38,7 @@ import {
   getLogColor,
 } from "@/utils/colorUtils";
 import { downloadKmlForLogs } from "@/utils/kmlExport";
-import { getTechnologyMetricOptions, UNIFIED_MAP_METRIC_OPTIONS } from "@/utils/technologyMetricLabels";
+import { getTechnologyMetricOptions, normalizeMetricTechnology, UNIFIED_MAP_METRIC_OPTIONS } from "@/utils/technologyMetricLabels";
 
 const PROVIDER_VOLUME_CACHE = new Map();
 const PROVIDER_VOLUME_PENDING = new Map();
@@ -570,8 +570,14 @@ export const OverviewTab = ({
       return;
     }
 
-    if (pptTechnologies.length === 0) {
-      toast.error("No technology is selected or available for this report.");
+    const networkTechnologies = pptTechnologies
+      .filter((technology) => technology !== "L3")
+      .sort((a, b) => {
+        const order = ["5G", "4G", "3G", "2G", "Unknown"];
+        return order.indexOf(normalizeMetricTechnology(a)) - order.indexOf(normalizeMetricTechnology(b));
+      });
+    if (networkTechnologies.length === 0) {
+      toast.error("Select a network technology (5G, 4G, 3G or 2G), including for L3 reports.");
       return;
     }
 
@@ -580,7 +586,14 @@ export const OverviewTab = ({
       : pptSelectedKpis.filter((key) => availablePptKpis.some((kpi) => kpi.key === key));
     const selectedMetricKpis = Array.from(new Set(availablePptKpis
       .filter((kpi) => selectedKpiKeys.includes(kpi.key))
-      .map((kpi) => kpi.metricKey)));
+      .map((kpi) => {
+        // Diagnostic fields retain their exact extra_json names.
+        if (kpi.group === "L3") return kpi.metricKey;
+        const family = normalizeMetricTechnology(kpi.group);
+        return family === "Unknown"
+          ? kpi.metricKey
+          : `${family.toLowerCase()}_${kpi.metricKey}`;
+      })));
     if (selectedMetricKpis.length === 0) {
       toast.error("Select at least one available KPI for the report.");
       return;
@@ -600,14 +613,14 @@ export const OverviewTab = ({
       user_id: Number.isFinite(numericUserId) ? numericUserId : 0,
       locked_bands: lockedBand,
       template: pptTemplate,
-      technology: pptTechnologies,
+      technology: networkTechnologies,
       map_view_type: pptMapViewType,
       ...(pptMapViewType === "grid" ? { aggregation: pptAggregation } : {}),
       ...(selectedSessionIds.length > 0 ? { session_ids: selectedSessionIds } : {}),
       selected_kpis: selectedMetricKpis,
-      poor_dl_threshold: Number(pptProblemAreaThresholds?.dl_tpt || pptProblemAreaThresholds?.dl) || 5,
+      poor_dl_threshold: Number(pptProblemAreaThresholds?.dl_tpt ?? pptProblemAreaThresholds?.dl ?? 5),
       problem_area_thresholds: pptProblemAreaThresholds,
-      problem_area_technologies: pptTechnologies.filter((technology) => technology !== "L3"),
+      problem_area_technologies: networkTechnologies,
       problem_area_kpis: pptProblemAreaKpis,
     };
 
