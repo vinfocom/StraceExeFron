@@ -19,7 +19,7 @@ import { StatCard } from "../common/StatCard";
 import { PCI_COLOR_PALETTE } from "@/components/map/layers/MultiColorCirclesLayer";
 import { useSearchParams } from "react-router-dom";
 import { toast } from "react-toastify";
-import { mapViewApi, pptReportApi } from "@/api/apiEndpoints";
+import { mapViewApi, pptReportApi, settingApi } from "@/api/apiEndpoints";
 import ReportProgressToast from "../ReportProgressToast";
 import { useAuth } from "@/hooks/useAuth";
 import { resolveUserRegion } from "@/utils/authSession";
@@ -195,6 +195,97 @@ const PROVIDER_VOLUME_OPTIONAL_COLUMNS = [
   },
 ];
 
+export const PROBLEM_AREA_9_KPIS = [
+  { key: "rsrp", label: "RSRP", op: "<", unit: "dBm", defaultCutoff: -105, placeholder: "-105" },
+  { key: "rsrq", label: "RSRQ", op: "<", unit: "dB", defaultCutoff: -14, placeholder: "-14" },
+  { key: "sinr", label: "SINR", op: "<", unit: "dB", defaultCutoff: 0, placeholder: "0" },
+  { key: "mos", label: "MOS", op: "<", unit: "", defaultCutoff: 3.0, placeholder: "3.0" },
+  { key: "dl_tpt", label: "DL THP", op: "<", unit: "Mbps", defaultCutoff: 5, placeholder: "5", aliases: ["dl", "poor_dl"] },
+  { key: "ul_tpt", label: "UL THP", op: "<", unit: "Mbps", defaultCutoff: 1, placeholder: "1", aliases: ["ul"] },
+  { key: "latency", label: "LATENCY", op: ">", unit: "ms", defaultCutoff: 100, placeholder: "100", aliases: ["lat"] },
+  { key: "jitter", label: "JITTER", op: ">", unit: "ms", defaultCutoff: 25, placeholder: "25", aliases: ["jit"] },
+  { key: "packet_loss", label: "PACKET LOSS", op: ">", unit: "%", defaultCutoff: 2, placeholder: "2", aliases: ["loss"] },
+];
+
+const extractPoorCutoffFromThresholds = (thresholdData) => {
+  const defaults = {
+    rsrp: -105,
+    rsrq: -14,
+    sinr: 0,
+    mos: 3.0,
+    dl_tpt: 5,
+    ul_tpt: 1,
+    latency: 100,
+    jitter: 25,
+    packet_loss: 2,
+  };
+
+  if (!thresholdData) return defaults;
+
+  // 1. Check PPT Report Acceptance first (explicit user setting)
+  let pptAcceptance = thresholdData.ppt_report_acceptance || thresholdData.ppt_report_acceptance_json;
+  if (typeof pptAcceptance === "string") {
+    try { pptAcceptance = JSON.parse(pptAcceptance); } catch { pptAcceptance = null; }
+  }
+  if (pptAcceptance && typeof pptAcceptance === "object") {
+    const src = pptAcceptance.default || pptAcceptance;
+    const res = { ...defaults };
+    let foundAny = false;
+    PROBLEM_AREA_9_KPIS.forEach((kpi) => {
+      const v = src[kpi.key] ?? src[kpi.key.replace("_tpt", "")];
+      if (v !== undefined && v !== null && v !== "" && !Number.isNaN(Number(v))) {
+        res[kpi.key] = Number(v);
+        foundAny = true;
+      }
+    });
+    if (foundAny) return res;
+  }
+
+  // 2. Fall back to parsing the general threshold bins for the red/poor row
+  const parseItem = (val, isLowerBetter = false, fallbackVal = 0) => {
+    if (val === null || val === undefined || val === "") return fallbackVal;
+    if (typeof val === "number") return val;
+    let parsed = val;
+    if (typeof val === "string") {
+      try {
+        parsed = JSON.parse(val);
+      } catch {
+        const num = parseFloat(val);
+        return Number.isNaN(num) ? fallbackVal : num;
+      }
+    }
+    if (parsed && typeof parsed === "object") {
+      let arr = Array.isArray(parsed) ? parsed : (parsed.default || parsed["4g"] || parsed["5g"] || []);
+      if (Array.isArray(arr) && arr.length > 0) {
+        const red = arr.find(
+          (x) =>
+            String(x?.color || "").toUpperCase().includes("FF0000") ||
+            String(x?.color || "").toUpperCase().includes("RED") ||
+            String(x?.label || "").toLowerCase().includes("poor") ||
+            String(x?.label || "").toLowerCase().includes("bad")
+        ) || (isLowerBetter ? arr[arr.length - 1] : arr[0]);
+        if (red) {
+          if (!isLowerBetter && red.max !== undefined && red.max !== null) return Number(red.max);
+          if (isLowerBetter && red.min !== undefined && red.min !== null) return Number(red.min);
+        }
+      }
+    }
+    return fallbackVal;
+  };
+
+  return {
+    rsrp: parseItem(thresholdData.rsrp_json || thresholdData.rsrp, false, defaults.rsrp),
+    rsrq: parseItem(thresholdData.rsrq_json || thresholdData.rsrq, false, defaults.rsrq),
+    sinr: parseItem(thresholdData.sinr_json || thresholdData.sinr, false, defaults.sinr),
+    mos: parseItem(thresholdData.mos_json || thresholdData.mos, false, defaults.mos),
+    dl_tpt: parseItem(thresholdData.dl_thpt_json || thresholdData.dl_tpt || thresholdData.dl, false, defaults.dl_tpt),
+    ul_tpt: parseItem(thresholdData.ul_thpt_json || thresholdData.ul_tpt || thresholdData.ul, false, defaults.ul_tpt),
+    latency: parseItem(thresholdData.latency, true, defaults.latency),
+    jitter: parseItem(thresholdData.jitter, true, defaults.jitter),
+    packet_loss: parseItem(thresholdData.packet_loss, true, defaults.packet_loss),
+  };
+};
+
 export const OverviewTab = ({
   totalLocations,
   filteredCount,
@@ -234,6 +325,185 @@ export const OverviewTab = ({
   const [pptTechnologies, setPptTechnologies] = useState([]);
   const [pptMapViewType, setPptMapViewType] = useState("grid");
   const [pptAggregation, setPptAggregation] = useState("median");
+  // Taiwan-template dynamic KPI selection: null means "all" (default full report)
+  const [pptSelectedKpis, setPptSelectedKpis] = useState(null);
+  const [pptKpiCategoryFilter, setPptKpiCategoryFilter] = useState("all");
+  const [pptKpiSearchText, setPptKpiSearchText] = useState("");
+  const [pptPoorDlThreshold, setPptPoorDlThreshold] = useState(5);
+  const [pptProblemAreaTechs, setPptProblemAreaTechs] = useState(["5G SA", "5G NSA", "4G", "4G LTE Anchor"]);
+  const [pptProblemAreaKpis, setPptProblemAreaKpis] = useState([
+    "rsrp", "rsrq", "sinr", "mos", "dl_tpt", "ul_tpt", "latency", "jitter", "packet_loss"
+  ]);
+  const [pptProblemAreaThresholds, setPptProblemAreaThresholds] = useState({
+    rsrp: -105, rsrq: -14, sinr: 0, mos: 3.0, dl_tpt: 5, ul_tpt: 1, latency: 100, jitter: 25, packet_loss: 2
+  });
+
+  // Load custom poor thresholds from threshold settings (prioritizing PPT Report Acceptance)
+  useEffect(() => {
+    let active = true;
+    const fetchThresholds = async () => {
+      try {
+        const resp = await settingApi.getThresholdSettings();
+        const data = resp?.data?.Data || resp?.Data || resp?.data;
+        if (data && active) {
+          const cutoffs = extractPoorCutoffFromThresholds(data);
+          setPptProblemAreaThresholds(cutoffs);
+          if (cutoffs.dl_tpt !== undefined) {
+            setPptPoorDlThreshold(cutoffs.dl_tpt);
+          }
+        }
+      } catch (e) {
+        console.warn("Could not load threshold settings for PPT Problem Areas:", e);
+      }
+    };
+    fetchThresholds();
+    return () => { active = false; };
+  }, []);
+
+  // ─── Dynamic Technology-Wise KPI Options ───────────────────────────
+  const PPT_KPI_OPTIONS = useMemo(() => [
+    // ─── 5G KPIs ───────────────────────────────────────
+    { key: "5g_rsrp",     label: "5G RSRP (dBm)",                group: "5G Coverage",    tech: "5G", category: "5g", isCore: true },
+    { key: "5g_rsrq",     label: "5G RSRQ (dB)",                 group: "5G Quality",     tech: "5G", category: "5g", isCore: true },
+    { key: "5g_sinr",     label: "5G SINR (dB)",                 group: "5G Quality",     tech: "5G", category: "5g", isCore: true },
+    { key: "5g_dl_tpt",   label: "5G DL Throughput (Mbps)",      group: "5G Throughput",  tech: "5G", category: "5g", isCore: true },
+    { key: "5g_ul_tpt",   label: "5G UL Throughput (Mbps)",      group: "5G Throughput",  tech: "5G", category: "5g", isCore: true },
+    { key: "5g_pci",      label: "5G PCI Distribution",          group: "5G Cell & PCI",  tech: "5G", category: "5g" },
+    { key: "5g_earfcn",   label: "5G NR-ARFCN",                  group: "5G Cell & PCI",  tech: "5G", category: "5g" },
+    { key: "5g_cell_id",  label: "5G Cell ID",                   group: "5G Cell & PCI",  tech: "5G", category: "5g" },
+    { key: "5g_ca",       label: "5G CA Configuration",          group: "5G Carrier Agg", tech: "5G", category: "5g" },
+    { key: "5g_mac_dl",   label: "5G MAC DL Throughput",         group: "5G Throughput",  tech: "5G", category: "5g" },
+    { key: "handover",    label: "5G Handover / ENDC",           group: "5G Mobility",    tech: "5G", category: "5g" },
+    { key: "5g_mac_bler", label: "5G MAC BLER (%)",              group: "5G L3/MAC",      tech: "5G", category: "5g" },
+    { key: "5g_mac_mcs",  label: "5G MAC MCS / Modulation",      group: "5G L3/MAC",      tech: "5G", category: "5g" },
+
+    // ─── 4G KPIs ───────────────────────────────────────
+    { key: "4g_rsrp",       label: "4G RSRP (dBm)",              group: "4G Coverage",    tech: "4G", category: "4g", isCore: true },
+    { key: "4g_rsrq",       label: "4G RSRQ (dB)",               group: "4G Quality",     tech: "4G", category: "4g", isCore: true },
+    { key: "4g_sinr",       label: "4G SINR (dB)",               group: "4G Quality",     tech: "4G", category: "4g", isCore: true },
+    { key: "4g_dl_tpt",     label: "4G DL Throughput (Mbps)",    group: "4G Throughput",  tech: "4G", category: "4g", isCore: true },
+    { key: "4g_ul_tpt",     label: "4G UL Throughput (Mbps)",    group: "4G Throughput",  tech: "4G", category: "4g", isCore: true },
+    { key: "4g_pci",        label: "4G PCI Distribution",        group: "4G Cell & PCI",  tech: "4G", category: "4g" },
+    { key: "4g_earfcn",     label: "4G EARFCN",                  group: "4G Cell & PCI",  tech: "4G", category: "4g" },
+    { key: "4g_cell_id",    label: "4G Cell ID",                 group: "4G Cell & PCI",  tech: "4G", category: "4g" },
+    { key: "4g_ca",         label: "4G CA Configuration",        group: "4G Carrier Agg", tech: "4G", category: "4g" },
+    { key: "4g_mac_dl",     label: "4G MAC DL Throughput",       group: "4G Throughput",  tech: "4G", category: "4g" },
+    { key: "4g_rsrp_l700",  label: "4G RSRP L700/L900 (dBm)",    group: "4G Band Cov",    tech: "4G", category: "4g" },
+    { key: "4g_rsrp_l1800", label: "4G RSRP L1800 (dBm)",        group: "4G Band Cov",    tech: "4G", category: "4g" },
+    { key: "4g_rsrp_l2100", label: "4G RSRP L2100 (dBm)",        group: "4G Band Cov",    tech: "4G", category: "4g" },
+    { key: "4g_rsrp_l2600", label: "4G RSRP L2600 (dBm)",        group: "4G Band Cov",    tech: "4G", category: "4g" },
+    { key: "4g_mac_bler",   label: "4G LTE BLER (%)",            group: "4G L3/MAC",      tech: "4G", category: "4g" },
+    { key: "4g_mac_mcs",    label: "4G LTE MCS",                 group: "4G L3/MAC",      tech: "4G", category: "4g" },
+
+    // ─── 3G KPIs ───────────────────────────────────────
+    { key: "3g_rsrp",     label: "3G RSCP / RSRP (dBm)",         group: "3G Coverage",    tech: "3G", category: "3g", isCore: true },
+    { key: "3g_rsrq",     label: "3G Ec/No / RSRQ (dB)",         group: "3G Quality",     tech: "3G", category: "3g", isCore: true },
+    { key: "3g_sinr",     label: "3G SINR (dB)",                 group: "3G Quality",     tech: "3G", category: "3g", isCore: true },
+    { key: "3g_dl_tpt",   label: "3G DL Throughput (Mbps)",      group: "3G Throughput",  tech: "3G", category: "3g", isCore: true },
+    { key: "3g_ul_tpt",   label: "3G UL Throughput (Mbps)",      group: "3G Throughput",  tech: "3G", category: "3g", isCore: true },
+    { key: "3g_pci",      label: "3G PSC / PCI",                 group: "3G Cell & PSC",  tech: "3G", category: "3g" },
+    { key: "3g_earfcn",   label: "3G UARFCN",                    group: "3G Cell & PSC",  tech: "3G", category: "3g" },
+    { key: "3g_cell_id",  label: "3G Cell ID",                   group: "3G Cell & PSC",  tech: "3G", category: "3g" },
+
+    // ─── 2G KPIs ───────────────────────────────────────
+    { key: "2g_rsrp",     label: "2G RxLev / RSRP (dBm)",        group: "2G Coverage",    tech: "2G", category: "2g", isCore: true },
+    { key: "2g_rxqual",   label: "2G RxQual / Quality",          group: "2G Quality",     tech: "2G", category: "2g", isCore: true },
+    { key: "2g_dl_tpt",   label: "2G DL Throughput (Mbps)",      group: "2G Throughput",  tech: "2G", category: "2g", isCore: true },
+    { key: "2g_ul_tpt",   label: "2G UL Throughput (Mbps)",      group: "2G Throughput",  tech: "2G", category: "2g", isCore: true },
+    { key: "2g_pci",      label: "2G BSIC / PCI",                group: "2G Cell & BSIC", tech: "2G", category: "2g" },
+    { key: "2g_earfcn",   label: "2G BCCH / ARFCN",              group: "2G Cell & BSIC", tech: "2G", category: "2g" },
+    { key: "2g_cell_id",  label: "2G Cell ID",                   group: "2G Cell & BSIC", tech: "2G", category: "2g" },
+
+    // ─── Network & Performance Filters ─────────────────
+    { key: "technology",         label: "Technology Mode Route",         group: "Network Overview", category: "network", isCore: true },
+    { key: "ci_db",              label: "C/I (Carrier-to-Interference)", group: "Signal & Quality", category: "network" },
+    { key: "mos",                label: "MOS (Mean Opinion Score)",       group: "Voice / Quality",  category: "network", isCore: true },
+    { key: "jitter",             label: "Jitter (ms)",                    group: "Performance",      category: "network" },
+    { key: "latency",            label: "Latency / Ping (ms)",            group: "Performance",      category: "network" },
+    { key: "packet_loss",        label: "Packet Loss (%)",                group: "Performance",      category: "network" },
+    { key: "num_cells",          label: "Pilot Pollution (Num Cells)",   group: "Network & Cell",   category: "network" },
+    { key: "level",              label: "Ping Pong / Level",              group: "Network & Cell",   category: "network" },
+    { key: "dominance",          label: "Dominance Analysis",             group: "Network & Cell",   category: "network" },
+    { key: "coverage_violation", label: "Coverage Violation",             group: "Network & Cell",   category: "network" },
+    { key: "tac",                label: "TAC / LAC",                      group: "Network & Cell",   category: "network" },
+    { key: "app_dl",             label: "App DL Throughput (Overall)",    group: "Throughput",       category: "network" },
+    { key: "poor_dl",            label: `Poor DL (< ${Number(pptProblemAreaThresholds?.dl_tpt || pptProblemAreaThresholds?.dl || pptPoorDlThreshold) || 5} Mbps)`, group: "Problem Areas", category: "network" },
+
+    // ─── L3 / MAC KPIs ─────────────────────────────────
+    { key: "mac_ul",             label: "MAC UL Throughput",              group: "L3 / MAC",         category: "network" },
+    { key: "mac_dl_delivered",   label: "MAC DL Delivered",               group: "L3 / MAC",         category: "network" },
+    { key: "mac_ul_delivered",   label: "MAC UL Delivered",               group: "L3 / MAC",         category: "network" },
+    { key: "mac_bler",           label: "MAC BLER (%)",                   group: "L3 / MAC",         category: "network" },
+    { key: "mac_bler_init",      label: "MAC BLER Init (%)",              group: "L3 / MAC",         category: "network" },
+    { key: "mac_mcs",            label: "MAC MCS / Modulation Code",      group: "L3 / MAC",         category: "network" },
+    { key: "mac_retx",           label: "MAC Retransmission (%)",         group: "L3 / MAC",         category: "network" },
+    { key: "mac_rb",             label: "MAC Resource Blocks (RB)",       group: "L3 / MAC",         category: "network" },
+    { key: "mac_grants",         label: "MAC Grants / Sec",               group: "L3 / MAC",         category: "network" },
+    { key: "mac_tx_power",       label: "MAC Tx Power (dBm)",             group: "L3 / MAC",         category: "network" },
+    { key: "mac_modulation_pct",  label: "MAC Modulation %",               group: "L3 / MAC",         category: "network" },
+  ], [pptPoorDlThreshold, pptProblemAreaThresholds]);
+
+  const filteredPptKpis = useMemo(() => {
+    return PPT_KPI_OPTIONS.filter((kpi) => {
+      if (pptKpiCategoryFilter !== "all") {
+        if (kpi.category !== pptKpiCategoryFilter) {
+          return false;
+        }
+      } else {
+        if (kpi.tech && !pptTechnologies.includes(kpi.tech)) {
+          return false;
+        }
+      }
+      if (pptKpiSearchText.trim()) {
+        const query = pptKpiSearchText.trim().toLowerCase();
+        return (
+          kpi.label.toLowerCase().includes(query) ||
+          kpi.group.toLowerCase().includes(query) ||
+          kpi.key.toLowerCase().includes(query)
+        );
+      }
+      return true;
+    });
+  }, [PPT_KPI_OPTIONS, pptKpiCategoryFilter, pptTechnologies, pptKpiSearchText]);
+
+  const togglePptKpi = useCallback((key) => {
+    setPptSelectedKpis((current) => {
+      const base = current === null
+        ? PPT_KPI_OPTIONS.filter((o) => (!o.tech || pptTechnologies.includes(o.tech)) && o.isCore).map((o) => o.key)
+        : current;
+      return base.includes(key) ? base.filter((k) => k !== key) : [...base, key];
+    });
+  }, [PPT_KPI_OPTIONS, pptTechnologies]);
+
+  const isPptKpiSelected = useCallback((key) => {
+    if (pptSelectedKpis === null) {
+      const item = PPT_KPI_OPTIONS.find((o) => o.key === key);
+      if (!item) return false;
+      if (!item.tech) return item.isCore ?? false;
+      return pptTechnologies.includes(item.tech) && (item.isCore ?? false);
+    }
+    return pptSelectedKpis.includes(key);
+  }, [pptSelectedKpis, PPT_KPI_OPTIONS, pptTechnologies]);
+
+  const selectAllKpis = useCallback(() => {
+    const targetKeys = filteredPptKpis.map((o) => o.key);
+    setPptSelectedKpis((current) => {
+      const base = current === null
+        ? PPT_KPI_OPTIONS.filter((o) => !o.tech || pptTechnologies.includes(o.tech)).map((o) => o.key)
+        : current;
+      return Array.from(new Set([...base, ...targetKeys]));
+    });
+  }, [filteredPptKpis, PPT_KPI_OPTIONS, pptTechnologies]);
+
+  const selectCoreKpis = useCallback(() => {
+    const coreKeys = PPT_KPI_OPTIONS
+      .filter((o) => o.isCore && (!o.tech || pptTechnologies.includes(o.tech)))
+      .map((o) => o.key);
+    setPptSelectedKpis(coreKeys);
+  }, [PPT_KPI_OPTIONS, pptTechnologies]);
+
+  const deselectAllKpis = useCallback(() => setPptSelectedKpis([]), []);
+
   const { user } = useAuth();
   const isTaiwanUser = useMemo(
     () => String(user?.country_code ?? "").trim().toUpperCase() === "TW",
@@ -290,22 +560,43 @@ export const OverviewTab = ({
     }
   }, [lockedBand, pptBandOptions]);
 
-  // Share the PDF picker's exact network values with the PPT report service.
-  const pptTechnologyOptions = reportTechnologies;
+  // Derive available technologies from reportTechnologies or locations, defaulting to ["5G", "4G"]
+  const pptTechnologyOptions = useMemo(() => {
+    if (Array.isArray(reportTechnologies) && reportTechnologies.length > 0) {
+      return reportTechnologies;
+    }
+    const found = new Set();
+    if (Array.isArray(plottedExportLocations)) {
+      plottedExportLocations.forEach((loc) => {
+        const t = String(loc?.technology || loc?.tech || "").toUpperCase();
+        if (t.includes("5G") || t.includes("NR")) found.add("5G");
+        if (t.includes("4G") || t.includes("LTE")) found.add("4G");
+        if (t.includes("3G") || t.includes("WCDMA") || t.includes("UMTS")) found.add("3G");
+        if (t.includes("2G") || t.includes("GSM")) found.add("2G");
+      });
+    }
+    if (found.size > 0) {
+      return ["5G", "4G", "3G", "2G"].filter((t) => found.has(t));
+    }
+    return ["5G", "4G"];
+  }, [reportTechnologies, plottedExportLocations]);
 
   useEffect(() => {
     setPptTechnologies((current) => {
+      if (current.length === 0) return pptTechnologyOptions;
       const next = current.filter((technology) => pptTechnologyOptions.includes(technology));
-      return next.length === current.length ? current : next;
+      return next.length > 0 ? next : pptTechnologyOptions;
     });
   }, [pptTechnologyOptions]);
 
   const togglePptTechnology = useCallback((technology) => {
-    setPptTechnologies((current) =>
-      current.includes(technology)
+    setPptTechnologies((current) => {
+      const next = current.includes(technology)
         ? current.filter((item) => item !== technology)
-        : [...current, technology],
-    );
+        : [...current, technology];
+      return next;
+    });
+    setPptKpiCategoryFilter(technology.toLowerCase());
   }, []);
 
   useEffect(() => {
@@ -389,10 +680,15 @@ export const OverviewTab = ({
       user_id: Number.isFinite(numericUserId) ? numericUserId : 0,
       locked_bands: lockedBand,
       template: pptTemplate,
-      technology: pptTechnologies,
+      technology: pptTechnologies.length > 0 ? pptTechnologies : ["5G", "4G"],
       map_view_type: pptMapViewType,
       ...(pptMapViewType === "grid" ? { aggregation: pptAggregation } : {}),
       ...(selectedSessionIds.length > 0 ? { session_ids: selectedSessionIds } : {}),
+      ...(pptSelectedKpis !== null ? { selected_kpis: pptSelectedKpis } : {}),
+      poor_dl_threshold: Number(pptProblemAreaThresholds?.dl_tpt || pptProblemAreaThresholds?.dl || pptPoorDlThreshold) || 5,
+      problem_area_thresholds: pptProblemAreaThresholds,
+      problem_area_technologies: pptProblemAreaTechs,
+      problem_area_kpis: pptProblemAreaKpis,
     };
 
     setIsPptBandDialogOpen(false);
@@ -518,12 +814,16 @@ export const OverviewTab = ({
   const handlePptButtonClick = useCallback(() => {
     if (isGeneratingPpt) return;
     setLockedBand("all");
-    setPptTemplate("stracer");
-    setPptTechnologies(pptTechnologyOptions);
+    setPptTemplate(isTaiwanUser ? "taiwan" : "stracer");
+    const defaultTechs = pptTechnologyOptions.length > 0 ? pptTechnologyOptions : ["5G", "4G"];
+    setPptTechnologies(defaultTechs);
+    setPptSelectedKpis(null);
+    setPptKpiCategoryFilter(defaultTechs.includes("5G") ? "5g" : (defaultTechs[0]?.toLowerCase() || "all"));
+    setPptKpiSearchText("");
     setPptMapViewType("grid");
     setPptAggregation("median");
     setIsPptBandDialogOpen(true);
-  }, [isGeneratingPpt, pptTechnologyOptions]);
+  }, [isGeneratingPpt, isTaiwanUser, pptTechnologyOptions]);
 
   const isUnknownOrEmpty = useCallback((value) => {
     if (!value) return true;
@@ -915,7 +1215,7 @@ export const OverviewTab = ({
         <DialogContent
           title="Configure PPT report"
           style={{
-            width: "min(28rem, calc(100vw - 2rem))",
+            width: "min(34rem, calc(100vw - 2rem))",
             background: "#0f172a",
             color: "#e2e8f0",
             border: "1px solid #334155",
@@ -948,6 +1248,53 @@ export const OverviewTab = ({
             </div>
           </div>
 
+          {/* Technology Selection */}
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <span className="text-sm font-medium text-slate-200">Technologies</span>
+              <div className="flex gap-2 text-xs">
+                <button
+                  type="button"
+                  onClick={() => setPptTechnologies([...pptTechnologyOptions])}
+                  className="text-xs text-purple-400 hover:text-purple-300 underline"
+                >
+                  Select All
+                </button>
+                <span className="text-slate-600">|</span>
+                <button
+                  type="button"
+                  onClick={() => setPptTechnologies([])}
+                  className="text-xs text-slate-400 hover:text-slate-300 underline"
+                >
+                  Clear
+                </button>
+              </div>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {pptTechnologyOptions.map((technology) => {
+                const isSelected = pptTechnologies.includes(technology);
+                return (
+                  <button
+                    key={technology}
+                    type="button"
+                    onClick={() => togglePptTechnology(technology)}
+                    className={`rounded-md border px-3 py-1.5 text-xs font-semibold transition ${
+                      isSelected
+                        ? "border-purple-500 bg-purple-600 text-white shadow-sm"
+                        : "border-slate-700 bg-slate-800 text-slate-300 hover:bg-slate-700"
+                    }`}
+                  >
+                    {technology}
+                  </button>
+                );
+              })}
+            </div>
+            {pptTechnologies.length === 0 && (
+              <p className="text-[11px] text-amber-400">Select at least one technology to include in the report.</p>
+            )}
+          </div>
+
+          {/* Locked Band (if Taiwan template) */}
           {pptTemplate === "taiwan" && (
             <div className="space-y-2">
               <label htmlFor="ppt-locked-bands" className="text-sm font-medium text-slate-200">
@@ -973,31 +1320,128 @@ export const OverviewTab = ({
             </div>
           )}
 
-          {pptTemplate === "stracer" && (
-            <fieldset className="space-y-2">
-              <legend className="text-sm font-medium text-slate-200">Per Technology</legend>
-              <p className="text-xs text-slate-400">Select the technologies to include in the PPT report.</p>
-              {pptTechnologyOptions.length === 0 && (
-                <p className="text-xs text-slate-400">No technologies are available for the current map data.</p>
-              )}
-              <div className="grid grid-cols-2 gap-2">
-                {pptTechnologyOptions.map((technology) => (
-                  <label
-                    key={technology}
-                    className="flex cursor-pointer items-center gap-2 rounded-md border border-slate-700 bg-slate-800/60 px-3 py-2 text-sm text-slate-200"
-                  >
-                    <input
-                      type="checkbox"
-                      checked={pptTechnologies.includes(technology)}
-                      onChange={() => togglePptTechnology(technology)}
-                      className="h-4 w-4 accent-purple-500"
-                    />
-                    {technology}
-                  </label>
-                ))}
+          {/* Technology-Wise KPI Options */}
+          <fieldset className="space-y-2.5">
+            <div className="flex flex-wrap items-center justify-between gap-1.5">
+              <legend className="text-sm font-semibold text-slate-100">
+                Report KPIs ({filteredPptKpis.length})
+              </legend>
+              <div className="flex flex-wrap items-center gap-1.5 text-xs">
+                <button
+                  type="button"
+                  onClick={selectAllKpis}
+                  className="rounded bg-purple-900/40 px-2 py-0.5 text-[11px] font-medium text-purple-300 hover:bg-purple-800/50 transition border border-purple-700/40"
+                >
+                  Select All
+                </button>
+                <button
+                  type="button"
+                  onClick={selectCoreKpis}
+                  className="rounded bg-slate-800 px-2 py-0.5 text-[11px] font-medium text-slate-300 hover:bg-slate-700 transition border border-slate-700"
+                >
+                  Core KPIs
+                </button>
+                <button
+                  type="button"
+                  onClick={deselectAllKpis}
+                  className="rounded bg-slate-800/80 px-2 py-0.5 text-[11px] font-medium text-rose-400 hover:bg-rose-950/40 transition border border-rose-900/30"
+                >
+                  Clear
+                </button>
               </div>
-            </fieldset>
-          )}
+            </div>
+
+            {/* Category / Technology Filter Tabs & Search */}
+            <div className="space-y-2">
+              <div className="flex flex-wrap gap-1 rounded-md border border-slate-700/60 bg-slate-900/60 p-1">
+                {[
+                  { id: "all", label: "All" },
+                  { id: "5g", label: "5G KPIs" },
+                  { id: "4g", label: "4G KPIs" },
+                  { id: "3g", label: "3G KPIs" },
+                  { id: "2g", label: "2G KPIs" },
+                  { id: "network", label: "Network & L3" },
+                ].map((tab) => {
+                  const isActive = pptKpiCategoryFilter === tab.id;
+                  return (
+                    <button
+                      key={tab.id}
+                      type="button"
+                      onClick={() => setPptKpiCategoryFilter(tab.id)}
+                      className={`flex-1 rounded px-2 py-1 text-center text-xs font-medium transition ${
+                        isActive
+                          ? "bg-purple-600 text-white shadow-sm"
+                          : "text-slate-400 hover:bg-slate-800 hover:text-slate-200"
+                      }`}
+                    >
+                      {tab.label}
+                    </button>
+                  );
+                })}
+              </div>
+
+              <input
+                type="text"
+                value={pptKpiSearchText}
+                onChange={(e) => setPptKpiSearchText(e.target.value)}
+                placeholder="Search KPI (e.g. RSRP, RSRQ, SINR, Throughput, PCI)..."
+                className="h-8 w-full rounded border border-slate-700 bg-slate-800/90 px-2.5 text-xs text-slate-200 placeholder-slate-500 outline-none focus:border-purple-400 focus:ring-1 focus:ring-purple-400"
+              />
+            </div>
+
+            {/* KPI Checklist */}
+            <div className="max-h-56 overflow-y-auto space-y-1 pr-1 rounded-md border border-slate-700/60 bg-slate-900/40 p-2">
+              {filteredPptKpis.length === 0 ? (
+                <div className="py-4 text-center text-xs text-slate-500">
+                  No parameters matching "{pptKpiSearchText}"
+                </div>
+              ) : (
+                filteredPptKpis.map((kpi) => {
+                  const isChecked = isPptKpiSelected(kpi.key);
+                  return (
+                    <label
+                      key={kpi.key}
+                      className={`flex cursor-pointer items-center justify-between gap-2 rounded px-2.5 py-1.5 text-xs transition ${
+                        isChecked
+                          ? "bg-purple-950/50 text-purple-100 border border-purple-800/50 shadow-sm"
+                          : "text-slate-400 hover:bg-slate-800/60 hover:text-slate-200"
+                      }`}
+                    >
+                      <span className="flex items-center gap-2">
+                        <input
+                          type="checkbox"
+                          checked={isChecked}
+                          onChange={() => togglePptKpi(kpi.key)}
+                          className="h-3.5 w-3.5 rounded accent-purple-500"
+                        />
+                        <span className="font-medium">{kpi.label}</span>
+                      </span>
+                      <span className="text-[10px] font-semibold tracking-wider text-slate-400 px-1.5 py-0.5 rounded bg-slate-800/90 border border-slate-700/50">
+                        {kpi.group}
+                      </span>
+                    </label>
+                  );
+                })
+              )}
+            </div>
+
+            <div className="flex items-center justify-between text-[11px] text-slate-400">
+              <span>
+                {pptSelectedKpis === null
+                  ? "Standard core parameters selected for active technologies"
+                  : `${pptSelectedKpis.length} parameters selected`}
+              </span>
+              {pptSelectedKpis !== null && (
+                <button
+                  type="button"
+                  onClick={() => setPptSelectedKpis(null)}
+                  className="text-purple-400 hover:text-purple-300 underline"
+                >
+                  Reset to Default
+                </button>
+              )}
+            </div>
+          </fieldset>
 
           <div className="space-y-2">
             <span className="text-sm font-medium text-slate-200">KPI map view</span>
@@ -1056,7 +1500,12 @@ export const OverviewTab = ({
             <button
               type="button"
               onClick={handlePptDownload}
-              disabled={isGeneratingPpt || !pptTemplate || (pptTemplate === "stracer" && pptTechnologies.length === 0)}
+              disabled={
+                isGeneratingPpt ||
+                !pptTemplate ||
+                (pptTemplate === "stracer" && pptTechnologies.length === 0) ||
+                (pptTemplate === "taiwan" && pptSelectedKpis !== null && pptSelectedKpis.length === 0)
+              }
               className="rounded-md bg-purple-600 px-3 py-2 text-sm font-medium text-white transition hover:bg-purple-500 disabled:cursor-wait disabled:opacity-60"
             >
               Generate PPT
