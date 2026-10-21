@@ -33,7 +33,12 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
-import { getMetricLabelsForLocations, getTechnologyMetricOptions } from "@/utils/technologyMetricLabels";
+import {
+  getMetricLabelsForLocations,
+  getTechnologyMetricOptions,
+  GRID_VIEW_ALLOWED_METRICS,
+  UNIFIED_MAP_METRIC_OPTIONS,
+} from "@/utils/technologyMetricLabels";
 import { getTechnologyFamily } from "@/utils/technologySelection";
 import { DEBUG_L3 } from "@/utils/l3Debug";
 import SwapSectorPanel from "./SwapSectorPanel";
@@ -609,17 +614,6 @@ const ThresholdInput = memo(
 );
 ThresholdInput.displayName = "ThresholdInput";
 
-const GRID_VIEW_ALLOWED_METRICS = Object.freeze([
-  "rsrp",
-  "rsrq",
-  "sinr",
-  "ci_db",
-  "dl_thpt",
-  "ul_thpt",
-  "mos",
-  "latency",
-  "jitter",
-]);
 const GRID_ONLY_METRICS = Object.freeze([
   "best_operator",
   "best_technology",
@@ -1007,31 +1001,9 @@ const UnifiedMapSidebar = ({
   // Metric options
   const metricOptions = useMemo(
     () => {
-      const allOptions = [
-        { value: "rsrp", label: "RSRP/RSSI/RXLevel" },
-        { value: "rsrq", label: "RSRQ" },
-        { value: "sinr", label: "SINR/RXQual/Ec/no" },
-        { value: "ci_db", label: "C/I" },
-        { value: "dl_thpt", label: "DL Throughput" },
-        { value: "ul_thpt", label: "UL Throughput" },
-        { value: "mos", label: "MOS" },
-        { value: "pci", label: "PCI/BSIC" },
-        { value: "num_cells", label: "Pilot pollution" },
-        { value: "level", label: "Ping pong" },
-        { value: "jitter", label: "Jitter" },
-        { value: "latency", label: "Latency" },
-        { value: "packet_loss", label: "Packet Loss" },
-        { value: "cell_id", label: "Cell ID" },
-        { value: "nodebid", label: "NodeB ID" },
-        {value: "earfcn", label: "Earfcn/BCCH"},
-        { value: "tac", label: "TAC/LAC" },
-        { value: "dominance", label: "Dominance Analysis" },
-        { value: "coverage_violation", label: "Coverage Violation" },
-      ];
-
       const baseOptions = getTechnologyMetricOptions(!enableGrid
-        ? allOptions
-        : allOptions.filter((option) =>
+        ? UNIFIED_MAP_METRIC_OPTIONS
+        : UNIFIED_MAP_METRIC_OPTIONS.filter((option) =>
         GRID_VIEW_ALLOWED_METRICS.includes(option.value),
       ), metricTechnology);
 

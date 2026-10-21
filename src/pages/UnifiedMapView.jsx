@@ -8114,6 +8114,7 @@ const UnifiedMapView = () => {
             dataFilters={dataFilters}
             availableBands={availableFilterOptions?.bands || []}
             availableTechnologies={availableFilterOptions?.technologies}
+            availableL3Kpis={availableFilterOptions?.macDetailFields || []}
             reportTechnologyRawValues={availableFilterOptions?.technologyRawValues}
             bestNetworkEnabled={bestNetworkEnabled}
             bestNetworkStats={bestNetworkStats}

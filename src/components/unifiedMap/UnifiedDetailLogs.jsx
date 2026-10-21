@@ -1381,6 +1381,7 @@ function UnifiedDetailLogs({
   projectId,
   sessionIds = [],
   availableBands = [],
+  availableL3Kpis = [],
   isLoading,
   thresholds,
   logArea,
@@ -2588,7 +2589,9 @@ function UnifiedDetailLogs({
               sessionIds={sessionIds}
               projectId={projectId}
               availableBands={availableBands}
+              availableL3Kpis={availableL3Kpis}
               reportTechnologies={availableReportTechnologies}
+              dataFilters={dataFilters}
               gridViewEnabled={gridViewEnabled}
               gridViewSummary={gridViewSummary}
               metricLabels={metricLabels}

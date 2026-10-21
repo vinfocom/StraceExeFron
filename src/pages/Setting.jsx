@@ -996,22 +996,6 @@ export const PPT_ACCEPTANCE_TECH_TABS = [
     { key: "2g", label: "2G" },
 ];
 
-const findPptAcceptanceError = (acceptance) => {
-    if (!acceptance || typeof acceptance !== "object") return "";
-    for (const [key, val] of Object.entries(acceptance)) {
-        if (val && typeof val === "object" && !Array.isArray(val)) {
-            for (const [kpiKey, numVal] of Object.entries(val)) {
-                if (numVal !== "" && numVal !== null && numVal !== undefined && Number.isNaN(Number(numVal))) {
-                    return `Invalid number for ${key} ${kpiKey}: ${numVal}`;
-                }
-            }
-        } else if (val !== "" && val !== null && val !== undefined && Number.isNaN(Number(val))) {
-            return `Invalid number for ${key}: ${val}`;
-        }
-    }
-    return "";
-};
-
 const PptReportAcceptanceForm = memo(({ value, setValue, onClose }) => {
     const [activeTech, setActiveTech] = useState("default");
     const [copiedNotification, setCopiedNotification] = useState(false);
@@ -1029,8 +1013,8 @@ const PptReportAcceptanceForm = memo(({ value, setValue, onClose }) => {
                 if (raw[t.key] && typeof raw[t.key] === "object") {
                     PPT_ACCEPTANCE_KPIS.forEach(kpi => {
                         const v = raw[t.key][kpi.key] ?? raw[t.key][kpi.key.replace("_tpt", "")];
-                        if (v !== undefined && v !== null && v !== "" && !Number.isNaN(Number(v))) {
-                            state[t.key][kpi.key] = Number(v);
+                        if (v !== undefined && v !== null) {
+                            state[t.key][kpi.key] = String(v);
                         }
                     });
                 }
@@ -1039,8 +1023,8 @@ const PptReportAcceptanceForm = memo(({ value, setValue, onClose }) => {
 
         PPT_ACCEPTANCE_KPIS.forEach(kpi => {
             const v = raw[kpi.key] ?? raw[kpi.key.replace("_tpt", "")];
-            if (v !== undefined && v !== null && v !== "" && !Number.isNaN(Number(v))) {
-                state.default[kpi.key] = Number(v);
+            if (v !== undefined && v !== null) {
+                state.default[kpi.key] = String(v);
             }
         });
 
@@ -1055,24 +1039,21 @@ const PptReportAcceptanceForm = memo(({ value, setValue, onClose }) => {
     }, [value, buildState]);
 
     const handleKpiChange = useCallback((kpiKey, valStr) => {
-        const num = valStr === "" || valStr === "-" || valStr === "." ? valStr : parseFloat(valStr);
-        setFormState(prev => {
-            const currentTechMap = { ...(prev[activeTech] || DEFAULT_PPT_ACCEPTANCE) };
-            currentTechMap[kpiKey] = Number.isNaN(num) ? "" : num;
+        const currentTechMap = { ...(formState[activeTech] || DEFAULT_PPT_ACCEPTANCE) };
+        currentTechMap[kpiKey] = valStr;
 
-            const next = {
-                ...prev,
-                [activeTech]: currentTechMap,
-            };
+        const next = {
+            ...formState,
+            [activeTech]: currentTechMap,
+        };
 
-            if (activeTech === "default") {
-                next[kpiKey] = currentTechMap[kpiKey];
-            }
+        if (activeTech === "default") {
+            next[kpiKey] = valStr;
+        }
 
-            setValue(next);
-            return next;
-        });
-    }, [activeTech, setValue]);
+        setFormState(next);
+        setValue(next);
+    }, [activeTech, formState, setValue]);
 
     const handleResetDefaults = useCallback(() => {
         setFormState(prev => {
@@ -1108,24 +1089,13 @@ const PptReportAcceptanceForm = memo(({ value, setValue, onClose }) => {
     const currentValues = formState[activeTech] || DEFAULT_PPT_ACCEPTANCE;
 
     return (
-        <div className="mt-5 p-5 border border-slate-700 rounded-2xl bg-gradient-to-b from-slate-900 to-slate-950 shadow-lg">
-            {/* Header with 'Poor < Cutoff' rule kept on header */}
-            <div className="flex flex-col md:flex-row md:items-start justify-between gap-4 mb-5 border-b border-slate-700/70 pb-4">
+        <div className="mt-5 p-5 border border-slate-700 rounded-2xl bg-slate-950 shadow-lg">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-5 border-b border-slate-700/70 pb-4">
                 <div>
-                    <div className="flex flex-wrap items-center gap-3">
-                        <h3 className="text-lg font-semibold tracking-wide text-white">
-                            PPT Report Acceptance
-                        </h3>
-                        <span className="rounded-md border border-slate-600 bg-slate-800 px-2.5 py-1 text-xs font-semibold text-slate-200">
-                            Poor &lt; Cutoff Rule
-                        </span>
-                    </div>
-                    <p className="text-xs text-slate-400 mt-1.5 max-w-2xl leading-relaxed">
-                        Threshold cutoff limits used for PowerPoint Problem Area slides and maps.
-                        Data samples worse than these cutoff limits are flagged in red as problem areas.
-                    </p>
+                    <h3 className="text-lg font-semibold text-white">PPT Report Acceptance</h3>
+                    
                 </div>
-                <div className="flex items-center gap-2 self-end md:self-auto">
+                <div className="flex flex-wrap items-center gap-2">
                     <Button
                         type="button"
                         variant="outline"
@@ -1142,7 +1112,7 @@ const PptReportAcceptanceForm = memo(({ value, setValue, onClose }) => {
                         variant="outline"
                         size="sm"
                         onClick={handleResetDefaults}
-                        title="Reset this tab to default values"
+                        title="Reset this technology to default values"
                         className="border-slate-500 bg-slate-800 hover:bg-slate-700 text-slate-100 text-xs rounded-lg flex items-center gap-1.5"
                     >
                         <RotateCcw className="h-3.5 w-3.5" />
@@ -1159,7 +1129,6 @@ const PptReportAcceptanceForm = memo(({ value, setValue, onClose }) => {
                 </div>
             </div>
 
-            {/* Tech Tabs using standard blue style */}
             <div className="flex flex-wrap gap-2 mb-4">
                 {PPT_ACCEPTANCE_TECH_TABS.map(tab => (
                     <Button
@@ -1168,94 +1137,42 @@ const PptReportAcceptanceForm = memo(({ value, setValue, onClose }) => {
                         variant={activeTech === tab.key ? 'default' : 'outline'}
                         onClick={() => setActiveTech(tab.key)}
                         className={activeTech === tab.key
-                            ? 'bg-blue-600 hover:bg-blue-700 text-white rounded-full px-5'
-                            : 'border-slate-500 !bg-slate-600 hover:!bg-slate-700 text-gray-100 rounded-full px-5'}
+                            ? 'bg-blue-600 hover:bg-blue-700 text-white rounded-lg px-4'
+                            : 'border-slate-600 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg px-4'}
                     >
                         {tab.label}
                     </Button>
                 ))}
             </div>
 
-            {/* KPI Cards Grid using standard default styling and blue accents */}
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3.5 max-h-[34rem] overflow-y-auto pr-1">
+            <div className="max-h-[34rem] overflow-y-auto rounded-xl border border-slate-800">
                 {PPT_ACCEPTANCE_KPIS.map(kpi => {
-                    const currentVal = currentValues[kpi.key] ?? kpi.defaultCutoff;
+                    const currentVal = currentValues[kpi.key] ?? "";
                     return (
                         <div
                             key={kpi.key}
-                            className="rounded-xl border border-slate-700 bg-slate-800/70 p-4 hover:border-blue-500/40 transition-all flex flex-col justify-between"
+                            className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 border-b border-slate-800 bg-slate-900/50 px-4 py-3 last:border-b-0 sm:grid-cols-[minmax(0,1fr)_auto_minmax(8rem,12rem)_auto]"
                         >
-                            <div>
-                                <div className="flex items-center justify-between mb-2">
-                                    <div className="flex items-center gap-2">
-                                        <h4 className="font-semibold text-slate-100">{kpi.label}</h4>
-                                        {kpi.unit ? (
-                                            <span className="text-xs font-normal text-slate-400">({kpi.unit})</span>
-                                        ) : null}
-                                    </div>
-
-                                </div>
-                                <p className="text-xs text-slate-400 mb-3 min-h-[28px] leading-snug">
-                                    {kpi.desc}
-                                </p>
-                            </div>
-
-                            <div className="space-y-2 pt-2 border-t border-slate-700/60">
-                                <div className="flex items-center justify-between gap-2">
-                                    <span className="text-xs font-medium text-slate-300">
-                                        Cutoff Value:
-                                    </span>
-                                    <div className="flex items-center gap-1.5">
-                                        <span className="text-xs font-bold text-blue-400">{kpi.op}</span>
-                                        <Input
-                                            type="number"
-                                            step="any"
-                                            value={currentVal ?? ""}
-                                            onChange={e => handleKpiChange(kpi.key, e.target.value)}
-                                            placeholder={kpi.placeholder}
-                                            className="h-9 w-28 text-right font-semibold text-white bg-slate-950 border-slate-600 focus:border-blue-500 rounded-lg text-sm"
-                                        />
-                                        {kpi.unit ? (
-                                            <span className="text-xs text-slate-400 min-w-[28px]">
-                                                {kpi.unit}
-                                            </span>
-                                        ) : null}
-                                    </div>
-                                </div>
-
-                                {kpi.presets && (
-                                    <div className="flex items-center justify-end gap-1 pt-1">
-                                        <span className="text-[10px] text-slate-400 mr-1">Presets:</span>
-                                        {kpi.presets.map(preset => (
-                                            <button
-                                                key={preset}
-                                                type="button"
-                                                onClick={() => handleKpiChange(kpi.key, String(preset))}
-                                                className={`text-[10px] px-2 py-0.5 rounded font-medium transition ${
-                                                    Number(currentVal) === preset
-                                                        ? "bg-blue-600 text-white"
-                                                        : "bg-slate-900 border border-slate-700 text-slate-300 hover:bg-slate-700"
-                                                }`}
-                                            >
-                                                &lt; {preset}M
-                                            </button>
-                                        ))}
-                                    </div>
-                                )}
-                            </div>
+                            <label htmlFor={`ppt-acceptance-${activeTech}-${kpi.key}`} className="font-medium text-slate-100">
+                                {kpi.label}
+                            </label>
+                            <span className="text-sm font-semibold text-blue-400">Poor {kpi.op}</span>
+                            <Input
+                                id={`ppt-acceptance-${activeTech}-${kpi.key}`}
+                                type="text"
+                                value={String(currentVal)}
+                                onChange={e => handleKpiChange(kpi.key, e.target.value)}
+                                placeholder={kpi.placeholder}
+                                className="h-9 w-full text-left text-white bg-slate-950 border-slate-600 focus:border-blue-500 rounded-lg text-sm"
+                            />
+                            <span className="text-xs text-slate-400 min-w-8">{kpi.unit}</span>
                         </div>
                     );
                 })}
             </div>
-
-            {/* Bottom info banner */}
-            <div className="mt-4 pt-3 border-t border-slate-800 flex flex-wrap items-center justify-between gap-2 text-xs text-slate-400">
-                <div className="flex items-center gap-2">
-                    <span className="text-blue-400 font-medium">Auto-synced with:</span>
-                    <span>PowerPoint Generator · Problem Area Slides (Slide 20 APP DL, RSRP, RSRQ, SINR, etc.)</span>
-                </div>
-                <span>Click "Save Settings" at the bottom to commit changes.</span>
-            </div>
+            <p className="mt-4 pt-3 border-t border-slate-800 text-xs text-slate-400">
+                Click "Save Settings" at the bottom to commit changes.
+            </p>
         </div>
     );
 });
@@ -2001,12 +1918,6 @@ const SettingsPage = ({ onSaveSuccess, initialParam = null }) => {
         const acceptanceProblem = findAcceptanceError(nextThresholds.report_acceptance);
         if (acceptanceProblem) {
             toast.error(`Report Acceptance: ${acceptanceProblem}`);
-            return;
-        }
-
-        const pptAcceptanceProblem = findPptAcceptanceError(nextThresholds.ppt_report_acceptance);
-        if (pptAcceptanceProblem) {
-            toast.error(`PPT Report Acceptance: ${pptAcceptanceProblem}`);
             return;
         }
 

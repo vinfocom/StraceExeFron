@@ -13,6 +13,32 @@ const TECHNOLOGY_METRIC_LABELS = {
   "5G": { rsrp: "nrRSRP", rsrq: "nrRSRQ", sinr: "nrSINR" },
 };
 
+export const UNIFIED_MAP_METRIC_OPTIONS = Object.freeze([
+  { value: "rsrp", label: "RSRP/RSSI/RXLevel" },
+  { value: "rsrq", label: "RSRQ" },
+  { value: "sinr", label: "SINR/RXQual/Ec/no" },
+  { value: "ci_db", label: "C/I" },
+  { value: "dl_thpt", label: "DL Throughput" },
+  { value: "ul_thpt", label: "UL Throughput" },
+  { value: "mos", label: "MOS" },
+  { value: "pci", label: "PCI/BSIC" },
+  { value: "num_cells", label: "Pilot pollution" },
+  { value: "level", label: "Ping pong" },
+  { value: "jitter", label: "Jitter" },
+  { value: "latency", label: "Latency" },
+  { value: "packet_loss", label: "Packet Loss" },
+  { value: "cell_id", label: "Cell ID" },
+  { value: "nodebid", label: "NodeB ID" },
+  { value: "earfcn", label: "Earfcn/BCCH" },
+  { value: "tac", label: "TAC/LAC" },
+  { value: "dominance", label: "Dominance Analysis" },
+  { value: "coverage_violation", label: "Coverage Violation" },
+]);
+
+export const GRID_VIEW_ALLOWED_METRICS = Object.freeze([
+  "rsrp", "rsrq", "sinr", "ci_db", "dl_thpt", "ul_thpt", "mos", "latency", "jitter",
+]);
+
 export const normalizeMetricTechnology = (value) => {
   const raw = String(value ?? "").trim().toUpperCase();
   if (!raw) return "Unknown";
