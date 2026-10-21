@@ -2,6 +2,10 @@ import React from 'react';
 import ReactDOM from 'react-dom/client';
 import App from './App';
 import './index.css';
+import { installElectronFocusRecovery } from './utils/electronFocus';
+
+const removeFocusRecovery = installElectronFocusRecovery(window);
+if (import.meta.hot) import.meta.hot.dispose(removeFocusRecovery);
 
 const enableStrictMode = String(import.meta.env.VITE_ENABLE_STRICT_MODE || '').toLowerCase() === 'true';
 const isElectronRuntime =

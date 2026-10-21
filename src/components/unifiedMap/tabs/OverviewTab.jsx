@@ -38,7 +38,7 @@ import {
   getLogColor,
 } from "@/utils/colorUtils";
 import { downloadKmlForLogs } from "@/utils/kmlExport";
-import { getTechnologyMetricOptions, UNIFIED_MAP_METRIC_OPTIONS } from "@/utils/technologyMetricLabels";
+import { getTechnologyMetricOptions, normalizeMetricTechnology, UNIFIED_MAP_METRIC_OPTIONS } from "@/utils/technologyMetricLabels";
 
 const PROVIDER_VOLUME_CACHE = new Map();
 const PROVIDER_VOLUME_PENDING = new Map();
@@ -359,6 +359,9 @@ export const OverviewTab = ({
 
   // ─── Dynamic Technology-Wise KPI Options ───────────────────────────
   const availablePptKpis = useMemo(() => {
+    const selectedNetworkTechnologies = new Set(
+      pptTechnologies.filter((technology) => technology !== "L3").map(normalizeMetricTechnology),
+    );
     const technologyOptions = pptTechnologies
       .filter((technology) => technology !== "L3")
       .flatMap((technology) => getTechnologyMetricOptions(UNIFIED_MAP_METRIC_OPTIONS, technology)
@@ -372,7 +375,13 @@ export const OverviewTab = ({
       ? Array.from(new Set((availableL3Kpis || [])
         .map((field) => String(field ?? "").trim())
         .filter(Boolean)))
-        .map((field) => ({ key: `L3:${field}`, metricKey: field, label: field, group: "L3" }))
+        .map((field) => {
+          const group = /^nr/i.test(field) ? "5G" : /^lte/i.test(field) ? "4G" : "L3";
+          const metricKey = field.replace(/^nr/i, "5g").replace(/^lte/i, "4g");
+          const label = field.replace(/^nr/i, "5G").replace(/^lte/i, "4G");
+          return { key: `L3:${field}`, metricKey, label, group };
+        })
+        .filter((kpi) => kpi.group === "L3" || selectedNetworkTechnologies.has(kpi.group))
       : [];
     return [...technologyOptions, ...l3Options];
   }, [availableL3Kpis, pptTechnologies]);
@@ -575,6 +584,8 @@ export const OverviewTab = ({
       return;
     }
 
+    const networkTechnologies = pptTechnologies.filter((technology) => technology !== "L3");
+
     const selectedKpiKeys = pptSelectedKpis === null
       ? availablePptKpis.map((kpi) => kpi.key)
       : pptSelectedKpis.filter((key) => availablePptKpis.some((kpi) => kpi.key === key));
@@ -600,14 +611,14 @@ export const OverviewTab = ({
       user_id: Number.isFinite(numericUserId) ? numericUserId : 0,
       locked_bands: lockedBand,
       template: pptTemplate,
-      technology: pptTechnologies,
+      technology: networkTechnologies,
       map_view_type: pptMapViewType,
       ...(pptMapViewType === "grid" ? { aggregation: pptAggregation } : {}),
       ...(selectedSessionIds.length > 0 ? { session_ids: selectedSessionIds } : {}),
       selected_kpis: selectedMetricKpis,
       poor_dl_threshold: Number(pptProblemAreaThresholds?.dl_tpt || pptProblemAreaThresholds?.dl) || 5,
       problem_area_thresholds: pptProblemAreaThresholds,
-      problem_area_technologies: pptTechnologies.filter((technology) => technology !== "L3"),
+      problem_area_technologies: networkTechnologies,
       problem_area_kpis: pptProblemAreaKpis,
     };
 
