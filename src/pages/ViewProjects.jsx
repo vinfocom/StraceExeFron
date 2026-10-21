@@ -44,7 +44,8 @@ const normalizeProject = (project = {}) => ({
 
 const projectHasL3 = (project) => {
   const value = project?.l3 ?? project?.L3;
-  return value === true || value === 1 || String(value).toLowerCase() === "true";
+  const normalized = String(value ?? "").trim().toLowerCase();
+  return value === true || value === 1 || normalized === "true" || normalized === "1";
 };
 
 const normalizeLatLng = (input) => {
@@ -392,6 +393,7 @@ const ViewProjectsPage = () => {
     }
 
     const params = new URLSearchParams({ project_id: project.id });
+    params.set("enableL3", projectHasL3(project) ? "1" : "0");
     if (project.ref_session_id) params.set("session", project.ref_session_id);
     if (project.is_local || Number(project.id) < 0) params.set("source", "local");
     navigate(`/unified-map?${params.toString()}`, {

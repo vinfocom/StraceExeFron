@@ -12,7 +12,7 @@ import { getClosestDrawingBoundaryHoverTarget, getDrawingPath, getNativeDrawingH
 // import TechHandoverMarkers from "../unifiedMap/TechHandoverMarkers";
 import useColorForLog from "@/hooks/useColorForLog";
 import { getMetricValueFromLog, getMacDetailValueFromLog, getPciColor, getEarfcnColor } from "@/utils/metrics";
-import { normalizeProviderName, normalizeTechName, normalizeBandName, getLogColor, getRegisteredColor, generateColorFromHash, resolveMacDetailMetricKey } from "@/utils/colorUtils";
+import { normalizeProviderName, normalizeTechName, normalizeBandName, getLogColor, getRegisteredColor, generateColorFromHash, resolveMacDetailMetricKey, getMacDetailThresholds } from "@/utils/colorUtils";
 import { DEBUG_L3, traceL3Effect } from "@/utils/l3Debug";
 import { logMapPlot } from "@/utils/mapPlotDebug";
 import { confirmAutoFit, getMapCoordinate, getValidMapCoordinates, isMapReadyForFit, resolveAutoFitAction } from "@/features/unified-map/map/autoFit.js";
@@ -1702,6 +1702,13 @@ const MapWithMultipleCircles = ({
     }
 
     if (typeKey === "mac_detail") {
+      const l3MetricKey = resolveMacDetailMetricKey(selectedMetric);
+      if (l3MetricKey) {
+        const l3Thresholds = getMacDetailThresholds(thresholds, selectedMetric);
+        if (l3Thresholds.length > 0) {
+          return getColorFromThresholds(value, l3Thresholds, l3MetricKey, metricColorOverrides);
+        }
+      }
       return getLogColor(typeKey, value, "#a8a6a2", selectedMetric);
     }
     if (['provider', 'technology', 'band', 'operator', 'cell_id'].includes(typeKey)) {

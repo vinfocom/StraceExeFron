@@ -25,6 +25,7 @@ import {
   getRegisteredColor,
   registerColor,
   resolveMacDetailMetricKey,
+  getMacDetailThresholds,
 } from "@/utils/colorUtils";
 import { useSettingsDialog } from "@/context/SettingsDialogContext";
 import { DEBUG_L3, traceL3Effect } from "@/utils/l3Debug";
@@ -756,12 +757,15 @@ const PciLegend = ({ logs, activeFilter, onFilterChange }) => {
 const MetricThresholdLegend = ({
   thresholds,
   selectedMetric,
+  isMacDetail = false,
   logs,
   activeFilter,
   onFilterChange,
 }) => {
   const config = getMetricConfig(selectedMetric);
-  const list = thresholds?.[config.thresholdKey] || [];
+  const list = isMacDetail
+    ? getMacDetailThresholds(thresholds, selectedMetric)
+    : thresholds?.[config.thresholdKey] || [];
   const [openColorKey, setOpenColorKey] = useState(null);
   const [customColorValue, setCustomColorValue] = useState("");
   const [colorOverrides, setColorOverrides] = useState({});
@@ -1428,6 +1432,7 @@ export default function MapLegend({
           <MetricThresholdLegend
             thresholds={thresholds}
             selectedMetric={selectedMetric}
+            isMacDetail={colorBy === "mac_detail"}
             logs={logs}
             activeFilter={activeFilter}
             onFilterChange={onFilterChange}

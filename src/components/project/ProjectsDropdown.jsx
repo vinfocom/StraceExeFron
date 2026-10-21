@@ -143,6 +143,14 @@ const ProjectsDropdown = ({ currentProjectId }) => {
     if (!project || !project.id) return;
 
     const params = new URLSearchParams({ project_id: project.id });
+    const l3Flag = project.l3 ?? project.L3;
+    const normalizedL3Flag = String(l3Flag ?? "").trim().toLowerCase();
+    params.set(
+      "enableL3",
+      l3Flag === true || l3Flag === 1 || normalizedL3Flag === "true" || normalizedL3Flag === "1"
+        ? "1"
+        : "0",
+    );
     if (project.ref_session_id) {
       params.set("session", project.ref_session_id);
     }

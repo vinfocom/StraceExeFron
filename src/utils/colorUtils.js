@@ -7,6 +7,12 @@ export const resolveMacDetailMetricKey = (fieldName) => {
   const name = String(fieldName || "").trim().toLowerCase();
   if (!name) return null;
 
+  // L3 signal fields use the standard signal KPI ranges. NR fields use the
+  // 5G bucket; all other signal fields use the configured default ranges.
+  if (name.includes("rsrp")) return "rsrp";
+  if (name.includes("rsrq")) return "rsrq";
+  if (name.includes("sinr")) return "sinr";
+
   if (name.endsWith("mbps")) {
     const isDelivered = name.includes("delivered");
     if (/(^|_)ul(_|$)/.test(name)) return isDelivered ? "mac_ul_delivered" : "mac_ul";
@@ -28,6 +34,23 @@ export const resolveMacDetailMetricKey = (fieldName) => {
   if (/(^|_)(tx_power|transmit_power)(_|$)/.test(name)) return "mac_tx_power";
 
   return null;
+};
+
+export const getMacDetailThresholds = (thresholds, fieldName) => {
+  const metricKey = resolveMacDetailMetricKey(fieldName);
+  if (!metricKey) return [];
+
+  const name = String(fieldName || "").trim().toLowerCase();
+  const isNrField = name.includes("_nr") || name.startsWith("nr_");
+  const technologyBucket = isNrField ? "5g" : "default";
+  const bucketedRanges = thresholds?.__bucketed?.[metricKey];
+  const configuredRanges = bucketedRanges?.[technologyBucket];
+
+  if (Array.isArray(configuredRanges) && configuredRanges.length) {
+    return configuredRanges;
+  }
+
+  return Array.isArray(thresholds?.[metricKey]) ? thresholds[metricKey] : [];
 };
 
 const stringToColor = (str) => {

@@ -831,7 +831,7 @@ const DriveTestSessionsPage = () => {
 
   const handleViewOnMap = (sessionId) => {
     syncSessionDiagnostics([sessionId]);
-    navigate(`/unified-map?sessionId=${encodeURIComponent(String(sessionId))}&showSecondary=1`);
+    navigate(`/unified-map?sessionId=${encodeURIComponent(String(sessionId))}&showSecondary=1&enableL3=1`);
   };
 
   const handleViewSelectedOnMap = () => {
@@ -841,7 +841,7 @@ const DriveTestSessionsPage = () => {
     }
     syncSessionDiagnostics(selectedSessions);
     const sessionIdsParam = selectedSessions.join(",");
-    navigate(`/unified-map?sessionId=${encodeURIComponent(sessionIdsParam)}&showSecondary=1`);
+    navigate(`/unified-map?sessionId=${encodeURIComponent(sessionIdsParam)}&showSecondary=1&enableL3=1`);
   };
 
   const handleDownloadLogs = async (event, sessionId) => {

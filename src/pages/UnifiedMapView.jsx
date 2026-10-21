@@ -1782,6 +1782,11 @@ const filterHandoverTransitionsByPairs = (transitions = [], selectedPairs = []) 
   );
 };
 
+const isExplicitlyEnabled = (value) => {
+  const normalized = String(value ?? "").trim().toLowerCase();
+  return value === true || value === 1 || normalized === "true" || normalized === "1";
+};
+
 const getHandoverObservationKey = (transition = {}) => {
   const session = String(
     transition?.sessionGroup ?? transition?.session_id ?? transition?.sessionId ?? "",
@@ -2686,6 +2691,12 @@ const UnifiedMapView = () => {
     Array.isArray(passedNeighbors) && passedNeighbors.length > 0;
 
   const [project, setProject] = useState(passedProject || null);
+  const projectL3Flag = project?.l3 ?? project?.L3;
+  const routeL3Flag = String(searchParams.get("enableL3") ?? "").trim().toLowerCase();
+  const hasRouteL3Flag = ["0", "1", "true", "false"].includes(routeL3Flag);
+  const l3Enabled = hasRouteL3Flag
+    ? isExplicitlyEnabled(routeL3Flag)
+    : projectL3Flag == null || isExplicitlyEnabled(projectL3Flag);
 
   const projectPredictionGridSizeMeters = useMemo(() => {
     const raw =
@@ -5238,6 +5249,7 @@ const UnifiedMapView = () => {
     const cellIds = new Set();
     const apps = new Set();
     const macDetailFields = new Set();
+    const invalidMacDetailFields = new Set();
 
     // Keep log technology choices available regardless of active map filters.
     (locations || []).forEach((loc) => {
@@ -5262,7 +5274,25 @@ const UnifiedMapView = () => {
     (renderedLegendFilteredLocations || []).forEach((loc) => {
       if (loc?.extra_fields && typeof loc.extra_fields === "object") {
         Object.keys(loc.extra_fields).forEach((key) => {
-          if (!HIDDEN_MAC_DETAIL_FIELDS.has(String(key).toLowerCase())) macDetailFields.add(key);
+          const fieldName = String(key).toLowerCase();
+          const value = loc.extra_fields[key];
+          const normalizedValue = typeof value === "string"
+            ? value.trim().replace(/[\[\],]/g, " ").replace(/\s+/g, " ").trim()
+            : "";
+          const isObjectPlaceholder = /^object(?: object)*$/i.test(normalizedValue);
+
+          if ((value !== null && typeof value === "object") || isObjectPlaceholder) {
+            invalidMacDetailFields.add(key);
+            macDetailFields.delete(key);
+            return;
+          }
+
+          if (
+            !invalidMacDetailFields.has(key) &&
+            !HIDDEN_MAC_DETAIL_FIELDS.has(fieldName)
+          ) {
+            macDetailFields.add(key);
+          }
         });
       }
       const providerName = getProviderDisplayName(loc);
@@ -8065,6 +8095,7 @@ const UnifiedMapView = () => {
             distance={distance}
             mapCenter={mapCenter}
             projectId={projectId}
+            l3Enabled={l3Enabled}
             sessionIds={sessionIds}
             isLoading={isLoading}
             thresholds={effectiveThresholds}

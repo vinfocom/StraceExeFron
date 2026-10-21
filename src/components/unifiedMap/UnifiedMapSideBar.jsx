@@ -691,6 +691,7 @@ const UnifiedMapSidebar = ({
   showSiteSectors = true,
   setShowSiteSectors,
   projectId,
+  l3Enabled = true,
   sessionIds,
   metric,
   setMetric,
@@ -1048,11 +1049,11 @@ const UnifiedMapSidebar = ({
   );
 
   const macDetailMetricOptions = useMemo(
-    () =>
-      (accumulatedFilterOptions.macDetailFields || []).map((field) => ({
-        value: field,
-        label: field,
-      })),
+    () => (accumulatedFilterOptions.macDetailFields || [])
+      .filter((field) => typeof field === "string" && field.trim())
+      .map((field) => field.trim())
+      .filter((field) => !/^object(?:\s+object)*$/i.test(field.replace(/[\[\],]/g, " ").trim()))
+      .map((field) => ({ value: field, label: field })),
     [accumulatedFilterOptions.macDetailFields],
   );
 
@@ -1072,6 +1073,12 @@ const UnifiedMapSidebar = ({
   // L3DEBUG-END
 
   useEffect(() => {
+    if (!l3Enabled && colorBy === "mac_detail") {
+      setColorBy?.(null);
+    }
+  }, [colorBy, l3Enabled, setColorBy]);
+
+  useEffect(() => {
     if (colorBy === "mac_detail" && macDetailMetricOptions.length === 0) {
       // L3DEBUG-START
       logL3ParentEffect("reset empty L3 color mode", {
@@ -1083,6 +1090,18 @@ const UnifiedMapSidebar = ({
       setColorBy?.(null);
     }
   }, [colorBy, macDetailMetricOptions, metric, setColorBy]);
+
+  useEffect(() => {
+    if (
+      colorBy !== "mac_detail" ||
+      macDetailMetricOptions.length === 0 ||
+      macDetailMetricOptions.some((option) => option.value === String(metric ?? ""))
+    ) {
+      return;
+    }
+
+    setMetric?.(macDetailMetricOptions[0].value);
+  }, [colorBy, macDetailMetricOptions, metric, setMetric]);
 
   const colorOptions = useMemo(
     () => {
@@ -1096,7 +1115,7 @@ const UnifiedMapSidebar = ({
           { value: "cell_id", label: "Best Cell ID" },
           { value: "nodebid", label: "Best NodeB ID" },
           { value: "pci", label: "Best Server" },
-          { value: "mac_detail", label: "L3 Detail" },
+          { value: "mac_detail", label: "L3 Detail", disabled: !l3Enabled },
         ];
       }
       return [
@@ -1107,16 +1126,18 @@ const UnifiedMapSidebar = ({
         { value: "earfcn", label: metricTechnology === "2G" ? "By BCCH" : "By EARFCN" },
         { value: "cell_id", label: "By Cell ID" },
         { value: "nodebid", label: "By NodeB ID" },
-        { value: "mac_detail", label: "L3 detail" },
+        { value: "mac_detail", label: "L3 detail", disabled: !l3Enabled },
       ];
     },
-    [enableGrid, metricTechnology],
+    [enableGrid, l3Enabled, metricTechnology],
   );
 
   const handleColorByChange = useCallback(
     (value) => {
       const nextColorBy = value === "metric" ? null : value;
       const currentL3Fields = accumulatedFilterOptions.macDetailFields;
+
+      if (nextColorBy === "mac_detail" && !l3Enabled) return;
 
       if (
         nextColorBy === "mac_detail" &&
@@ -1140,7 +1161,7 @@ const UnifiedMapSidebar = ({
       }
       setColorBy?.(nextColorBy);
     },
-    [accumulatedFilterOptions.macDetailFields, colorBy, metric, setColorBy, setMetric],
+    [accumulatedFilterOptions.macDetailFields, colorBy, l3Enabled, metric, setColorBy, setMetric],
   );
 
   // Filter handlers
