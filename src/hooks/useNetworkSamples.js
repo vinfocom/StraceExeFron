@@ -7,6 +7,7 @@ import { isCancelledError } from '@/api/apiService';
 import { useRequestGeneration } from '@/features/unified-map/data/useRequestGeneration.js';
 import { getPolygonRequestIdentity } from '@/features/unified-map/data/mapRequestIdentity.js';
 import { normalizeTechName, normalizeProviderName } from '@/utils/colorUtils';
+import { parseNetworkLogExtraFields } from '@/utils/networkLogExtraFields.js';
 import {
   makeProjectCacheKey,
   readProjectSessionCache,
@@ -91,16 +92,6 @@ const isPointInPolygon = (point, polygon) => {
     }
   }
   return inside;
-};
-
-const parseExtraJsonObject = (rawExtraJson) => {
-  if (!rawExtraJson || typeof rawExtraJson !== 'string') return null;
-  try {
-    const parsed = JSON.parse(rawExtraJson);
-    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : null;
-  } catch {
-    return null;
-  }
 };
 
 const isMacAddress = (value) =>
@@ -515,7 +506,7 @@ const parseLogEntry = (log, sessionId) => {
     apps: log.apps || '',
     image_path: log.image_path || '',
     extra_json: log.extra_json || '',
-    extra_fields: parseExtraJsonObject(log.extra_json) || {},
+    extra_fields: parseNetworkLogExtraFields(log.extra_json) || {},
   };
 };
 
@@ -547,7 +538,7 @@ export const useNetworkSamples = (
   const cacheKey = makeProjectCacheKey({
     resource: 'unified-network-samples',
     sessionIds: sessionIds || [],
-    variant: `typed-network-wifi-v15-atomic-ci:${safeMaxRows ? `max-${safeMaxRows}` : 'all'}:project-${projectId || 'none'}`,
+    variant: `typed-network-wifi-v16-canonical-extras:${safeMaxRows ? `max-${safeMaxRows}` : 'all'}:project-${projectId || 'none'}`,
   });
   const requestIdentity = JSON.stringify({
     cacheKey,

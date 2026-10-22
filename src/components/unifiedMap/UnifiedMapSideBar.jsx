@@ -41,6 +41,7 @@ import {
 } from "@/utils/technologyMetricLabels";
 import { getTechnologyFamily } from "@/utils/technologySelection";
 import { DEBUG_L3 } from "@/utils/l3Debug";
+import { canonicalNetworkLogField, canonicalNetworkLogFields } from "@/utils/networkLogExtraFields.js";
 import SwapSectorPanel from "./SwapSectorPanel";
 
 const LTE_RECOMMENDATION_OPTIMIZED_DEFAULTS = Object.freeze({
@@ -881,7 +882,7 @@ const UnifiedMapSidebar = ({
       technologies: current.technologies || [],
       cellIds: current.cellIds || [],
       apps: current.apps || [],
-      macDetailFields: current.macDetailFields || [],
+      macDetailFields: canonicalNetworkLogFields(current.macDetailFields),
     };
     setAccumulatedFilterOptions((prev) => {
       const keys = Object.keys(next);
@@ -906,16 +907,16 @@ const UnifiedMapSidebar = ({
       keys.forEach(key => {
         const incoming = availableFilterOptions[key];
         if (Array.isArray(incoming) && incoming.length > 0) {
-          const currentSet = new Set(prev[key]);
-          const originalSize = currentSet.size;
+          const currentSet = new Set(key === 'macDetailFields'
+            ? canonicalNetworkLogFields(prev[key]) : prev[key]);
           
           incoming.forEach(item => {
             if (item !== null && item !== undefined && item !== "") {
-              currentSet.add(item);
+              currentSet.add(key === 'macDetailFields' ? canonicalNetworkLogField(item) : item);
             }
           });
           
-          if (currentSet.size > originalSize) {
+          if (currentSet.size !== prev[key].length || prev[key].some(item => !currentSet.has(item))) {
             next[key] = Array.from(currentSet).sort((a, b) => {
               if (typeof a === 'string' && typeof b === 'string') {
                 return a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' });
@@ -1021,7 +1022,7 @@ const UnifiedMapSidebar = ({
   );
 
   const macDetailMetricOptions = useMemo(
-    () => (accumulatedFilterOptions.macDetailFields || [])
+    () => canonicalNetworkLogFields(accumulatedFilterOptions.macDetailFields)
       .filter((field) => typeof field === "string" && field.trim())
       .map((field) => field.trim())
       .filter((field) => !/^object(?:\s+object)*$/i.test(field.replace(/[\[\],]/g, " ").trim()))
@@ -1072,7 +1073,9 @@ const UnifiedMapSidebar = ({
       return;
     }
 
-    setMetric?.(macDetailMetricOptions[0].value);
+    const canonicalMetric = canonicalNetworkLogField(metric);
+    setMetric?.(macDetailMetricOptions.some(option => option.value === canonicalMetric)
+      ? canonicalMetric : macDetailMetricOptions[0].value);
   }, [colorBy, macDetailMetricOptions, metric, setMetric]);
 
   const colorOptions = useMemo(
@@ -1120,7 +1123,7 @@ const UnifiedMapSidebar = ({
       }
 
       if (nextColorBy === "mac_detail") {
-        const exactCurrentMetric = String(metric ?? "");
+        const exactCurrentMetric = canonicalNetworkLogField(metric);
         if (!currentL3Fields.includes(exactCurrentMetric)) {
           const nextMetric = currentL3Fields[0];
           logL3ParentEffect("select L3 metric with color mode", {
@@ -1129,6 +1132,8 @@ const UnifiedMapSidebar = ({
             currentL3Fields,
           }, nextMetric);
           setMetric?.(nextMetric);
+        } else if (exactCurrentMetric !== metric) {
+          setMetric?.(exactCurrentMetric);
         }
       }
       setColorBy?.(nextColorBy);

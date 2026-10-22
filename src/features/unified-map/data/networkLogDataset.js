@@ -1,3 +1,5 @@
+import { normalizeNetworkLogSampleExtras } from '../../../utils/networkLogExtraFields.js';
+
 const readReliableTotal = (body) => {
   for (const key of ["total_count", "totalCount", "TotalCount", "total_records", "totalRecords"]) {
     if (body?.[key] === null || body?.[key] === undefined || body?.[key] === "") continue;
@@ -142,7 +144,7 @@ export const createNetworkLogCacheSnapshot = (entry, identity, revision) => {
   if (!isCompleteNetworkLogCacheEntry(entry)) return null;
   return {
     snapshot: createCompleteNetworkLogSnapshot({
-      rows: entry.locations,
+      rows: entry.locations.map(normalizeNetworkLogSampleExtras),
       identity,
       revision,
       outcome: entry.outcome,
