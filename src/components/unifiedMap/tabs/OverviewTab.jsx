@@ -312,6 +312,7 @@ export const OverviewTab = ({
   availableL3Kpis = [],
   reportTechnologies = [],
   dataFilters = {},
+  hasProjectPolygon = false,
   gridViewEnabled = false,
   gridViewSummary = null,
 }) => {
@@ -337,6 +338,16 @@ export const OverviewTab = ({
   const [pptProblemAreaThresholds, setPptProblemAreaThresholds] = useState({
     rsrp: -105, rsrq: -14, sinr: 0, mos: 3.0, dl_tpt: 5, ul_tpt: 1, latency: 100, jitter: 25, packet_loss: 2
   });
+
+  // Grid view needs a saved project boundary polygon to grid over -- if the
+  // selected project changes (or loses its polygon) while "grid" is still
+  // selected, fall back to raw instead of silently sending a grid request
+  // the backend can no longer honor with a real grid.
+  useEffect(() => {
+    if (!hasProjectPolygon && pptMapViewType === "grid") {
+      setPptMapViewType("raw");
+    }
+  }, [hasProjectPolygon, pptMapViewType]);
 
   // Load custom poor thresholds from threshold settings (prioritizing PPT Report Acceptance)
   useEffect(() => {
@@ -499,9 +510,15 @@ export const OverviewTab = ({
       .map((technology) => String(technology ?? "").trim())
       .filter((technology) => technology && !/^all$/i.test(technology) && !/^l3$/i.test(technology))))
       .sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" }));
-    technologies.push("L3");
+    // L3 is only meaningful as a selectable "technology" for the Taiwan
+    // template's per-KPI diagnostic picker (see the kpi.group === "L3"
+    // handling above) -- Stracer has no KPI picker at all, so offering it
+    // there is a dead option that does nothing.
+    if (pptTemplate === "taiwan") {
+      technologies.push("L3");
+    }
     return technologies;
-  }, [reportTechnologies, plottedExportLocations]);
+  }, [reportTechnologies, plottedExportLocations, pptTemplate]);
 
   useEffect(() => {
     setPptTechnologies((current) => {
@@ -589,8 +606,6 @@ export const OverviewTab = ({
       toast.error("Select a network technology (5G, 4G, 3G or 2G), including for L3 reports.");
       return;
     }
-
-    const networkTechnologies = pptTechnologies.filter((technology) => technology !== "L3");
 
     const selectedKpiKeys = pptSelectedKpis === null
       ? availablePptKpis.map((kpi) => kpi.key)
@@ -772,10 +787,13 @@ export const OverviewTab = ({
     setPptTechnologies(selectedTechnologies.length > 0 ? selectedTechnologies : defaultTechnologies);
     setPptSelectedKpis(null);
     setPptKpiSearchText("");
-    setPptMapViewType("grid");
+    // Grid view aggregates samples into the project's own boundary grid --
+    // with no saved project polygon there is no boundary to grid over, so
+    // default (and restrict, see the KPI map view toggle below) to raw.
+    setPptMapViewType(hasProjectPolygon ? "grid" : "raw");
     setPptAggregation("median");
     setIsPptBandDialogOpen(true);
-  }, [dataFilters, isGeneratingPpt, isTaiwanUser, pptBandOptions, pptTechnologyOptions]);
+  }, [dataFilters, hasProjectPolygon, isGeneratingPpt, isTaiwanUser, pptBandOptions, pptTechnologyOptions]);
 
   const isUnknownOrEmpty = useCallback((value) => {
     if (!value) return true;
@@ -1178,9 +1196,18 @@ export const OverviewTab = ({
           <DialogHeader>
             <DialogTitle style={{ color: "#f8fafc" }}>Configure PPT report</DialogTitle>
             <DialogDescription style={{ color: "#94a3b8" }}>
-              Choose the available technologies, bands, and KPIs for the report.
+              {pptTemplate === "taiwan"
+                ? "Choose the available technologies, bands, and KPIs for the report."
+                : "Select a template and provide the filters for the PowerPoint report."}
             </DialogDescription>
           </DialogHeader>
+
+          {/* Single spacing container for every config section below -- the
+              sections are siblings with no margin of their own between them,
+              so without this wrapper they sit flush against each other
+              (visually "compressed") whenever fewer sections are shown, e.g.
+              the Stracer template's shorter form (no Band/KPI picker). */}
+          <div className="space-y-4">
 
           {pptTemplateOptions.length > 1 && <div className="space-y-2">
             <span className="text-sm font-medium text-slate-200">Template</span>
@@ -1251,7 +1278,11 @@ export const OverviewTab = ({
             )}
           </div>
 
-          {pptBandOptions.length > 0 && (
+          {/* Band filtering and the per-KPI picker are Taiwan-template-only --
+              Stracer keeps its original, simpler config (technologies +
+              grid/raw view only); it has no band-locking or KPI-selection
+              concept server-side, so this UI should not appear for it. */}
+          {pptTemplate === "taiwan" && pptBandOptions.length > 0 && (
             <div className="space-y-2">
               <label htmlFor="ppt-locked-bands" className="text-sm font-medium text-slate-200">
                 Band
@@ -1273,7 +1304,7 @@ export const OverviewTab = ({
             </div>
           )}
 
-          {pptTechnologies.length > 0 && <fieldset className="space-y-2.5">
+          {pptTemplate === "taiwan" && pptTechnologies.length > 0 && <fieldset className="space-y-2.5">
             <div className="flex flex-wrap items-center justify-between gap-1.5">
               <legend className="text-sm font-semibold text-slate-100">
                 Available KPIs ({filteredPptKpis.length})
@@ -1354,23 +1385,32 @@ export const OverviewTab = ({
           <div className="space-y-2">
             <span className="text-sm font-medium text-slate-200">KPI map view</span>
             <div className="grid grid-cols-2 gap-2">
-              {["grid", "raw"].map((viewType) => (
-                <button
-                  key={viewType}
-                  type="button"
-                  onClick={() => setPptMapViewType(viewType)}
-                  className={`rounded-md border px-3 py-2 text-sm font-medium capitalize transition ${
-                    pptMapViewType === viewType
-                      ? "border-purple-400 bg-purple-600/30 text-purple-100"
-                      : "border-slate-600 bg-slate-800 text-slate-300 hover:bg-slate-700"
-                  }`}
-                >
-                  {viewType}
-                </button>
-              ))}
+              {["grid", "raw"].map((viewType) => {
+                const disabled = viewType === "grid" && !hasProjectPolygon;
+                return (
+                  <button
+                    key={viewType}
+                    type="button"
+                    disabled={disabled}
+                    title={disabled ? "Grid view needs a saved project boundary polygon" : undefined}
+                    onClick={() => !disabled && setPptMapViewType(viewType)}
+                    className={`rounded-md border px-3 py-2 text-sm font-medium capitalize transition ${
+                      disabled
+                        ? "border-slate-700 bg-slate-800/50 text-slate-500 cursor-not-allowed"
+                        : pptMapViewType === viewType
+                        ? "border-purple-400 bg-purple-600/30 text-purple-100"
+                        : "border-slate-600 bg-slate-800 text-slate-300 hover:bg-slate-700"
+                    }`}
+                  >
+                    {viewType}
+                  </button>
+                );
+              })}
             </div>
             <p className="text-xs text-slate-400">
-              Grid view aggregates numeric KPI samples into the project grid cells. Categorical and event maps remain point-based.
+              {hasProjectPolygon
+                ? "Grid view aggregates numeric KPI samples into the project grid cells. Categorical and event maps remain point-based."
+                : "Grid view is unavailable: this project has no saved boundary polygon to grid over."}
             </p>
           </div>
 
@@ -1396,6 +1436,8 @@ export const OverviewTab = ({
               </div>
             </div>
           )}
+
+          </div>
 
           <DialogFooter className="flex justify-end gap-2">
             <button

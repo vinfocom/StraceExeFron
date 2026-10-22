@@ -1404,6 +1404,7 @@ function UnifiedDetailLogs({
   dataFilters = DEFAULT_DATA_FILTERS,
   availableTechnologies,
   reportTechnologyRawValues = {},
+  hasProjectPolygon = false,
   onFilteredDataChange,
   showSubSession = false,
   subSessionData = [],
@@ -2592,6 +2593,7 @@ function UnifiedDetailLogs({
               availableL3Kpis={availableL3Kpis}
               reportTechnologies={availableReportTechnologies}
               dataFilters={dataFilters}
+              hasProjectPolygon={hasProjectPolygon}
               gridViewEnabled={gridViewEnabled}
               gridViewSummary={gridViewSummary}
               metricLabels={metricLabels}

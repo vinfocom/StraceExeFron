@@ -8116,6 +8116,7 @@ const UnifiedMapView = () => {
             availableTechnologies={availableFilterOptions?.technologies}
             availableL3Kpis={availableFilterOptions?.macDetailFields || []}
             reportTechnologyRawValues={availableFilterOptions?.technologyRawValues}
+            hasProjectPolygon={hasExistingProjectPolygonBoundary}
             bestNetworkEnabled={bestNetworkEnabled}
             bestNetworkStats={bestNetworkStats}
             onClose={handleCloseAnalytics}
