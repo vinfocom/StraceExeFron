@@ -14,6 +14,7 @@ import {
   Square,
   SlidersHorizontal,
   Loader2,
+  Settings,
 } from "lucide-react";
 import { StatCard } from "../common/StatCard";
 import { PCI_COLOR_PALETTE } from "@/components/map/layers/MultiColorCirclesLayer";
@@ -23,6 +24,7 @@ import { mapViewApi, pptReportApi, settingApi } from "@/api/apiEndpoints";
 import ReportProgressToast from "../ReportProgressToast";
 import { useAuth } from "@/hooks/useAuth";
 import { resolveUserRegion } from "@/utils/authSession";
+import { useSettingsDialog } from "@/context/SettingsDialogContext";
 import {
   Dialog,
   DialogContent,
@@ -39,6 +41,7 @@ import {
 } from "@/utils/colorUtils";
 import { downloadKmlForLogs } from "@/utils/kmlExport";
 import { getTechnologyMetricOptions, normalizeMetricTechnology, UNIFIED_MAP_METRIC_OPTIONS } from "@/utils/technologyMetricLabels";
+import { calculateStats } from "@/utils/analyticsHelpers";
 
 const PROVIDER_VOLUME_CACHE = new Map();
 const PROVIDER_VOLUME_PENDING = new Map();
@@ -208,6 +211,20 @@ export const PROBLEM_AREA_9_KPIS = [
   { key: "packet_loss", label: "PACKET LOSS", op: ">", unit: "%", defaultCutoff: 2, placeholder: "2", aliases: ["loss"] },
 ];
 
+// Full per-technology PPT Report Acceptance document ({default, "5g", "4g",
+// "3g", "2g"} -> {rsrp, rsrq, sinr, mos, dl_tpt, ul_tpt, latency, jitter,
+// packet_loss}), for showing each KPI row's own configured threshold --
+// extractPoorCutoffFromThresholds below only keeps the flattened "default"
+// bucket, which isn't enough once a row needs its OWN technology's cutoff.
+const extractPptAcceptanceByTech = (thresholdData) => {
+  if (!thresholdData) return null;
+  let pptAcceptance = thresholdData.ppt_report_acceptance || thresholdData.ppt_report_acceptance_json;
+  if (typeof pptAcceptance === "string") {
+    try { pptAcceptance = JSON.parse(pptAcceptance); } catch { return null; }
+  }
+  return pptAcceptance && typeof pptAcceptance === "object" ? pptAcceptance : null;
+};
+
 const extractPoorCutoffFromThresholds = (thresholdData) => {
   const defaults = {
     rsrp: -105,
@@ -317,6 +334,7 @@ export const OverviewTab = ({
   gridViewSummary = null,
 }) => {
   const [searchParams] = useSearchParams();
+  const { openSettings: openSettingsDialog } = useSettingsDialog();
   const [providerVolume, setProviderVolume] = useState({});
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -324,7 +342,17 @@ export const OverviewTab = ({
   const [pptPercent, setPptPercent] = useState(null);
   const [readyPpt, setReadyPpt] = useState(null);
   const [isPptBandDialogOpen, setIsPptBandDialogOpen] = useState(false);
-  const [lockedBand, setLockedBand] = useState("all");
+  // Empty array = "all bands" (no restriction) -- the backend's
+  // parse_locked_bands() already treats both an empty list and the string
+  // "all" as "no restriction", and routes.py already accepts locked_bands
+  // as either a string or an array of strings, so sending the array as-is
+  // needs no backend change.
+  const [lockedBands, setLockedBands] = useState([]);
+  const togglePptBand = useCallback((band) => {
+    setLockedBands((current) => (
+      current.includes(band) ? current.filter((b) => b !== band) : [...current, band]
+    ));
+  }, []);
   const [pptTemplate, setPptTemplate] = useState("");
   const [pptTechnologies, setPptTechnologies] = useState([]);
   const [pptMapViewType, setPptMapViewType] = useState("grid");
@@ -349,6 +377,18 @@ export const OverviewTab = ({
     }
   }, [hasProjectPolygon, pptMapViewType]);
 
+  // Beside "Select All" in Available KPIs: toggle showing each KPI's own
+  // configured PPT Report Acceptance threshold next to it. Independent of
+  // showKpiStats below -- a configured acceptance cutoff and a computed
+  // sample statistic are two different things, so each has its own toggle
+  // rather than being shown/hidden together.
+  const [showKpiThresholds, setShowKpiThresholds] = useState(false);
+  const [pptAcceptanceByTech, setPptAcceptanceByTech] = useState(null);
+  // Toggle showing each KPI row's own Avg/Min/Max/Median (kpiStatMode)
+  // computed from its technology's raw samples.
+  const [showKpiStats, setShowKpiStats] = useState(false);
+  const [kpiStatMode, setKpiStatMode] = useState("avg");
+
   // Load custom poor thresholds from threshold settings (prioritizing PPT Report Acceptance)
   useEffect(() => {
     let active = true;
@@ -359,6 +399,7 @@ export const OverviewTab = ({
         if (data && active) {
           const cutoffs = extractPoorCutoffFromThresholds(data);
           setPptProblemAreaThresholds(cutoffs);
+          setPptAcceptanceByTech(extractPptAcceptanceByTech(data));
         }
       } catch (e) {
         console.warn("Could not load threshold settings for PPT Problem Areas:", e);
@@ -373,6 +414,19 @@ export const OverviewTab = ({
     const selectedNetworkTechnologies = new Set(
       pptTechnologies.filter((technology) => technology !== "L3").map(normalizeMetricTechnology),
     );
+    // Metric-first, technology-second -- matches the order the real PPT
+    // slides come out in (ppt_selection.py's build_kpi_requests sorts by
+    // kpi_sort_key first, technology_sort_key second), so RSRP/4G,
+    // RSRP/4G LTE Anchor, RSRP/5G sit together, then RSRQ/4G, RSRQ/4G LTE
+    // Anchor, RSRQ/5G, etc. -- instead of every metric for one technology
+    // before moving to the next technology.
+    const metricRank = new Map(UNIFIED_MAP_METRIC_OPTIONS.map((option, index) => [option.value, index]));
+    // pptTechnologyOptions (the canonical, alphabetically-sorted technology
+    // list) is declared further down in this component and isn't in scope
+    // yet here, so this ranks by the order the Technologies pills are
+    // currently selected in instead -- still stable and deterministic for a
+    // given selection, which is all this secondary sort needs.
+    const technologyRank = new Map(pptTechnologies.map((technology, index) => [technology, index]));
     const technologyOptions = pptTechnologies
       .filter((technology) => technology !== "L3")
       .flatMap((technology) => getTechnologyMetricOptions(UNIFIED_MAP_METRIC_OPTIONS, technology)
@@ -381,7 +435,12 @@ export const OverviewTab = ({
           metricKey: option.value,
           label: option.label,
           group: technology,
-        })));
+        })))
+      .sort((a, b) => {
+        const metricDiff = (metricRank.get(a.metricKey) ?? 999) - (metricRank.get(b.metricKey) ?? 999);
+        if (metricDiff !== 0) return metricDiff;
+        return (technologyRank.get(a.group) ?? 999) - (technologyRank.get(b.group) ?? 999);
+      });
     const l3Options = pptTechnologies.includes("L3")
       ? Array.from(new Set((availableL3Kpis || [])
         .map((field) => String(field ?? "").trim())
@@ -409,6 +468,58 @@ export const OverviewTab = ({
       return true;
     });
   }, [availablePptKpis, pptKpiSearchText]);
+
+  // Raw sample rows grouped by their own RAW technology value, for the
+  // per-KPI Avg/Min/Max/Median stat in the Available KPIs list -- reuses
+  // calculateStats (src/utils/analyticsHelpers.js), the same function
+  // already used for the sidebar's selected-metric stat cards, rather than
+  // writing new averaging logic. Deliberately independent of PPT's own
+  // "Grid Aggregation" setting, which only controls how the PPT backend
+  // collapses samples per map grid cell at render time -- it has no
+  // meaning here and would be the wrong thing to reuse for this.
+  // Declared here (not nearer bandsByTechnology further down) only because
+  // it only needs the `locations` prop, which is already in scope this
+  // early -- getKpiStat below needs it before that point in the component.
+  const locationsByTechnology = useMemo(() => {
+    const map = new Map();
+    (Array.isArray(locations) ? locations : []).forEach((location) => {
+      const technology = String(location?.technology ?? location?.tech ?? location?.networkType ?? "").trim();
+      if (!technology || /^all$/i.test(technology)) return;
+      if (!map.has(technology)) map.set(technology, []);
+      map.get(technology).push(location);
+    });
+    return map;
+  }, [locations]);
+
+  // A KPI row's own PPT Report Acceptance threshold, for the "show
+  // thresholds" toggle -- null when this KPI has no configured acceptance
+  // cutoff (e.g. a plain L3 diagnostic field, or settings not loaded yet).
+  const getKpiAcceptanceThreshold = useCallback((kpi) => {
+    const acceptanceKey = { dl_thpt: "dl_tpt", ul_thpt: "ul_tpt" }[kpi.metricKey] || kpi.metricKey;
+    const spec = PROBLEM_AREA_9_KPIS.find((item) => item.key === acceptanceKey);
+    if (!spec) return null;
+    const techKey = { "5G": "5g", "4G": "4g", "3G": "3g", "2G": "2g" }[kpi.group];
+    const byTech = pptAcceptanceByTech || {};
+    const bucket = (techKey && byTech[techKey]) || byTech.default || byTech;
+    const raw = bucket?.[acceptanceKey] ?? bucket?.[acceptanceKey.replace("_tpt", "")];
+    const value = raw !== undefined && raw !== null && raw !== "" && !Number.isNaN(Number(raw))
+      ? Number(raw)
+      : spec.defaultCutoff;
+    return `${spec.op} ${value}${spec.unit ? ` ${spec.unit}` : ""}`;
+  }, [pptAcceptanceByTech]);
+
+  // A KPI row's own Avg/Min/Max/Median (kpiStatMode) over its technology's
+  // raw samples -- reuses calculateStats (src/utils/analyticsHelpers.js),
+  // the same stat function already powering the sidebar's selected-metric
+  // cards, rather than new averaging logic. Independent of PPT's "Grid
+  // Aggregation" setting (a map-rendering-time parameter, not a selection
+  // summary) -- see locationsByTechnology above for why.
+  const getKpiStat = useCallback((kpi) => {
+    const fieldKey = { dl_thpt: "dl_tpt", ul_thpt: "ul_tpt" }[kpi.metricKey] || kpi.metricKey;
+    const techLocations = locationsByTechnology.get(kpi.group) || [];
+    const stats = calculateStats(techLocations, fieldKey);
+    return stats ? stats[kpiStatMode] : null;
+  }, [locationsByTechnology, kpiStatMode]);
 
   const togglePptKpi = useCallback((key) => {
     setPptSelectedKpis((current) => {
@@ -455,7 +566,7 @@ export const OverviewTab = ({
   useEffect(() => {
     if (!isTaiwanUser && pptTemplate === "taiwan") {
       setPptTemplate("");
-      setLockedBand("all");
+      setLockedBands([]);
     }
   }, [isTaiwanUser, pptTemplate]);
 
@@ -466,7 +577,44 @@ export const OverviewTab = ({
     return Array.isArray(locations) ? locations : [];
   }, [locations, mapPlotLocations]);
 
-  const pptBandOptions = useMemo(() => {
+  const sortBands = useCallback((bands) => [...bands].sort((a, b) => {
+    const numberA = Number.parseInt(a.replace(/\D/g, ""), 10);
+    const numberB = Number.parseInt(b.replace(/\D/g, ""), 10);
+    if (Number.isFinite(numberA) && Number.isFinite(numberB) && numberA !== numberB) {
+      return numberA - numberB;
+    }
+    return a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" });
+  }), []);
+
+  // Every band actually seen in the data, per RAW technology value (the same
+  // exact strings pptTechnologyOptions/pptTechnologies use, e.g. "4G",
+  // "4G(LTE-ANCHOR NSA)", "5G NSA", "5G SA") -- not a generic 4G/5G guess
+  // from band naming (B.. vs n..), since that would be wrong wherever a
+  // project mixes 3G/2G bands too.
+  //
+  // Deliberately sourced from `locations` (the full raw per-sample rows),
+  // NOT `plottedExportLocations`/`mapPlotLocations` -- mapPlotLocations is a
+  // map-rendering-decimated set (one representative point per grid cell),
+  // so a representative point's (technology, band) pairing doesn't reliably
+  // match every real sample's own pairing. That was producing wrong results
+  // (e.g. 5G NR bands n14/n77/n78 showing up for "4G"/"4G(LTE-ANCHOR NSA)"):
+  // confirmed by testing with the full raw rows instead.
+  const bandsByTechnology = useMemo(() => {
+    const map = new Map();
+    (Array.isArray(locations) ? locations : []).forEach((location) => {
+      const band = String(location?.band ?? location?.primaryBand ?? "").trim();
+      const technology = String(location?.technology ?? location?.tech ?? location?.networkType ?? "").trim();
+      if (!band || /^(all|unknown|null|undefined)$/i.test(band)) return;
+      if (!technology || /^all$/i.test(technology)) return;
+      if (!map.has(technology)) map.set(technology, new Map());
+      const bandsByKey = map.get(technology);
+      const key = band.toLowerCase();
+      if (!bandsByKey.has(key)) bandsByKey.set(key, band);
+    });
+    return map;
+  }, [locations]);
+
+  const allPptBandOptions = useMemo(() => {
     const candidates = [
       ...(Array.isArray(availableBands) ? availableBands : []),
       ...(Array.isArray(plottedExportLocations) ? plottedExportLocations : []).map(
@@ -482,21 +630,42 @@ export const OverviewTab = ({
       if (!bandsByKey.has(key)) bandsByKey.set(key, band);
     });
 
-    return Array.from(bandsByKey.values()).sort((a, b) => {
-      const numberA = Number.parseInt(a.replace(/\D/g, ""), 10);
-      const numberB = Number.parseInt(b.replace(/\D/g, ""), 10);
-      if (Number.isFinite(numberA) && Number.isFinite(numberB) && numberA !== numberB) {
-        return numberA - numberB;
-      }
-      return a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" });
+    return sortBands(Array.from(bandsByKey.values()));
+  }, [availableBands, plottedExportLocations, sortBands]);
+
+  // Only the bands actually used by the CURRENTLY SELECTED technologies --
+  // e.g. selecting just "4G" hides the n.. (5G NR) bands that were showing
+  // regardless of technology before. Falls back to every known band when no
+  // per-technology data is available yet (e.g. pptBandOptions built purely
+  // from availableBands with no matching per-location technology).
+  const pptBandOptions = useMemo(() => {
+    const selectedTechnologies = pptTechnologies.filter((technology) => technology !== "L3");
+    if (selectedTechnologies.length === 0 || bandsByTechnology.size === 0) {
+      return allPptBandOptions;
+    }
+    const bandsByKey = new Map();
+    let matchedAnyTechnology = false;
+    selectedTechnologies.forEach((technology) => {
+      const bandsForTech = bandsByTechnology.get(technology);
+      if (!bandsForTech) return;
+      matchedAnyTechnology = true;
+      bandsForTech.forEach((band, key) => {
+        if (!bandsByKey.has(key)) bandsByKey.set(key, band);
+      });
     });
-  }, [availableBands, plottedExportLocations]);
+    // No per-location technology matched any selected technology string
+    // (e.g. a mismatch between pptTechnologies and the raw location field) --
+    // fall back to the full list rather than hiding every band.
+    return matchedAnyTechnology ? sortBands(Array.from(bandsByKey.values())) : allPptBandOptions;
+  }, [pptTechnologies, bandsByTechnology, allPptBandOptions, sortBands]);
 
   useEffect(() => {
-    if (lockedBand !== "all" && !pptBandOptions.some((band) => band.toLowerCase() === lockedBand.toLowerCase())) {
-      setLockedBand("all");
-    }
-  }, [lockedBand, pptBandOptions]);
+    setLockedBands((current) => {
+      const next = current.filter((band) =>
+        pptBandOptions.some((option) => option.toLowerCase() === band.toLowerCase()));
+      return next.length === current.length ? current : next;
+    });
+  }, [pptBandOptions]);
 
   // Mirror the technology options available in the map sidebar.
   const pptTechnologyOptions = useMemo(() => {
@@ -637,7 +806,7 @@ export const OverviewTab = ({
       project_id: numericProjectId,
       country_code: region,
       user_id: Number.isFinite(numericUserId) ? numericUserId : 0,
-      locked_bands: lockedBand,
+      locked_bands: lockedBands,
       template: pptTemplate,
       technology: networkTechnologies,
       map_view_type: pptMapViewType,
@@ -768,17 +937,17 @@ export const OverviewTab = ({
       setIsGeneratingPpt(false);
       setPptPercent(null);
     }
-  }, [availablePptKpis, downloadReadyPpt, isGeneratingPpt, lockedBand, projectId, pptAggregation, pptMapViewType, pptProblemAreaKpis, pptProblemAreaThresholds, pptSelectedKpis, pptTechnologies, pptTemplate, sessionIds, user]);
+  }, [availablePptKpis, downloadReadyPpt, isGeneratingPpt, lockedBands, projectId, pptAggregation, pptMapViewType, pptProblemAreaKpis, pptProblemAreaThresholds, pptSelectedKpis, pptTechnologies, pptTemplate, sessionIds, user]);
 
   const handlePptButtonClick = useCallback(() => {
     if (isGeneratingPpt) return;
     const selectedBands = (dataFilters?.bands || [])
       .map((band) => String(band ?? "").trim())
       .filter((band) => band && !/^all$/i.test(band));
-    const availableSelectedBand = selectedBands.length === 1
-      ? pptBandOptions.find((band) => band.toLowerCase() === selectedBands[0].toLowerCase())
-      : null;
-    setLockedBand(availableSelectedBand || "all");
+    const availableSelectedBands = selectedBands
+      .map((band) => pptBandOptions.find((option) => option.toLowerCase() === band.toLowerCase()))
+      .filter(Boolean);
+    setLockedBands(availableSelectedBands);
     setPptTemplate(isTaiwanUser ? "taiwan" : "stracer");
     const selectedTechnologies = (dataFilters?.technologies || [])
       .map((technology) => String(technology ?? "").trim())
@@ -1185,7 +1354,7 @@ export const OverviewTab = ({
         <DialogContent
           title="Configure PPT report"
           style={{
-            width: "min(34rem, calc(100vw - 2rem))",
+            width: "min(46rem, calc(100vw - 2rem))",
             maxHeight: "calc(100vh - 2rem)",
             overflowY: "auto",
             background: "#0f172a",
@@ -1249,6 +1418,20 @@ export const OverviewTab = ({
                 >
                   Clear
                 </button>
+                {pptTemplate === "taiwan" && (
+                  <>
+                    <span className="text-slate-600">|</span>
+                    <button
+                      type="button"
+                      onClick={() => openSettingsDialog({ initialParam: "ppt_report_acceptance" })}
+                      title="Open PPT Report Acceptance settings"
+                      className="flex items-center gap-1 text-xs text-purple-400 hover:text-purple-300 underline"
+                    >
+                      <Settings size={12} />
+                      PPT Acceptance
+                    </button>
+                  </>
+                )}
               </div>
             </div>
             <div className="flex flex-wrap gap-2">
@@ -1284,23 +1467,53 @@ export const OverviewTab = ({
               concept server-side, so this UI should not appear for it. */}
           {pptTemplate === "taiwan" && pptBandOptions.length > 0 && (
             <div className="space-y-2">
-              <label htmlFor="ppt-locked-bands" className="text-sm font-medium text-slate-200">
-                Band
-              </label>
-              <select
-                id="ppt-locked-bands"
-                aria-label="locked_bands"
-                value={lockedBand}
-                onChange={(event) => setLockedBand(event.target.value)}
-                className="h-10 w-full rounded-md border border-slate-600 bg-slate-800 px-3 text-sm text-slate-100 outline-none focus:border-purple-400 focus:ring-2 focus:ring-purple-500/30"
-              >
-                <option value="all">All bands</option>
-                {pptBandOptions.map((band) => (
-                  <option key={band} value={band}>
-                    {band}
-                  </option>
-                ))}
-              </select>
+              <div className="flex items-center justify-between">
+                <span className="text-sm font-medium text-slate-200">
+                  Band{lockedBands.length > 0 ? ` (${lockedBands.length} selected)` : ""}
+                </span>
+                <div className="flex gap-2 text-xs">
+                  <button
+                    type="button"
+                    onClick={() => setLockedBands([...pptBandOptions])}
+                    className="text-xs text-purple-400 hover:text-purple-300 underline"
+                  >
+                    Select All
+                  </button>
+                  <span className="text-slate-600">|</span>
+                  <button
+                    type="button"
+                    onClick={() => setLockedBands([])}
+                    className="text-xs text-slate-400 hover:text-slate-300 underline"
+                  >
+                    Clear
+                  </button>
+                </div>
+              </div>
+              <div className="flex flex-wrap gap-2" role="group" aria-label="locked_bands">
+                {pptBandOptions.map((band) => {
+                  const isSelected = lockedBands.includes(band);
+                  return (
+                    <button
+                      key={band}
+                      type="button"
+                      aria-pressed={isSelected}
+                      onClick={() => togglePptBand(band)}
+                      className={`rounded-md border px-3 py-1.5 text-xs font-semibold transition ${
+                        isSelected
+                          ? "border-purple-500 bg-purple-600 text-white shadow-sm"
+                          : "border-slate-700 bg-slate-800 text-slate-300 hover:bg-slate-700"
+                      }`}
+                    >
+                      {band}
+                    </button>
+                  );
+                })}
+              </div>
+              <p className="text-xs text-slate-400">
+                {lockedBands.length === 0
+                  ? "No band selected -- all bands are included."
+                  : "Only the selected bands are included."}
+              </p>
             </div>
           )}
 
@@ -1324,8 +1537,55 @@ export const OverviewTab = ({
                 >
                   Clear
                 </button>
+                <button
+                  type="button"
+                  aria-pressed={showKpiThresholds}
+                  onClick={() => setShowKpiThresholds((current) => !current)}
+                  title="Show each KPI's configured PPT Report Acceptance threshold"
+                  className={`rounded px-2 py-0.5 text-[11px] font-medium transition border ${
+                    showKpiThresholds
+                      ? "bg-purple-600 text-white border-purple-500"
+                      : "bg-slate-800/80 text-slate-300 hover:bg-slate-700 border-slate-700"
+                  }`}
+                >
+                  Show Thresholds
+                </button>
+                <button
+                  type="button"
+                  aria-pressed={showKpiStats}
+                  onClick={() => setShowKpiStats((current) => !current)}
+                  title="Show each KPI's Avg/Min/Max/Median over its technology's raw samples"
+                  className={`rounded px-2 py-0.5 text-[11px] font-medium transition border ${
+                    showKpiStats
+                      ? "bg-sky-600 text-white border-sky-500"
+                      : "bg-slate-800/80 text-slate-300 hover:bg-slate-700 border-slate-700"
+                  }`}
+                >
+                  Show Stats
+                </button>
               </div>
             </div>
+
+            {showKpiStats && (
+              <div className="flex items-center gap-1.5">
+                <span className="text-[11px] text-slate-400">Stat:</span>
+                {["avg", "min", "max", "median"].map((mode) => (
+                  <button
+                    key={mode}
+                    type="button"
+                    aria-pressed={kpiStatMode === mode}
+                    onClick={() => setKpiStatMode(mode)}
+                    className={`rounded px-2 py-0.5 text-[11px] font-medium capitalize transition border ${
+                      kpiStatMode === mode
+                        ? "bg-purple-600 text-white border-purple-500"
+                        : "bg-slate-800/80 text-slate-300 hover:bg-slate-700 border-slate-700"
+                    }`}
+                  >
+                    {mode}
+                  </button>
+                ))}
+              </div>
+            )}
 
             <div className="space-y-2">
               <input
@@ -1348,6 +1608,8 @@ export const OverviewTab = ({
               ) : (
                 filteredPptKpis.map((kpi) => {
                   const isChecked = isPptKpiSelected(kpi.key);
+                  const threshold = showKpiThresholds ? getKpiAcceptanceThreshold(kpi) : null;
+                  const stat = showKpiStats ? getKpiStat(kpi) : null;
                   return (
                     <label
                       key={kpi.key}
@@ -1366,8 +1628,20 @@ export const OverviewTab = ({
                         />
                         <span className="font-medium">{kpi.label}</span>
                       </span>
-                      <span className="text-[10px] font-semibold tracking-wider text-slate-400 px-1.5 py-0.5 rounded bg-slate-800/90 border border-slate-700/50">
-                        {kpi.group}
+                      <span className="flex items-center gap-1.5">
+                        {stat !== null && stat !== undefined && (
+                          <span className="text-[10px] font-semibold text-sky-300 px-1.5 py-0.5 rounded bg-sky-950/40 border border-sky-800/40 capitalize">
+                            {kpiStatMode} {stat}
+                          </span>
+                        )}
+                        {threshold && (
+                          <span className="text-[10px] font-semibold text-amber-300 px-1.5 py-0.5 rounded bg-amber-950/40 border border-amber-800/40">
+                            Poor {threshold}
+                          </span>
+                        )}
+                        <span className="text-[10px] font-semibold tracking-wider text-slate-400 px-1.5 py-0.5 rounded bg-slate-800/90 border border-slate-700/50">
+                          {kpi.group}
+                        </span>
                       </span>
                     </label>
                   );

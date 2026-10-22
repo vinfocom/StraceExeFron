@@ -30,7 +30,8 @@ import {
   FileJson,
   Loader2,
   Check,
-  GripHorizontal
+  GripHorizontal,
+  Settings
 } from "lucide-react";
 import { toast } from "react-toastify";
 import { Rnd } from "react-rnd";
@@ -43,6 +44,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Checkbox } from "@/components/ui/checkbox";
+import { useSettingsDialog } from "@/context/SettingsDialogContext";
 
 import { TabButton } from "./common/TabButton";
 import { LoadingSpinner } from "./common/LoadingSpinner";
@@ -1450,6 +1452,7 @@ function UnifiedDetailLogs({
   const [pdfMapViewType, setPdfMapViewType] = useState("raw"); // "grid" | "raw" -- only meaningful when the project has a polygon (canEnableGridView)
   const [pdfAggregation, setPdfAggregation] = useState("median"); // "max" | "mean" | "min" | "median" -- how samples in a grid cell collapse to one value (Grid view only)
   const [selectedPdfTechnologies, setSelectedPdfTechnologies] = useState([]);
+  const { openSettings: openSettingsDialog } = useSettingsDialog();
 
   // Mirror the log Technology dropdown in UnifiedMapSidebar, including
   // selected values that may no longer be in the current available set.
@@ -2333,7 +2336,18 @@ function UnifiedDetailLogs({
 
               <div className="space-y-5 py-2">
                 <div>
-                  <p className="mb-2 text-sm font-medium text-slate-200">Report Type</p>
+                  <div className="mb-2 flex items-center justify-between">
+                    <p className="text-sm font-medium text-slate-200">Report Type</p>
+                    <button
+                      type="button"
+                      onClick={() => openSettingsDialog({ initialParam: "report_acceptance" })}
+                      title="Open Report Acceptance settings"
+                      className="flex items-center gap-1 text-xs text-sky-400 hover:text-sky-300 underline"
+                    >
+                      <Settings size={12} />
+                      Report Acceptance
+                    </button>
+                  </div>
                   <div className="grid grid-cols-2 gap-3">
                     {[
                       { value: "combined", label: "Combined" },
