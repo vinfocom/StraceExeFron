@@ -38,6 +38,7 @@ import {
   normalizeTechName,
   COLOR_SCHEMES,
   getLogColor,
+  resolveMacDetailMetricKey,
 } from "@/utils/colorUtils";
 import { downloadKmlForLogs } from "@/utils/kmlExport";
 import { getTechnologyMetricOptions, normalizeMetricTechnology, UNIFIED_MAP_METRIC_OPTIONS } from "@/utils/technologyMetricLabels";
@@ -222,7 +223,46 @@ const extractPptAcceptanceByTech = (thresholdData) => {
   if (typeof pptAcceptance === "string") {
     try { pptAcceptance = JSON.parse(pptAcceptance); } catch { return null; }
   }
-  return pptAcceptance && typeof pptAcceptance === "object" ? pptAcceptance : null;
+  if (!pptAcceptance || typeof pptAcceptance !== "object") pptAcceptance = {};
+
+  // The selector also lists raw L3 fields. Their cutoff comes from the saved
+  // per-technology L3 acceptance value when present, otherwise from the same
+  // configured MAC range bands used to color L3 values across the app.
+  const l3 = { ...(pptAcceptance.l3 || {}) };
+  const l3Definitions = {
+    mac_dl: { op: "<", json: "mac_dl_json" },
+    mac_ul: { op: "<", json: "mac_ul_json" },
+    mac_dl_delivered: { op: "<", json: "mac_dl_delivered_json" },
+    mac_ul_delivered: { op: "<", json: "mac_ul_delivered_json" },
+    mac_bler: { op: ">", json: "mac_bler_json" },
+    mac_bler_init: { op: ">", json: "mac_bler_init_json" },
+    mac_mcs: { op: "<", json: "mac_mcs_json" },
+    mac_retx: { op: ">", json: "mac_retx_json" },
+    mac_rb: { op: "<", json: "mac_rb_json" },
+    mac_grants: { op: "<", json: "mac_grants_json" },
+    mac_tx_power: { op: ">", json: "mac_tx_power_json" },
+    mac_modulation_pct: { op: "<", json: "mac_modulation_pct_json" },
+  };
+  const parseRanges = (raw, techKey) => {
+    if (typeof raw === "string") {
+      try { raw = JSON.parse(raw); } catch { return []; }
+    }
+    if (Array.isArray(raw)) return raw;
+    return raw?.[techKey] || raw?.default || [];
+  };
+  ["default", "5g", "4g", "3g", "2g"].forEach((techKey) => {
+    const bucket = { ...(l3[techKey] || {}) };
+    Object.entries(l3Definitions).forEach(([key, { op, json }]) => {
+      if (bucket[key] !== undefined && bucket[key] !== null && bucket[key] !== "") return;
+      const ranges = parseRanges(thresholdData[json] || thresholdData[key], techKey);
+      const poorRows = ranges.filter((row) => /ff0000|red/i.test(String(row?.color || "")) || /poor|bad/i.test(String(row?.label || "")));
+      const poor = op === "<" ? (poorRows[0] || ranges[0]) : (poorRows[poorRows.length - 1] || ranges[ranges.length - 1]);
+      const value = op === "<" ? Number(poor?.max) : Number(poor?.min);
+      if (Number.isFinite(value)) bucket[key] = value;
+    });
+    l3[techKey] = bucket;
+  });
+  return { ...pptAcceptance, l3 };
 };
 
 const extractPoorCutoffFromThresholds = (thresholdData) => {
@@ -495,6 +535,20 @@ export const OverviewTab = ({
   // thresholds" toggle -- null when this KPI has no configured acceptance
   // cutoff (e.g. a plain L3 diagnostic field, or settings not loaded yet).
   const getKpiAcceptanceThreshold = useCallback((kpi) => {
+    if (kpi.key?.startsWith("L3:")) {
+      const field = kpi.key.slice(3);
+      const metricKey = resolveMacDetailMetricKey(field);
+      if (!metricKey) return null;
+      const techKey = /^nr/i.test(field) ? "5g" : /^lte/i.test(field) ? "4g" : "default";
+      const l3 = pptAcceptanceByTech?.l3 || {};
+      // Accept both the current per-technology shape and legacy flat L3
+      // settings, so an existing saved cutoff remains visible in this list.
+      const bucket = l3[techKey] || l3.default || l3;
+      const value = bucket[metricKey] ?? bucket[field] ?? l3[metricKey] ?? l3[field];
+      if (value === undefined || value === null || value === "" || Number.isNaN(Number(value))) return null;
+      const op = ["mac_bler", "mac_bler_init", "mac_retx", "mac_tx_power"].includes(metricKey) ? ">" : "<";
+      return `${op} ${Number(value)}`;
+    }
     const acceptanceKey = { dl_thpt: "dl_tpt", ul_thpt: "ul_tpt" }[kpi.metricKey] || kpi.metricKey;
     const spec = PROBLEM_AREA_9_KPIS.find((item) => item.key === acceptanceKey);
     if (!spec) return null;

@@ -5032,7 +5032,7 @@ const UnifiedMapView = () => {
         }),
       );
     }
-    const { providers, bands, technologies, cellIds, apps, indoorOutdoor } = dataFilters;
+    const { providers, bands, technologies, cellIds, nodeIds, apps, indoorOutdoor } = dataFilters;
     if (providers?.length)
       result = result.filter((l) => {
         const providerName = getProviderDisplayName(l);
@@ -5052,6 +5052,10 @@ const UnifiedMapView = () => {
     if (cellIds?.length)
       result = result.filter((l) =>
         cellIds.includes(String(l?.cell_id ?? l?.cellId ?? l?.CellId ?? "").trim()),
+      );
+    if (nodeIds?.length)
+      result = result.filter((l) =>
+        nodeIds.includes(String(l?.node_id ?? l?.nodeId ?? l?.nodeb_id ?? l?.nodebId ?? l?.nodebid ?? l?.node_b_id ?? l?.NodeBId ?? "").trim()),
       );
     if (apps?.length)
       result = result.filter((l) => locationMatchesSelectedApps(l, apps));
@@ -5247,6 +5251,7 @@ const UnifiedMapView = () => {
     const technologies = new Set();
     const technologyRawValues = new Map();
     const cellIds = new Set();
+    const nodeIds = new Set();
     const apps = new Set();
     const macDetailFields = new Set();
     const invalidMacDetailFields = new Set();
@@ -5309,6 +5314,12 @@ const UnifiedMapView = () => {
       if (cellId && !isUnknownOption(cellId)) {
         cellIds.add(cellId);
       }
+      const nodeId = String(
+        loc?.node_id ?? loc?.nodeId ?? loc?.nodeb_id ?? loc?.nodebId ?? loc?.nodebid ?? loc?.node_b_id ?? loc?.NodeBId ?? "",
+      ).trim();
+      if (nodeId && !isUnknownOption(nodeId)) {
+        nodeIds.add(nodeId);
+      }
       splitAppNames(
         loc?.apps ??
           loc?.app ??
@@ -5340,6 +5351,12 @@ const UnifiedMapView = () => {
         [...technologyRawValues].map(([label, values]) => [label, [...values]]),
       ),
       cellIds: [...cellIds].sort((a, b) => {
+        const numA = Number(a);
+        const numB = Number(b);
+        if (Number.isFinite(numA) && Number.isFinite(numB)) return numA - numB;
+        return a.localeCompare(b);
+      }),
+      nodeIds: [...nodeIds].sort((a, b) => {
         const numA = Number(a);
         const numB = Number(b);
         if (Number.isFinite(numA) && Number.isFinite(numB)) return numA - numB;

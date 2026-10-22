@@ -54,6 +54,7 @@ export const DEFAULT_DATA_FILTERS = {
   bands: [],
   technologies: [],
   cellIds: [],
+  nodeIds: [],
   apps: [],
   indoorOutdoor: [],
   excludedMetricValue: "",

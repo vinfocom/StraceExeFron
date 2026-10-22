@@ -870,6 +870,7 @@ const UnifiedMapSidebar = ({
     bands: [],
     technologies: [],
     cellIds: [],
+    nodeIds: [],
     apps: [],
     macDetailFields: []
   });
@@ -881,6 +882,7 @@ const UnifiedMapSidebar = ({
       bands: current.bands || [],
       technologies: current.technologies || [],
       cellIds: current.cellIds || [],
+      nodeIds: current.nodeIds || [],
       apps: current.apps || [],
       macDetailFields: canonicalNetworkLogFields(current.macDetailFields),
     };
@@ -903,7 +905,7 @@ const UnifiedMapSidebar = ({
       let hasChanges = false;
       const next = { ...prev };
 
-      const keys = ['providers', 'bands', 'technologies', 'cellIds', 'apps', 'macDetailFields'];
+      const keys = ['providers', 'bands', 'technologies', 'cellIds', 'nodeIds', 'apps', 'macDetailFields'];
       keys.forEach(key => {
         const incoming = availableFilterOptions[key];
         if (Array.isArray(incoming) && incoming.length > 0) {
@@ -1165,6 +1167,7 @@ const UnifiedMapSidebar = ({
       bands: [],
       technologies: [],
       cellIds: [],
+      nodeIds: [],
       indoorOutdoor: [],
       excludedMetricValue: "",
     }));
@@ -1257,6 +1260,7 @@ const UnifiedMapSidebar = ({
       (dataFilters.bands?.length > 0 ? 1 : 0) +
       (dataFilters.technologies?.length > 0 ? 1 : 0) +
       (dataFilters.cellIds?.length > 0 ? 1 : 0) +
+      (dataFilters.nodeIds?.length > 0 ? 1 : 0) +
       (dataFilters.indoorOutdoor?.length > 0 ? 1 : 0) +
       (String(dataFilters.excludedMetricValue ?? "").trim() ? 1 : 0)
     );
@@ -4214,6 +4218,21 @@ const UnifiedMapSidebar = ({
                         }))),
                       ]}
                       placeholder="All Cell IDs"
+                      disabled={!enableDataToggle}
+                    />
+
+                    <MultiSelectRow
+                      label="Node ID"
+                      values={dataFilters?.nodeIds || []}
+                      onChange={(v) => updateDataFilter("nodeIds", v)}
+                      options={[
+                        { value: "all", label: "All Node IDs" },
+                        ...(accumulatedFilterOptions.nodeIds.map((nodeId) => ({
+                          value: nodeId,
+                          label: nodeId,
+                        }))),
+                      ]}
+                      placeholder="All Node IDs"
                       disabled={!enableDataToggle}
                     />
 

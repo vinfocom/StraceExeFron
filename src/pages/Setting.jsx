@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, memo, useRef } from 'react';
+import React, { useState, useEffect, useCallback, memo, useRef, useMemo } from 'react';
 import { toast } from 'react-toastify';
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
@@ -988,6 +988,47 @@ export const PPT_ACCEPTANCE_KPIS = [
     { key: "packet_loss", label: "Packet Loss", op: ">", unit: "%", defaultCutoff: 2, placeholder: "2", desc: "Packet loss percentage cutoff; samples above are marked as Poor." },
 ];
 
+export const PPT_ACCEPTANCE_L3_PARAMETERS = [
+    { key: "ps_app_dl_mbps", settingKey: "ps_app_dl_mbps", label: "ps_app_dl_mbps", op: "<", unit: "Mbps", defaultCutoff: 10 },
+    { key: "ps_app_ul_mbps", settingKey: "ps_app_ul_mbps", label: "ps_app_ul_mbps", op: "<", unit: "Mbps", defaultCutoff: 1 },
+    { key: "ps_delivered_dl_mbps", settingKey: "ps_delivered_dl_mbps", label: "ps_delivered_dl_mbps", op: "<", unit: "Mbps", defaultCutoff: 5 },
+    { key: "wire_dl_mbps", settingKey: "wire_dl_mbps", label: "wire_dl_mbps", op: "<", unit: "Mbps", defaultCutoff: 10 },
+    { key: "mac_dl", settingKey: "mac_dl", label: "MAC DL Throughput", op: "<", unit: "Mbps", defaultCutoff: 5 },
+    { key: "mac_ul", settingKey: "mac_ul", label: "MAC UL Throughput", op: "<", unit: "Mbps", defaultCutoff: 5 },
+    { key: "mac_dl_delivered", settingKey: "mac_dl_delivered", label: "MAC DL Delivered", op: "<", unit: "Mbps", defaultCutoff: 20 },
+    { key: "mac_ul_delivered", settingKey: "mac_ul_delivered", label: "MAC UL Delivered", op: "<", unit: "Mbps", defaultCutoff: 5 },
+    { key: "mac_bler", settingKey: "mac_bler", label: "MAC BLER", op: ">", unit: "%", defaultCutoff: 20 },
+    { key: "mac_bler_init", settingKey: "mac_bler_init", label: "MAC BLER Init", op: ">", unit: "%", defaultCutoff: 10 },
+    { key: "mac_mcs", settingKey: "mac_mcs", label: "MAC MCS", op: "<", unit: "", defaultCutoff: 9 },
+    { key: "mac_retx", settingKey: "mac_retx", label: "MAC Retx", op: ">", unit: "%", defaultCutoff: 15 },
+    { key: "mac_rb", settingKey: "mac_rb", label: "MAC Resource Blocks", op: "<", unit: "", defaultCutoff: 25 },
+    { key: "mac_grants", settingKey: "mac_grants", label: "MAC Grants / Sec", op: "<", unit: "grants/s", defaultCutoff: 100 },
+    { key: "mac_tx_power", settingKey: "mac_tx_power", label: "MAC Tx Power", op: ">", unit: "dBm", defaultCutoff: 15 },
+    { key: "mac_modulation_pct", settingKey: "mac_modulation_pct", label: "MAC Modulation %", op: "<", unit: "%", defaultCutoff: 25 },
+];
+
+const DEFAULT_PPT_L3_ACCEPTANCE = Object.fromEntries(
+    PPT_ACCEPTANCE_L3_PARAMETERS.map(({ key, defaultCutoff }) => [key, defaultCutoff]),
+);
+
+const extractL3CutoffsFromThresholds = (thresholdData) => Object.fromEntries(
+    PPT_ACCEPTANCE_TECH_TABS.map(({ key: techKey }) => [techKey, Object.fromEntries(
+        PPT_ACCEPTANCE_L3_PARAMETERS.map((metric) => {
+            const rows = thresholdData?.[metric.settingKey]?.[techKey] || thresholdData?.[metric.settingKey]?.default || [];
+            const poorRows = rows.filter((row) => {
+                const color = String(row.color || "").toLowerCase();
+                const label = String(row.label || "").toLowerCase();
+                return color === "#ff0000" || color === "#d50000" || /poor|bad/.test(label);
+            });
+            const poorRow = metric.op === "<"
+                ? (poorRows[0] || rows[0])
+                : (poorRows[poorRows.length - 1] || rows[rows.length - 1]);
+            const value = metric.op === "<" ? Number(poorRow?.max) : Number(poorRow?.min);
+            return [metric.key, Number.isFinite(value) ? value : metric.defaultCutoff];
+        }),
+    )]),
+);
+
 export const PPT_ACCEPTANCE_TECH_TABS = [
     { key: "default", label: "Default (All)" },
     { key: "5g", label: "5G" },
@@ -996,13 +1037,26 @@ export const PPT_ACCEPTANCE_TECH_TABS = [
     { key: "2g", label: "2G" },
 ];
 
-const PptReportAcceptanceForm = memo(({ value, setValue, onClose }) => {
+const PPT_ACCEPTANCE_VIEW_TABS = [
+    ...PPT_ACCEPTANCE_TECH_TABS,
+    { key: "l3", label: "L3" },
+];
+
+const PptReportAcceptanceForm = memo(({ value, setValue, onClose, l3Defaults }) => {
     const [activeTech, setActiveTech] = useState("default");
     const [copiedNotification, setCopiedNotification] = useState(false);
+    const defaultL3Values = useMemo(
+        () => Object.fromEntries(PPT_ACCEPTANCE_TECH_TABS.map(({ key }) => [
+            key,
+            { ...DEFAULT_PPT_L3_ACCEPTANCE, ...(l3Defaults?.[key] || {}) },
+        ])),
+        [l3Defaults],
+    );
 
     const buildState = useCallback((incoming) => {
         const raw = incoming && typeof incoming === "object" && !Array.isArray(incoming) ? incoming : {};
         const state = {};
+        state.l3 = Object.fromEntries(PPT_ACCEPTANCE_TECH_TABS.map(({ key }) => [key, { ...(defaultL3Values[key] || {}) }]));
         PPT_ACCEPTANCE_TECH_TABS.forEach(t => {
             state[t.key] = { ...DEFAULT_PPT_ACCEPTANCE };
         });
@@ -1028,9 +1082,21 @@ const PptReportAcceptanceForm = memo(({ value, setValue, onClose }) => {
             }
         });
 
+        if (raw.l3 && typeof raw.l3 === "object" && !Array.isArray(raw.l3)) {
+            PPT_ACCEPTANCE_TECH_TABS.forEach(({ key: techKey }) => {
+                const bucket = raw.l3[techKey];
+                if (bucket && typeof bucket === "object") {
+                    PPT_ACCEPTANCE_L3_PARAMETERS.forEach(metric => {
+                        const value = bucket[metric.key];
+                        if (value !== undefined && value !== null && value !== "") state.l3[techKey][metric.key] = String(value);
+                    });
+                }
+            });
+        }
+
         Object.assign(state, state.default);
         return state;
-    }, []);
+    }, [defaultL3Values]);
 
     const [formState, setFormState] = useState(() => buildState(value));
 
@@ -1038,7 +1104,14 @@ const PptReportAcceptanceForm = memo(({ value, setValue, onClose }) => {
         setFormState(buildState(value));
     }, [value, buildState]);
 
+    const [activeL3Tech, setActiveL3Tech] = useState("default");
     const handleKpiChange = useCallback((kpiKey, valStr) => {
+        if (activeTech === "l3") {
+            const next = { ...formState, l3: { ...(formState.l3 || {}), [activeL3Tech]: { ...(formState.l3?.[activeL3Tech] || {}), [kpiKey]: valStr } } };
+            setFormState(next);
+            setValue(next);
+            return;
+        }
         const currentTechMap = { ...(formState[activeTech] || DEFAULT_PPT_ACCEPTANCE) };
         currentTechMap[kpiKey] = valStr;
 
@@ -1053,10 +1126,15 @@ const PptReportAcceptanceForm = memo(({ value, setValue, onClose }) => {
 
         setFormState(next);
         setValue(next);
-    }, [activeTech, formState, setValue]);
+    }, [activeTech, activeL3Tech, formState, setValue]);
 
     const handleResetDefaults = useCallback(() => {
         setFormState(prev => {
+            if (activeTech === "l3") {
+                const next = { ...prev, l3: { ...(prev.l3 || {}), [activeL3Tech]: { ...(defaultL3Values[activeL3Tech] || {}) } } };
+                setValue(next);
+                return next;
+            }
             const next = {
                 ...prev,
                 [activeTech]: { ...DEFAULT_PPT_ACCEPTANCE },
@@ -1068,7 +1146,7 @@ const PptReportAcceptanceForm = memo(({ value, setValue, onClose }) => {
             return next;
         });
         toast.info(`Reset ${activeTech.toUpperCase()} cutoffs to default values.`);
-    }, [activeTech, setValue]);
+    }, [activeTech, activeL3Tech, defaultL3Values, setValue]);
 
     const handleApplyDefaultToAll = useCallback(() => {
         setFormState(prev => {
@@ -1086,7 +1164,10 @@ const PptReportAcceptanceForm = memo(({ value, setValue, onClose }) => {
         toast.success("Applied Default threshold cutoffs across all technologies.");
     }, [setValue]);
 
-    const currentValues = formState[activeTech] || DEFAULT_PPT_ACCEPTANCE;
+    const currentValues = activeTech === "l3"
+        ? (formState.l3?.[activeL3Tech] || defaultL3Values[activeL3Tech] || {})
+        : (formState[activeTech] || DEFAULT_PPT_ACCEPTANCE);
+    const activeMetrics = activeTech === "l3" ? PPT_ACCEPTANCE_L3_PARAMETERS : PPT_ACCEPTANCE_KPIS;
 
     return (
         <div className="mt-5 p-5 border border-slate-700 rounded-2xl bg-slate-950 shadow-lg">
@@ -1096,7 +1177,7 @@ const PptReportAcceptanceForm = memo(({ value, setValue, onClose }) => {
                     
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
-                    <Button
+                    {activeTech !== "l3" && <Button
                         type="button"
                         variant="outline"
                         size="sm"
@@ -1106,13 +1187,13 @@ const PptReportAcceptanceForm = memo(({ value, setValue, onClose }) => {
                     >
                         {copiedNotification ? <Check className="h-3.5 w-3.5 text-emerald-400" /> : <Copy className="h-3.5 w-3.5" />}
                         {copiedNotification ? "Applied to All" : "Apply Default to All"}
-                    </Button>
+                    </Button>}
                     <Button
                         type="button"
                         variant="outline"
                         size="sm"
                         onClick={handleResetDefaults}
-                        title="Reset this technology to default values"
+                        title="Reset the current tab to its configured default values"
                         className="border-slate-500 bg-slate-800 hover:bg-slate-700 text-slate-100 text-xs rounded-lg flex items-center gap-1.5"
                     >
                         <RotateCcw className="h-3.5 w-3.5" />
@@ -1130,7 +1211,7 @@ const PptReportAcceptanceForm = memo(({ value, setValue, onClose }) => {
             </div>
 
             <div className="flex flex-wrap gap-2 mb-4">
-                {PPT_ACCEPTANCE_TECH_TABS.map(tab => (
+                {PPT_ACCEPTANCE_VIEW_TABS.map(tab => (
                     <Button
                         key={tab.key}
                         type="button"
@@ -1146,7 +1227,15 @@ const PptReportAcceptanceForm = memo(({ value, setValue, onClose }) => {
             </div>
 
             <div className="max-h-[34rem] overflow-y-auto rounded-xl border border-slate-800">
-                {PPT_ACCEPTANCE_KPIS.map(kpi => {
+                {activeTech === "l3" && (
+                    <>
+                        <p className="border-b border-slate-800 bg-slate-900/70 px-4 py-3 text-xs text-slate-300">L3 parameters and poor cutoffs are listed by field name. Values can be adjusted for each technology.</p>
+                        <div className="flex flex-wrap gap-2 border-b border-slate-800 bg-slate-900/40 p-3">
+                            {PPT_ACCEPTANCE_TECH_TABS.map(tab => <Button key={`l3-${tab.key}`} type="button" size="sm" variant={activeL3Tech === tab.key ? "default" : "outline"} onClick={() => setActiveL3Tech(tab.key)}>{tab.label}</Button>)}
+                        </div>
+                    </>
+                )}
+                {activeMetrics.map(kpi => {
                     const currentVal = currentValues[kpi.key] ?? "";
                     return (
                         <div
@@ -1872,6 +1961,10 @@ const SettingsPage = ({ onSaveSuccess, initialParam = null }) => {
         initialParam && (initialParam in PARAMETERS || initialParam in SPECIAL_FIELDS) ? initialParam : null
     );
     const fileInputRef = useRef(null);
+    const l3AcceptanceDefaults = useMemo(
+        () => extractL3CutoffsFromThresholds(thresholds),
+        [thresholds],
+    );
 
     const allParameters = { ...PARAMETERS, ...SPECIAL_FIELDS };
 
@@ -2147,6 +2240,7 @@ const SettingsPage = ({ onSaveSuccess, initialParam = null }) => {
                                         value={thresholds.ppt_report_acceptance}
                                         setValue={val => updateParam("ppt_report_acceptance", val)}
                                         onClose={handleClose}
+                                        l3Defaults={l3AcceptanceDefaults}
                                     />
                                 )}
 
@@ -2196,7 +2290,7 @@ const SettingsPage = ({ onSaveSuccess, initialParam = null }) => {
                                                             >
                                                                 <div className="text-xs text-slate-400">{name}</div>
                                                                 <div className="text-lg font-bold text-white">
-                                                                    9 Cutoffs
+                                                                    9 KPI + {PPT_ACCEPTANCE_L3_PARAMETERS.length} L3
                                                                 </div>
                                                                 <div className="text-[11px] text-slate-400 mt-1">
                                                                     DL &lt; {defaultDl}M · RSRP &lt; {defaultRsrp} dBm
