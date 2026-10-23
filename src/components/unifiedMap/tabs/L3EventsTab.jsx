@@ -502,7 +502,7 @@ function DiagnosticApiOverview({ summary, timeline = [] }) {
         { parameter: "VoLTE detected", result: detectedServices.hasVolte ? "Yes" : "No" },
         { parameter: "VoLTE text rows", result: String(detectedServices.volteTextRows) },
         { parameter: "VoLTE network rows", result: String(detectedServices.volteNetworkRows) },
-        { parameter: "VoLTE call -1 rows", result: String(detectedServices.volteCallMinusOneRows) },
+        { parameter: "VoLTE call rows", result: String(detectedServices.volteCallMinusOneRows) },
         { parameter: "VoLTE active rows", result: String(detectedServices.volteCallActiveRows) },
         { parameter: "VoLTE blank rows", result: String(detectedServices.volteCallBlankRows) },
         { parameter: "VoNR detected", result: detectedServices.hasVonr ? "Yes" : "No" },

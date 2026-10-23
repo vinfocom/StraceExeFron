@@ -163,7 +163,7 @@ const getLegendCategoryKeyFromLog = (log, colorBy, macDetailField) => {
 
   if (key === "mac_detail") {
     if (!macDetailField) return "Unknown";
-    const raw = log?.extra_fields?.[macDetailField];
+    const raw = getMacDetailValueFromLog(log, macDetailField);
     const value = String(raw ?? "").trim();
     return value || "Unknown";
   }
@@ -228,6 +228,8 @@ const matchesPrimaryLegendFilter = (log, legendFilter) => {
     } else if (legendFilter.key === 'pci') {
       const pci = Number.parseInt(log.pci ?? log.PCI ?? log.best_pci, 10);
       key = Number.isFinite(pci) ? String(pci) : "Unknown";
+    } else if (legendFilter.key === 'mac_detail') {
+      key = String(getMacDetailValueFromLog(log, legendFilter.metric) ?? "").trim() || "Unknown";
     }
 
     return String(key) === String(legendFilter.value);
@@ -292,6 +294,8 @@ const matchesGridCellLegendFilter = (cell, legendFilter) => {
     } else if (key === "pci") {
       const pci = Number.parseInt(cell.bestByColor?.name, 10);
       value = Number.isFinite(pci) ? String(pci) : "Unknown";
+    } else if (key === "mac_detail") {
+      value = cell.bestByColor?.name || "Unknown";
     }
     return String(value) === String(legendFilter.value);
   }

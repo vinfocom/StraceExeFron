@@ -4,7 +4,9 @@
 // categorical/hash coloring. Fields with no match here (dl_mod, nr_serving,
 // nr_dl_pci, nr_dl_arfcn, ...) stay categorical.
 export const resolveMacDetailMetricKey = (fieldName) => {
-  const name = String(fieldName || "").trim().toLowerCase();
+  const path = String(fieldName || "").trim().toLowerCase();
+  const leaf = path.split(".").pop()?.replace(/\[\d+\]$/, "") || "";
+  const name = leaf.replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
   if (!name) return null;
 
   // L3 signal fields use the standard signal KPI ranges. NR fields use the
@@ -20,6 +22,9 @@ export const resolveMacDetailMetricKey = (fieldName) => {
     return null;
   }
 
+  if (name === "dl_tpt" || name === "dl_thpt" || name === "dl_rpt") return "dl_thpt";
+  if (name === "ul_tpt" || name === "ul_thpt" || name === "ul_rpt") return "ul_thpt";
+
   // Initial BLER (pre-retransmission) must be checked before the generic
   // "bler" match since its name is a superset ("..._bler_init").
   if (name.includes("bler_init")) return "mac_bler_init";
@@ -31,7 +36,7 @@ export const resolveMacDetailMetricKey = (fieldName) => {
   if (name.endsWith("pct") && (name.includes("qpsk") || name.includes("qam"))) {
     return "mac_modulation_pct";
   }
-  if (/(^|_)(tx_power|transmit_power)(_|$)/.test(name)) return "mac_tx_power";
+  if (name === "pusch_tx" || /(^|_)(tx_power|transmit_power)(_|$)/.test(name)) return "mac_tx_power";
 
   return null;
 };
@@ -41,7 +46,7 @@ export const getMacDetailThresholds = (thresholds, fieldName) => {
   if (!metricKey) return [];
 
   const name = String(fieldName || "").trim().toLowerCase();
-  const isNrField = name.includes("_nr") || name.startsWith("nr_");
+  const isNrField = /(^|[._\s])nr(?:[_\s.]|$)/.test(name) || name.includes("_nr");
   const technologyBucket = isNrField ? "5g" : "default";
   const bucketedRanges = thresholds?.__bucketed?.[metricKey];
   const configuredRanges = bucketedRanges?.[technologyBucket];

@@ -492,7 +492,12 @@ export const resolveMetricConfig = (key) => {
 // against core metrics (e.g. nr_dl_pci must not become the top-level pci).
 export const getMacDetailValueFromLog = (log, field) => {
   if (!log?.extra_fields || typeof field !== "string" || !field) return null;
-  const value = log.extra_fields[field];
+  const exact = log.extra_fields[field];
+  const value = exact !== undefined
+    ? exact
+    : Object.entries(log.extra_fields).find(([key]) =>
+        key.trim().toLocaleLowerCase() === field.trim().toLocaleLowerCase(),
+      )?.[1];
   return value === undefined || value === null || value === "" ? null : value;
 };
 
@@ -511,6 +516,15 @@ export const getMacDetailFieldKind = (field, resolveBucketKey, sampleValue) => {
 
 export const getMetricValueFromLog = (log, metric) => {
   if (!log) return NaN;
+
+  // In L3 mode the selected field can be a flattened nested extra_json path.
+  // Resolve that exact field before the generic metric config (which may fall
+  // back to a core KPI for an unfamiliar name).
+  const extraValue = getMacDetailValueFromLog(log, String(metric ?? ""));
+  if (extraValue !== null) {
+    const parsedExtraValue = Number.parseFloat(extraValue);
+    if (Number.isFinite(parsedExtraValue)) return parsedExtraValue;
+  }
 
   const config = getMetricConfig(metric);
   if (!config?.fields) return NaN;

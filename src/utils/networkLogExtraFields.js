@@ -12,15 +12,26 @@ const aliases = new Map([
 
 const isObject = value => value !== null && typeof value === 'object' && !Array.isArray(value);
 const missing = value => value === null || value === undefined || (typeof value === 'string' && !value.trim());
+const HIDDEN_EXTRA_FIELD_KEYS = new Set([
+  'ps', 'ps_data', 'cs', 'cs_data', 'sub_session_detail', 'sub_session_details',
+  'ca_cc', 'ca_cc_count', 'altitude',
+]);
 
 export const canonicalNetworkLogField = field => {
   const name = String(field ?? '').trim();
   return aliases.get(name.toLowerCase()) || name;
 };
 
-export const canonicalNetworkLogFields = fields => [...new Set(
-  (fields || []).filter(field => typeof field === 'string' && field.trim()).map(canonicalNetworkLogField),
-)];
+export const canonicalNetworkLogFields = fields => {
+  const byIdentity = new Map();
+  for (const field of fields || []) {
+    if (typeof field !== 'string' || !field.trim()) continue;
+    const canonical = canonicalNetworkLogField(field);
+    const identity = canonical.toLowerCase();
+    if (!byIdentity.has(identity)) byIdentity.set(identity, canonical);
+  }
+  return [...byIdentity.values()];
+};
 
 // Used for both API rows and saved browser snapshots. Keep raw extra_json intact.
 export const parseNetworkLogExtraFields = raw => {
@@ -50,7 +61,30 @@ export const parseNetworkLogExtraFields = raw => {
     const name = canonicalNetworkLogField(key);
     if (missing(result.get(name))) result.set(name, value);
   }
-  return Object.fromEntries(result);
+  const flattened = new Map();
+  const visit = (value, path = '') => {
+    if (isObject(value)) {
+      for (const [key, child] of Object.entries(value)) {
+        const normalizedKey = key.trim().toLowerCase();
+        if (HIDDEN_EXTRA_FIELD_KEYS.has(normalizedKey)) continue;
+        const nextPath = normalizedKey === 'network_log_fields'
+          ? path
+          : path ? `${path}.${key}` : key;
+        visit(child, nextPath);
+      }
+      return;
+    }
+    if (Array.isArray(value)) {
+      value.forEach((child, index) => visit(child, `${path}[${index}]`));
+      return;
+    }
+    if (path) flattened.set(path, value);
+  };
+
+  for (const [key, value] of result) {
+    if (!HIDDEN_EXTRA_FIELD_KEYS.has(key.trim().toLowerCase())) visit(value, key);
+  }
+  return Object.fromEntries(flattened);
 };
 
 export const normalizeNetworkLogSampleExtras = sample => {
