@@ -14,6 +14,7 @@ import {
   getEarfcnColor,
   getMetricConfig,
   getMetricValueFromLog,
+  getMacDetailValueFromLog,
 } from "@/utils/metrics";
 import {
   normalizeProviderName,
@@ -183,7 +184,10 @@ const getLegendFilterSignature = (filter) => {
 
 const canCombineLegendFilters = (a, b) => {
   if (!a || !b || a.type !== b.type) return false;
-  if (a.type === "category") return String(a.key ?? "") === String(b.key ?? "");
+  if (a.type === "category") {
+    return String(a.key ?? "") === String(b.key ?? "") &&
+      (String(a.key ?? "") !== "mac_detail" || String(a.metric ?? "") === String(b.metric ?? ""));
+  }
   if (a.type === "metric") return String(a.metric ?? "") === String(b.metric ?? "");
   return true;
 };
@@ -319,7 +323,7 @@ const getNormalizedKey = (log, colorBy, scheme, macDetailField) => {
     }
     case "mac_detail": {
       if (!macDetailField) return "Unknown";
-      const raw = log?.extra_fields?.[macDetailField];
+      const raw = getMacDetailValueFromLog(log, macDetailField);
       const value = String(raw ?? "").trim();
       return value || "Unknown";
     }
@@ -365,7 +369,12 @@ const ColorSchemeLegend = ({ colorBy, logs, activeFilter, onFilterChange, macDet
   const handleRowClick = (key) => {
     toggleLegendFilter(
       activeFilter,
-      { type: "category", value: key, key: colorBy },
+      {
+        type: "category",
+        value: key,
+        key: colorBy,
+        ...(colorBy === "mac_detail" ? { metric: macDetailField } : {}),
+      },
       onFilterChange,
     );
   };
@@ -408,6 +417,7 @@ const ColorSchemeLegend = ({ colorBy, logs, activeFilter, onFilterChange, macDet
             type: "category",
             value: key,
             key: colorBy,
+            ...(colorBy === "mac_detail" ? { metric: macDetailField } : {}),
           });
           const isDimmed = getLegendFilterItems(activeFilter).length > 0 && !isActive;
           const isPaletteOpen = openColorKey === key;

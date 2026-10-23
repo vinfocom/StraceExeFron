@@ -358,7 +358,10 @@ const SITE_CLUSTER_COLOR_PATTERN =
 
 // extra_json fields that should never appear as selectable "MAC Detail" fields
 // in the Color By / KPI Filters field dropdown.
-const HIDDEN_MAC_DETAIL_FIELDS = new Set(["ps_data","ca_cc","ca_cc_count","cs","altitude"]);
+const HIDDEN_MAC_DETAIL_FIELDS = new Set([
+  "ps", "ps_data", "cs", "cs_data", "sub_session_detail", "sub_session_details",
+  "ca_cc", "ca_cc_count", "altitude",
+]);
 
 const SITE_OPERATOR_COLOR_PREFIX = "operator:";
 
@@ -632,6 +635,8 @@ const matchesUnifiedLegendFilter = (log, legendFilter) => {
     } else if (legendFilter.key === "pci") {
       const pci = Number.parseInt(log?.pci ?? log?.PCI ?? log?.best_pci, 10);
       key = Number.isFinite(pci) ? String(pci) : "Unknown";
+    } else if (legendFilter.key === "mac_detail") {
+      key = String(getMacDetailValueFromLog(log, legendFilter.metric) ?? "").trim() || "Unknown";
     }
 
     return String(key) === String(legendFilter.value);
