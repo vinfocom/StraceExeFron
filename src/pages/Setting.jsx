@@ -1088,7 +1088,9 @@ const PptReportAcceptanceForm = memo(({ value, setValue, onClose, l3Defaults }) 
                 if (bucket && typeof bucket === "object") {
                     PPT_ACCEPTANCE_L3_PARAMETERS.forEach(metric => {
                         const value = bucket[metric.key];
-                        if (value !== undefined && value !== null && value !== "") state.l3[techKey][metric.key] = String(value);
+                        // Preserve an empty draft while the user replaces a cutoff.
+                        // Replacing it with the default here prevents Backspace/Delete.
+                        if (value !== undefined && value !== null) state.l3[techKey][metric.key] = String(value);
                     });
                 }
             });
@@ -1150,19 +1152,24 @@ const PptReportAcceptanceForm = memo(({ value, setValue, onClose, l3Defaults }) 
 
     const handleApplyDefaultToAll = useCallback(() => {
         setFormState(prev => {
-            const defValues = { ...(prev.default || DEFAULT_PPT_ACCEPTANCE) };
             const next = { ...prev };
-            PPT_ACCEPTANCE_TECH_TABS.forEach(t => {
-                next[t.key] = { ...defValues };
-            });
-            Object.assign(next, defValues);
+            if (activeTech === "l3") {
+                const defValues = { ...(prev.l3?.default || DEFAULT_PPT_L3_ACCEPTANCE) };
+                next.l3 = Object.fromEntries(PPT_ACCEPTANCE_TECH_TABS.map(t => [t.key, { ...defValues }]));
+            } else {
+                const defValues = { ...(prev.default || DEFAULT_PPT_ACCEPTANCE) };
+                PPT_ACCEPTANCE_TECH_TABS.forEach(t => {
+                    next[t.key] = { ...defValues };
+                });
+                Object.assign(next, defValues);
+            }
             setValue(next);
             return next;
         });
         setCopiedNotification(true);
         setTimeout(() => setCopiedNotification(false), 2500);
         toast.success("Applied Default threshold cutoffs across all technologies.");
-    }, [setValue]);
+    }, [activeTech, setValue]);
 
     const currentValues = activeTech === "l3"
         ? (formState.l3?.[activeL3Tech] || defaultL3Values[activeL3Tech] || {})
@@ -1177,7 +1184,7 @@ const PptReportAcceptanceForm = memo(({ value, setValue, onClose, l3Defaults }) 
                     
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
-                    {activeTech !== "l3" && <Button
+                    <Button
                         type="button"
                         variant="outline"
                         size="sm"
@@ -1187,7 +1194,7 @@ const PptReportAcceptanceForm = memo(({ value, setValue, onClose, l3Defaults }) 
                     >
                         {copiedNotification ? <Check className="h-3.5 w-3.5 text-emerald-400" /> : <Copy className="h-3.5 w-3.5" />}
                         {copiedNotification ? "Applied to All" : "Apply Default to All"}
-                    </Button>}
+                    </Button>
                     <Button
                         type="button"
                         variant="outline"

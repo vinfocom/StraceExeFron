@@ -254,6 +254,11 @@ const extractPptAcceptanceByTech = (thresholdData) => {
     const bucket = { ...(l3[techKey] || {}) };
     Object.entries(l3Definitions).forEach(([key, { op, json }]) => {
       if (bucket[key] !== undefined && bucket[key] !== null && bucket[key] !== "") return;
+      const savedDefault = pptAcceptance.l3?.default?.[key] ?? pptAcceptance.l3?.[key];
+      if (savedDefault !== undefined && savedDefault !== null && savedDefault !== "") {
+        bucket[key] = savedDefault;
+        return;
+      }
       const ranges = parseRanges(thresholdData[json] || thresholdData[key], techKey);
       const poorRows = ranges.filter((row) => /ff0000|red/i.test(String(row?.color || "")) || /poor|bad/i.test(String(row?.label || "")));
       const poor = op === "<" ? (poorRows[0] || ranges[0]) : (poorRows[poorRows.length - 1] || ranges[ranges.length - 1]);
@@ -446,7 +451,11 @@ export const OverviewTab = ({
       }
     };
     fetchThresholds();
-    return () => { active = false; };
+    window.addEventListener("thresholds:updated", fetchThresholds);
+    return () => {
+      active = false;
+      window.removeEventListener("thresholds:updated", fetchThresholds);
+    };
   }, []);
 
   // ─── Dynamic Technology-Wise KPI Options ───────────────────────────
@@ -537,14 +546,15 @@ export const OverviewTab = ({
   const getKpiAcceptanceThreshold = useCallback((kpi) => {
     if (kpi.key?.startsWith("L3:")) {
       const field = kpi.key.slice(3);
-      const metricKey = resolveMacDetailMetricKey(field);
-      if (!metricKey) return null;
+      const metricKey = resolveMacDetailMetricKey(field)
+        || (["pusch_tx", "pusch_tx_measured"].includes(field) ? "mac_tx_power" : null);
       const techKey = /^nr/i.test(field) ? "5g" : /^lte/i.test(field) ? "4g" : "default";
       const l3 = pptAcceptanceByTech?.l3 || {};
-      // Accept both the current per-technology shape and legacy flat L3
-      // settings, so an existing saved cutoff remains visible in this list.
-      const bucket = l3[techKey] || l3.default || l3;
-      const value = bucket[metricKey] ?? bucket[field] ?? l3[metricKey] ?? l3[field];
+      const bucket = l3[techKey] || {};
+      const defaults = l3.default || {};
+      // Exact field cutoffs take priority over generic MAC cutoffs.
+      const value = bucket[field] ?? bucket[metricKey]
+        ?? defaults[field] ?? defaults[metricKey] ?? l3[field] ?? l3[metricKey];
       if (value === undefined || value === null || value === "" || Number.isNaN(Number(value))) return null;
       const op = ["mac_bler", "mac_bler_init", "mac_retx", "mac_tx_power"].includes(metricKey) ? ">" : "<";
       return `${op} ${Number(value)}`;
