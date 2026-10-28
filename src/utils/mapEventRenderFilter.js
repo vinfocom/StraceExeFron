@@ -1,3 +1,5 @@
+import { isWifiNetworkLog } from "./networkLogType.js";
+
 const FIELD_KEYS = [
   "event_name",
   "eventName",
@@ -82,6 +84,6 @@ export function getMapRenderEventType(log = {}) {
 
 export function shouldRenderLogOnMap(log = {}) {
   if (log?.is_generated_log) return true;
-  if (log?.is_wifi === true) return true;
+  if (isWifiNetworkLog(log)) return true;
   return Boolean(getMapRenderEventType(log));
 }

@@ -89,6 +89,7 @@ import {
 } from "@/utils/colorUtils";
 import { PolygonChecker as FastPolygonChecker } from "@/utils/polygonUtils";
 import { getMetricValueFromLog } from "@/utils/metrics";
+import { getNetworkLogType, isWifiNetworkLog } from "@/utils/networkLogType";
 import { shouldRenderLogOnMap } from "@/utils/mapEventRenderFilter";
 import {
   buildOrderedDriveLogs,
@@ -529,13 +530,7 @@ const readLogSessionKey = (loc) => {
 };
 
 const isWifiLogRow = (row) => {
-  const type = String(
-    row?.connection_type ?? row?.connectionType ?? row?.log_type ?? row?.type ?? "",
-  ).trim().toLowerCase();
-  if (type === "wifi" || type === "wi-fi" || row?.is_wifi === true) return true;
-
-  const primaryInfo = String(row?.primary_cell_info_1 ?? row?.primaryCellInfo1 ?? "");
-  return primaryInfo.includes("SSID:") || primaryInfo.includes("BSSID:");
+  return isWifiNetworkLog(row);
 };
 
 const cleanWifiProviderName = (value) => {
@@ -635,6 +630,8 @@ const matchesUnifiedLegendFilter = (log, legendFilter) => {
     } else if (legendFilter.key === "pci") {
       const pci = Number.parseInt(log?.pci ?? log?.PCI ?? log?.best_pci, 10);
       key = Number.isFinite(pci) ? String(pci) : "Unknown";
+    } else if (legendFilter.key === "wifi_channel") {
+      key = String(log?.wifi_channel ?? log?.wifiChannel ?? "").trim() || "Unknown";
     } else if (legendFilter.key === "mac_detail") {
       key = String(getMacDetailValueFromLog(log, legendFilter.metric) ?? "").trim() || "Unknown";
     }
@@ -5260,9 +5257,34 @@ const UnifiedMapView = () => {
     const apps = new Set();
     const macDetailFields = new Set();
     const invalidMacDetailFields = new Set();
+    const wifiMetricKeys = new Set();
+    let wifiRowCount = 0;
+    let cellularRowCount = 0;
+    const wifiMetricFields = {
+      rsrp: ["wifi_rssi_dbm", "wifiRssiDbm", "wifi_rssi", "rssi", "signal_value", "level"],
+      dl_thpt: ["dl_tpt", "dl_thpt", "dl_rpt"],
+      ul_thpt: ["ul_tpt", "ul_thpt", "ul_rpt"],
+      wifi_frequency: ["wifi_frequency", "wifi_frequency_mhz", "wifiFrequencyMhz"],
+      wifi_channel: ["wifi_channel", "wifiChannel", "channel", "channel_number"],
+    };
 
     // Keep log technology choices available regardless of active map filters.
     (locations || []).forEach((loc) => {
+      const logType = getNetworkLogType(loc);
+      if (logType === "wifi") {
+        wifiRowCount += 1;
+        Object.entries(wifiMetricFields).forEach(([metricKey, fieldNames]) => {
+          if (fieldNames.some((field) => {
+            const value = loc?.[field];
+            return value !== null && value !== undefined && value !== "" && Number.isFinite(Number(value));
+          })) {
+            wifiMetricKeys.add(metricKey);
+          }
+        });
+      } else if (logType === "cellular") {
+        cellularRowCount += 1;
+      }
+
       const rawTechnology = String(
         loc?.technology ?? loc?.networkType ?? loc?.network ?? "",
       ).trim();
@@ -5355,6 +5377,14 @@ const UnifiedMapView = () => {
       technologyRawValues: Object.fromEntries(
         [...technologyRawValues].map(([label, values]) => [label, [...values]]),
       ),
+      networkMode: wifiRowCount > 0 && cellularRowCount === 0
+        ? "wifi"
+        : cellularRowCount > 0 && wifiRowCount === 0
+          ? "cellular"
+          : wifiRowCount > 0 && cellularRowCount > 0
+            ? "mixed"
+            : "unknown",
+      wifiMetricKeys: [...wifiMetricKeys],
       cellIds: [...cellIds].sort((a, b) => {
         const numA = Number(a);
         const numB = Number(b);

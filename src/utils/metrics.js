@@ -1,5 +1,6 @@
 import { resolveMacDetailMetricKey } from "@/utils/colorUtils";
 import { getLogTechnology, getTechnologyMetricValue, is2GTechnology } from "./technologyMetricLabels.js";
+import { isWifiNetworkLog } from "./networkLogType.js";
 
 export const PCI_COLOR_PALETTE = [
   "#FF6B6B", "#4ECDC4", "#45B7D1", "#FFA07A", "#98D8C8",
@@ -327,6 +328,36 @@ export const METRIC_CONFIG = {
     unit: '%',
     fields: ['packet_loss', 'packetloss', 'packet_loss_rate'],
   },
+  wifi_link_speed_mbps: {
+    thresholdKey: 'wifi_link_speed_mbps',
+    label: 'Wi-Fi Link Speed',
+    unit: 'Mbps',
+    fields: ['wifi_link_speed_mbps'],
+  },
+  wifi_rx_link_speed_mbps: {
+    thresholdKey: 'wifi_rx_link_speed_mbps',
+    label: 'Wi-Fi RX Link Speed',
+    unit: 'Mbps',
+    fields: ['wifi_rx_link_speed_mbps'],
+  },
+  wifi_signal_level_0_4: {
+    thresholdKey: 'wifi_signal_level_0_4',
+    label: 'Wi-Fi Signal Level',
+    unit: '/ 4',
+    fields: ['wifi_signal_level_0_4'],
+  },
+  wifi_frequency: {
+    thresholdKey: 'wifi_frequency',
+    label: 'Frequency',
+    unit: 'GHz',
+    fields: ['wifi_frequency'],
+  },
+  wifi_channel: {
+    thresholdKey: 'wifi_channel',
+    label: 'Channel',
+    unit: '',
+    fields: ['wifi_channel'],
+  },
   tac: {
     thresholdKey: 'tac',
     label: 'TAC',
@@ -445,6 +476,12 @@ const METRIC_ALIASES = {
   'ci': 'ci_db',
 };
 
+export const DEFAULT_WIFI_FREQUENCY_THRESHOLDS = Object.freeze([
+  { min: 0, max: 3, range: '2.4 GHz band', color: '#22C55E' },
+  { min: 3, max: 5.925, range: '5 GHz band', color: '#3B82F6' },
+  { min: 5.925, max: 8, range: '6 GHz band', color: '#A855F7' },
+]);
+
 export const getMetricConfig = (metric) => {
   if (!metric) {
     return { ...METRIC_CONFIG.rsrp, key: 'rsrp' };
@@ -517,6 +554,16 @@ export const getMacDetailFieldKind = (field, resolveBucketKey, sampleValue) => {
 export const getMetricValueFromLog = (log, metric) => {
   if (!log) return NaN;
 
+  const rawMetricKey = String(metric ?? "");
+  if (
+    isWifiNetworkLog(log) &&
+    rawMetricKey.startsWith("wifi_") &&
+    log[rawMetricKey] !== null && log[rawMetricKey] !== undefined && log[rawMetricKey] !== ""
+  ) {
+    const wifiMetricValue = Number.parseFloat(log[rawMetricKey]);
+    if (Number.isFinite(wifiMetricValue)) return wifiMetricValue;
+  }
+
   // In L3 mode the selected field can be a flattened nested extra_json path.
   // Resolve that exact field before the generic metric config (which may fall
   // back to a core KPI for an unfamiliar name).
@@ -533,14 +580,13 @@ export const getMetricValueFromLog = (log, metric) => {
     const value = Number.parseFloat(getTechnologyMetricValue(log, metricKey));
     return Number.isFinite(value) ? value : NaN;
   }
-  const isWifiLog =
-    log?.is_wifi === true ||
-    ["wifi", "wi-fi"].includes(
-      String(log?.connection_type ?? log?.connectionType ?? "").trim().toLowerCase(),
-    );
+  const isWifiLog = isWifiNetworkLog(log);
 
   if (isWifiLog && metricKey === "rsrp") {
     const wifiSignalCandidates = [
+      log.wifi_rssi_dbm,
+      log.wifiRssiDbm,
+      log.wifi_rssi,
       log.rssi,
       log.RSSI,
       log.Rssi,
@@ -602,12 +648,14 @@ export const getColorForMetric = (metric, value, thresholds) => {
   const metricKey = String(metric).toLowerCase();
   const config = getMetricConfig(metric);
   if (config.thresholdKey === 'earfcn') return getEarfcnColor(value);
-  if (metricKey === 'pci' || config.thresholdKey === 'pci') {
+  if (metricKey === 'wifi_channel' || metricKey === 'pci' || config.thresholdKey === 'pci') {
     return getPciColor(value);
   }
 
   const fallbackThresholds =
-    config.thresholdKey === "ci_db"
+    config.thresholdKey === "wifi_frequency"
+      ? DEFAULT_WIFI_FREQUENCY_THRESHOLDS
+      : config.thresholdKey === "ci_db"
       ? [
           { min: 18, max: 99, color: "#00c853" },
           { min: 12, max: 18, color: "#ffd600" },
@@ -615,7 +663,10 @@ export const getColorForMetric = (metric, value, thresholds) => {
           { min: -99, max: 9, color: "#d50000" },
         ]
       : [];
-  const metricThresholds = thresholds?.[config.thresholdKey] || fallbackThresholds;
+  const configuredThresholds = thresholds?.[config.thresholdKey];
+  const metricThresholds = Array.isArray(configuredThresholds) && configuredThresholds.length
+    ? configuredThresholds
+    : fallbackThresholds;
   const numValue = parseFloat(value);
 
   if (!Number.isFinite(numValue) || metricThresholds.length === 0) {

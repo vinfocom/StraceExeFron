@@ -38,6 +38,7 @@ import {
   getTechnologyMetricOptions,
   GRID_VIEW_ALLOWED_METRICS,
   UNIFIED_MAP_METRIC_OPTIONS,
+  WIFI_UNIFIED_MAP_METRIC_OPTIONS,
 } from "@/utils/technologyMetricLabels";
 import { getTechnologyFamily } from "@/utils/technologySelection";
 import { DEBUG_L3 } from "@/utils/l3Debug";
@@ -1001,16 +1002,36 @@ const UnifiedMapSidebar = ({
     return labels.rsrp === "RxLev" ? "2G" : "";
   }, [dataFilters?.technologies, availableFilterOptions?.technologies]);
 
+  const isWifiMetricMode = useMemo(() => {
+    const selectedTechnologies = dataFilters?.technologies?.length
+      ? dataFilters.technologies
+      : availableFilterOptions?.technologies || [];
+    const selectedWifi = selectedTechnologies.some((technology) => /wi[\s-]?fi|wlan/i.test(String(technology)));
+    const selectedCellular = selectedTechnologies.some((technology) => !/wi[\s-]?fi|wlan/i.test(String(technology)));
+    return availableFilterOptions?.networkMode === "wifi" || (selectedWifi && !selectedCellular);
+  }, [availableFilterOptions?.networkMode, availableFilterOptions?.technologies, dataFilters?.technologies]);
+
   // Metric options
   const metricOptions = useMemo(
     () => {
-      const baseOptions = getTechnologyMetricOptions(!enableGrid
-        ? UNIFIED_MAP_METRIC_OPTIONS
-        : UNIFIED_MAP_METRIC_OPTIONS.filter((option) =>
-        GRID_VIEW_ALLOWED_METRICS.includes(option.value),
-      ), metricTechnology);
+      const allOptions = isWifiMetricMode
+        ? (() => {
+            const availableWifiKeys = new Set([
+              "rsrp",
+              "dl_thpt",
+              "ul_thpt",
+              "wifi_frequency",
+              "wifi_channel",
+              ...(availableFilterOptions?.wifiMetricKeys || []),
+            ]);
+            return WIFI_UNIFIED_MAP_METRIC_OPTIONS.filter((option) => availableWifiKeys.has(option.value));
+          })()
+        : UNIFIED_MAP_METRIC_OPTIONS;
+      const baseOptions = getTechnologyMetricOptions(isWifiMetricMode || !enableGrid
+        ? allOptions
+        : allOptions.filter((option) => GRID_VIEW_ALLOWED_METRICS.includes(option.value)), metricTechnology);
 
-      if (!isSecondaryOnlyMode) return baseOptions;
+      if (isWifiMetricMode || !isSecondaryOnlyMode) return baseOptions;
 
       const secondaryOnlyMetrics = new Set(["rsrp", "rsrq", "sinr", "ci_db", "pci"]);
       return baseOptions
@@ -1020,8 +1041,14 @@ const UnifiedMapSidebar = ({
           disabled: !Boolean(secondaryMetricAvailability?.[option.value]),
         }));
     },
-    [enableGrid, isSecondaryOnlyMode, secondaryMetricAvailability, metricTechnology],
+    [availableFilterOptions?.wifiMetricKeys, enableGrid, isSecondaryOnlyMode, isWifiMetricMode, secondaryMetricAvailability, metricTechnology],
   );
+
+  useEffect(() => {
+    if (!isWifiMetricMode || colorBy === "mac_detail") return;
+    if (metricOptions.some((option) => option.value === metric)) return;
+    setMetric?.("rsrp");
+  }, [colorBy, isWifiMetricMode, metric, metricOptions, setMetric]);
 
   const macDetailMetricOptions = useMemo(
     () => canonicalNetworkLogFields(accumulatedFilterOptions.macDetailFields)

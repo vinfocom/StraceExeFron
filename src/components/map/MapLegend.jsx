@@ -15,6 +15,7 @@ import {
   getMetricConfig,
   getMetricValueFromLog,
   getMacDetailValueFromLog,
+  DEFAULT_WIFI_FREQUENCY_THRESHOLDS,
 } from "@/utils/metrics";
 import {
   normalizeProviderName,
@@ -321,6 +322,10 @@ const getNormalizedKey = (log, colorBy, scheme, macDetailField) => {
       const earfcn = String(raw ?? "").trim();
       return earfcn || "Unknown";
     }
+    case "wifi_channel": {
+      const channel = String(log?.wifi_channel ?? log?.wifiChannel ?? "").trim();
+      return channel || "Unknown";
+    }
     case "mac_detail": {
       if (!macDetailField) return "Unknown";
       const raw = getMacDetailValueFromLog(log, macDetailField);
@@ -353,7 +358,7 @@ const ColorSchemeLegend = ({ colorBy, logs, activeFilter, onFilterChange, macDet
         key,
         colorOverrides[key] ||
         getRegisteredColor(colorBy, key, macDetailField) ||
-        (colorBy === "pci"
+        (colorBy === "pci" || colorBy === "wifi_channel"
           ? getMetricPciColor(key)
           : colorBy === "earfcn"
           ? getEarfcnColor(key)
@@ -773,9 +778,14 @@ const MetricThresholdLegend = ({
   onFilterChange,
 }) => {
   const config = getMetricConfig(selectedMetric);
+  const configuredThresholds = thresholds?.[config.thresholdKey];
   const list = isMacDetail
     ? getMacDetailThresholds(thresholds, selectedMetric)
-    : thresholds?.[config.thresholdKey] || [];
+    : Array.isArray(configuredThresholds) && configuredThresholds.length
+      ? configuredThresholds
+      : config.thresholdKey === "wifi_frequency"
+        ? DEFAULT_WIFI_FREQUENCY_THRESHOLDS
+        : [];
   const [openColorKey, setOpenColorKey] = useState(null);
   const [customColorValue, setCustomColorValue] = useState("");
   const [colorOverrides, setColorOverrides] = useState({});
@@ -1476,6 +1486,20 @@ export default function MapLegend({
           />
         ),
         title: colorByTitle,
+      };
+    }
+
+    if (String(selectedMetric || "").toLowerCase() === "wifi_channel") {
+      return {
+        content: (
+          <ColorSchemeLegend
+            colorBy="wifi_channel"
+            logs={logs}
+            activeFilter={activeFilter}
+            onFilterChange={onFilterChange}
+          />
+        ),
+        title: "Channel",
       };
     }
 

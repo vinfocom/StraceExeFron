@@ -8,6 +8,7 @@ import { useRequestGeneration } from '@/features/unified-map/data/useRequestGene
 import { getPolygonRequestIdentity } from '@/features/unified-map/data/mapRequestIdentity.js';
 import { normalizeTechName, normalizeProviderName } from '@/utils/colorUtils';
 import { parseNetworkLogExtraFields } from '@/utils/networkLogExtraFields.js';
+import { isWifiNetworkLog } from '@/utils/networkLogType.js';
 import {
   makeProjectCacheKey,
   readProjectSessionCache,
@@ -104,18 +105,7 @@ const cleanDisplayName = (value) => {
 };
 
 const isWifiLog = (log) => {
-  const type = String(
-    log?.connection_type ??
-      log?.connectionType ??
-      log?.log_type ??
-      log?.type ??
-      ""
-  ).trim().toLowerCase();
-
-  if (type === "wifi" || type === "wi-fi") return true;
-
-  const primaryInfo = String(log?.primary_cell_info_1 ?? log?.primaryCellInfo1 ?? "");
-  return primaryInfo.includes("SSID:") || primaryInfo.includes("BSSID:");
+  return isWifiNetworkLog(log);
 };
 
 const firstFiniteNumber = (...values) => {
@@ -209,6 +199,26 @@ const getNormalizedTechnology = (log, band = null) => {
   return normalizeTechName(null, band);
 };
 
+const getWifiFrequencyGHz = (log) => {
+  const explicitGhz = log?.wifi_frequency_ghz ?? log?.wifiFrequencyGhz;
+  if (explicitGhz !== null && explicitGhz !== undefined && explicitGhz !== "") {
+    const parsed = Number.parseFloat(explicitGhz);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+
+  const explicitMhz = log?.wifi_frequency_mhz ?? log?.wifiFrequencyMhz;
+  if (explicitMhz !== null && explicitMhz !== undefined && explicitMhz !== "") {
+    const parsed = Number.parseFloat(explicitMhz);
+    return Number.isFinite(parsed) ? parsed / 1000 : null;
+  }
+
+  const rawFrequency = log?.wifi_frequency ?? log?.wifiFrequency ?? log?.band;
+  if (rawFrequency === null || rawFrequency === undefined || rawFrequency === "") return null;
+  const parsed = Number.parseFloat(rawFrequency);
+  if (!Number.isFinite(parsed)) return null;
+  const rawText = String(rawFrequency).toLowerCase();
+  return rawText.includes("mhz") || parsed >= 100 ? parsed / 1000 : parsed;
+};
 
 
 const parseLogEntry = (log, sessionId) => {
@@ -275,6 +285,8 @@ const parseLogEntry = (log, sessionId) => {
   ]);
 
   const parsedRssiRaw = parseNumFromKeys([
+    "wifi_rssi_dbm",
+    "wifiRssiDbm",
     "rssi",
     "RSSI",
     "Rssi",
@@ -356,13 +368,15 @@ const parseLogEntry = (log, sessionId) => {
     "NRSINR",
   ]);
 
-  const wifiLog = log?.is_wifi === true || isWifiLog(log);
+  const wifiLog = isWifiLog(log);
+  const wifiSsid = log?.wifi_ssid ?? log?.wifiSsid ?? log?.ssid ?? "";
   const parsedRsrp = wifiLog ? null : normalizeSignalToDbm(parsedRsrpRaw);
   const parsedRssi = normalizeSignalToDbm(parsedRssiRaw);
   const signalValue = wifiLog ? parsedRssi : (parsedRsrp ?? parsedRssi);
   const canonicalProvider = cleanDisplayName(log.provider ?? log.Provider);
   const provider = wifiLog
     ? (
+        cleanDisplayName(wifiSsid) ||
         canonicalProvider ||
         cleanDisplayName(log.m_alpha_short) ||
         cleanDisplayName(log.m_alpha_long) ||
@@ -381,7 +395,7 @@ const parseLogEntry = (log, sessionId) => {
     log.primary_band ??
     log.neighbourBand ??
     "";
-  const technology = getNormalizedTechnology(log, band);
+  const technology = wifiLog ? "WiFi" : getNormalizedTechnology(log, band);
   const eventName =
     log.event_name ??
     log.eventName ??
@@ -408,6 +422,9 @@ const parseLogEntry = (log, sessionId) => {
     "";
 
   return {
+    ...Object.fromEntries(
+      Object.entries(log).filter(([key]) => key.startsWith("wifi_")),
+    ),
     id: log.id ?? log.Id ?? log.log_id ?? log.LogId ?? null,
     session_id: sessionId ?? log.session_id,
     lat, lng, latitude: lat, longitude: lng,
@@ -472,10 +489,14 @@ const parseLogEntry = (log, sessionId) => {
     },
     log_type: wifiLog ? "wifi" : "network",
     connection_type: wifiLog ? "wifi" : "network",
+    network_kind: wifiLog ? "wifi" : "cellular",
     is_wifi: wifiLog,
-    ssid: wifiLog ? provider : "",
+    ssid: wifiLog ? (wifiSsid || provider) : "",
     wifi_rssi: wifiLog ? parsedRssi : null,
-    wifi_frequency: wifiLog ? (log.band || "") : "",
+    wifi_frequency: wifiLog ? getWifiFrequencyGHz(log) : null,
+    wifi_channel: wifiLog
+      ? parseNumFromKeys(["wifi_channel", "wifiChannel", "channel", "channel_number", "channelNumber"])
+      : null,
     technology,
     networkType: technology,
     network: log.network || technology,
@@ -538,7 +559,7 @@ export const useNetworkSamples = (
   const cacheKey = makeProjectCacheKey({
     resource: 'unified-network-samples',
     sessionIds: sessionIds || [],
-    variant: `typed-network-wifi-v16-canonical-extras:${safeMaxRows ? `max-${safeMaxRows}` : 'all'}:project-${projectId || 'none'}`,
+    variant: `typed-network-wifi-v18-wifi-frequency-ghz-fields-canonical-extras:${safeMaxRows ? `max-${safeMaxRows}` : 'all'}:project-${projectId || 'none'}`,
   });
   const requestIdentity = JSON.stringify({
     cacheKey,

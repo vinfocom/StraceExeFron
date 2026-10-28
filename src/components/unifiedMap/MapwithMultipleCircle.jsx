@@ -11,7 +11,8 @@ import { Zap, Layers, Radio, Square, Circle, Trash2 } from "lucide-react";
 import { getClosestDrawingBoundaryHoverTarget, getDrawingPath, getNativeDrawingHoverTarget, isCompletedDeletableDrawing } from "@/features/unified-map/drawing/drawingShapeInteractions.js";
 // import TechHandoverMarkers from "../unifiedMap/TechHandoverMarkers";
 import useColorForLog from "@/hooks/useColorForLog";
-import { getMetricValueFromLog, getMacDetailValueFromLog, getPciColor, getEarfcnColor } from "@/utils/metrics";
+import { getMetricValueFromLog, getMacDetailValueFromLog, getPciColor, getEarfcnColor, DEFAULT_WIFI_FREQUENCY_THRESHOLDS } from "@/utils/metrics";
+import { isWifiNetworkLog } from "@/utils/networkLogType";
 import { normalizeProviderName, normalizeTechName, normalizeBandName, getLogColor, getRegisteredColor, generateColorFromHash, resolveMacDetailMetricKey, getMacDetailThresholds } from "@/utils/colorUtils";
 import { DEBUG_L3, traceL3Effect } from "@/utils/l3Debug";
 import { logMapPlot } from "@/utils/mapPlotDebug";
@@ -42,13 +43,7 @@ const MAX_IMAGE_LOG_SCAN_POINTS = 12000;
 const GRID_POLYGON_FILL_OPACITY = 0.72;
 
 const isWifiLogRow = (log) => {
-  const type = String(
-    log?.connection_type ?? log?.connectionType ?? log?.log_type ?? log?.type ?? "",
-  ).trim().toLowerCase();
-  if (type === "wifi" || type === "wi-fi" || log?.is_wifi === true) return true;
-
-  const primaryInfo = String(log?.primary_cell_info_1 ?? log?.primaryCellInfo1 ?? "");
-  return primaryInfo.includes("SSID:") || primaryInfo.includes("BSSID:");
+  return isWifiNetworkLog(log);
 };
 
 const cleanWifiProviderName = (value) => {
@@ -77,6 +72,9 @@ const resolveProviderDisplayName = (log) => {
 
 const getOverridablePciColor = (value) =>
   getRegisteredColor("pci", value) || getPciColor(value);
+
+const getOverridableWifiChannelColor = (value) =>
+  getRegisteredColor("wifi_channel", value) || getPciColor(value);
 
 const getOverridableEarfcnColor = (value) =>
   getRegisteredColor("earfcn", value) || getEarfcnColor(value);
@@ -1389,14 +1387,12 @@ const PrimaryLogInfoWindow = React.memo(({ log, resolveColor, selectedMetric, co
       : popupMacBucketKey
         ? (Number.isFinite(popupNumericValue) ? resolveColor(popupNumericValue, popupMacBucketKey) : "#808080")
         : resolveColor(metricValue, colorBy === "mac_detail" ? "mac_detail" : selectedMetric);
-  const isWifiLog =
-    log?.is_wifi === true ||
-    ["wifi", "wi-fi"].includes(
-      String(log?.log_type ?? log?.connection_type ?? log?.connectionType ?? "").trim().toLowerCase()
-    );
+  const isWifiLog = isWifiNetworkLog(log);
   const labels = getTechnologyMetricLabels(getLogTechnology(log));
   const cellChannel = getTechnologyMetricValue(log, "pci");
-  const signalValue = isWifiLog ? (log.rssi ?? log.signal_value ?? log.rsrp) : log.rsrp;
+  const signalValue = isWifiLog
+    ? (log.wifi_rssi_dbm ?? log.wifiRssiDbm ?? log.wifi_rssi ?? log.rssi ?? log.signal_value ?? log.rsrp)
+    : log.rsrp;
   const ciValue = getMetricValueFromLog(log, "ci_db");
   const logTypeLabel = isWifiLog ? "Wi-Fi Log" : "Network Log";
   const overlapLogs = Array.isArray(log.__overlapLogs) ? log.__overlapLogs : [];
@@ -1425,7 +1421,7 @@ const PrimaryLogInfoWindow = React.memo(({ log, resolveColor, selectedMetric, co
         </div>
         <div className="space-y-0.5">
           <div className="flex justify-between gap-3 rounded bg-blue-50 px-1.5 py-0.5 text-[11px]">
-            <span className="text-gray-600 text-sm font-bold">{selectedMetric || "KPI"}</span>
+            <span className="text-gray-600 text-sm font-bold">{isWifiLog && selectedMetricKey === "rsrp" ? "RSSI" : selectedMetric || "KPI"}</span>
             <span className="font-bold " >
               {metricValue !== null && metricValue !== undefined && Number.isFinite(Number(metricValue))
                 ? Number(metricValue).toLocaleString(undefined, { maximumFractionDigits: 3 })
@@ -1434,9 +1430,10 @@ const PrimaryLogInfoWindow = React.memo(({ log, resolveColor, selectedMetric, co
           </div>
           {isWifiLog ? (
             <>
-              {log.provider && <div className="flex justify-between text-xs"><span className="text-gray-500">SSID</span><span className="font-medium">{log.ssid || log.provider}</span></div>}
+              {(log.wifi_ssid || log.ssid || log.provider) && <div className="flex justify-between text-xs"><span className="text-gray-500">SSID</span><span className="font-medium">{log.wifi_ssid || log.ssid || log.provider}</span></div>}
+              {log.wifi_bssid && <div className="flex justify-between text-xs"><span className="text-gray-500">BSSID</span><span className="font-medium">{log.wifi_bssid}</span></div>}
               {signalValue !== null && signalValue !== undefined && <div className="flex justify-between text-xs items-center"><span className="text-gray-500">RSSI</span><span className="font-semibold" style={{ color: resolveColor(signalValue, 'rsrp') }}>{signalValue?.toFixed?.(1)} dBm</span></div>}
-              {log.band && <div className="flex justify-between text-xs"><span className="text-gray-500">Frequency</span><span className="font-semibold text-blue-600">{log.band} MHz</span></div>}
+              {(log.wifi_frequency ?? log.wifi_frequency_ghz ?? log.wifiFrequencyGhz ?? log.wifi_frequency_mhz ?? log.wifiFrequencyMhz ?? log.band) && <div className="flex justify-between text-xs"><span className="text-gray-500">Frequency</span><span className="font-semibold text-blue-600">{log.wifi_frequency ?? log.wifi_frequency_ghz ?? log.wifiFrequencyGhz ?? log.wifi_frequency_mhz ?? log.wifiFrequencyMhz ?? log.band} GHz</span></div>}
             </>
           ) : (
             <>
@@ -1695,6 +1692,17 @@ const MapWithMultipleCircles = ({
 
     if (typeKey === "pci" || typeKey === "best_pci") {
       return getOverridablePciColor(value);
+    }
+
+    if (typeKey === "wifi_channel") {
+      return getOverridableWifiChannelColor(value);
+    }
+
+    if (typeKey === "wifi_frequency") {
+      const frequencyThresholds = thresholds?.wifi_frequency?.length
+        ? thresholds.wifi_frequency
+        : DEFAULT_WIFI_FREQUENCY_THRESHOLDS;
+      return getColorFromThresholds(value, frequencyThresholds, "wifi_frequency", metricColorOverrides);
     }
     
     if (typeKey === 'tac') {

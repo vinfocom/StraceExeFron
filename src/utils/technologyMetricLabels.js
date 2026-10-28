@@ -1,3 +1,5 @@
+import { isWifiNetworkLog } from "./networkLogType.js";
+
 const GENERIC_METRIC_LABELS = Object.freeze({
   rsrp: "RSRP",
   rsrq: "RSRQ",
@@ -33,6 +35,14 @@ export const UNIFIED_MAP_METRIC_OPTIONS = Object.freeze([
   { value: "tac", label: "TAC/LAC" },
   { value: "dominance", label: "Dominance Analysis" },
   { value: "coverage_violation", label: "Coverage Violation" },
+]);
+
+export const WIFI_UNIFIED_MAP_METRIC_OPTIONS = Object.freeze([
+  { value: "rsrp", label: "RSSI" },
+  { value: "dl_thpt", label: "DL Throughput" },
+  { value: "ul_thpt", label: "UL Throughput" },
+  { value: "wifi_frequency", label: "Frequency (GHz)" },
+  { value: "wifi_channel", label: "Channel" },
 ]);
 
 export const GRID_VIEW_ALLOWED_METRICS = Object.freeze([
@@ -103,8 +113,12 @@ export const getTechnologyMetricOptions = (options, technology) => {
 };
 
 export const getMetricLabelsForLocations = (locations = []) => {
+  const rows = Array.isArray(locations) ? locations : [];
+  if (rows.length > 0 && rows.every(isWifiNetworkLog)) {
+    return { ...GENERIC_METRIC_LABELS, rsrp: "RSSI" };
+  }
   const technologies = new Set(
-    (Array.isArray(locations) ? locations : [])
+    rows
       .map((location) => normalizeMetricTechnology(
         getLogTechnology(location),
       ))

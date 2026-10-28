@@ -1,3 +1,5 @@
+import { isWifiNetworkLog } from "./networkLogType.js";
+
 export const calculateStats = (locations, metric) => {
   if (!locations?.length) return null;
 
@@ -6,7 +8,14 @@ export const calculateStats = (locations, metric) => {
     normalizedMetric === "dl_thpt" || normalizedMetric === "ul_thpt";
 
   const values = locations
-    .map(loc => loc[metric])
+    .map((loc) => {
+      if (normalizedMetric === "rsrp" && isWifiNetworkLog(loc)) {
+        return loc?.wifi_rssi_dbm ?? loc?.wifiRssiDbm ?? loc?.wifi_rssi ?? loc?.rssi ?? loc?.signal_value ?? loc?.level;
+      }
+      if (normalizedMetric === "dl_thpt") return loc?.dl_tpt ?? loc?.dl_thpt ?? loc?.dl_rpt ?? loc?.[metric];
+      if (normalizedMetric === "ul_thpt") return loc?.ul_tpt ?? loc?.ul_thpt ?? loc?.ul_rpt ?? loc?.[metric];
+      return loc?.[metric];
+    })
     .filter((val) => {
       if (val == null || val === '' || isNaN(val)) return false;
       const numericValue = Number(val);
@@ -36,11 +45,27 @@ export const calculateStats = (locations, metric) => {
     ? (sorted[mid - 1] + sorted[mid]) / 2
     : sorted[mid];
 
+  let highestFrequency = 1;
+  let modes = [];
+  for (let start = 0; start < sorted.length;) {
+    let end = start + 1;
+    while (end < sorted.length && sorted[end] === sorted[start]) end += 1;
+    const frequency = end - start;
+    if (frequency > 1 && frequency > highestFrequency) {
+      highestFrequency = frequency;
+      modes = [sorted[start]];
+    } else if (frequency > 1 && frequency === highestFrequency) {
+      modes.push(sorted[start]);
+    }
+    start = end;
+  }
+
   return {
     avg: Number(avg.toFixed(2)),
     min: Number(min.toFixed(2)),
     max: Number(max.toFixed(2)),
     median: Number(median.toFixed(2)),
+    mode: modes.length === 1 ? Number(modes[0].toFixed(2)) : modes.map((value) => Number(value.toFixed(2))),
     count: numericValues.length,
   };
 };

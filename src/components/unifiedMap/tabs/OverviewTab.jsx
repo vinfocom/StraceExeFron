@@ -41,12 +41,33 @@ import {
   resolveMacDetailMetricKey,
 } from "@/utils/colorUtils";
 import { downloadKmlForLogs } from "@/utils/kmlExport";
-import { getTechnologyMetricOptions, normalizeMetricTechnology, UNIFIED_MAP_METRIC_OPTIONS } from "@/utils/technologyMetricLabels";
+import { getTechnologyMetricOptions, normalizeMetricTechnology, UNIFIED_MAP_METRIC_OPTIONS, WIFI_UNIFIED_MAP_METRIC_OPTIONS } from "@/utils/technologyMetricLabels";
 import { calculateStats } from "@/utils/analyticsHelpers";
+import { isWifiNetworkLog } from "@/utils/networkLogType";
 
 const PROVIDER_VOLUME_CACHE = new Map();
 const PROVIDER_VOLUME_PENDING = new Map();
 const PROVIDER_VOLUME_CACHE_VERSION = "v2";
+
+const WIFI_OVERVIEW_METRICS = [
+  { metricKey: "rsrp", label: "RSSI", unit: "dBm", read: (row) => row?.wifi_rssi_dbm ?? row?.wifiRssiDbm ?? row?.wifi_rssi ?? row?.rssi ?? row?.signal_value ?? row?.level },
+  { metricKey: "dl_thpt", label: "DL Throughput", unit: "Mbps", read: (row) => row?.dl_tpt ?? row?.dl_thpt ?? row?.dl_rpt },
+  { metricKey: "ul_thpt", label: "UL Throughput", unit: "Mbps", read: (row) => row?.ul_tpt ?? row?.ul_thpt ?? row?.ul_rpt },
+  { metricKey: "wifi_frequency", label: "Frequency", unit: "GHz", read: (row) => row?.wifi_frequency ?? row?.wifi_frequency_ghz ?? row?.wifiFrequencyGhz ?? row?.wifi_frequency_mhz ?? row?.wifiFrequencyMhz },
+  { metricKey: "wifi_channel", label: "Channel", unit: "", read: (row) => row?.wifi_channel ?? row?.wifiChannel ?? row?.channel ?? row?.channel_number },
+];
+
+const firstFiniteMetric = (value) => {
+  if (value === null || value === undefined || value === "") return null;
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+};
+
+const formatWifiStat = (value) => {
+  if (Array.isArray(value)) return value.length ? value.map((item) => Number(item).toFixed(2)).join(", ") : "No mode";
+  if (value === null || value === undefined || value === "") return "No mode";
+  return Number.isFinite(Number(value)) ? Number(value).toFixed(2) : "No mode";
+};
 
 const getProviderVolumeCacheKey = (projectId, sessionIds = []) => {
   const normalizedProjectId = String(projectId ?? "").trim() || "no-project";
@@ -377,6 +398,7 @@ export const OverviewTab = ({
   hasProjectPolygon = false,
   gridViewEnabled = false,
   gridViewSummary = null,
+  metricLabels = {},
 }) => {
   const [searchParams] = useSearchParams();
   const { openSettings: openSettingsDialog } = useSettingsDialog();
@@ -434,6 +456,22 @@ export const OverviewTab = ({
   const [showKpiStats, setShowKpiStats] = useState(false);
   const [kpiStatMode, setKpiStatMode] = useState("avg");
 
+  const wifiKpiStats = useMemo(() => {
+    const wifiRows = (Array.isArray(locations) ? locations : []).filter(isWifiNetworkLog);
+    if (wifiRows.length === 0) return null;
+
+    const metrics = WIFI_OVERVIEW_METRICS.map((metric) => {
+      const values = wifiRows
+        .map((row) => firstFiniteMetric(metric.read(row)))
+        .filter((value) => value !== null);
+      if (values.length === 0) return null;
+      const summary = calculateStats(values.map((value) => ({ value })), "value");
+      return summary ? { ...metric, ...summary } : null;
+    }).filter(Boolean);
+
+    return { rowCount: wifiRows.length, metrics };
+  }, [locations]);
+
   // Load custom poor thresholds from threshold settings (prioritizing PPT Report Acceptance)
   useEffect(() => {
     let active = true;
@@ -478,13 +516,21 @@ export const OverviewTab = ({
     const technologyRank = new Map(pptTechnologies.map((technology, index) => [technology, index]));
     const technologyOptions = pptTechnologies
       .filter((technology) => technology !== "L3")
-      .flatMap((technology) => getTechnologyMetricOptions(UNIFIED_MAP_METRIC_OPTIONS, technology)
+      .flatMap((technology) => {
+        const isWifiTechnology = /wi[\s-]?fi|wlan/i.test(String(technology));
+        const sourceOptions = isWifiTechnology
+          ? WIFI_UNIFIED_MAP_METRIC_OPTIONS.filter((option) =>
+              wifiKpiStats?.metrics.some((metric) => metric.metricKey === option.value),
+            )
+          : getTechnologyMetricOptions(UNIFIED_MAP_METRIC_OPTIONS, technology);
+        return sourceOptions
         .map((option) => ({
           key: `${technology}:${option.value}`,
           metricKey: option.value,
           label: option.label,
           group: technology,
-        })))
+        }));
+      })
       .sort((a, b) => {
         const metricDiff = (metricRank.get(a.metricKey) ?? 999) - (metricRank.get(b.metricKey) ?? 999);
         if (metricDiff !== 0) return metricDiff;
@@ -503,7 +549,7 @@ export const OverviewTab = ({
         .filter((kpi) => kpi.group === "L3" || selectedNetworkTechnologies.has(kpi.group))
       : [];
     return [...technologyOptions, ...l3Options];
-  }, [availableL3Kpis, pptTechnologies]);
+  }, [availableL3Kpis, pptTechnologies, wifiKpiStats]);
   const filteredPptKpis = useMemo(() => {
     return availablePptKpis.filter((kpi) => {
       if (pptKpiSearchText.trim()) {
@@ -1852,18 +1898,56 @@ export const OverviewTab = ({
         <div className="bg-slate-900 rounded-lg p-4 border border-slate-700">
           <h4 className="text-sm font-semibold text-white mb-3 flex items-center gap-2">
             <Activity className="h-4 w-4" />
-            {selectedMetric?.toUpperCase() || "METRIC"} Statistics
+            {(selectedMetric === "rsrp" ? metricLabels?.rsrp : null) || selectedMetric?.toUpperCase() || "METRIC"} Statistics
           </h4>
 
           <div
-            className={`grid ${expanded ? "grid-cols-5" : "grid-cols-3"} gap-3`}
+            className={`grid ${expanded ? "grid-cols-6" : "grid-cols-3"} gap-3`}
           >
-            <MetricCard label="Average" value={stats.avg} />
+            <MetricCard label="Mean" value={stats.avg} />
             <MetricCard label="Minimum" value={stats.min} color="blue" />
             <MetricCard label="Maximum" value={stats.max} color="green" />
             <MetricCard label="Median" value={stats.median} color="purple" />
+            <MetricCard label="Mode" value={formatWifiStat(stats.mode)} raw />
             <MetricCard label="Count" value={stats.count} color="yellow" raw />
           </div>
+        </div>
+      )}
+
+      {wifiKpiStats && wifiKpiStats.metrics.length > 0 && (
+        <div className="overflow-hidden rounded-lg border border-cyan-800/60 bg-slate-900">
+          <div className="flex items-center justify-between gap-3 border-b border-slate-700 px-4 py-3">
+            <h4 className="flex items-center gap-2 text-sm font-semibold text-white">
+              <Wifi className="h-4 w-4 text-cyan-400" />
+              Wi-Fi KPI Statistics
+            </h4>
+            <span className="text-xs text-slate-400">{wifiKpiStats.rowCount.toLocaleString()} Wi-Fi samples</span>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="min-w-full text-xs">
+              <thead className="bg-slate-800/80 text-slate-300">
+                <tr>
+                  {["KPI", "Mean", "Median", "Mode", "Min", "Max", "Samples"].map((heading) => (
+                    <th key={heading} className="whitespace-nowrap px-3 py-2 text-right first:text-left font-medium">{heading}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-800 text-slate-200">
+                {wifiKpiStats.metrics.map((metric) => (
+                  <tr key={metric.label}>
+                    <td className="whitespace-nowrap px-3 py-2 font-medium text-white">{metric.label}{metric.unit ? ` (${metric.unit})` : ""}</td>
+                    <td className="whitespace-nowrap px-3 py-2 text-right">{formatWifiStat(metric.avg)}</td>
+                    <td className="whitespace-nowrap px-3 py-2 text-right">{formatWifiStat(metric.median)}</td>
+                    <td className="whitespace-nowrap px-3 py-2 text-right">{formatWifiStat(metric.mode)}</td>
+                    <td className="whitespace-nowrap px-3 py-2 text-right">{formatWifiStat(metric.min)}</td>
+                    <td className="whitespace-nowrap px-3 py-2 text-right">{formatWifiStat(metric.max)}</td>
+                    <td className="whitespace-nowrap px-3 py-2 text-right">{metric.count.toLocaleString()}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <p className="px-4 py-2 text-[11px] text-slate-400">Mode shows the most frequent value; tied modes are listed. “No mode” means no value repeats.</p>
         </div>
       )}
 
