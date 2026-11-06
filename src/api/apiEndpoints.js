@@ -1382,8 +1382,8 @@ export const pptReportApi = {
     pythonApi.post(`/api/ppt-report/cancel/${encodeURIComponent(reportId)}`, {}, { timeout: 30000 }),
   healthCheck: () =>
     pythonApi.get("/api/ppt-report/health", { timeout: 120000 }),
-  getDownloadUrl: (downloadUrl, projectId) => {
-    const fallbackPath = `/api/ppt-report/download/${encodeURIComponent(projectId)}`;
+  getDownloadUrl: (downloadUrl, projectId, pptFormat) => {
+    const fallbackPath = `/api/ppt-report/download/${encodeURIComponent(projectId)}${pptFormat === "up_tech" ? "?ppt_format=up_tech" : ""}`;
     const path = String(downloadUrl || fallbackPath).trim();
     const baseUrl = getPythonApiBaseUrl() || PYTHON_BASE_URL_EXPORT;
 
@@ -1393,8 +1393,8 @@ export const pptReportApi = {
       return path;
     }
   },
-  download: (downloadUrl, projectId) =>
-    pythonApi.get(pptReportApi.getDownloadUrl(downloadUrl, projectId), {
+  download: (downloadUrl, projectId, pptFormat) =>
+    pythonApi.get(pptReportApi.getDownloadUrl(downloadUrl, projectId, pptFormat), {
       responseType: "blob",
       timeout: 600000,
     }),

@@ -421,6 +421,7 @@ export const OverviewTab = ({
     ));
   }, []);
   const [pptTemplate, setPptTemplate] = useState("");
+  const isTaiwanStylePpt = pptTemplate === "taiwan" || pptTemplate === "up_tech";
   const [pptTechnologies, setPptTechnologies] = useState([]);
   const [pptMapViewType, setPptMapViewType] = useState("grid");
   const [pptAggregation, setPptAggregation] = useState("median");
@@ -669,7 +670,7 @@ export const OverviewTab = ({
     [user?.country_code],
   );
   const pptTemplateOptions = useMemo(
-    () => (isTaiwanUser ? ["stracer", "taiwan"] : ["stracer"]),
+    () => (isTaiwanUser ? ["stracer", "taiwan", "up_tech"] : ["stracer", "up_tech"]),
     [isTaiwanUser],
   );
 
@@ -790,14 +791,14 @@ export const OverviewTab = ({
       .filter((technology) => technology && !/^all$/i.test(technology) && !/^l3$/i.test(technology))))
       .sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" }));
     // L3 is only meaningful as a selectable "technology" for the Taiwan
-    // template's per-KPI diagnostic picker (see the kpi.group === "L3"
+    // and UP-Tech templates' per-KPI diagnostic picker (see the kpi.group === "L3"
     // handling above) -- Stracer has no KPI picker at all, so offering it
     // there is a dead option that does nothing.
-    if (pptTemplate === "taiwan") {
+    if (isTaiwanStylePpt) {
       technologies.push("L3");
     }
     return technologies;
-  }, [reportTechnologies, plottedExportLocations, pptTemplate]);
+  }, [reportTechnologies, plottedExportLocations, isTaiwanStylePpt]);
 
   useEffect(() => {
     setPptTechnologies((current) => {
@@ -918,6 +919,7 @@ export const OverviewTab = ({
       user_id: Number.isFinite(numericUserId) ? numericUserId : 0,
       locked_bands: lockedBands,
       template: pptTemplate,
+      ...(pptTemplate === "up_tech" ? { ppt_format: "up_tech" } : {}),
       technology: networkTechnologies,
       map_view_type: pptMapViewType,
       ...(pptMapViewType === "grid" ? { aggregation: pptAggregation } : {}),
@@ -1018,12 +1020,12 @@ export const OverviewTab = ({
         throw new Error(reportResponse?.message || "The PPT report could not be generated.");
       }
 
-      const blob = await pptReportApi.download(reportResponse?.download_url, numericProjectId);
+      const blob = await pptReportApi.download(reportResponse?.download_url, numericProjectId, pptTemplate);
       const report = {
         blob: blob instanceof Blob ? blob : new Blob([blob], {
           type: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
         }),
-        filename: String(reportResponse?.output_file || `Mobility_DT_Project_${numericProjectId}.pptx`)
+        filename: String(reportResponse?.output_file || `${pptTemplate === "up_tech" ? "UP_Tech_DT" : "Mobility_DT"}_Project_${numericProjectId}.pptx`)
           .split(/[\\/]/).pop(),
       };
       setReadyPpt(report);
@@ -1475,7 +1477,7 @@ export const OverviewTab = ({
           <DialogHeader>
             <DialogTitle style={{ color: "#f8fafc" }}>Configure PPT report</DialogTitle>
             <DialogDescription style={{ color: "#94a3b8" }}>
-              {pptTemplate === "taiwan"
+              {isTaiwanStylePpt
                 ? "Choose the available technologies, bands, and KPIs for the report."
                 : "Select a template and provide the filters for the PowerPoint report."}
             </DialogDescription>
@@ -1490,7 +1492,7 @@ export const OverviewTab = ({
 
           {pptTemplateOptions.length > 1 && <div className="space-y-2">
             <span className="text-sm font-medium text-slate-200">Template</span>
-            <div className={`grid ${pptTemplateOptions.length === 1 ? "grid-cols-1" : "grid-cols-2"} gap-2`}>
+            <div className={`grid ${pptTemplateOptions.length > 2 ? "grid-cols-3" : "grid-cols-2"} gap-2`}>
               {pptTemplateOptions.map((template) => (
                 <button
                   key={template}
@@ -1502,7 +1504,7 @@ export const OverviewTab = ({
                       : "border-slate-600 bg-slate-800 text-slate-300 hover:bg-slate-700"
                   }`}
                 >
-                  {template}
+                  {template === "up_tech" ? "UP-Tech" : template}
                 </button>
               ))}
             </div>
@@ -1528,7 +1530,7 @@ export const OverviewTab = ({
                 >
                   Clear
                 </button>
-                {pptTemplate === "taiwan" && (
+                {isTaiwanStylePpt && (
                   <>
                     <span className="text-slate-600">|</span>
                     <button
@@ -1571,11 +1573,11 @@ export const OverviewTab = ({
             )}
           </div>
 
-          {/* Band filtering and the per-KPI picker are Taiwan-template-only --
+          {/* Band filtering and the per-KPI picker support Taiwan and UP-Tech --
               Stracer keeps its original, simpler config (technologies +
               grid/raw view only); it has no band-locking or KPI-selection
               concept server-side, so this UI should not appear for it. */}
-          {pptTemplate === "taiwan" && pptBandOptions.length > 0 && (
+          {isTaiwanStylePpt && pptBandOptions.length > 0 && (
             <div className="space-y-2">
               <div className="flex items-center justify-between">
                 <span className="text-sm font-medium text-slate-200">
@@ -1627,7 +1629,7 @@ export const OverviewTab = ({
             </div>
           )}
 
-          {pptTemplate === "taiwan" && pptTechnologies.length > 0 && <fieldset className="space-y-2.5">
+          {isTaiwanStylePpt && pptTechnologies.length > 0 && <fieldset className="space-y-2.5">
             <div className="flex flex-wrap items-center justify-between gap-1.5">
               <legend className="text-sm font-semibold text-slate-100">
                 Available KPIs ({filteredPptKpis.length})
