@@ -670,12 +670,12 @@ export const OverviewTab = ({
     [user?.country_code],
   );
   const pptTemplateOptions = useMemo(
-    () => (isTaiwanUser ? ["stracer", "taiwan", "up_tech"] : ["stracer", "up_tech"]),
+    () => (isTaiwanUser ? ["stracer", "taiwan", "up_tech"] : ["stracer"]),
     [isTaiwanUser],
   );
 
   useEffect(() => {
-    if (!isTaiwanUser && pptTemplate === "taiwan") {
+    if (!isTaiwanUser && (pptTemplate === "taiwan" || pptTemplate === "up_tech")) {
       setPptTemplate("");
       setLockedBands([]);
     }
@@ -1490,9 +1490,9 @@ export const OverviewTab = ({
               the Stracer template's shorter form (no Band/KPI picker). */}
           <div className="space-y-4">
 
-          {pptTemplateOptions.length > 1 && <div className="space-y-2">
+          {pptTemplateOptions.length > 0 && <div className="space-y-2">
             <span className="text-sm font-medium text-slate-200">Template</span>
-            <div className={`grid ${pptTemplateOptions.length > 2 ? "grid-cols-3" : "grid-cols-2"} gap-2`}>
+            <div className={`grid ${pptTemplateOptions.length > 2 ? "grid-cols-3" : pptTemplateOptions.length === 1 ? "grid-cols-1" : "grid-cols-2"} gap-2`}>
               {pptTemplateOptions.map((template) => (
                 <button
                   key={template}
