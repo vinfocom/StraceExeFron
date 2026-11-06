@@ -1025,7 +1025,7 @@ export const OverviewTab = ({
         blob: blob instanceof Blob ? blob : new Blob([blob], {
           type: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
         }),
-        filename: String(reportResponse?.output_file || `${pptTemplate === "up_tech" ? "UP_Tech_DT" : "Mobility_DT"}_Project_${numericProjectId}.pptx`)
+        filename: String(reportResponse?.output_file || `${pptTemplate === "up_tech" ? "UP_Tech_DT" : pptTemplate === "stracer" ? "Stracer_DT" : "Mobility_DT"}_Project_${numericProjectId}.pptx`)
           .split(/[\\/]/).pop(),
       };
       setReadyPpt(report);
@@ -1504,7 +1504,7 @@ export const OverviewTab = ({
                       : "border-slate-600 bg-slate-800 text-slate-300 hover:bg-slate-700"
                   }`}
                 >
-                  {template === "up_tech" ? "UP-Tech" : template}
+                  {template === "up_tech" ? "UP-Tech" : template === "taiwan" ? "Taiwan-FET" : template}
                 </button>
               ))}
             </div>

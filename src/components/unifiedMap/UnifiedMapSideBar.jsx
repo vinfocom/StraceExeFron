@@ -1054,6 +1054,7 @@ const UnifiedMapSidebar = ({
     () => canonicalNetworkLogFields(accumulatedFilterOptions.macDetailFields)
       .filter((field) => typeof field === "string" && field.trim())
       .map((field) => field.trim())
+      .filter((field) => field.toLowerCase().replace(/[\s_-]+/g, "") !== "unsentdata")
       .filter((field) => !/^object(?:\s+object)*$/i.test(field.replace(/[\[\],]/g, " ").trim()))
       .map((field) => ({ value: field, label: field })),
     [accumulatedFilterOptions.macDetailFields],

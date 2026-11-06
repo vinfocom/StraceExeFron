@@ -1383,7 +1383,7 @@ export const pptReportApi = {
   healthCheck: () =>
     pythonApi.get("/api/ppt-report/health", { timeout: 120000 }),
   getDownloadUrl: (downloadUrl, projectId, pptFormat) => {
-    const fallbackPath = `/api/ppt-report/download/${encodeURIComponent(projectId)}${pptFormat === "up_tech" ? "?ppt_format=up_tech" : ""}`;
+    const fallbackPath = `/api/ppt-report/download/${encodeURIComponent(projectId)}${pptFormat ? `?ppt_format=${encodeURIComponent(pptFormat)}` : ""}`;
     const path = String(downloadUrl || fallbackPath).trim();
     const baseUrl = getPythonApiBaseUrl() || PYTHON_BASE_URL_EXPORT;
 
